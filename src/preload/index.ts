@@ -866,6 +866,63 @@ const api = {
     ): Promise<GitHubProjectMutationResult> => ipcRenderer.invoke('gh:updateIssueTypeBySlug', args)
   },
 
+  gl: {
+    viewer: (): Promise<unknown> => ipcRenderer.invoke('gitlab:viewer'),
+
+    projectSlug: (args: { repoPath: string }): Promise<unknown> =>
+      ipcRenderer.invoke('gitlab:projectSlug', args),
+
+    mrForBranch: (args: { repoPath: string; branch: string }): Promise<unknown> =>
+      ipcRenderer.invoke('gitlab:mrForBranch', args),
+
+    mr: (args: { repoPath: string; iid: number }): Promise<unknown> =>
+      ipcRenderer.invoke('gitlab:mr', args),
+
+    listMRs: (args: {
+      repoPath: string
+      state?: 'opened' | 'merged' | 'closed' | 'all'
+      page?: number
+      perPage?: number
+    }): Promise<unknown> => ipcRenderer.invoke('gitlab:listMRs', args),
+
+    issue: (args: { repoPath: string; number: number }): Promise<unknown> =>
+      ipcRenderer.invoke('gitlab:issue', args),
+
+    listIssues: (args: { repoPath: string; limit?: number }): Promise<unknown[]> =>
+      ipcRenderer.invoke('gitlab:listIssues', args),
+
+    createIssue: (args: {
+      repoPath: string
+      title: string
+      body: string
+    }): Promise<{ ok: true; number: number; url: string } | { ok: false; error: string }> =>
+      ipcRenderer.invoke('gitlab:createIssue', args),
+
+    updateIssue: (args: {
+      repoPath: string
+      number: number
+      updates: unknown
+    }): Promise<{ ok: true } | { ok: false; error: string }> =>
+      ipcRenderer.invoke('gitlab:updateIssue', args),
+
+    addIssueComment: (args: { repoPath: string; number: number; body: string }): Promise<unknown> =>
+      ipcRenderer.invoke('gitlab:addIssueComment', args),
+
+    listLabels: (args: { repoPath: string }): Promise<string[]> =>
+      ipcRenderer.invoke('gitlab:listLabels', args),
+
+    listAssignableUsers: (args: { repoPath: string }): Promise<unknown[]> =>
+      ipcRenderer.invoke('gitlab:listAssignableUsers', args),
+
+    workItemByPath: (args: {
+      repoPath: string
+      host: string
+      path: string
+      iid: number
+      type: 'issue' | 'mr'
+    }): Promise<unknown> => ipcRenderer.invoke('gitlab:workItemByPath', args)
+  },
+
   linear: {
     connect: (args: {
       apiKey: string
