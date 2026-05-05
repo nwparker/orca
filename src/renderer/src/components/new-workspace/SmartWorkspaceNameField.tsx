@@ -36,9 +36,10 @@ import {
   parseGitHubIssueOrPRLink,
   type RepoSlug
 } from '@/lib/github-links'
+import { parseGitLabIssueOrMRLink } from '@/lib/gitlab-links'
 import { cn } from '@/lib/utils'
 import { LinearIcon } from '@/components/icons/LinearIcon'
-import type { GitHubWorkItem, LinearIssue } from '../../../../shared/types'
+import type { GitHubWorkItem, GitLabWorkItem, LinearIssue } from '../../../../shared/types'
 
 type SmartNameMode = 'smart' | 'github' | 'branches' | 'linear' | 'text'
 
@@ -51,6 +52,9 @@ type SmartWorkspaceNameFieldProps = {
   value: string
   onValueChange: (value: string) => void
   onGitHubItemSelect: (item: GitHubWorkItem) => void
+  /** Optional so callers that pre-date GitLab support don't need to wire
+   *  it. When omitted, GitLab paste-URL detection is silently skipped. */
+  onGitLabItemSelect?: (item: GitLabWorkItem) => void
   onBranchSelect: (refName: string) => void
   onLinearIssueSelect: (issue: LinearIssue) => void
   selectedSource: SmartWorkspaceNameSelection | null
@@ -60,7 +64,7 @@ type SmartWorkspaceNameFieldProps = {
 }
 
 export type SmartWorkspaceNameSelection = {
-  kind: 'github-pr' | 'github-issue' | 'branch' | 'linear'
+  kind: 'github-pr' | 'github-issue' | 'gitlab-mr' | 'gitlab-issue' | 'branch' | 'linear'
   label: string
   url?: string
 }
@@ -100,6 +104,7 @@ type RowEntry =
   | { kind: 'use-name'; value: string; name: string }
   | { kind: 'create-branch'; value: string; name: string }
   | { kind: 'github'; value: string; item: GitHubWorkItem }
+  | { kind: 'gitlab'; value: string; item: GitLabWorkItem }
   | { kind: 'branch'; value: string; refName: string }
   | { kind: 'linear'; value: string; issue: LinearIssue }
 
@@ -110,6 +115,7 @@ export default function SmartWorkspaceNameField({
   value,
   onValueChange,
   onGitHubItemSelect,
+  onGitLabItemSelect,
   onBranchSelect,
   onLinearIssueSelect,
   selectedSource,
@@ -147,9 +153,11 @@ export default function SmartWorkspaceNameField({
   const [open, setOpen] = useState(false)
   const [debouncedQuery, setDebouncedQuery] = useState(value)
   const [githubItems, setGithubItems] = useState<GitHubWorkItem[]>([])
+  const [gitlabItems, setGitlabItems] = useState<GitLabWorkItem[]>([])
   const [branches, setBranches] = useState<string[]>([])
   const [linearIssues, setLinearIssues] = useState<LinearIssue[]>([])
   const [githubLoading, setGithubLoading] = useState(false)
+  const [gitlabLoading, setGitlabLoading] = useState(false)
   const [branchesLoading, setBranchesLoading] = useState(false)
   const [linearLoading, setLinearLoading] = useState(false)
   const [commandValue, setCommandValue] = useState('')
@@ -394,6 +402,60 @@ export default function SmartWorkspaceNameField({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [debouncedQuery, linearStatus.connected, shouldQueryLinear])
 
+  // Why: GitLab paste-URL flow. Watches the debounced query for a GitLab
+  // issue/MR URL (parseGitLabIssueOrMRLink already filters non-GitLab URLs
+  // via the project-internal `/-/` separator) and resolves it to a
+  // GitLabWorkItem via the IPC. v1 only handles paste-URL — the
+  // tab/list-search UI is a follow-up commit. Skipped silently when the
+  // host hook hasn't supplied an onGitLabItemSelect handler.
+  const parsedGlLink = useMemo(() => parseGitLabIssueOrMRLink(debouncedQuery), [debouncedQuery])
+  useEffect(() => {
+    if (!onGitLabItemSelect || !selectedRepo?.path || selectedRepo.connectionId) {
+      setGitlabItems([])
+      setGitlabLoading(false)
+      return
+    }
+    if (parsedGlLink === null) {
+      setGitlabItems([])
+      setGitlabLoading(false)
+      return
+    }
+    let stale = false
+    setGitlabLoading(true)
+    void window.api.gl
+      .workItemByPath({
+        repoPath: selectedRepo.path,
+        // Why: parseGitLabIssueOrMRLink doesn't carry the host (the URL
+        // pattern is host-agnostic on purpose so self-hosted instances
+        // work). Use 'gitlab.com' as the IPC arg — the main process maps
+        // by project path internally and the host param is currently
+        // informational; revisit when the picker grows multi-host UX.
+        host: 'gitlab.com',
+        path: parsedGlLink.slug.path,
+        iid: parsedGlLink.number,
+        type: parsedGlLink.type
+      })
+      .then((item) => {
+        if (stale) {
+          return
+        }
+        setGitlabItems(item ? [{ ...item, repoId: selectedRepo.id } as GitLabWorkItem] : [])
+      })
+      .catch(() => {
+        if (!stale) {
+          setGitlabItems([])
+        }
+      })
+      .finally(() => {
+        if (!stale) {
+          setGitlabLoading(false)
+        }
+      })
+    return () => {
+      stale = true
+    }
+  }, [onGitLabItemSelect, parsedGlLink, selectedRepo])
+
   const rows = useMemo<RowEntry[]>(() => {
     const trimmed = value.trim()
     // Why: on the Branches tab the generic "Use … as workspace name" row
@@ -430,6 +492,18 @@ export default function SmartWorkspaceNameField({
         }))
       )
     }
+    // Why: GitLab rows surface in 'smart' mode only in v1. The dedicated
+    // GitLab tab (with Open / Merged / Closed / All chips) is a
+    // follow-up; for now paste-URL is the only entry point.
+    if (mode === 'smart') {
+      nextRows.push(
+        ...gitlabItems.map((item) => ({
+          kind: 'gitlab' as const,
+          value: `gitlab-${item.type}-${item.number}`,
+          item
+        }))
+      )
+    }
     if (mode === 'smart' || mode === 'branches') {
       if (createBranchRow) {
         nextRows.push(createBranchRow)
@@ -452,7 +526,7 @@ export default function SmartWorkspaceNameField({
       )
     }
     return nextRows.slice(0, RESULT_LIMIT + 1)
-  }, [branches, githubItems, linearIssues, mode, value])
+  }, [branches, githubItems, gitlabItems, linearIssues, mode, value])
 
   // Why: source rows (GitHub/branches/Linear) are driven by debouncedQuery,
   // so they're stale until the user pauses typing for SEARCH_DEBOUNCE_MS.
@@ -517,7 +591,7 @@ export default function SmartWorkspaceNameField({
     )
   }, [isQueryStale, rows, sourceIntent])
 
-  const loading = githubLoading || branchesLoading || linearLoading
+  const loading = githubLoading || gitlabLoading || branchesLoading || linearLoading
   const ActiveInputIcon = mode === 'text' ? CaseSensitive : loading ? LoaderCircle : Search
 
   const handleSelect = useCallback(
@@ -529,6 +603,10 @@ export default function SmartWorkspaceNameField({
         onValueChange(row.name)
       } else if (row.kind === 'github') {
         onGitHubItemSelect(row.item)
+      } else if (row.kind === 'gitlab') {
+        // Why: optional handler — guarded so the surface degrades to a
+        // no-op for hosts that haven't wired GitLab support yet.
+        onGitLabItemSelect?.(row.item)
       } else if (row.kind === 'branch') {
         onBranchSelect(row.refName)
       } else {
@@ -536,7 +614,7 @@ export default function SmartWorkspaceNameField({
       }
       setOpen(false)
     },
-    [onBranchSelect, onGitHubItemSelect, onLinearIssueSelect, onValueChange]
+    [onBranchSelect, onGitHubItemSelect, onGitLabItemSelect, onLinearIssueSelect, onValueChange]
   )
 
   const acceptGitHubLink = useCallback(
@@ -892,6 +970,16 @@ function RowIcon({ row }: { row: RowEntry }): React.JSX.Element {
       <CircleDot className="size-3.5 shrink-0 text-muted-foreground" />
     )
   }
+  if (row.kind === 'gitlab') {
+    // Why: MRs and PRs use the same conceptual icon (a PR/MR), and issues
+    // share CircleDot with GitHub issues — no need to invent GitLab-only
+    // glyphs at this scope; provider attribution lives in the row text.
+    return row.item.type === 'mr' ? (
+      <GitPullRequest className="size-3.5 shrink-0 text-muted-foreground" />
+    ) : (
+      <CircleDot className="size-3.5 shrink-0 text-muted-foreground" />
+    )
+  }
   if (row.kind === 'branch') {
     return <GitBranch className="size-3.5 shrink-0 text-muted-foreground" />
   }
@@ -899,10 +987,10 @@ function RowIcon({ row }: { row: RowEntry }): React.JSX.Element {
 }
 
 function SelectionIcon({ kind }: { kind: SmartWorkspaceNameSelection['kind'] }): React.JSX.Element {
-  if (kind === 'github-pr') {
+  if (kind === 'github-pr' || kind === 'gitlab-mr') {
     return <GitPullRequest className="size-3.5 shrink-0 text-muted-foreground" />
   }
-  if (kind === 'github-issue') {
+  if (kind === 'github-issue' || kind === 'gitlab-issue') {
     return <CircleDot className="size-3.5 shrink-0 text-muted-foreground" />
   }
   if (kind === 'branch') {
@@ -932,6 +1020,21 @@ function RowLabel({ row }: { row: RowEntry }): React.JSX.Element {
     return (
       <span className="min-w-0 truncate">
         <span className="font-medium text-foreground">#{row.item.number}</span> {row.item.title}
+      </span>
+    )
+  }
+  if (row.kind === 'gitlab') {
+    // Why: GitLab uses `!N` for MRs and `#N` for issues — show the
+    // appropriate prefix so the row is unambiguous to users coming from
+    // gitlab.com's UI.
+    const prefix = row.item.type === 'mr' ? '!' : '#'
+    return (
+      <span className="min-w-0 truncate">
+        <span className="font-medium text-foreground">
+          {prefix}
+          {row.item.number}
+        </span>{' '}
+        {row.item.title}
       </span>
     )
   }
