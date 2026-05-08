@@ -10,6 +10,7 @@ import {
   GitBranchPlus,
   GitPullRequest,
   Github,
+  Gitlab,
   LoaderCircle,
   Search,
   Sparkles,
@@ -41,7 +42,18 @@ import { cn } from '@/lib/utils'
 import { LinearIcon } from '@/components/icons/LinearIcon'
 import type { GitHubWorkItem, GitLabWorkItem, LinearIssue } from '../../../../shared/types'
 
-type SmartNameMode = 'smart' | 'github' | 'branches' | 'linear' | 'text'
+type SmartNameMode = 'smart' | 'github' | 'gitlab' | 'branches' | 'linear' | 'text'
+
+// Why: GitLab MR list filter — Open / Merged / Closed / All — replaces
+// GitHub's search-DSL on the GitLab tab per the agreed scope.
+type MrStateFilter = 'opened' | 'merged' | 'closed' | 'all'
+
+const MR_STATE_FILTERS: { id: MrStateFilter; label: string }[] = [
+  { id: 'opened', label: 'Open' },
+  { id: 'merged', label: 'Merged' },
+  { id: 'closed', label: 'Closed' },
+  { id: 'all', label: 'All' }
+]
 
 type RepoOption = ReturnType<typeof useAppStore.getState>['repos'][number]
 
@@ -79,6 +91,7 @@ const MODES: {
 }[] = [
   { id: 'smart', label: 'Smart', Icon: Sparkles },
   { id: 'github', label: 'GitHub', Icon: Github },
+  { id: 'gitlab', label: 'GitLab', Icon: Gitlab },
   { id: 'branches', label: 'Branch', Icon: GitBranch },
   {
     id: 'linear',
@@ -150,6 +163,7 @@ export default function SmartWorkspaceNameField({
     [repoId, repos]
   )
   const [mode, setMode] = useState<SmartNameMode>('smart')
+  const [mrStateFilter, setMrStateFilter] = useState<MrStateFilter>('opened')
   const [open, setOpen] = useState(false)
   const [debouncedQuery, setDebouncedQuery] = useState(value)
   const [githubItems, setGithubItems] = useState<GitHubWorkItem[]>([])
@@ -405,18 +419,30 @@ export default function SmartWorkspaceNameField({
   // Why: GitLab paste-URL flow. Watches the debounced query for a GitLab
   // issue/MR URL (parseGitLabIssueOrMRLink already filters non-GitLab URLs
   // via the project-internal `/-/` separator) and resolves it to a
-  // GitLabWorkItem via the IPC. v1 only handles paste-URL — the
-  // tab/list-search UI is a follow-up commit. Skipped silently when the
-  // host hook hasn't supplied an onGitLabItemSelect handler.
+  // GitLabWorkItem via the IPC. Skipped silently when the host hook
+  // hasn't supplied an onGitLabItemSelect handler.
   const parsedGlLink = useMemo(() => parseGitLabIssueOrMRLink(debouncedQuery), [debouncedQuery])
+  const shouldQueryGitlab = mode === 'smart' || mode === 'gitlab'
   useEffect(() => {
-    if (!onGitLabItemSelect || !selectedRepo?.path || selectedRepo.connectionId) {
-      setGitlabItems([])
+    if (
+      !shouldQueryGitlab ||
+      !onGitLabItemSelect ||
+      !selectedRepo?.path ||
+      selectedRepo.connectionId
+    ) {
+      // Why: don't clobber list-mode items here — the listMRs effect below
+      // is the sole writer when the user is in 'gitlab' mode without a URL.
+      if (parsedGlLink === null && mode !== 'gitlab') {
+        setGitlabItems([])
+      }
       setGitlabLoading(false)
       return
     }
     if (parsedGlLink === null) {
-      setGitlabItems([])
+      // Same reason: only clear when leaving the gitlab/smart context.
+      if (mode !== 'gitlab') {
+        setGitlabItems([])
+      }
       setGitlabLoading(false)
       return
     }
@@ -454,7 +480,60 @@ export default function SmartWorkspaceNameField({
     return () => {
       stale = true
     }
-  }, [onGitLabItemSelect, parsedGlLink, selectedRepo])
+  }, [mode, onGitLabItemSelect, parsedGlLink, selectedRepo, shouldQueryGitlab])
+
+  // Why: when the user is on the GitLab tab and hasn't pasted a URL,
+  // surface the project's MRs filtered by the current state chip.
+  // Default 'opened' matches gitlab.com's default MR list view.
+  useEffect(() => {
+    if (mode !== 'gitlab' || !onGitLabItemSelect) {
+      return
+    }
+    if (!selectedRepo?.path || selectedRepo.connectionId) {
+      setGitlabItems([])
+      setGitlabLoading(false)
+      return
+    }
+    if (parsedGlLink !== null) {
+      // Why: paste-URL effect owns the list while a URL is in the input.
+      return
+    }
+    let stale = false
+    setGitlabLoading(true)
+    void window.api.gl
+      .listMRs({
+        repoPath: selectedRepo.path,
+        state: mrStateFilter,
+        page: 1,
+        perPage: RESULT_LIMIT
+      })
+      .then((result) => {
+        if (stale) {
+          return
+        }
+        // Why: listMRs returns ListMergeRequestsResult { items, ... };
+        // each item is already a GitLabWorkItem. Stamp repoId on the
+        // way through so the picker can attribute rows.
+        const items = (result as { items: GitLabWorkItem[] }).items.map((item) => ({
+          ...item,
+          repoId: selectedRepo.id
+        }))
+        setGitlabItems(items)
+      })
+      .catch(() => {
+        if (!stale) {
+          setGitlabItems([])
+        }
+      })
+      .finally(() => {
+        if (!stale) {
+          setGitlabLoading(false)
+        }
+      })
+    return () => {
+      stale = true
+    }
+  }, [mode, mrStateFilter, onGitLabItemSelect, parsedGlLink, selectedRepo])
 
   const rows = useMemo<RowEntry[]>(() => {
     const trimmed = value.trim()
@@ -492,10 +571,7 @@ export default function SmartWorkspaceNameField({
         }))
       )
     }
-    // Why: GitLab rows surface in 'smart' mode only in v1. The dedicated
-    // GitLab tab (with Open / Merged / Closed / All chips) is a
-    // follow-up; for now paste-URL is the only entry point.
-    if (mode === 'smart') {
+    if (mode === 'smart' || mode === 'gitlab') {
       nextRows.push(
         ...gitlabItems.map((item) => ({
           kind: 'gitlab' as const,
@@ -891,6 +967,28 @@ export default function SmartWorkspaceNameField({
               }
             }}
           >
+            {mode === 'gitlab' ? (
+              // Why: GitLab MR-state filter — Open / Merged / Closed / All —
+              // mirrors the gitlab.com merge-requests page tab strip so users
+              // arriving from the web UI find a familiar control.
+              <div
+                className="flex shrink-0 items-center gap-1 border-b border-border/40 px-2 py-1.5"
+                onMouseDown={(e) => e.preventDefault()}
+              >
+                {MR_STATE_FILTERS.map(({ id, label }) => (
+                  <Button
+                    key={id}
+                    type="button"
+                    variant={mrStateFilter === id ? 'secondary' : 'ghost'}
+                    size="sm"
+                    onClick={() => setMrStateFilter(id)}
+                    className="h-6 px-2 text-xs"
+                  >
+                    {label}
+                  </Button>
+                ))}
+              </div>
+            ) : null}
             <CommandList className="!max-h-none min-h-0 flex-1 scrollbar-sleek">
               {loading && rows.length === 0 ? (
                 <div className="space-y-1 p-1">
