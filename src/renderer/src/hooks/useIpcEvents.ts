@@ -867,15 +867,26 @@ export function useIpcEvents(): void {
         if (!payload) {
           return
         }
-        // Why: resolve tab existence and terminal title in a single pass.
-        // Previously the code walked store.tabsByWorktree twice — once to
-        // look up the tab-level title (when the pane-level title was
-        // missing) and again for the explicit tabExists check. A paneKey
-        // that no longer resolves to a live tab belongs to a pane that has
-        // already been torn down; dropping here prevents orphan entries
-        // from accumulating in agentStatusByPaneKey.
-        const { exists, title } = resolvePaneKey(store, data.paneKey)
+        // Why: resolve tab existence, terminal title, and the live repo's
+        // connectionId in a single pass. A paneKey that no longer resolves
+        // to a live tab belongs to a pane that has already been torn down;
+        // dropping here prevents orphan entries from accumulating in
+        // agentStatusByPaneKey.
+        const { exists, title, repoConnectionId } = resolvePaneKey(store, data.paneKey)
         if (!exists) {
+          return
+        }
+        // Why: drop in-flight events from a connection that no longer owns
+        // this pane. After an SSH disconnect (or tab destroy/recreate during
+        // reconnect), notifications may still arrive stamped with the
+        // connectionId of the dead connection. The renderer compares the
+        // stamped connectionId against the live repo's connectionId for the
+        // pane's worktree — see docs/design/agent-status-over-ssh.md §5.
+        // - data.connectionId === undefined: legacy main builds; accept.
+        // - data.connectionId !== undefined and unknown live repo: treat
+        //   the expected value as null so remote (string) events are
+        //   dropped when ownership cannot be proven.
+        if (data.connectionId !== undefined && data.connectionId !== repoConnectionId) {
           return
         }
         store.setAgentStatus(data.paneKey, payload, title)
@@ -908,20 +919,22 @@ export function useIpcEvents(): void {
   }, [])
 }
 
-/** Resolve a paneKey (tabId:paneId) to both a liveness check and the current
- *  terminal title, in a single walk of tabsByWorktree. Used for agent type
- *  inference when the CLI payload omits agentType, plus to drop status updates
- *  targeted at panes whose tabs have already been torn down.
- *  Why combined: callers need both pieces per hook event, and hook events can
- *  fire many times per second during a tool-use run. Two separate O(N) scans
- *  over the same map is wasteful; one pass returns both. */
+/** Resolve a paneKey (tabId:paneId) to a liveness check, the current terminal
+ *  title, and the connectionId of the repo that owns the pane's worktree, all
+ *  in a single walk of tabsByWorktree. Used for agent type inference when the
+ *  CLI payload omits agentType, plus to drop status updates targeted at panes
+ *  whose tabs have already been torn down or whose owning connection is no
+ *  longer live (see docs/design/agent-status-over-ssh.md §5).
+ *  Why combined: callers need all three pieces per hook event, and hook
+ *  events can fire many times per second during a tool-use run. Multiple
+ *  O(N) scans over the same map is wasteful; one pass returns all of them. */
 function resolvePaneKey(
   store: ReturnType<typeof useAppStore.getState>,
   paneKey: string
-): { exists: boolean; title: string | undefined } {
+): { exists: boolean; title: string | undefined; repoConnectionId: string | null } {
   const [tabId, paneIdRaw] = paneKey.split(':')
   if (!tabId) {
-    return { exists: false, title: undefined }
+    return { exists: false, title: undefined, repoConnectionId: null }
   }
   // Why: split panes track per-pane titles in runtimePaneTitlesByTabId; prefer
   // the pane's own title over the tab-level (last-winning) title so agent type
@@ -936,11 +949,13 @@ function resolvePaneKey(
   const paneTitle = rawPaneTitle && rawPaneTitle.length > 0 ? rawPaneTitle : undefined
   let exists = false
   let tabTitle: string | undefined
-  for (const tabs of Object.values(store.tabsByWorktree)) {
+  let owningWorktreeId: string | undefined
+  for (const [worktreeId, tabs] of Object.entries(store.tabsByWorktree)) {
     for (const tab of tabs) {
       if (tab.id === tabId) {
         exists = true
         tabTitle = tab.title
+        owningWorktreeId = worktreeId
         break
       }
     }
@@ -948,5 +963,23 @@ function resolvePaneKey(
       break
     }
   }
-  return { exists, title: paneTitle ?? tabTitle }
+  // Why: ownership lookup is `tab → worktree → repo → repo.connectionId`.
+  // Treat unknown owner (no matching worktree/repo) as `null` so remote
+  // events stamped with a string connectionId are dropped by the caller —
+  // we cannot prove they belong to the currently-live local repo.
+  let repoConnectionId: string | null = null
+  if (owningWorktreeId !== undefined) {
+    let owningRepoId: string | undefined
+    for (const [repoId, worktrees] of Object.entries(store.worktreesByRepo)) {
+      if (worktrees.some((w) => w.id === owningWorktreeId)) {
+        owningRepoId = repoId
+        break
+      }
+    }
+    if (owningRepoId !== undefined) {
+      const repo = store.repos.find((r) => r.id === owningRepoId)
+      repoConnectionId = repo?.connectionId ?? null
+    }
+  }
+  return { exists, title: paneTitle ?? tabTitle, repoConnectionId }
 }

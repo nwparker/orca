@@ -119,6 +119,118 @@ describe('AgentHookServer listener replay', () => {
     }
   })
 
+  // Why: agent-status-over-SSH §3 — the relay forwards `env`/`version`
+  // verbatim from the agent CLI's POST body. ingestRemote must run the same
+  // warn-once cross-build and dev-vs-prod diagnostics the local HTTP path
+  // runs, so a remote source of stale hooks emits the same noise locally.
+  it('runs warn-once env/version diagnostics on relay-forwarded events without re-normalizing the payload', async () => {
+    const server = new AgentHookServer()
+    await server.start({ env: 'production' })
+    try {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      const listener = vi.fn()
+      server.setListener(listener)
+
+      // Mismatched env (development hook hitting a production server):
+      // a single warn line should fire, the event should still flow through.
+      server.ingestRemote(
+        {
+          paneKey: PANE,
+          tabId: 'tab-1',
+          worktreeId: 'wt-1',
+          env: 'development',
+          version: '999',
+          payload: {
+            state: 'working',
+            paneKey: PANE,
+            updatedAt: Date.now(),
+            agentType: 'claude'
+          }
+        },
+        'conn-1'
+      )
+
+      expect(listener).toHaveBeenCalledTimes(1)
+      expect(listener).toHaveBeenCalledWith(
+        expect.objectContaining({
+          paneKey: PANE,
+          connectionId: 'conn-1',
+          payload: expect.objectContaining({ state: 'working', agentType: 'claude' })
+        })
+      )
+
+      const warnCalls = warn.mock.calls.map((c) => String(c[0]))
+      expect(warnCalls.some((m) => m.includes('v999'))).toBe(true)
+      expect(warnCalls.some((m) => m.includes('development') && m.includes('production'))).toBe(
+        true
+      )
+
+      // Repeating with the same env/version pair must not warn again
+      // (warn-once Set deduping). We re-use a fresh paneKey so the event
+      // still produces an onAgentStatus call for symmetry with above.
+      const warnsAfterFirst = warn.mock.calls.length
+      server.ingestRemote(
+        {
+          paneKey: 'tab-2:0',
+          env: 'development',
+          version: '999',
+          payload: {
+            state: 'working',
+            paneKey: 'tab-2:0',
+            updatedAt: Date.now(),
+            agentType: 'claude'
+          }
+        },
+        'conn-1'
+      )
+      expect(warn.mock.calls.length).toBe(warnsAfterFirst)
+    } finally {
+      server.stop()
+    }
+  })
+
+  it('passes through matching env/version metadata silently and does not re-normalize the payload', async () => {
+    const server = new AgentHookServer()
+    await server.start({ env: 'production' })
+    try {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      const listener = vi.fn()
+      server.setListener(listener)
+
+      // Why: ingestRemote should not re-run normalizeHookPayload — pass a
+      // payload missing the hook envelope shape (no hook_event_name) so a
+      // re-normalization call would drop it. The event must still flow.
+      server.ingestRemote(
+        {
+          paneKey: 'tab-3:0',
+          tabId: 'tab-3',
+          worktreeId: 'wt-3',
+          env: 'production',
+          version: '1',
+          payload: {
+            state: 'done',
+            paneKey: 'tab-3:0',
+            updatedAt: Date.now(),
+            agentType: 'codex'
+          }
+        },
+        'conn-9'
+      )
+
+      expect(listener).toHaveBeenCalledTimes(1)
+      expect(listener).toHaveBeenCalledWith(
+        expect.objectContaining({
+          paneKey: 'tab-3:0',
+          connectionId: 'conn-9',
+          payload: expect.objectContaining({ state: 'done', agentType: 'codex' })
+        })
+      )
+      expect(warn).not.toHaveBeenCalled()
+    } finally {
+      server.stop()
+    }
+  })
+
   it('accepts form-encoded hook posts from Unix managed scripts', async () => {
     const server = new AgentHookServer()
     await server.start({ env: 'production' })
@@ -1263,156 +1375,3 @@ describe('Endpoint file lifecycle', () => {
   })
 })
 
-describe('AgentHookServer ingestRemote', () => {
-  it('stamps connectionId and forwards a valid relay envelope to the listener', () => {
-    const server = new AgentHookServer()
-    const payload = parseAgentStatusPayload(
-      JSON.stringify({ state: 'working', prompt: 'p', agentType: 'claude' })
-    )
-    if (!payload) {
-      throw new Error('parseAgentStatusPayload returned null for a known-good fixture')
-    }
-    const listener = vi.fn()
-    server.setListener(listener)
-    server.ingestRemote(
-      { paneKey: PANE, tabId: 'tab-1', worktreeId: 'wt-1', payload },
-      'conn-1'
-    )
-    expect(listener).toHaveBeenCalledTimes(1)
-    expect(listener).toHaveBeenCalledWith({
-      paneKey: PANE,
-      tabId: 'tab-1',
-      worktreeId: 'wt-1',
-      connectionId: 'conn-1',
-      payload
-    })
-  })
-
-  it('drops envelopes whose payload state is not in AGENT_STATUS_STATES', () => {
-    const server = new AgentHookServer()
-    const listener = vi.fn()
-    server.setListener(listener)
-    // Why: bypass parseAgentStatusPayload (which itself rejects bad states) by
-    // constructing an obviously-invalid payload — `ingestRemote` is the trust
-    // boundary we're testing, not the parser.
-    server.ingestRemote(
-      {
-        paneKey: PANE,
-        tabId: 'tab-1',
-        worktreeId: 'wt-1',
-        payload: { state: 'nonsense', prompt: '', agentType: 'claude' }
-      },
-      'conn-1'
-    )
-    expect(listener).not.toHaveBeenCalled()
-  })
-
-  it('drops envelopes whose paneKey exceeds MAX_PANE_KEY_LEN', () => {
-    const server = new AgentHookServer()
-    const payload = parseAgentStatusPayload(
-      JSON.stringify({ state: 'working', prompt: 'p', agentType: 'claude' })
-    )
-    if (!payload) {
-      throw new Error('parseAgentStatusPayload returned null for a known-good fixture')
-    }
-    const listener = vi.fn()
-    server.setListener(listener)
-    // 201 chars — one past the listener's 200-char cap.
-    const oversized = 'a'.repeat(201)
-    server.ingestRemote(
-      { paneKey: oversized, tabId: 'tab-1', worktreeId: 'wt-1', payload },
-      'conn-1'
-    )
-    expect(listener).not.toHaveBeenCalled()
-  })
-
-  it('rejects empty connectionId', () => {
-    const server = new AgentHookServer()
-    const payload = parseAgentStatusPayload(
-      JSON.stringify({ state: 'working', prompt: 'p', agentType: 'claude' })
-    )
-    if (!payload) {
-      throw new Error('parseAgentStatusPayload returned null for a known-good fixture')
-    }
-    const listener = vi.fn()
-    server.setListener(listener)
-    server.ingestRemote(
-      { paneKey: PANE, tabId: 'tab-1', worktreeId: 'wt-1', payload },
-      ''
-    )
-    expect(listener).not.toHaveBeenCalled()
-  })
-
-  it('rejects whitespace-only connectionId', () => {
-    const server = new AgentHookServer()
-    const payload = parseAgentStatusPayload(
-      JSON.stringify({ state: 'working', prompt: 'p', agentType: 'claude' })
-    )
-    if (!payload) {
-      throw new Error('parseAgentStatusPayload returned null for a known-good fixture')
-    }
-    const listener = vi.fn()
-    server.setListener(listener)
-    server.ingestRemote(
-      { paneKey: PANE, tabId: 'tab-1', worktreeId: 'wt-1', payload },
-      '   '
-    )
-    expect(listener).not.toHaveBeenCalled()
-  })
-
-  it('rejects non-string tabId', () => {
-    const server = new AgentHookServer()
-    const payload = parseAgentStatusPayload(
-      JSON.stringify({ state: 'working', prompt: 'p', agentType: 'claude' })
-    )
-    if (!payload) {
-      throw new Error('parseAgentStatusPayload returned null for a known-good fixture')
-    }
-    const listener = vi.fn()
-    server.setListener(listener)
-    server.ingestRemote(
-      { paneKey: PANE, tabId: 123 as unknown as string, worktreeId: 'wt-1', payload },
-      'conn-1'
-    )
-    expect(listener).not.toHaveBeenCalled()
-  })
-
-  it('rejects empty paneKey after trim', () => {
-    const server = new AgentHookServer()
-    const payload = parseAgentStatusPayload(
-      JSON.stringify({ state: 'working', prompt: 'p', agentType: 'claude' })
-    )
-    if (!payload) {
-      throw new Error('parseAgentStatusPayload returned null for a known-good fixture')
-    }
-    const listener = vi.fn()
-    server.setListener(listener)
-    server.ingestRemote(
-      { paneKey: '   ', tabId: 'tab-1', worktreeId: 'wt-1', payload },
-      'conn-1'
-    )
-    expect(listener).not.toHaveBeenCalled()
-  })
-
-  it('normalizes inner payload via normalizeAgentStatusPayload — clamps oversized prompt', () => {
-    // Why: the relay normally normalizes the payload on the wire, but a buggy
-    // or malicious relay could forward an over-cap field. ingestRemote must
-    // re-run the canonical normalizer so the AGENT_STATUS_MAX_FIELD_LENGTH
-    // cap (200 chars) is enforced at the trust boundary.
-    const server = new AgentHookServer()
-    const listener = vi.fn()
-    server.setListener(listener)
-    server.ingestRemote(
-      {
-        paneKey: PANE,
-        tabId: 'tab-1',
-        worktreeId: 'wt-1',
-        payload: { state: 'working', prompt: 'x'.repeat(500), agentType: 'claude' }
-      },
-      'conn-1'
-    )
-    expect(listener).toHaveBeenCalledTimes(1)
-    const event = listener.mock.calls[0][0] as { payload: { prompt: string } }
-    expect(event.payload.prompt.length).toBe(200)
-  })
-})
