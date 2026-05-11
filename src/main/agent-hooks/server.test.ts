@@ -14,7 +14,6 @@ import {
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { AgentHookServer, _internals } from './server'
-import { parseAgentStatusPayload } from '../../shared/agent-status-types'
 
 const PANE = 'tab-1:0'
 
