@@ -1489,6 +1489,7 @@ describe('useIpcEvents agentStatus connection filtering', () => {
 
   function buildHarness(args: {
     repoConnectionId: string | null
+    worktreesByRepoOverride?: Record<string, { id: string; repoId: string }[]>
   }): {
     setAgentStatus: ReturnType<typeof vi.fn>
     onSetRef: { current: ((data: Record<string, unknown>) => void) | null }
@@ -1538,7 +1539,7 @@ describe('useIpcEvents agentStatus connection filtering', () => {
       clearTabPtyId: vi.fn(),
       setAgentStatus,
       repos: [{ id: 'repo-1', connectionId: args.repoConnectionId }],
-      worktreesByRepo: {
+      worktreesByRepo: args.worktreesByRepoOverride ?? {
         'repo-1': [{ id: 'wt-1', repoId: 'repo-1' }]
       },
       tabsByWorktree: {
@@ -1662,6 +1663,9 @@ describe('useIpcEvents agentStatus connection filtering', () => {
       onSetRef,
       runEvents: async () => {
         const { useIpcEvents } = await import('./useIpcEvents')
+        // Why: vitest harness, not a real React render — useEffect is mocked
+        // synchronously above so this just runs the effect body once.
+        // oxlint-disable-next-line react-hooks/rules-of-hooks
         useIpcEvents()
         await Promise.resolve()
       }
@@ -1701,14 +1705,20 @@ describe('useIpcEvents agentStatus connection filtering', () => {
     expect(harness.setAgentStatus).not.toHaveBeenCalled()
   })
 
-  it('drops remote-stamped events when the owning repo cannot be resolved (treats unknown owner as null)', async () => {
-    const harness = buildHarness({ repoConnectionId: 'conn-1' })
+  it('drops remote-stamped events when the owning worktree is no longer in worktreesByRepo (treats unknown owner as null)', async () => {
+    // Why: tab-1 is still listed in tabsByWorktree (so the liveness check
+    // passes), but the worktree row has been removed from worktreesByRepo —
+    // so resolvePaneKey cannot resolve an owning repo/connection. The PR2
+    // contract treats that "unknown owner" case as a null connection, which
+    // means any remote-stamped (string) connectionId must be dropped.
+    const harness = buildHarness({
+      repoConnectionId: 'conn-1',
+      worktreesByRepoOverride: { 'repo-1': [] }
+    })
     await harness.runEvents()
     if (typeof harness.onSetRef.current !== 'function') {
       throw new Error('Expected agentStatus.onSet listener to be registered')
     }
-    // paneKey targets a tab id that exists in tabsByWorktree (so liveness
-    // passes), but stamped connectionId does not match repo's conn-1.
     harness.onSetRef.current({
       paneKey: 'tab-1:0',
       connectionId: 'conn-other',

@@ -1,6 +1,7 @@
 /* oxlint-disable max-lines -- Why: this App-level IPC bridge intentionally keeps the renderer's main-process event contract in one place so shortcut, runtime, updater, and agent-status wiring do not drift across files. */
 import { useEffect } from 'react'
 import { useAppStore } from '../store'
+import { getWorktreeMapFromState, getRepoMapFromState } from '@/store/selectors'
 import { applyUIZoom } from '@/lib/ui-zoom'
 import { activateAndRevealWorktree } from '@/lib/worktree-activation'
 import { runSleepWorktree } from '@/components/sidebar/sleep-worktree-flow'
@@ -882,7 +883,11 @@ export function useIpcEvents(): void {
         // connectionId of the dead connection. The renderer compares the
         // stamped connectionId against the live repo's connectionId for the
         // pane's worktree — see docs/design/agent-status-over-ssh.md §5.
-        // - data.connectionId === undefined: legacy main builds; accept.
+        // The IPC contract declares connectionId as required (string | null),
+        // so the undefined branch only fires under dev hot-reload skew where
+        // the renderer bundle is newer than the preload bundle:
+        // - data.connectionId === undefined: preload pre-dates the field;
+        //   accept rather than dropping every event during a stale reload.
         // - data.connectionId !== undefined and unknown live repo: treat
         //   the expected value as null so remote (string) events are
         //   dropped when ownership cannot be proven.
@@ -920,14 +925,16 @@ export function useIpcEvents(): void {
 }
 
 /** Resolve a paneKey (tabId:paneId) to a liveness check, the current terminal
- *  title, and the connectionId of the repo that owns the pane's worktree, all
- *  in a single walk of tabsByWorktree. Used for agent type inference when the
+ *  title, and the connectionId of the repo that owns the pane's worktree.
+ *  Walks tabsByWorktree to locate the tab, then resolves the owning worktree
+ *  and repo via cached selector maps. Used for agent type inference when the
  *  CLI payload omits agentType, plus to drop status updates targeted at panes
  *  whose tabs have already been torn down or whose owning connection is no
  *  longer live (see docs/design/agent-status-over-ssh.md §5).
  *  Why combined: callers need all three pieces per hook event, and hook
- *  events can fire many times per second during a tool-use run. Multiple
- *  O(N) scans over the same map is wasteful; one pass returns all of them. */
+ *  events can fire many times per second during a tool-use run. Bundling
+ *  liveness + title + connectionId into one helper keeps the per-event work
+ *  in one place and avoids re-deriving the owning repo at the call site. */
 function resolvePaneKey(
   store: ReturnType<typeof useAppStore.getState>,
   paneKey: string
@@ -969,17 +976,9 @@ function resolvePaneKey(
   // we cannot prove they belong to the currently-live local repo.
   let repoConnectionId: string | null = null
   if (owningWorktreeId !== undefined) {
-    let owningRepoId: string | undefined
-    outer: for (const [repoId, worktrees] of Object.entries(store.worktreesByRepo)) {
-      for (const w of worktrees) {
-        if (w.id === owningWorktreeId) {
-          owningRepoId = repoId
-          break outer
-        }
-      }
-    }
-    if (owningRepoId !== undefined) {
-      const repo = store.repos.find((r) => r.id === owningRepoId)
+    const worktree = getWorktreeMapFromState(store).get(owningWorktreeId)
+    if (worktree) {
+      const repo = getRepoMapFromState(store).get(worktree.repoId)
       repoConnectionId = repo?.connectionId ?? null
     }
   }
