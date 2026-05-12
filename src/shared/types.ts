@@ -1269,6 +1269,10 @@ export type GlobalSettings = {
   /** Legacy persisted key from before the sidekick -> pet rename. Read only
    *  during migration; new writes use experimentalPet. */
   experimentalSidekick?: boolean
+  /** Experimental: Slack-style Activity page that groups agent/worktree status
+   *  events by worktree. Opt-in while the UI and backend event model are still
+   *  being refined. */
+  experimentalActivity: boolean
   /** Experimental: when creating a worktree, automatically symlink a
    *  user-configured set of files/folders from the primary checkout (e.g.
    *  `.env`, `node_modules`) into the new worktree. Opt-in while the
@@ -1461,6 +1465,14 @@ export type PersistedUIState = {
   /** Once the user has seen the "your sessions won't be interrupted"
    *  reassurance card, we never show it again. */
   updateReassuranceSeen?: boolean
+  /** Per-paneKey "user has visited this row" timestamps, used by the inline
+   *  agents list to mute rows the user has already seen. Persisted because
+   *  agent rows themselves now survive restart; without persisting acks too,
+   *  rows you'd already clicked come back bold on relaunch. Stale entries
+   *  keyed on dead panes are inert: a future paneKey reuse stamps a fresh
+   *  stateStartedAt that beats the old ack via the existing comparison in
+   *  WorktreeCardAgents. Renderer-owned, written through ui:set. */
+  acknowledgedAgentsByPaneKey?: Record<string, number>
   /** URL to navigate to when a new browser tab is opened. Null means blank tab.
    *  Phase 3 will expand this to a full BrowserSessionProfile per workspace. */
   browserDefaultUrl?: string | null

@@ -15,7 +15,8 @@ import { listFilesWithGit, searchWithGitGrep } from './fs-handler-git-fallback'
 import { listFilesWithReaddir } from './fs-handler-readdir-fallback'
 import { buildExcludePathPrefixes } from '../shared/quick-open-filter'
 import { buildInstallRgMessage } from './fs-handler-install-rg'
-import { readRelayFileContent } from './fs-handler-file-read'
+import { readRelayFileContent, readRelayFileStreamMetadata } from './fs-handler-file-read'
+import { RelayStreamRegistry } from './fs-stream-registry'
 
 type WatchState = {
   rootPath: string
@@ -27,6 +28,7 @@ type WatchState = {
 export class FsHandler {
   private dispatcher: RelayDispatcher
   private watches = new Map<string, WatchState>()
+  private streamRegistry = new RelayStreamRegistry()
 
   constructor(dispatcher: RelayDispatcher, _context: RelayContext) {
     this.dispatcher = dispatcher
@@ -36,6 +38,7 @@ export class FsHandler {
   private registerHandlers(): void {
     this.dispatcher.onRequest('fs.readDir', (p) => this.readDir(p))
     this.dispatcher.onRequest('fs.readFile', (p) => this.readFile(p))
+    this.dispatcher.onRequest('fs.readFileStream', (p, c) => this.readFileStream(p, c))
     this.dispatcher.onRequest('fs.writeFile', (p) => this.writeFile(p))
     this.dispatcher.onRequest('fs.stat', (p) => this.stat(p))
     this.dispatcher.onRequest('fs.deletePath', (p) => this.deletePath(p))
@@ -48,6 +51,7 @@ export class FsHandler {
     this.dispatcher.onRequest('fs.listFiles', (p) => this.listFiles(p))
     this.dispatcher.onRequest('fs.watch', (p, context) => this.watch(p, context))
     this.dispatcher.onNotification('fs.unwatch', (p) => this.unwatch(p))
+    this.dispatcher.onNotification('fs.cancelStream', (p) => this.cancelStream(p))
   }
 
   private async readDir(params: Record<string, unknown>) {
@@ -70,6 +74,22 @@ export class FsHandler {
   private async readFile(params: Record<string, unknown>) {
     const filePath = expandTilde(params.filePath as string)
     return readRelayFileContent(filePath)
+  }
+
+  private async readFileStream(
+    params: Record<string, unknown>,
+    context?: { isStale: () => boolean }
+  ) {
+    const filePath = expandTilde(params.filePath as string)
+    const ctx = context ?? { isStale: () => false }
+    return readRelayFileStreamMetadata(filePath, this.dispatcher, this.streamRegistry, ctx)
+  }
+
+  private cancelStream(params: Record<string, unknown>): void {
+    const streamId = params.streamId as number | undefined
+    if (typeof streamId === 'number') {
+      this.streamRegistry.abort(streamId)
+    }
   }
 
   private async writeFile(params: Record<string, unknown>) {
@@ -296,5 +316,6 @@ export class FsHandler {
       state.unwatchFn?.()
     }
     this.watches.clear()
+    void this.streamRegistry.disposeAll()
   }
 }

@@ -135,10 +135,14 @@ describe('registerPtyHandlers', () => {
   }
 
   const savedPiAgentDir = process.env.PI_CODING_AGENT_DIR
+  const savedOrcaOpenCodeConfigDir = process.env.ORCA_OPENCODE_CONFIG_DIR
+  const savedOrcaPiAgentDir = process.env.ORCA_PI_CODING_AGENT_DIR
 
   beforeEach(() => {
     delete process.env.OPENCODE_CONFIG_DIR
     delete process.env.PI_CODING_AGENT_DIR
+    delete process.env.ORCA_OPENCODE_CONFIG_DIR
+    delete process.env.ORCA_PI_CODING_AGENT_DIR
     handlers.clear()
     handleMock.mockReset()
     onMock.mockReset()
@@ -201,8 +205,20 @@ describe('registerPtyHandlers', () => {
   afterEach(() => {
     unregisterSshPtyProvider('ssh-1')
     setLocalPtyProvider(new LocalPtyProvider())
-    if (savedPiAgentDir !== undefined) {
+    if (savedPiAgentDir === undefined) {
+      delete process.env.PI_CODING_AGENT_DIR
+    } else {
       process.env.PI_CODING_AGENT_DIR = savedPiAgentDir
+    }
+    if (savedOrcaOpenCodeConfigDir === undefined) {
+      delete process.env.ORCA_OPENCODE_CONFIG_DIR
+    } else {
+      process.env.ORCA_OPENCODE_CONFIG_DIR = savedOrcaOpenCodeConfigDir
+    }
+    if (savedOrcaPiAgentDir === undefined) {
+      delete process.env.ORCA_PI_CODING_AGENT_DIR
+    } else {
+      process.env.ORCA_PI_CODING_AGENT_DIR = savedOrcaPiAgentDir
     }
   })
 
@@ -1017,6 +1033,70 @@ describe('registerPtyHandlers', () => {
       'remote-pty',
       'term_remote'
     )
+  })
+
+  it('reuses the runtime background handle in local PTY spawn env', async () => {
+    type RuntimeSpawnController = {
+      spawn(args: {
+        cols: number
+        rows: number
+        worktreeId?: string
+        preAllocatedHandle?: string
+      }): Promise<{ id: string }>
+    }
+    let controller: RuntimeSpawnController | null = null
+    const runtime = {
+      setPtyController: vi.fn((value) => {
+        controller = value
+      }),
+      preAllocateHandleForPty: vi.fn(() => 'term_wrong'),
+      registerPreAllocatedHandleForPty: vi.fn(),
+      registerPty: vi.fn(),
+      onPtySpawned: vi.fn(),
+      onPtyExit: vi.fn(),
+      onPtyData: vi.fn()
+    }
+
+    registerPtyHandlers(mainWindow as never, runtime as never)
+    expect(controller).not.toBeNull()
+    const spawnController = controller as unknown as RuntimeSpawnController
+    await spawnController.spawn({
+      cols: 80,
+      rows: 24,
+      worktreeId: 'wt-1',
+      preAllocatedHandle: 'term_expected'
+    })
+
+    const spawnCall = spawnMock.mock.calls.at(-1)!
+    const env = spawnCall[2].env as Record<string, string>
+    expect(env.ORCA_TERMINAL_HANDLE).toBe('term_expected')
+    expect(runtime.preAllocateHandleForPty).not.toHaveBeenCalled()
+    expect(runtime.registerPreAllocatedHandleForPty).toHaveBeenCalledWith(
+      expect.any(String),
+      'term_expected'
+    )
+  })
+
+  it('ignores renderer-provided ORCA_TERMINAL_HANDLE for local PTY spawns', async () => {
+    const runtime = {
+      setPtyController: vi.fn(),
+      preAllocateHandleForPty: vi.fn(() => 'term_trusted'),
+      onPtySpawned: vi.fn(),
+      onPtyExit: vi.fn(),
+      onPtyData: vi.fn()
+    }
+
+    registerPtyHandlers(mainWindow as never, runtime as never)
+    await handlers.get('pty:spawn')!(null, {
+      cols: 80,
+      rows: 24,
+      env: { ORCA_TERMINAL_HANDLE: 'term_untrusted' }
+    })
+
+    const spawnCall = spawnMock.mock.calls.at(-1)!
+    const env = spawnCall[2].env as Record<string, string>
+    expect(env.ORCA_TERMINAL_HANDLE).toBe('term_trusted')
+    expect(runtime.preAllocateHandleForPty).toHaveBeenCalledWith(expect.any(String))
   })
 
   describe('Windows UTF-8 code page', () => {

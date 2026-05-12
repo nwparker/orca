@@ -21,6 +21,12 @@ import {
 } from './layout-serialization'
 import { warnTerminalLifecycleAnomaly } from './terminal-lifecycle-diagnostics'
 import { registerPtySerializer, registerPtyTitleSource } from './pty-buffer-serializer'
+import {
+  discardTerminalOutput,
+  flushTerminalOutput,
+  waitForTerminalOutputParsed,
+  writeTerminalOutput
+} from '@/lib/pane-manager/pane-terminal-output-scheduler'
 
 const pendingSpawnByPaneKey = new Map<string, Promise<string | null>>()
 
@@ -487,6 +493,7 @@ export function connectPanePty(
       }
       const unregisterSerializer = registerPtySerializer(ptyId, async (opts) => {
         try {
+          await waitForTerminalOutputParsed(pane.terminal)
           // Why: alt-screen TUIs (vim, claude-code) hold transient state in
           // the alternate screen. The hydration path requests
           // altScreenForcesZeroRows so normal-buffer scrollback isn't bled
@@ -582,6 +589,9 @@ export function connectPanePty(
     // regardless of DOM visibility and the guard stays engaged via the
     // write-completion callback until xterm finishes parsing.
     const writeReplayData = (data: string): void => {
+      // Why: drain any queued background bytes BEFORE the replay paint, so the
+      // scheduler's deferred drain cannot land older bytes on top of the replay.
+      flushTerminalOutput(pane.terminal)
       if (terminalOutputRequiresDomRenderer(data)) {
         manager.markPaneHasComplexScriptOutput(pane.id)
       }
@@ -597,16 +607,15 @@ export function connectPanePty(
     }
 
     const dataCallback = (data: string): void => {
-      // Always-live writes: PTY output goes straight into xterm regardless
-      // of visibility. xterm's internal write queue handles batching, and
-      // suspending WebGL while hidden (use-terminal-pane-global-effects)
-      // keeps GPU resources from leaking. Visibility-gated buffering used
-      // to feed bytes into xterm at stale dimensions on resume, which was
-      // the root of the cursor-on-strange-line and broken-wide-char bugs.
       if (terminalOutputRequiresDomRenderer(data)) {
         manager.markPaneHasComplexScriptOutput(pane.id)
       }
-      pane.terminal.write(data)
+      // Why: visibility is the right gate — split-pane layouts have multiple
+      // visible-but-inactive panes whose output the user is watching. Only
+      // hidden panes (background tabs) should be throttled.
+      writeTerminalOutput(pane.terminal, data, {
+        foreground: deps.isVisibleRef.current
+      })
 
       if (pendingStartupCommand) {
         if (startupInjectTimer !== null) {
@@ -1148,6 +1157,7 @@ export function connectPanePty(
         clearTimeout(startupInjectTimer)
         startupInjectTimer = null
       }
+      discardTerminalOutput(pane.terminal)
       if (connectFrame !== null) {
         // Why: StrictMode and split-group remounts can dispose a pane binding
         // before its deferred PTY attach/spawn work runs. Cancel that queued

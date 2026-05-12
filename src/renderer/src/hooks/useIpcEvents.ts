@@ -20,7 +20,10 @@ import {
   handleSwitchTabAcrossAllTypes,
   handleSwitchTerminalTab
 } from './ipc-tab-switch'
-import { normalizeAgentStatusPayload } from '../../../shared/agent-status-types'
+import {
+  normalizeAgentStatusPayload,
+  type AgentStatusIpcPayload
+} from '../../../shared/agent-status-types'
 import { isGitRepoKind } from '../../../shared/repo-kind'
 import { focusTerminalTabSurface } from '@/lib/focus-terminal-tab-surface'
 import { setFitOverride, hydrateOverrides } from '@/lib/pane-manager/mobile-fit-overrides'
@@ -218,26 +221,60 @@ export function useIpcEvents(): void {
     )
 
     unsubs.push(
-      window.api.ui.onCreateTerminal(({ worktreeId, command, title }) => {
-        const store = useAppStore.getState()
-        store.setActiveView('terminal')
-        store.setActiveWorktree(worktreeId)
-        // Why: CLI-driven terminal creation is a user-initiated worktree switch
-        // and must stamp focus recency for Cmd+J. Doesn't route through
-        // activateAndRevealWorktree because it has custom terminal-creation
-        // logic; see docs/cmd-j-empty-query-ordering.md.
-        store.markWorktreeVisited(worktreeId)
-        const tab = store.createTab(worktreeId)
-        store.setActiveTabType('terminal')
-        store.setActiveTab(tab.id)
-        store.revealWorktreeInSidebar(worktreeId)
-        if (title) {
-          store.setTabCustomTitle(tab.id, title)
+      window.api.ui.onCreateTerminal(
+        ({ requestId, worktreeId, command, title, ptyId, activate }) => {
+          try {
+            const store = useAppStore.getState()
+            const shouldActivate = activate !== false
+            if (shouldActivate) {
+              store.setActiveView('terminal')
+              store.setActiveWorktree(worktreeId)
+              // Why: CLI-driven terminal focus is a user-initiated worktree switch
+              // and must stamp focus recency for Cmd+J. Doesn't route through
+              // activateAndRevealWorktree because it has custom terminal-creation
+              // logic; see docs/cmd-j-empty-query-ordering.md.
+              store.markWorktreeVisited(worktreeId)
+            }
+            const tab = ptyId
+              ? ((store.tabsByWorktree[worktreeId] ?? []).find(
+                  (candidate) =>
+                    candidate.ptyId === ptyId ||
+                    (store.ptyIdsByTabId[candidate.id] ?? []).includes(ptyId)
+                ) ??
+                store.createTab(worktreeId, undefined, undefined, {
+                  initialPtyId: ptyId,
+                  activate: shouldActivate
+                }))
+              : store.createTab(worktreeId)
+            if (shouldActivate) {
+              store.setActiveTabType('terminal')
+              store.setActiveTab(tab.id)
+              store.revealWorktreeInSidebar(worktreeId)
+            }
+            if (title) {
+              store.setTabCustomTitle(tab.id, title)
+            }
+            if (command) {
+              store.queueTabStartupCommand(tab.id, { command })
+            }
+            if (requestId) {
+              window.api.ui.replyTerminalCreate({
+                requestId,
+                tabId: tab.id,
+                title: title ?? tab.title
+              })
+            }
+          } catch (err) {
+            if (!requestId) {
+              throw err
+            }
+            window.api.ui.replyTerminalCreate({
+              requestId,
+              error: err instanceof Error ? err.message : 'Terminal reveal failed'
+            })
+          }
         }
-        if (command) {
-          store.queueTabStartupCommand(tab.id, { command })
-        }
-      })
+      )
     )
 
     // Why: CLI-driven terminal creation sends a request and waits for the
@@ -847,56 +884,107 @@ export function useIpcEvents(): void {
     // Why: agent status arrives from native hook receivers in the main process.
     // Re-parse it here so the renderer enforces the same normalization rules
     // (state enum, field truncation) regardless of whether the source was a
-    // hook callback or an OSC fallback path.
+    // hook callback or an OSC fallback path. Startup pushes are ignored until
+    // workspace session hydration finishes; the snapshot pull below replays the
+    // main-process cache after tab identity is available.
+    const applyAgentStatus = (data: AgentStatusIpcPayload): void => {
+      const store = useAppStore.getState()
+      if (!store.workspaceSessionReady) {
+        return
+      }
+      const payload = normalizeAgentStatusPayload({
+        state: data.state,
+        prompt: data.prompt,
+        agentType: data.agentType,
+        toolName: data.toolName,
+        toolInput: data.toolInput,
+        lastAssistantMessage: data.lastAssistantMessage,
+        interrupted: data.interrupted
+      })
+      if (!payload) {
+        return
+      }
+      const { exists, title, repoConnectionId } = resolvePaneKey(store, data.paneKey)
+      if (!exists) {
+        return
+      }
+      // Why: drop in-flight events from a connection that no longer owns
+      // this pane. After an SSH disconnect (or tab destroy/recreate during
+      // reconnect), notifications may still arrive stamped with the
+      // connectionId of the dead connection. The renderer compares the
+      // stamped connectionId against the live repo's connectionId for the
+      // pane's worktree — see docs/design/agent-status-over-ssh.md §5.
+      // The IPC contract declares connectionId as required (string | null),
+      // so the undefined branch only fires under dev hot-reload skew where
+      // the renderer bundle is newer than the preload bundle:
+      // - data.connectionId === undefined: preload pre-dates the field;
+      //   accept rather than dropping every event during a stale reload.
+      // - data.connectionId !== undefined and unknown live repo: treat
+      //   the expected value as null so remote (string) events are
+      //   dropped when ownership cannot be proven.
+      if (data.connectionId !== undefined && data.connectionId !== repoConnectionId) {
+        return
+      }
+      store.setAgentStatus(data.paneKey, payload, title, {
+        updatedAt: data.receivedAt,
+        stateStartedAt: data.stateStartedAt
+      })
+    }
+
+    let snapshotRequestedForReadyWindow = false
+    let snapshotRequestId = 0
+    const requestAgentStatusSnapshotIfReady = (): void => {
+      const store = useAppStore.getState()
+      if (!store.workspaceSessionReady) {
+        snapshotRequestedForReadyWindow = false
+        return
+      }
+      if (snapshotRequestedForReadyWindow) {
+        return
+      }
+      const getSnapshot = window.api.agentStatus.getSnapshot
+      if (typeof getSnapshot !== 'function') {
+        return
+      }
+      snapshotRequestedForReadyWindow = true
+      const requestId = ++snapshotRequestId
+      void getSnapshot()
+        .then((entries) => {
+          if (requestId !== snapshotRequestId) {
+            return
+          }
+          const current = useAppStore.getState()
+          if (!current.workspaceSessionReady) {
+            return
+          }
+          for (const entry of entries) {
+            applyAgentStatus(entry)
+          }
+        })
+        .catch((err) => {
+          // Why: keep snapshotRequestedForReadyWindow latched on failure. The
+          // store subscriber below fires on every update (including high-rate
+          // PTY ticks), so resetting the flag here would turn a persistent IPC
+          // failure into an unbounded retry storm. One warning per ready
+          // window is sufficient; the flag still clears when
+          // workspaceSessionReady toggles off, so a fresh workspace re-ready
+          // cycle will retry.
+          console.warn('[agent-status] failed to load startup snapshot:', err)
+        })
+    }
+
     unsubs.push(
       window.api.agentStatus.onSet((data) => {
-        const store = useAppStore.getState()
-        // Why: the IPC payload is already a structured object — pass it
-        // straight to the object-input normalizer instead of round-tripping
-        // through JSON.stringify/JSON.parse. Hook events can fire many times
-        // per second during a tool-use run, so this avoids the per-event
-        // serialization cost.
-        const payload = normalizeAgentStatusPayload({
-          state: data.state,
-          prompt: data.prompt,
-          agentType: data.agentType,
-          toolName: data.toolName,
-          toolInput: data.toolInput,
-          lastAssistantMessage: data.lastAssistantMessage,
-          interrupted: data.interrupted
-        })
-        if (!payload) {
-          return
-        }
-        // Why: resolve tab existence, terminal title, and the live repo's
-        // connectionId in a single pass. A paneKey that no longer resolves
-        // to a live tab belongs to a pane that has already been torn down;
-        // dropping here prevents orphan entries from accumulating in
-        // agentStatusByPaneKey.
-        const { exists, title, repoConnectionId } = resolvePaneKey(store, data.paneKey)
-        if (!exists) {
-          return
-        }
-        // Why: drop in-flight events from a connection that no longer owns
-        // this pane. After an SSH disconnect (or tab destroy/recreate during
-        // reconnect), notifications may still arrive stamped with the
-        // connectionId of the dead connection. The renderer compares the
-        // stamped connectionId against the live repo's connectionId for the
-        // pane's worktree — see docs/design/agent-status-over-ssh.md §5.
-        // The IPC contract declares connectionId as required (string | null),
-        // so the undefined branch only fires under dev hot-reload skew where
-        // the renderer bundle is newer than the preload bundle:
-        // - data.connectionId === undefined: preload pre-dates the field;
-        //   accept rather than dropping every event during a stale reload.
-        // - data.connectionId !== undefined and unknown live repo: treat
-        //   the expected value as null so remote (string) events are
-        //   dropped when ownership cannot be proven.
-        if (data.connectionId !== undefined && data.connectionId !== repoConnectionId) {
-          return
-        }
-        store.setAgentStatus(data.paneKey, payload, title)
+        applyAgentStatus(data)
       })
     )
+
+    // Why: the main hook server is the durable source of truth. Pull a
+    // snapshot only after workspace tabs are ready, so early startup pushes
+    // can be safely ignored instead of buffered against partially hydrated
+    // renderer state.
+    requestAgentStatusSnapshotIfReady()
+    unsubs.push(useAppStore.subscribe(() => requestAgentStatusSnapshotIfReady()))
 
     // Why: hydrate mobile-fit overrides before terminal panes run their first
     // attach/fit logic, so a renderer reload doesn't undo active mobile fits.

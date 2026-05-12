@@ -36,6 +36,7 @@ import {
   sidebarHasActiveFilters
 } from './visible-worktrees'
 import { activateAndRevealWorktree } from '@/lib/worktree-activation'
+import { useRepoHeaderDrag } from './repo-header-drag'
 
 // How long to wait after a sortEpoch bump before actually re-sorting.
 // Prevents jarring position shifts when background events (AI starting work,
@@ -79,6 +80,13 @@ type VirtualizedWorktreeViewportProps = {
   clearPendingRevealWorktreeId: () => void
   worktrees: Worktree[]
   repoMap: Map<string, Repo>
+  repoOrder: Map<string, number>
+  // The full canonical state.repos id ordering — the drag controller commits
+  // permutations of this list, even when some repos aren't currently visible
+  // (filtered out / collapsed-only). Visible-only ids would silently drop the
+  // hidden repos on reorder.
+  allRepoIds: string[]
+  reorderRepos: (orderedIds: string[]) => void
   prCache: Record<string, unknown> | null
   // Why: the viewport remounts when the row structure changes (see
   // viewportResetKey) so the virtualizer's measurementsCache cannot hold
@@ -101,10 +109,22 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
   clearPendingRevealWorktreeId,
   worktrees,
   repoMap,
+  repoOrder,
+  allRepoIds,
+  reorderRepos,
   prCache,
   scrollOffsetRef
 }: VirtualizedWorktreeViewportProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
+
+  // Drag is only meaningful when the user is grouping by repo. When inert
+  // (groupBy !== 'repo'), the controller is still constructed for hook order
+  // stability but the handle is never rendered.
+  const repoDrag = useRepoHeaderDrag({
+    orderedRepoIds: allRepoIds,
+    onCommit: reorderRepos,
+    getScrollContainer: () => scrollRef.current
+  })
   const activeWorktreeRowIndex = useMemo(
     () => rows.findIndex((row) => row.type === 'item' && row.worktree.id === activeWorktreeId),
     [rows, activeWorktreeId]
@@ -260,7 +280,8 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
         worktrees,
         repoMap,
         prCache,
-        new Set<string>()
+        new Set<string>(),
+        repoOrder
       ).filter((r): r is Extract<Row, { type: 'item' }> => r.type === 'item')
       if (worktreeRows.length === 0) {
         return
@@ -293,7 +314,7 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
         virtualizer.scrollToIndex(rowIndex, { align: 'auto' })
       }
     },
-    [rows, activeWorktreeId, virtualizer, groupBy, worktrees, repoMap, prCache]
+    [rows, activeWorktreeId, virtualizer, groupBy, worktrees, repoMap, prCache, repoOrder]
   )
 
   useEffect(() => {
@@ -368,10 +389,22 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
         className="relative w-full"
         style={{ height: `${virtualizer.getTotalSize()}px` }}
       >
+        {repoDrag.state.draggingRepoId !== null && repoDrag.state.dropIndicatorY !== null ? (
+          <div
+            role="presentation"
+            className="pointer-events-none absolute left-2 right-2 z-10 border-t border-dashed border-muted-foreground/70"
+            style={{ top: `${repoDrag.state.dropIndicatorY}px` }}
+          />
+        ) : null}
         {virtualItems.map((vItem) => {
           const row = rows[vItem.index]
 
           if (row.type === 'header') {
+            const isRepoHeader = groupBy === 'repo' && row.repo !== undefined
+            const repoIdForHeader = isRepoHeader ? row.repo!.id : undefined
+            const isDraggingThis =
+              repoDrag.state.draggingRepoId !== null &&
+              repoDrag.state.draggingRepoId === repoIdForHeader
             return (
               <div
                 key={vItem.key}
@@ -384,8 +417,12 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
                 <div
                   role="button"
                   tabIndex={0}
+                  data-repo-header-id={repoIdForHeader}
                   className={cn(
-                    'group flex h-7 w-full items-center gap-1.5 pl-3 pr-1 text-left transition-all cursor-pointer',
+                    'group flex h-7 w-full items-center gap-1.5 pl-3 pr-1 text-left transition-all',
+                    'cursor-pointer',
+                    isDraggingThis &&
+                      'bg-accent/80 ring-1 ring-ring/40 shadow-md rounded-md scale-[1.01]',
                     // First header sits directly under SidebarHeader, which already
                     // supplies its own spacing — only offset secondary group headers.
                     vItem.index !== firstHeaderIndex && 'mt-2',
@@ -401,6 +438,11 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
                 >
                   {row.icon ? (
                     <div
+                      onPointerDown={
+                        isRepoHeader && repoIdForHeader
+                          ? (e) => repoDrag.onHandlePointerDown(e, repoIdForHeader)
+                          : undefined
+                      }
                       className={cn(
                         'flex size-4 shrink-0 items-center justify-center rounded-[4px]',
                         row.repo && 'text-muted-foreground'
@@ -711,10 +753,22 @@ const WorktreeList = React.memo(function WorktreeList() {
   const collapsedGroups = useAppStore((s) => s.collapsedGroups)
   const toggleGroup = useAppStore((s) => s.toggleCollapsedGroup)
 
+  // Why: header order in groupBy='repo' is bound to state.repos array order so
+  // manual reorder is the single source of truth. The Map lets buildRows do an
+  // O(1) rank lookup per group without depending on Repo identity.
+  const repos = useAppStore((s) => s.repos)
+  const repoOrder = useMemo(() => {
+    const map = new Map<string, number>()
+    repos.forEach((r, i) => map.set(r.id, i))
+    return map
+  }, [repos])
+  const allRepoIds = useMemo(() => repos.map((r) => r.id), [repos])
+  const reorderReposAction = useAppStore((s) => s.reorderRepos)
+
   // Build flat row list for rendering
   const rows: Row[] = useMemo(
-    () => buildRows(groupBy, worktrees, repoMap, prCache, collapsedGroups),
-    [groupBy, worktrees, repoMap, prCache, collapsedGroups]
+    () => buildRows(groupBy, worktrees, repoMap, prCache, collapsedGroups, repoOrder),
+    [groupBy, worktrees, repoMap, prCache, collapsedGroups, repoOrder]
   )
   // Why: rows.length alone can stay the same when items migrate between
   // groups (e.g., PR cache loads on restart and a collapsed group absorbs
@@ -745,9 +799,10 @@ const WorktreeList = React.memo(function WorktreeList() {
         .map((r) => r.worktree),
     [rows]
   )
-  // Why: when the tasks page is active, no sidebar card should appear selected
-  // — the user hasn't picked a worktree yet.
-  const selectedSidebarWorktreeId = activeView === 'tasks' ? null : activeWorktreeId
+  // Why: full-page navigation views are not scoped to one worktree, so no
+  // sidebar card should appear selected while one of them is active.
+  const selectedSidebarWorktreeId =
+    activeView === 'tasks' || activeView === 'activity' ? null : activeWorktreeId
 
   // Why layout effect instead of effect: the global Cmd/Ctrl+1–9 key handler
   // can fire immediately after React commits the new grouped/collapsed order.
@@ -824,6 +879,11 @@ const WorktreeList = React.memo(function WorktreeList() {
       clearPendingRevealWorktreeId={clearPendingRevealWorktreeId}
       worktrees={worktrees}
       repoMap={repoMap}
+      repoOrder={repoOrder}
+      allRepoIds={allRepoIds}
+      reorderRepos={(orderedIds) => {
+        void reorderReposAction(orderedIds)
+      }}
       prCache={prCache}
       scrollOffsetRef={sidebarScrollOffsetRef}
     />
