@@ -42,12 +42,21 @@ export default function MonacoCodeExcerpt({
       return
     }
 
-    // Why: colorizeModelLine gives the comment excerpt Monaco's token colors
-    // without mounting a full editor instance for every visible PR comment.
-    const model = monaco.editor.createModel(code, language)
-    const nextLines = lines.map((_, index) => monaco.editor.colorizeModelLine(model, index + 1, 2))
-    model.dispose()
-    setHtmlLines(nextLines)
+    let cancelled = false
+    // Why: notebook languages like Python are loaded lazily by Monaco. The
+    // async colorizer waits for that tokenizer; colorizeModelLine can render
+    // only default-token spans if called before the contribution finishes.
+    void monaco.editor.colorize(code, language, { tabSize: 2 }).then((html) => {
+      if (cancelled) {
+        return
+      }
+      const nextLines = html.split('<br/>').slice(0, lines.length)
+      setHtmlLines(nextLines)
+    })
+
+    return () => {
+      cancelled = true
+    }
   }, [code, language, lines])
 
   return (
