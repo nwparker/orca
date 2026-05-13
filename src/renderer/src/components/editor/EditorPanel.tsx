@@ -23,7 +23,10 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { CLOSE_ALL_CONTEXT_MENUS_EVENT } from '../tab-bar/SortableTab'
 import type { MarkdownViewMode, OpenFile } from '@/store/slices/editor'
-import EditorViewToggle, { CSV_VIEW_MODE_METADATA } from './EditorViewToggle'
+import EditorViewToggle, {
+  CSV_VIEW_MODE_METADATA,
+  NOTEBOOK_VIEW_MODE_METADATA
+} from './EditorViewToggle'
 import { EditorContent } from './EditorContent'
 import { scrollTopCache, cursorPositionCache, diffViewStateCache } from '@/lib/scroll-cache'
 import type { GitDiffResult } from '../../../../shared/types'
@@ -947,6 +950,7 @@ function EditorPanelInner({
   const isMarkdown = resolvedLanguage === 'markdown'
   const isMermaid = resolvedLanguage === 'mermaid'
   const isCsv = resolvedLanguage === 'csv' || resolvedLanguage === 'tsv'
+  const isNotebook = resolvedLanguage === 'notebook'
   // Why: "Open Preview to the Side" only applies to edit-mode tabs whose
   // language has a registered renderer. Diff tabs already have their own
   // toggle set and there is no clear semantic for previewing a diff.
@@ -1188,7 +1192,13 @@ function EditorPanelInner({
               value={effectiveToggleValue}
               modes={availableEditorToggleModes}
               onChange={handleEditorToggleChange}
-              metadataOverride={isCsv ? CSV_VIEW_MODE_METADATA : undefined}
+              metadataOverride={
+                isCsv
+                  ? CSV_VIEW_MODE_METADATA
+                  : isNotebook
+                    ? NOTEBOOK_VIEW_MODE_METADATA
+                    : undefined
+              }
             />
           )}
           {hasViewModeToggle && isMarkdown && (
@@ -1236,6 +1246,7 @@ function EditorPanelInner({
           isMarkdown={isMarkdown}
           isMermaid={isMermaid}
           isCsv={isCsv}
+          isNotebook={isNotebook}
           mdViewMode={mdViewMode}
           isChangesMode={isChangesMode}
           sideBySide={sideBySide}

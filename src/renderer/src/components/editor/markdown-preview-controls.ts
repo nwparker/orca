@@ -12,6 +12,7 @@ const MARKDOWN_DIFF_VIEW_MODES = [
 ] as const satisfies readonly MarkdownViewMode[]
 const MERMAID_VIEW_MODES = ['source', 'rich'] as const satisfies readonly MarkdownViewMode[]
 const CSV_VIEW_MODES = ['source', 'rich'] as const satisfies readonly MarkdownViewMode[]
+const NOTEBOOK_VIEW_MODES = ['source', 'rich'] as const satisfies readonly MarkdownViewMode[]
 const NO_VIEW_MODES = [] as const satisfies readonly MarkdownViewMode[]
 
 // Why: every editable file (markdown, mermaid, or plain code) can flip into
@@ -53,6 +54,10 @@ export function getMarkdownViewModes(target: MarkdownPreviewTarget): readonly Ma
 
   if ((target.language === 'csv' || target.language === 'tsv') && target.mode === 'edit') {
     return CSV_VIEW_MODES
+  }
+
+  if (target.language === 'notebook' && target.mode === 'edit') {
+    return NOTEBOOK_VIEW_MODES
   }
 
   return NO_VIEW_MODES

@@ -27,6 +27,7 @@ const ImageViewer = lazy(() => import('./ImageViewer'))
 const ImageDiffViewer = lazy(() => import('./ImageDiffViewer'))
 const MermaidViewer = lazy(() => import('./MermaidViewer'))
 const CsvViewer = lazy(() => import('./CsvViewer'))
+const IpynbViewer = lazy(() => import('./IpynbViewer'))
 
 const richMarkdownSizeEncoder = new TextEncoder()
 // Why: encodeInto() with a pre-allocated buffer avoids creating a new
@@ -51,6 +52,7 @@ export function EditorContent({
   isMarkdown,
   isMermaid,
   isCsv,
+  isNotebook,
   mdViewMode,
   isChangesMode,
   sideBySide,
@@ -69,6 +71,7 @@ export function EditorContent({
   isMarkdown: boolean
   isMermaid: boolean
   isCsv: boolean
+  isNotebook: boolean
   mdViewMode: MarkdownViewMode
   isChangesMode: boolean
   sideBySide: boolean
@@ -92,6 +95,7 @@ export function EditorContent({
     viewStateScopeId === activeFile.id
       ? `${activeFile.id}:preview`
       : `${activeFile.id}::${viewStateScopeId}:preview`
+  const monacoLanguage = resolvedLanguage === 'notebook' ? 'json' : resolvedLanguage
 
   const openConflictFile = useAppStore((s) => s.openConflictFile)
   const openConflictReview = useAppStore((s) => s.openConflictReview)
@@ -118,7 +122,7 @@ export function EditorContent({
       viewStateKey={editorViewStateKey}
       relativePath={activeFile.relativePath}
       content={editBuffers[activeFile.id] ?? fc.content}
-      language={resolvedLanguage}
+      language={monacoLanguage}
       onContentChange={handleContentChange}
       onSave={isMarkdown ? md.mdSave : handleSave}
       revealLine={
@@ -356,7 +360,7 @@ export function EditorContent({
           dc={diffContents[activeFile.id]}
           modifiedContent={editBuffers[activeFile.id] ?? fc.content}
           activeConflictEntry={activeConflictEntry}
-          resolvedLanguage={resolvedLanguage}
+          resolvedLanguage={monacoLanguage}
           sideBySide={sideBySide}
           viewStateScopeId={viewStateScopeId}
           diffViewStateKey={diffViewStateKey}
@@ -382,6 +386,13 @@ export function EditorContent({
               key={activeFile.id}
               content={editBuffers[activeFile.id] ?? fc.content}
               filePath={activeFile.filePath}
+            />
+          ) : isNotebook && mdViewMode === 'rich' ? (
+            <IpynbViewer
+              key={activeFile.id}
+              content={editBuffers[activeFile.id] ?? fc.content}
+              filePath={activeFile.filePath}
+              scrollCacheKey={`${editorViewStateKey}:notebook`}
             />
           ) : (
             renderMonacoEditor(fc)
@@ -455,7 +466,7 @@ export function EditorContent({
       modelKey={diffViewStateKey}
       originalContent={dc.originalContent}
       modifiedContent={modifiedDiffContent}
-      language={resolvedLanguage}
+      language={monacoLanguage}
       filePath={activeFile.filePath}
       relativePath={activeFile.relativePath}
       sideBySide={sideBySide}
