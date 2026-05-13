@@ -5,6 +5,7 @@ import { joinPath } from '@/lib/path'
 import { toast } from 'sonner'
 import { resolveMarkdownLinkTarget } from '@/components/editor/markdown-internal-links'
 import { openHttpLink } from '@/lib/http-link-routing'
+import { detectLanguage } from '@/lib/language-detect'
 import type {
   GitBranchChangeEntry,
   GitBranchCompareSummary,
@@ -622,16 +623,19 @@ export const createEditorSlice: StateCreator<AppState, [], [], EditorSlice> = (s
       if (existing) {
         // If opening as non-preview, also pin the existing tab
         const updatedPreview = isPreview ? existing.isPreview : false
-        if (
-          existing.mode === file.mode &&
-          existing.diffSource === file.diffSource &&
-          existing.branchCompare?.compareVersion === file.branchCompare?.compareVersion &&
-          existing.conflict?.kind === file.conflict?.kind &&
-          existing.conflict?.conflictKind === file.conflict?.conflictKind &&
-          existing.conflict?.conflictStatus === file.conflict?.conflictStatus &&
-          existing.conflictReview?.snapshotTimestamp === file.conflictReview?.snapshotTimestamp &&
-          existing.isPreview === updatedPreview
-        ) {
+        const needsExistingUpdate =
+          existing.mode !== file.mode ||
+          existing.diffSource !== file.diffSource ||
+          existing.branchCompare?.compareVersion !== file.branchCompare?.compareVersion ||
+          existing.conflict?.kind !== file.conflict?.kind ||
+          existing.conflict?.conflictKind !== file.conflict?.conflictKind ||
+          existing.conflict?.conflictStatus !== file.conflict?.conflictStatus ||
+          existing.conflictReview?.snapshotTimestamp !== file.conflictReview?.snapshotTimestamp ||
+          existing.isPreview !== updatedPreview ||
+          existing.language !== file.language ||
+          existing.relativePath !== file.relativePath ||
+          existing.worktreeId !== file.worktreeId
+        if (!needsExistingUpdate) {
           return activeResult
         }
         return {
@@ -639,6 +643,9 @@ export const createEditorSlice: StateCreator<AppState, [], [], EditorSlice> = (s
             f.id === id
               ? {
                   ...f,
+                  relativePath: file.relativePath,
+                  worktreeId: file.worktreeId,
+                  language: file.language,
                   mode: file.mode,
                   diffSource: file.diffSource,
                   branchCompare: file.branchCompare,
@@ -2222,7 +2229,10 @@ export const createEditorSlice: StateCreator<AppState, [], [], EditorSlice> = (s
             filePath: pf.filePath,
             relativePath: pf.relativePath,
             worktreeId,
-            language: pf.language,
+            // Why: sessions can contain language ids from older Orca builds.
+            // Re-detect on hydrate so newly-supported extensions like .ipynb
+            // stop reopening as raw JSON/plain text after the upgrade.
+            language: detectLanguage(pf.relativePath || pf.filePath),
             isDirty: false,
             isPreview: pf.isPreview,
             mode: 'edit'

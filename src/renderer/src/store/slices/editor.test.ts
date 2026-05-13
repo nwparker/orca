@@ -108,6 +108,33 @@ describe('createEditorSlice openDiff', () => {
 })
 
 describe('createEditorSlice markdown view state', () => {
+  it('updates stale language metadata when reopening an existing file', () => {
+    const store = createEditorStore()
+
+    store.getState().openFile({
+      filePath: '/repo/notebooks/example.ipynb',
+      relativePath: 'notebooks/example.ipynb',
+      worktreeId: 'wt-1',
+      language: 'json',
+      mode: 'edit'
+    })
+
+    store.getState().openFile({
+      filePath: '/repo/notebooks/example.ipynb',
+      relativePath: 'notebooks/example.ipynb',
+      worktreeId: 'wt-1',
+      language: 'notebook',
+      mode: 'edit'
+    })
+
+    expect(store.getState().openFiles).toEqual([
+      expect.objectContaining({
+        filePath: '/repo/notebooks/example.ipynb',
+        language: 'notebook'
+      })
+    ])
+  })
+
   it('drops markdown view mode for a replaced preview tab', () => {
     const store = createEditorStore()
 
