@@ -7,7 +7,8 @@ import {
   translateKernelLanguageToMonaco,
   updateIpynbCellKind,
   updateIpynbCellOutputs,
-  updateIpynbCellSource
+  updateIpynbCellSource,
+  updateIpynbCellSources
 } from './ipynb-parse'
 
 describe('ipynb parsing', () => {
@@ -94,6 +95,28 @@ describe('ipynb parsing', () => {
     const updated = JSON.parse(updateIpynbCellSource(content, 0, 'print("hi")\nprint("bye")'))
     expect(updated.metadata).toEqual({ custom: true })
     expect(updated.cells[0].source).toEqual(['print("hi")\n', 'print("bye")'])
+  })
+
+  it('serializes batched source edits with one notebook mutation', () => {
+    const content = JSON.stringify({
+      nbformat: 4,
+      nbformat_minor: 5,
+      metadata: { custom: true },
+      cells: [
+        { cell_type: 'code', metadata: {}, execution_count: null, outputs: [], source: [] },
+        { cell_type: 'code', metadata: {}, execution_count: null, outputs: [], source: [] }
+      ]
+    })
+
+    const updated = JSON.parse(
+      updateIpynbCellSources(content, [
+        { index: 0, source: 'x = 41' },
+        { index: 1, source: 'print(x + 1)' }
+      ])
+    )
+    expect(updated.metadata).toEqual({ custom: true })
+    expect(updated.cells[0].source).toEqual(['x = 41'])
+    expect(updated.cells[1].source).toEqual(['print(x + 1)'])
   })
 
   it('inserts, deletes, and changes cell kinds', () => {

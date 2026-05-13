@@ -391,10 +391,12 @@ export function EditorContent({
             <IpynbViewer
               key={activeFile.id}
               content={editBuffers[activeFile.id] ?? fc.content}
+              fileId={activeFile.id}
               filePath={activeFile.filePath}
               worktreeId={activeFile.worktreeId}
               scrollCacheKey={`${editorViewStateKey}:notebook`}
               onContentChange={handleContentChange}
+              onDirtyStateHint={handleDirtyStateHint}
               onSave={handleSave}
             />
           ) : (

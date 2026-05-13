@@ -2,13 +2,15 @@
 controls share one parsed document/update path for this first notebook editor
 slice; splitting before the model stabilizes would make save/run mutations
 harder to audit. */
-import React, { useLayoutEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import Editor, { type OnMount } from '@monaco-editor/react'
 import DOMPurify from 'dompurify'
 import Markdown from 'react-markdown'
 import rehypeRaw from 'rehype-raw'
 import rehypeSanitize from 'rehype-sanitize'
 import remarkGfm from 'remark-gfm'
 import { AlertCircle, Braces, FileCode2, Loader2, Play, Plus, Trash2 } from 'lucide-react'
+import { monaco } from '@/lib/monaco-setup'
 import { computeEditorFontSize } from '@/lib/editor-font-zoom'
 import { getConnectionId } from '@/lib/connection-context'
 import { useAppStore } from '@/store'
@@ -16,13 +18,15 @@ import { scrollTopCache, setWithLRU } from '@/lib/scroll-cache'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { registerPendingEditorFlush } from './editor-pending-flush'
+import MonacoCodeExcerpt from './MonacoCodeExcerpt'
 import {
   deleteIpynbCell,
   insertIpynbCell,
   parseIpynb,
   updateIpynbCellKind,
   updateIpynbCellOutputs,
-  updateIpynbCellSource,
+  updateIpynbCellSources,
   type IpynbCell,
   type IpynbCellKind,
   type IpynbOutputItem
@@ -30,12 +34,16 @@ import {
 
 type IpynbViewerProps = {
   content: string
+  fileId: string
   filePath: string
   worktreeId: string
   scrollCacheKey: string
   onContentChange: (content: string) => void
+  onDirtyStateHint: (dirty: boolean) => void
   onSave: (content: string) => Promise<void>
 }
+
+const NOTEBOOK_SOURCE_COMMIT_DELAY_MS = 400
 
 function valueToText(value: unknown): string {
   if (Array.isArray(value)) {
@@ -167,28 +175,95 @@ function MarkdownCell({ source }: { source: string }): React.JSX.Element {
 
 function CodeCell({
   cell,
+  source,
+  active,
+  onActivate,
   onChange
 }: {
   cell: IpynbCell
+  source: string
+  active: boolean
+  onActivate: () => void
   onChange: (source: string) => void
 }): React.JSX.Element {
   const settings = useAppStore((s) => s.settings)
   const editorFontZoomLevel = useAppStore((s) => s.editorFontZoomLevel)
   const fontSize = computeEditorFontSize(settings?.terminalFontSize ?? 13, editorFontZoomLevel)
-  const lineCount = Math.max(3, cell.source.split('\n').length + 1)
-  return (
-    <textarea
-      value={cell.source}
-      onChange={(event) => onChange(event.target.value)}
-      spellCheck={false}
-      className="block w-full resize-y border-0 bg-editor-surface px-4 py-3 font-mono text-foreground outline-none focus:ring-1 focus:ring-ring"
-      style={{
-        minHeight: Math.min(520, Math.max(96, lineCount * (fontSize + 8))),
-        fontSize,
-        fontFamily: settings?.terminalFontFamily || 'monospace'
-      }}
-    />
+  const lineCount = Math.max(3, source.split('\n').length + 1)
+  const editorHeight = Math.min(520, Math.max(96, lineCount * (fontSize + 8)))
+  const isDark =
+    settings?.theme === 'dark' ||
+    (settings?.theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)
+  const lines = useMemo(
+    () => (source.length > 0 ? source.replace(/\n$/, '').split('\n') : ['']),
+    [source]
   )
+  const handleMount: OnMount = useCallback((editorInstance) => {
+    editorInstance.focus()
+  }, [])
+
+  useEffect(() => {
+    monaco.editor.setTheme(isDark ? 'vs-dark' : 'vs')
+  }, [isDark])
+
+  if (!active) {
+    return (
+      <div
+        role="button"
+        tabIndex={0}
+        className="block w-full cursor-text bg-editor-surface text-left"
+        onClick={onActivate}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') {
+            onActivate()
+          }
+        }}
+      >
+        <MonacoCodeExcerpt
+          lines={lines}
+          firstLineNumber={1}
+          highlightedStartLine={-1}
+          highlightedEndLine={-1}
+          language={cell.language}
+        />
+      </div>
+    )
+  }
+
+  return (
+    <div className="bg-editor-surface focus-within:ring-1 focus-within:ring-ring">
+      <Editor
+        height={editorHeight}
+        defaultLanguage={cell.language}
+        language={cell.language}
+        value={source}
+        onMount={handleMount}
+        onChange={(value) => onChange(value ?? '')}
+        options={{
+          automaticLayout: true,
+          fontFamily: settings?.terminalFontFamily || 'monospace',
+          fontSize,
+          glyphMargin: false,
+          lineNumbersMinChars: 3,
+          minimap: { enabled: false },
+          overviewRulerLanes: 0,
+          renderLineHighlight: 'none',
+          scrollBeyondLastLine: false,
+          wordWrap: 'off'
+        }}
+      />
+    </div>
+  )
+}
+
+const MemoizedCodeCell = React.memo(CodeCell)
+
+function getCellKey(cell: IpynbCell, index: number): string {
+  return cell.id ?? `${index}:${cell.kind}`
+}
+
+function hasOwnDraft(drafts: Record<string, string>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(drafts, key)
 }
 
 function EditableTextCell({
@@ -307,10 +382,12 @@ function CellOutputs({ cell }: { cell: IpynbCell }): React.JSX.Element | null {
 
 export default function IpynbViewer({
   content,
+  fileId,
   filePath,
   worktreeId,
   scrollCacheKey,
   onContentChange,
+  onDirtyStateHint,
   onSave
 }: IpynbViewerProps): React.JSX.Element {
   const rootRef = useRef<HTMLDivElement>(null)
@@ -318,6 +395,14 @@ export default function IpynbViewer({
   const editorFontZoomLevel = useAppStore((s) => s.editorFontZoomLevel)
   const [runningCellIndex, setRunningCellIndex] = useState<number | null>(null)
   const [runError, setRunError] = useState<string | null>(null)
+  const [editingCellKey, setEditingCellKey] = useState<string | null>(null)
+  const [sourceDrafts, setSourceDrafts] = useState<Record<string, string>>({})
+  const sourceDraftsRef = useRef(sourceDrafts)
+  const contentRef = useRef(content)
+  const notebookRef = useRef<ReturnType<typeof parseIpynb> | null>(null)
+  const onContentChangeRef = useRef(onContentChange)
+  const onDirtyStateHintRef = useRef(onDirtyStateHint)
+  const sourceCommitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const fontSize = computeEditorFontSize(13, editorFontZoomLevel)
   const parsed = useMemo(() => {
     try {
@@ -329,6 +414,76 @@ export default function IpynbViewer({
       }
     }
   }, [content])
+  contentRef.current = content
+  notebookRef.current = parsed.notebook
+  onContentChangeRef.current = onContentChange
+  onDirtyStateHintRef.current = onDirtyStateHint
+
+  const materializeSourceDrafts = useCallback((): string => {
+    const notebook = notebookRef.current
+    const drafts = sourceDraftsRef.current
+    if (!notebook || Object.keys(drafts).length === 0) {
+      return contentRef.current
+    }
+    const updates = notebook.cells
+      .map((cell, index) => {
+        const key = getCellKey(cell, index)
+        return hasOwnDraft(drafts, key) ? { index, source: drafts[key] ?? '' } : null
+      })
+      .filter((update): update is { index: number; source: string } => update !== null)
+    return updateIpynbCellSources(contentRef.current, updates)
+  }, [])
+
+  const flushSourceDrafts = useCallback((): string => {
+    if (sourceCommitTimerRef.current !== null) {
+      clearTimeout(sourceCommitTimerRef.current)
+      sourceCommitTimerRef.current = null
+    }
+    const nextContent = materializeSourceDrafts()
+    if (nextContent !== contentRef.current) {
+      contentRef.current = nextContent
+      onContentChangeRef.current(nextContent)
+    }
+    return nextContent
+  }, [materializeSourceDrafts])
+
+  const queueSourceDraftCommit = useCallback((): void => {
+    if (sourceCommitTimerRef.current !== null) {
+      clearTimeout(sourceCommitTimerRef.current)
+    }
+    sourceCommitTimerRef.current = setTimeout(() => {
+      void flushSourceDrafts()
+    }, NOTEBOOK_SOURCE_COMMIT_DELAY_MS)
+  }, [flushSourceDrafts])
+
+  useEffect(() => {
+    return registerPendingEditorFlush(fileId, flushSourceDrafts)
+  }, [fileId, flushSourceDrafts])
+
+  useEffect(() => {
+    return () => {
+      void flushSourceDrafts()
+    }
+  }, [flushSourceDrafts])
+
+  useEffect(() => {
+    if (!parsed.notebook || Object.keys(sourceDraftsRef.current).length === 0) {
+      return
+    }
+    const nextDrafts = { ...sourceDraftsRef.current }
+    let changed = false
+    parsed.notebook.cells.forEach((cell, index) => {
+      const key = getCellKey(cell, index)
+      if (hasOwnDraft(nextDrafts, key) && nextDrafts[key] === cell.source) {
+        delete nextDrafts[key]
+        changed = true
+      }
+    })
+    if (changed) {
+      sourceDraftsRef.current = nextDrafts
+      setSourceDrafts(nextDrafts)
+    }
+  }, [parsed.notebook])
 
   useLayoutEffect(() => {
     const container = rootRef.current
@@ -382,40 +537,55 @@ export default function IpynbViewer({
 
   const { notebook } = parsed
   const applyContent = (nextContent: string): void => {
+    contentRef.current = nextContent
     onContentChange(nextContent)
   }
   const updateCellSource = (index: number, source: string): void => {
-    applyContent(updateIpynbCellSource(content, index, source))
+    const cell = notebook.cells[index]
+    if (!cell) {
+      return
+    }
+    const key = getCellKey(cell, index)
+    const nextDrafts = { ...sourceDraftsRef.current, [key]: source }
+    sourceDraftsRef.current = nextDrafts
+    setSourceDrafts(nextDrafts)
+    onDirtyStateHintRef.current(true)
+    queueSourceDraftCommit()
   }
   const updateCellKind = (index: number, kind: IpynbCellKind): void => {
-    applyContent(updateIpynbCellKind(content, index, kind, notebook.language))
+    const latestContent = flushSourceDrafts()
+    applyContent(updateIpynbCellKind(latestContent, index, kind, notebook.language))
   }
   const insertCell = (index: number, kind: IpynbCellKind): void => {
-    applyContent(insertIpynbCell(content, index, kind, notebook.language))
+    const latestContent = flushSourceDrafts()
+    applyContent(insertIpynbCell(latestContent, index, kind, notebook.language))
   }
   const deleteCell = (index: number): void => {
-    applyContent(deleteIpynbCell(content, index))
+    const latestContent = flushSourceDrafts()
+    applyContent(deleteIpynbCell(latestContent, index))
   }
   const runCell = async (index: number): Promise<void> => {
-    const cell = notebook.cells[index]
+    const latestContent = flushSourceDrafts()
+    const latestNotebook = parseIpynb(latestContent)
+    const cell = latestNotebook.cells[index]
     if (!cell || cell.kind !== 'code' || runningCellIndex !== null) {
       return
     }
     setRunError(null)
     setRunningCellIndex(index)
     try {
-      await onSave(content)
+      await onSave(latestContent)
       const result = await window.api.notebook.runPythonCell({
         filePath,
         code: cell.source,
-        preamble: notebook.cells
+        preamble: latestNotebook.cells
           .slice(0, index)
           .filter((previousCell) => previousCell.kind === 'code')
           .map((previousCell) => previousCell.source)
           .join('\n\n'),
         connectionId: getConnectionId(worktreeId) ?? undefined
       })
-      applyContent(updateIpynbCellOutputs(content, index, result))
+      applyContent(updateIpynbCellOutputs(latestContent, index, result))
     } catch (error) {
       setRunError(error instanceof Error ? error.message : String(error))
     } finally {
@@ -443,41 +613,53 @@ export default function IpynbViewer({
             Empty notebook
           </div>
         ) : (
-          notebook.cells.map((cell, index) => (
-            <section
-              key={cell.id ?? index}
-              className="overflow-hidden rounded-md border border-border bg-background"
-            >
-              <NotebookCellHeader
-                cell={cell}
-                index={index}
-                running={runningCellIndex === index}
-                onRun={() => void runCell(index)}
-                onKindChange={(kind) => updateCellKind(index, kind)}
-                onInsertBelow={(kind) => insertCell(index + 1, kind)}
-                onDelete={() => deleteCell(index)}
-              />
-              {cell.kind === 'markdown' ? (
-                <div className="grid gap-0 lg:grid-cols-2">
-                  <EditableTextCell
-                    source={cell.source}
-                    onChange={(source) => updateCellSource(index, source)}
-                  />
-                  <div className="border-t border-border/50 lg:border-l lg:border-t-0">
-                    <MarkdownCell source={cell.source} />
-                  </div>
-                </div>
-              ) : cell.kind === 'code' ? (
-                <CodeCell cell={cell} onChange={(source) => updateCellSource(index, source)} />
-              ) : (
-                <EditableTextCell
-                  source={cell.source}
-                  onChange={(source) => updateCellSource(index, source)}
+          notebook.cells.map((cell, index) => {
+            const cellKey = getCellKey(cell, index)
+            const source = hasOwnDraft(sourceDrafts, cellKey)
+              ? (sourceDrafts[cellKey] ?? '')
+              : cell.source
+            return (
+              <section
+                key={cellKey}
+                className="overflow-hidden rounded-md border border-border bg-background"
+              >
+                <NotebookCellHeader
+                  cell={cell}
+                  index={index}
+                  running={runningCellIndex === index}
+                  onRun={() => void runCell(index)}
+                  onKindChange={(kind) => updateCellKind(index, kind)}
+                  onInsertBelow={(kind) => insertCell(index + 1, kind)}
+                  onDelete={() => deleteCell(index)}
                 />
-              )}
-              <CellOutputs cell={cell} />
-            </section>
-          ))
+                {cell.kind === 'markdown' ? (
+                  <div className="grid gap-0 lg:grid-cols-2">
+                    <EditableTextCell
+                      source={source}
+                      onChange={(nextSource) => updateCellSource(index, nextSource)}
+                    />
+                    <div className="border-t border-border/50 lg:border-l lg:border-t-0">
+                      <MarkdownCell source={source} />
+                    </div>
+                  </div>
+                ) : cell.kind === 'code' ? (
+                  <MemoizedCodeCell
+                    cell={cell}
+                    source={source}
+                    active={editingCellKey === cellKey}
+                    onActivate={() => setEditingCellKey(cellKey)}
+                    onChange={(nextSource) => updateCellSource(index, nextSource)}
+                  />
+                ) : (
+                  <EditableTextCell
+                    source={source}
+                    onChange={(nextSource) => updateCellSource(index, nextSource)}
+                  />
+                )}
+                <CellOutputs cell={cell} />
+              </section>
+            )
+          })
         )}
       </div>
     </div>

@@ -1,3 +1,6 @@
+/* eslint-disable max-lines -- Why: keeping notebook parse and mutation helpers
+in one module makes nbformat preservation easier to audit while the notebook
+editor model is still small. */
 export type IpynbCellKind = 'code' | 'markdown' | 'raw'
 
 export type IpynbOutput =
@@ -235,6 +238,20 @@ function serializeNotebook(root: Record<string, unknown>): string {
 export function updateIpynbCellSource(content: string, index: number, source: string): string {
   const root = parseNotebookRoot(content)
   ensureCell(root, index).source = splitIpynbSource(source)
+  return serializeNotebook(root)
+}
+
+export function updateIpynbCellSources(
+  content: string,
+  updates: { index: number; source: string }[]
+): string {
+  if (updates.length === 0) {
+    return content
+  }
+  const root = parseNotebookRoot(content)
+  for (const update of updates) {
+    ensureCell(root, update.index).source = splitIpynbSource(update.source)
+  }
   return serializeNotebook(root)
 }
 
