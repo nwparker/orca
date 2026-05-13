@@ -17,6 +17,7 @@ import { registerMemoryHandlers } from './memory'
 import { registerRateLimitHandlers } from './rate-limits'
 import { registerRuntimeHandlers } from './runtime'
 import { registerNotificationHandlers } from './notifications'
+import { registerNotebookHandlers } from './notebook'
 import { registerOnboardingHandlers } from './onboarding'
 import { registerDeveloperPermissionHandlers } from './developer-permissions'
 import { registerComputerUsePermissionHandlers } from './computer-use-permissions'
@@ -85,6 +86,7 @@ export function registerCoreHandlers(
   registerStatsHandlers(stats)
   registerMemoryHandlers(store)
   registerNotificationHandlers(store, runtime)
+  registerNotebookHandlers(store)
   registerOnboardingHandlers(store)
   registerDeveloperPermissionHandlers()
   registerComputerUsePermissionHandlers()

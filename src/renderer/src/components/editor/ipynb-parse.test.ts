@@ -1,8 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import {
   concatIpynbMultilineString,
+  deleteIpynbCell,
+  insertIpynbCell,
   parseIpynb,
-  translateKernelLanguageToMonaco
+  translateKernelLanguageToMonaco,
+  updateIpynbCellKind,
+  updateIpynbCellOutputs,
+  updateIpynbCellSource
 } from './ipynb-parse'
 
 describe('ipynb parsing', () => {
@@ -76,5 +81,63 @@ describe('ipynb parsing', () => {
   it('rejects invalid notebook roots', () => {
     expect(() => parseIpynb('[]')).toThrow('Notebook root must be a JSON object')
     expect(() => parseIpynb('{}')).toThrow('Notebook is missing a cells array')
+  })
+
+  it('serializes cell source edits while preserving notebook metadata', () => {
+    const content = JSON.stringify({
+      nbformat: 4,
+      nbformat_minor: 5,
+      metadata: { custom: true },
+      cells: [{ cell_type: 'code', metadata: {}, execution_count: null, outputs: [], source: [] }]
+    })
+
+    const updated = JSON.parse(updateIpynbCellSource(content, 0, 'print("hi")\nprint("bye")'))
+    expect(updated.metadata).toEqual({ custom: true })
+    expect(updated.cells[0].source).toEqual(['print("hi")\n', 'print("bye")'])
+  })
+
+  it('inserts, deletes, and changes cell kinds', () => {
+    const content = JSON.stringify({
+      nbformat: 4,
+      nbformat_minor: 5,
+      metadata: {},
+      cells: [{ cell_type: 'markdown', metadata: {}, source: ['# Title'] }]
+    })
+
+    const inserted = JSON.parse(insertIpynbCell(content, 1, 'code', 'python'))
+    expect(inserted.cells).toHaveLength(2)
+    expect(inserted.cells[1]).toMatchObject({
+      cell_type: 'code',
+      execution_count: null,
+      outputs: [],
+      metadata: { vscode: { languageId: 'python' } }
+    })
+
+    const changed = JSON.parse(updateIpynbCellKind(JSON.stringify(inserted), 0, 'code', 'python'))
+    expect(changed.cells[0]).toMatchObject({ cell_type: 'code', outputs: [] })
+
+    const deleted = JSON.parse(deleteIpynbCell(JSON.stringify(changed), 1))
+    expect(deleted.cells).toHaveLength(1)
+  })
+
+  it('writes Python run results as notebook outputs', () => {
+    const content = JSON.stringify({
+      nbformat: 4,
+      nbformat_minor: 5,
+      metadata: {},
+      cells: [{ cell_type: 'code', metadata: {}, execution_count: null, outputs: [], source: [] }]
+    })
+
+    const updated = JSON.parse(
+      updateIpynbCellOutputs(content, 0, {
+        stdout: 'hello\n',
+        stderr: '',
+        exitCode: 0
+      })
+    )
+    expect(updated.cells[0].execution_count).toBe(1)
+    expect(updated.cells[0].outputs).toEqual([
+      { output_type: 'stream', name: 'stdout', text: ['hello\n'] }
+    ])
   })
 })

@@ -1,21 +1,40 @@
-import React, { useLayoutEffect, useMemo, useRef } from 'react'
+/* eslint-disable max-lines -- Why: notebook editing, output rendering, and cell
+controls share one parsed document/update path for this first notebook editor
+slice; splitting before the model stabilizes would make save/run mutations
+harder to audit. */
+import React, { useLayoutEffect, useMemo, useRef, useState } from 'react'
 import DOMPurify from 'dompurify'
 import Markdown from 'react-markdown'
 import rehypeRaw from 'rehype-raw'
 import rehypeSanitize from 'rehype-sanitize'
 import remarkGfm from 'remark-gfm'
-import { AlertCircle, Braces, FileCode2, Play } from 'lucide-react'
+import { AlertCircle, Braces, FileCode2, Loader2, Play, Plus, Trash2 } from 'lucide-react'
 import { computeEditorFontSize } from '@/lib/editor-font-zoom'
+import { getConnectionId } from '@/lib/connection-context'
 import { useAppStore } from '@/store'
 import { scrollTopCache, setWithLRU } from '@/lib/scroll-cache'
 import { cn } from '@/lib/utils'
-import MonacoCodeExcerpt from './MonacoCodeExcerpt'
-import { parseIpynb, type IpynbCell, type IpynbOutputItem } from './ipynb-parse'
+import { Button } from '@/components/ui/button'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import {
+  deleteIpynbCell,
+  insertIpynbCell,
+  parseIpynb,
+  updateIpynbCellKind,
+  updateIpynbCellOutputs,
+  updateIpynbCellSource,
+  type IpynbCell,
+  type IpynbCellKind,
+  type IpynbOutputItem
+} from './ipynb-parse'
 
 type IpynbViewerProps = {
   content: string
   filePath: string
+  worktreeId: string
   scrollCacheKey: string
+  onContentChange: (content: string) => void
+  onSave: (content: string) => Promise<void>
 }
 
 function valueToText(value: unknown): string {
@@ -44,17 +63,93 @@ function dataUriForImage(item: IpynbOutputItem): string | null {
 
 function NotebookCellHeader({
   cell,
-  index
+  index,
+  running,
+  onRun,
+  onKindChange,
+  onInsertBelow,
+  onDelete
 }: {
   cell: IpynbCell
   index: number
+  running: boolean
+  onRun: () => void
+  onKindChange: (kind: IpynbCellKind) => void
+  onInsertBelow: (kind: IpynbCellKind) => void
+  onDelete: () => void
 }): React.JSX.Element {
   const Icon = cell.kind === 'code' ? Play : cell.kind === 'markdown' ? FileCode2 : Braces
   const executionLabel = cell.kind === 'code' ? `In [${cell.executionCount ?? ' '}]:` : cell.kind
   return (
-    <div className="flex items-center gap-2 border-b border-border/50 px-3 py-1.5 text-xs text-muted-foreground">
+    <div className="flex items-center gap-2 border-b border-border/50 bg-muted/20 px-3 py-1.5 text-xs text-muted-foreground">
       <Icon className="size-3.5" />
       <span className="font-mono">{executionLabel}</span>
+      <select
+        value={cell.kind}
+        onChange={(event) => onKindChange(event.target.value as IpynbCellKind)}
+        className="h-7 rounded-md border border-input bg-background px-2 text-xs text-foreground"
+      >
+        <option value="code">Code</option>
+        <option value="markdown">Markdown</option>
+        <option value="raw">Raw</option>
+      </select>
+      {cell.kind === 'code' ? (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="size-7"
+              disabled={running}
+              onClick={onRun}
+            >
+              {running ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <Play className="size-3.5" />
+              )}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Run cell</TooltipContent>
+        </Tooltip>
+      ) : null}
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="size-7"
+            onClick={() => onInsertBelow('code')}
+          >
+            <Plus className="size-3.5" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>Add code cell</TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="size-7"
+            onClick={() => onInsertBelow('markdown')}
+          >
+            <FileCode2 className="size-3.5" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>Add markdown cell</TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button type="button" variant="ghost" size="icon" className="size-7" onClick={onDelete}>
+            <Trash2 className="size-3.5" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>Delete cell</TooltipContent>
+      </Tooltip>
       <span className="ml-auto font-mono">#{index + 1}</span>
     </div>
   )
@@ -70,18 +165,45 @@ function MarkdownCell({ source }: { source: string }): React.JSX.Element {
   )
 }
 
-function CodeCell({ cell }: { cell: IpynbCell }): React.JSX.Element {
-  const lines = cell.source.length > 0 ? cell.source.replace(/\n$/, '').split('\n') : ['']
+function CodeCell({
+  cell,
+  onChange
+}: {
+  cell: IpynbCell
+  onChange: (source: string) => void
+}): React.JSX.Element {
+  const settings = useAppStore((s) => s.settings)
+  const editorFontZoomLevel = useAppStore((s) => s.editorFontZoomLevel)
+  const fontSize = computeEditorFontSize(settings?.terminalFontSize ?? 13, editorFontZoomLevel)
+  const lineCount = Math.max(3, cell.source.split('\n').length + 1)
   return (
-    <div className="bg-editor-surface">
-      <MonacoCodeExcerpt
-        lines={lines}
-        firstLineNumber={1}
-        highlightedStartLine={-1}
-        highlightedEndLine={-1}
-        language={cell.language}
-      />
-    </div>
+    <textarea
+      value={cell.source}
+      onChange={(event) => onChange(event.target.value)}
+      spellCheck={false}
+      className="block w-full resize-y border-0 bg-editor-surface px-4 py-3 font-mono text-foreground outline-none focus:ring-1 focus:ring-ring"
+      style={{
+        minHeight: Math.min(520, Math.max(96, lineCount * (fontSize + 8))),
+        fontSize,
+        fontFamily: settings?.terminalFontFamily || 'monospace'
+      }}
+    />
+  )
+}
+
+function EditableTextCell({
+  source,
+  onChange
+}: {
+  source: string
+  onChange: (source: string) => void
+}): React.JSX.Element {
+  return (
+    <textarea
+      value={source}
+      onChange={(event) => onChange(event.target.value)}
+      className="block min-h-24 w-full resize-y border-0 bg-background px-4 py-3 text-sm text-foreground outline-none focus:ring-1 focus:ring-ring"
+    />
   )
 }
 
@@ -186,11 +308,16 @@ function CellOutputs({ cell }: { cell: IpynbCell }): React.JSX.Element | null {
 export default function IpynbViewer({
   content,
   filePath,
-  scrollCacheKey
+  worktreeId,
+  scrollCacheKey,
+  onContentChange,
+  onSave
 }: IpynbViewerProps): React.JSX.Element {
   const rootRef = useRef<HTMLDivElement>(null)
   const settings = useAppStore((s) => s.settings)
   const editorFontZoomLevel = useAppStore((s) => s.editorFontZoomLevel)
+  const [runningCellIndex, setRunningCellIndex] = useState<number | null>(null)
+  const [runError, setRunError] = useState<string | null>(null)
   const fontSize = computeEditorFontSize(13, editorFontZoomLevel)
   const parsed = useMemo(() => {
     try {
@@ -254,6 +381,48 @@ export default function IpynbViewer({
   }
 
   const { notebook } = parsed
+  const applyContent = (nextContent: string): void => {
+    onContentChange(nextContent)
+  }
+  const updateCellSource = (index: number, source: string): void => {
+    applyContent(updateIpynbCellSource(content, index, source))
+  }
+  const updateCellKind = (index: number, kind: IpynbCellKind): void => {
+    applyContent(updateIpynbCellKind(content, index, kind, notebook.language))
+  }
+  const insertCell = (index: number, kind: IpynbCellKind): void => {
+    applyContent(insertIpynbCell(content, index, kind, notebook.language))
+  }
+  const deleteCell = (index: number): void => {
+    applyContent(deleteIpynbCell(content, index))
+  }
+  const runCell = async (index: number): Promise<void> => {
+    const cell = notebook.cells[index]
+    if (!cell || cell.kind !== 'code' || runningCellIndex !== null) {
+      return
+    }
+    setRunError(null)
+    setRunningCellIndex(index)
+    try {
+      await onSave(content)
+      const result = await window.api.notebook.runPythonCell({
+        filePath,
+        code: cell.source,
+        preamble: notebook.cells
+          .slice(0, index)
+          .filter((previousCell) => previousCell.kind === 'code')
+          .map((previousCell) => previousCell.source)
+          .join('\n\n'),
+        connectionId: getConnectionId(worktreeId) ?? undefined
+      })
+      applyContent(updateIpynbCellOutputs(content, index, result))
+    } catch (error) {
+      setRunError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setRunningCellIndex(null)
+    }
+  }
+
   return (
     <div
       ref={rootRef}
@@ -265,6 +434,7 @@ export default function IpynbViewer({
         <span>{notebook.cells.length} cells</span>
         <span>{notebook.language}</span>
         {notebook.kernelName ? <span>{notebook.kernelName}</span> : null}
+        {runError ? <span className="text-destructive">{runError}</span> : null}
         <span className="ml-auto font-mono">nbformat {notebook.nbformat}</span>
       </div>
       <div className="mx-auto flex max-w-[980px] flex-col gap-3 px-5 py-5">
@@ -278,13 +448,32 @@ export default function IpynbViewer({
               key={cell.id ?? index}
               className="overflow-hidden rounded-md border border-border bg-background"
             >
-              <NotebookCellHeader cell={cell} index={index} />
+              <NotebookCellHeader
+                cell={cell}
+                index={index}
+                running={runningCellIndex === index}
+                onRun={() => void runCell(index)}
+                onKindChange={(kind) => updateCellKind(index, kind)}
+                onInsertBelow={(kind) => insertCell(index + 1, kind)}
+                onDelete={() => deleteCell(index)}
+              />
               {cell.kind === 'markdown' ? (
-                <MarkdownCell source={cell.source} />
+                <div className="grid gap-0 lg:grid-cols-2">
+                  <EditableTextCell
+                    source={cell.source}
+                    onChange={(source) => updateCellSource(index, source)}
+                  />
+                  <div className="border-t border-border/50 lg:border-l lg:border-t-0">
+                    <MarkdownCell source={cell.source} />
+                  </div>
+                </div>
               ) : cell.kind === 'code' ? (
-                <CodeCell cell={cell} />
+                <CodeCell cell={cell} onChange={(source) => updateCellSource(index, source)} />
               ) : (
-                <PreformattedOutput text={cell.source} />
+                <EditableTextCell
+                  source={cell.source}
+                  onChange={(source) => updateCellSource(index, source)}
+                />
               )}
               <CellOutputs cell={cell} />
             </section>

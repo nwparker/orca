@@ -1485,6 +1485,16 @@ const api = {
     }
   },
 
+  notebook: {
+    runPythonCell: (args: {
+      filePath: string
+      code: string
+      preamble?: string
+      connectionId?: string | null
+    }): Promise<{ stdout: string; stderr: string; exitCode: number | null; error?: string }> =>
+      ipcRenderer.invoke('notebook:runPythonCell', args)
+  },
+
   fs: {
     readDir: (args: {
       dirPath: string

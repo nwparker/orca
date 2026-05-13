@@ -392,7 +392,10 @@ export function EditorContent({
               key={activeFile.id}
               content={editBuffers[activeFile.id] ?? fc.content}
               filePath={activeFile.filePath}
+              worktreeId={activeFile.worktreeId}
               scrollCacheKey={`${editorViewStateKey}:notebook`}
+              onContentChange={handleContentChange}
+              onSave={handleSave}
             />
           ) : (
             renderMonacoEditor(fc)

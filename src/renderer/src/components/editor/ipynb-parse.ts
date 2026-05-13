@@ -26,6 +26,13 @@ export type ParsedIpynb = {
   cells: IpynbCell[]
 }
 
+export type IpynbRunResult = {
+  stdout: string
+  stderr: string
+  exitCode: number | null
+  error?: string
+}
+
 const DISPLAY_MIME_ORDER = [
   'text/html',
   'image/png',
@@ -193,4 +200,132 @@ export function parseIpynb(content: string): ParsedIpynb {
         : 'unknown',
     cells
   }
+}
+
+function splitIpynbSource(source: string): string[] {
+  if (!source) {
+    return []
+  }
+  return source.endsWith('\n') ? (source.match(/[^\n]*\n/g) ?? []) : source.split(/(?<=\n)/)
+}
+
+function parseNotebookRoot(content: string): Record<string, unknown> {
+  const parsed = JSON.parse(content) as unknown
+  if (!isRecord(parsed)) {
+    throw new Error('Notebook root must be a JSON object')
+  }
+  if (!Array.isArray(parsed.cells)) {
+    throw new Error('Notebook is missing a cells array')
+  }
+  return parsed
+}
+
+function ensureCell(root: Record<string, unknown>, index: number): Record<string, unknown> {
+  const cells = root.cells
+  if (!Array.isArray(cells) || !isRecord(cells[index])) {
+    throw new Error('Notebook cell no longer exists')
+  }
+  return cells[index]
+}
+
+function serializeNotebook(root: Record<string, unknown>): string {
+  return `${JSON.stringify(root, null, 1)}\n`
+}
+
+export function updateIpynbCellSource(content: string, index: number, source: string): string {
+  const root = parseNotebookRoot(content)
+  ensureCell(root, index).source = splitIpynbSource(source)
+  return serializeNotebook(root)
+}
+
+export function updateIpynbCellKind(
+  content: string,
+  index: number,
+  kind: IpynbCellKind,
+  fallbackLanguage: string
+): string {
+  const root = parseNotebookRoot(content)
+  const cell = ensureCell(root, index)
+  cell.cell_type = kind
+  if (kind === 'code') {
+    cell.outputs = Array.isArray(cell.outputs) ? cell.outputs : []
+    cell.execution_count = typeof cell.execution_count === 'number' ? cell.execution_count : null
+    cell.metadata = isRecord(cell.metadata) ? cell.metadata : {}
+    const metadata = cell.metadata as Record<string, unknown>
+    const vscode = isRecord(metadata.vscode) ? metadata.vscode : {}
+    metadata.vscode = { ...vscode, languageId: fallbackLanguage }
+  } else {
+    delete cell.outputs
+    delete cell.execution_count
+  }
+  return serializeNotebook(root)
+}
+
+export function insertIpynbCell(
+  content: string,
+  index: number,
+  kind: IpynbCellKind,
+  language: string
+): string {
+  const root = parseNotebookRoot(content)
+  const cells = root.cells as unknown[]
+  const nextCell: Record<string, unknown> = {
+    cell_type: kind,
+    id: crypto.randomUUID?.() ?? `cell-${Date.now()}`,
+    metadata: {},
+    source: []
+  }
+  if (kind === 'code') {
+    nextCell.execution_count = null
+    nextCell.outputs = []
+    nextCell.metadata = { vscode: { languageId: language } }
+  }
+  cells.splice(Math.min(Math.max(index, 0), cells.length), 0, nextCell)
+  return serializeNotebook(root)
+}
+
+export function deleteIpynbCell(content: string, index: number): string {
+  const root = parseNotebookRoot(content)
+  const cells = root.cells as unknown[]
+  if (cells.length <= 1) {
+    cells.splice(0, cells.length, {
+      cell_type: 'code',
+      id: crypto.randomUUID?.() ?? `cell-${Date.now()}`,
+      metadata: {},
+      execution_count: null,
+      outputs: [],
+      source: []
+    })
+  } else {
+    cells.splice(index, 1)
+  }
+  return serializeNotebook(root)
+}
+
+export function updateIpynbCellOutputs(
+  content: string,
+  index: number,
+  result: IpynbRunResult
+): string {
+  const root = parseNotebookRoot(content)
+  const cell = ensureCell(root, index)
+  const outputs: Record<string, unknown>[] = []
+  if (result.stdout) {
+    outputs.push({ output_type: 'stream', name: 'stdout', text: splitIpynbSource(result.stdout) })
+  }
+  if (result.stderr && result.exitCode === 0 && !result.error) {
+    outputs.push({ output_type: 'stream', name: 'stderr', text: splitIpynbSource(result.stderr) })
+  }
+  if (result.error || (result.exitCode ?? 0) !== 0) {
+    const message = result.error || result.stderr || `Process exited with code ${result.exitCode}`
+    outputs.push({
+      output_type: 'error',
+      ename: 'PythonError',
+      evalue: message,
+      traceback: splitIpynbSource(result.stderr || message)
+    })
+  }
+  cell.outputs = outputs
+  cell.execution_count = typeof cell.execution_count === 'number' ? cell.execution_count + 1 : 1
+  return serializeNotebook(root)
 }

@@ -882,6 +882,14 @@ export type PreloadApi = {
     onStatus: (callback: (status: UpdateStatus) => void) => () => void
     onClearDismissal: (callback: () => void) => () => void
   }
+  notebook: {
+    runPythonCell: (args: {
+      filePath: string
+      code: string
+      preamble?: string
+      connectionId?: string | null
+    }) => Promise<{ stdout: string; stderr: string; exitCode: number | null; error?: string }>
+  }
   stats: StatsApi
   memory: MemoryApi
   claudeUsage: ClaudeUsageApi
