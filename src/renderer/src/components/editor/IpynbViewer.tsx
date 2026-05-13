@@ -605,7 +605,10 @@ export default function IpynbViewer({
         <span>{notebook.language}</span>
         {notebook.kernelName ? <span>{notebook.kernelName}</span> : null}
         {runError ? <span className="text-destructive">{runError}</span> : null}
-        <span className="ml-auto font-mono">nbformat {notebook.nbformat}</span>
+        <span className="ml-auto rounded-sm border border-border bg-muted px-1.5 py-0.5 font-medium text-muted-foreground">
+          BETA
+        </span>
+        <span className="font-mono">nbformat {notebook.nbformat}</span>
       </div>
       <div className="mx-auto flex max-w-[980px] flex-col gap-3 px-5 py-5">
         {notebook.cells.length === 0 ? (
