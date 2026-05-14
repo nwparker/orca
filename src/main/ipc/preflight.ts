@@ -5,6 +5,7 @@ import path from 'path'
 import { TUI_AGENT_CONFIG } from '../../shared/tui-agent-config'
 import type { PathSource, ShellHydrationFailureReason } from '../../shared/types'
 import { hydrateShellPath, mergePathSegments } from '../startup/hydrate-shell-path'
+import { getBitbucketAuthStatus } from '../bitbucket/client'
 import { getActiveMultiplexer } from './ssh'
 
 const execFileAsync = promisify(execFile)
@@ -17,6 +18,7 @@ export type PreflightStatus = {
   // affordances (the GitLab tab in the source picker, MR list, etc.)
   // gate on `glab?.authenticated`.
   glab?: { installed: boolean; authenticated: boolean }
+  bitbucket?: { configured: boolean; authenticated: boolean; account: string | null }
 }
 
 // Why: cache the result so repeated Landing mounts don't re-spawn processes.
@@ -148,15 +150,17 @@ export async function runPreflightCheck(force = false): Promise<PreflightStatus>
     isCommandAvailable('glab')
   ])
 
-  const [ghAuthenticated, glabAuthenticated] = await Promise.all([
+  const [ghAuthenticated, glabAuthenticated, bitbucket] = await Promise.all([
     ghInstalled ? isGhAuthenticated() : Promise.resolve(false),
-    glabInstalled ? isGlabAuthenticated() : Promise.resolve(false)
+    glabInstalled ? isGlabAuthenticated() : Promise.resolve(false),
+    getBitbucketAuthStatus()
   ])
 
   cached = {
     git: { installed: gitInstalled },
     gh: { installed: ghInstalled, authenticated: ghAuthenticated },
-    glab: { installed: glabInstalled, authenticated: glabAuthenticated }
+    glab: { installed: glabInstalled, authenticated: glabAuthenticated },
+    bitbucket
   }
 
   return cached

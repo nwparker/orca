@@ -10,6 +10,7 @@ import { registerClaudeUsageHandlers } from './claude-usage'
 import { registerCodexUsageHandlers } from './codex-usage'
 import { registerGitHubHandlers } from './github'
 import { registerGitLabHandlers } from './gitlab'
+import { registerHostedReviewHandlers } from './hosted-review'
 import { registerLinearHandlers } from './linear'
 import { registerFeedbackHandlers } from './feedback'
 import { registerExportHandlers } from './export'
@@ -87,6 +88,7 @@ export function registerCoreHandlers(
   registerRateLimitHandlers(rateLimits)
   registerGitHubHandlers(store, stats)
   registerGitLabHandlers(store)
+  registerHostedReviewHandlers(store, stats)
   registerLinearHandlers()
   registerFeedbackHandlers()
   registerExportHandlers()

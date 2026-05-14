@@ -54,9 +54,9 @@ export function registerGitLabHandlers(store: Store): void {
 
   ipcMain.handle(
     'gitlab:mrForBranch',
-    async (_event, args: { repoPath: string; branch: string }) => {
+    async (_event, args: { repoPath: string; branch: string; linkedMRIid?: number | null }) => {
       const repo = assertRegisteredRepo(args.repoPath, store)
-      return getMergeRequestForBranch(repo.path, args.branch)
+      return getMergeRequestForBranch(repo.path, args.branch, args.linkedMRIid ?? null)
     }
   )
 

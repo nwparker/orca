@@ -1,13 +1,20 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { handleMock, execFileMock, execFileAsyncMock, hydrateShellPathMock, mergePathSegmentsMock } =
-  vi.hoisted(() => ({
-    handleMock: vi.fn(),
-    execFileMock: vi.fn(),
-    execFileAsyncMock: vi.fn(),
-    hydrateShellPathMock: vi.fn(),
-    mergePathSegmentsMock: vi.fn()
-  }))
+const {
+  handleMock,
+  execFileMock,
+  execFileAsyncMock,
+  hydrateShellPathMock,
+  mergePathSegmentsMock,
+  getBitbucketAuthStatusMock
+} = vi.hoisted(() => ({
+  handleMock: vi.fn(),
+  execFileMock: vi.fn(),
+  execFileAsyncMock: vi.fn(),
+  hydrateShellPathMock: vi.fn(),
+  mergePathSegmentsMock: vi.fn(),
+  getBitbucketAuthStatusMock: vi.fn()
+}))
 
 vi.mock('electron', () => ({
   ipcMain: {
@@ -30,6 +37,10 @@ vi.mock('../startup/hydrate-shell-path', () => ({
   mergePathSegments: mergePathSegmentsMock
 }))
 
+vi.mock('../bitbucket/client', () => ({
+  getBitbucketAuthStatus: getBitbucketAuthStatusMock
+}))
+
 import {
   _resetPreflightCache,
   detectInstalledAgents,
@@ -47,6 +58,12 @@ describe('preflight', () => {
     execFileAsyncMock.mockReset()
     hydrateShellPathMock.mockReset()
     mergePathSegmentsMock.mockReset()
+    getBitbucketAuthStatusMock.mockReset()
+    getBitbucketAuthStatusMock.mockResolvedValue({
+      configured: false,
+      authenticated: false,
+      account: null
+    })
     _resetPreflightCache()
 
     for (const key of Object.keys(handlers)) {
@@ -74,7 +91,8 @@ describe('preflight', () => {
     expect(status).toEqual({
       git: { installed: true },
       gh: { installed: true, authenticated: true },
-      glab: { installed: true, authenticated: true }
+      glab: { installed: true, authenticated: true },
+      bitbucket: { configured: false, authenticated: false, account: null }
     })
     expect(execFileAsyncMock).toHaveBeenNthCalledWith(4, 'gh', ['auth', 'status'], {
       encoding: 'utf-8'
@@ -174,7 +192,8 @@ describe('preflight', () => {
     expect(status).toEqual({
       git: { installed: true },
       gh: { installed: true, authenticated: true },
-      glab: { installed: true, authenticated: true }
+      glab: { installed: true, authenticated: true },
+      bitbucket: { configured: false, authenticated: false, account: null }
     })
   })
 
@@ -199,12 +218,14 @@ describe('preflight', () => {
     expect(firstStatus).toEqual({
       git: { installed: true },
       gh: { installed: true, authenticated: false },
-      glab: { installed: true, authenticated: true }
+      glab: { installed: true, authenticated: true },
+      bitbucket: { configured: false, authenticated: false, account: null }
     })
     expect(refreshedStatus).toEqual({
       git: { installed: true },
       gh: { installed: true, authenticated: true },
-      glab: { installed: true, authenticated: true }
+      glab: { installed: true, authenticated: true },
+      bitbucket: { configured: false, authenticated: false, account: null }
     })
   })
 

@@ -10,8 +10,11 @@ export const glApi = {
   projectSlug: (args: { repoPath: string }): Promise<unknown> =>
     ipcRenderer.invoke('gitlab:projectSlug', args),
 
-  mrForBranch: (args: { repoPath: string; branch: string }): Promise<unknown> =>
-    ipcRenderer.invoke('gitlab:mrForBranch', args),
+  mrForBranch: (args: {
+    repoPath: string
+    branch: string
+    linkedMRIid?: number | null
+  }): Promise<unknown> => ipcRenderer.invoke('gitlab:mrForBranch', args),
 
   mr: (args: { repoPath: string; iid: number }): Promise<unknown> =>
     ipcRenderer.invoke('gitlab:mr', args),

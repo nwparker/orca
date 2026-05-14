@@ -153,6 +153,26 @@ describe('gitlab client — MR operations', () => {
       await expect(getMergeRequestForBranch('/repo', 'feature')).resolves.toBeNull()
     })
 
+    it('falls back to a linked MR iid when the branch lookup misses', async () => {
+      getProjectRefMock.mockResolvedValueOnce({ host: 'gitlab.com', path: 'g/p' })
+      glabExecFileAsyncMock.mockResolvedValueOnce({ stdout: '[]' }).mockResolvedValueOnce({
+        stdout: JSON.stringify({
+          iid: 9,
+          title: 'Linked MR',
+          state: 'opened',
+          pipeline: { status: 'success' }
+        })
+      })
+
+      const mr = await getMergeRequestForBranch('/repo', 'local-review-branch', 9)
+      expect(mr?.number).toBe(9)
+      expect(mr?.pipelineStatus).toBe('success')
+      expect(glabExecFileAsyncMock).toHaveBeenLastCalledWith(
+        ['api', 'projects/g%2Fp/merge_requests/9'],
+        { cwd: '/repo' }
+      )
+    })
+
     it('returns null for an empty / detached-HEAD branch arg', async () => {
       // Why: during a rebase the branch is empty — mirror github/getPRForBranch's
       // early return without calling glab.

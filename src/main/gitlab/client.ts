@@ -106,10 +106,11 @@ export async function getMergeRequest(repoPath: string, iid: number): Promise<MR
  */
 export async function getMergeRequestForBranch(
   repoPath: string,
-  branch: string
+  branch: string,
+  linkedMRIid?: number | null
 ): Promise<MRInfo | null> {
   const branchName = branch.replace(/^refs\/heads\//, '')
-  if (!branchName) {
+  if (!branchName && linkedMRIid == null) {
     return null
   }
   const knownHosts = await getGlabKnownHosts()
@@ -119,21 +120,38 @@ export async function getMergeRequestForBranch(
   }
   await acquire()
   try {
-    const { stdout } = await glabExecFileAsync(
-      [
-        'api',
-        `projects/${encodedProject(projectRef.path)}/merge_requests?source_branch=${encodeURIComponent(branchName)}&state=opened&order_by=updated_at&sort=desc&per_page=1`
-      ],
-      { cwd: repoPath }
-    )
-    const data = JSON.parse(stdout) as (Parameters<typeof mapMRInfo>[0] & {
-      head_pipeline?: { status?: string } | null
-    })[]
-    if (!Array.isArray(data) || data.length === 0) {
+    if (branchName) {
+      const { stdout } = await glabExecFileAsync(
+        [
+          'api',
+          `projects/${encodedProject(projectRef.path)}/merge_requests?source_branch=${encodeURIComponent(branchName)}&state=opened&order_by=updated_at&sort=desc&per_page=1`
+        ],
+        { cwd: repoPath }
+      )
+      const data = JSON.parse(stdout) as (Parameters<typeof mapMRInfo>[0] & {
+        head_pipeline?: { status?: string } | null
+      })[]
+      if (Array.isArray(data) && data.length > 0) {
+        const raw = data[0]
+        const pipelineStatus = derivePipelineStatus(raw.head_pipeline ?? null)
+        return mapMRInfo(raw, pipelineStatus)
+      }
+    }
+    if (typeof linkedMRIid !== 'number') {
       return null
     }
-    const raw = data[0]
-    const pipelineStatus = derivePipelineStatus(raw.head_pipeline ?? null)
+    // Why: create-from-MR worktrees may use a fresh local branch name rather
+    // than the MR source branch. Fall back to the durable linked iid so the
+    // core review status still follows the workspace.
+    const { stdout } = await glabExecFileAsync(
+      ['api', `projects/${encodedProject(projectRef.path)}/merge_requests/${linkedMRIid}`],
+      { cwd: repoPath }
+    )
+    const raw = JSON.parse(stdout) as Parameters<typeof mapMRInfo>[0] & {
+      head_pipeline?: { status?: string } | null
+      pipeline?: { status?: string } | null
+    }
+    const pipelineStatus = derivePipelineStatus(raw.head_pipeline ?? raw.pipeline ?? null)
     return mapMRInfo(raw, pipelineStatus)
   } catch {
     return null

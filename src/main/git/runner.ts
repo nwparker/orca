@@ -1,3 +1,6 @@
+/* eslint-disable max-lines -- Why: command routing, WSL translation, and
+git/gh/glab wrappers must stay co-located so platform behavior remains
+consistent across every repo-scoped subprocess call. */
 /**
  * Centralized git/gh/command runner with transparent WSL support.
  *

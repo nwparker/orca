@@ -6,6 +6,7 @@ import type { TabsSlice } from './slices/tabs'
 import type { UISlice } from './slices/ui'
 import type { SettingsSlice } from './slices/settings'
 import type { GitHubSlice } from './slices/github'
+import type { HostedReviewSlice } from './slices/hosted-review'
 import type { LinearSlice } from './slices/linear'
 import type { EditorSlice } from './slices/editor'
 import type { StatsSlice } from './slices/stats'
@@ -29,6 +30,7 @@ export type AppState = RepoSlice &
   UISlice &
   SettingsSlice &
   GitHubSlice &
+  HostedReviewSlice &
   LinearSlice &
   EditorSlice &
   StatsSlice &

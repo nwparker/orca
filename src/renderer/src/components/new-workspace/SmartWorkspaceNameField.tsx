@@ -109,6 +109,7 @@ const MODES: {
 const emptyHintByMode: Record<SmartNameMode, string> = {
   smart: 'Start typing to create a name or find a source.',
   github: 'Start typing to search GitHub PRs and issues.',
+  gitlab: 'Start typing to search GitLab MRs and issues.',
   branches: 'Start typing to find a branch or create a new one.',
   linear: 'Start typing to search Linear issues.',
   text: ''

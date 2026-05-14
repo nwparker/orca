@@ -1,4 +1,5 @@
 /* eslint-disable max-lines -- Why: the preload contract is intentionally centralized in one declaration file so renderer and preload stay in lockstep when IPC surfaces change. */
+import type { HostedReviewForBranchArgs, HostedReviewInfo } from '../shared/hosted-review'
 import type {
   BaseRefDefaultResult,
   BrowserCookieImportResult,
@@ -299,6 +300,7 @@ export type PreflightStatus = {
   /** Optional — older preload payloads predating GitLab support don't
    *  include it. Consumers gate on `glab?.installed` / `authenticated`. */
   glab?: { installed: boolean; authenticated: boolean }
+  bitbucket?: { configured: boolean; authenticated: boolean; account: string | null }
 }
 
 export type RefreshAgentsResult = {
@@ -749,6 +751,9 @@ export type PreloadApi = {
     listIssueTypesBySlug: (args: ListIssueTypesBySlugArgs) => Promise<ListIssueTypesBySlugResult>
     updateIssueTypeBySlug: (args: UpdateIssueTypeBySlugArgs) => Promise<GitHubProjectMutationResult>
   }
+  hostedReview: {
+    forBranch: (args: HostedReviewForBranchArgs) => Promise<HostedReviewInfo | null>
+  }
   // ── GitLab — parallel to gh, MR/issue surface only in v1 ────────
   // Shapes mirror gh.* one-to-one where the data matches; diverge
   // where GitLab's API differs (MR state values, project path with
@@ -756,7 +761,11 @@ export type PreloadApi = {
   gl: {
     viewer: () => Promise<GitLabViewer | null>
     projectSlug: (args: { repoPath: string }) => Promise<GitLabProjectRef | null>
-    mrForBranch: (args: { repoPath: string; branch: string }) => Promise<MRInfo | null>
+    mrForBranch: (args: {
+      repoPath: string
+      branch: string
+      linkedMRIid?: number | null
+    }) => Promise<MRInfo | null>
     mr: (args: { repoPath: string; iid: number }) => Promise<MRInfo | null>
     listMRs: (args: {
       repoPath: string

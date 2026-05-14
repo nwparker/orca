@@ -7,6 +7,7 @@ import { useEffect, useState } from 'react'
 import {
   Github,
   Gitlab,
+  GitPullRequestArrow,
   ExternalLink,
   LoaderCircle,
   Lock,
@@ -48,6 +49,11 @@ export const INTEGRATIONS_PANE_SEARCH_ENTRIES: SettingsSearchEntry[] = [
     keywords: ['gitlab', 'glab', 'integration', 'mr', 'merge request']
   },
   {
+    title: 'Bitbucket Integration',
+    description: 'Bitbucket Cloud authentication via API token environment variables.',
+    keywords: ['bitbucket', 'integration', 'pull request', 'api token']
+  },
+  {
     title: 'Linear Integration',
     description: 'Connect Linear to browse and link issues.',
     keywords: ['linear', 'integration', 'api key', 'connect', 'disconnect']
@@ -58,6 +64,7 @@ type GhStatus = 'checking' | 'connected' | 'not-installed' | 'not-authenticated'
 // Why: parallel to GhStatus — GitLab uses glab and the same three failure
 // modes (probe in-flight / installed-but-unauth / missing entirely).
 type GlabStatus = GhStatus
+type BitbucketStatus = 'checking' | 'connected' | 'not-configured' | 'not-authenticated'
 
 export function IntegrationsPane(): React.JSX.Element {
   const linearStatus = useAppStore((s) => s.linearStatus)
@@ -68,6 +75,8 @@ export function IntegrationsPane(): React.JSX.Element {
 
   const [ghStatus, setGhStatus] = useState<GhStatus>('checking')
   const [glabStatus, setGlabStatus] = useState<GlabStatus>('checking')
+  const [bitbucketStatus, setBitbucketStatus] = useState<BitbucketStatus>('checking')
+  const [bitbucketAccount, setBitbucketAccount] = useState<string | null>(null)
   const [linearDialogOpen, setLinearDialogOpen] = useState(false)
   const [linearApiKeyDraft, setLinearApiKeyDraft] = useState('')
   const [linearConnectState, setLinearConnectState] = useState<'idle' | 'connecting' | 'error'>(
@@ -99,6 +108,15 @@ export function IntegrationsPane(): React.JSX.Element {
         setGlabStatus('not-authenticated')
       } else {
         setGlabStatus('connected')
+      }
+      const bitbucket = status.bitbucket
+      setBitbucketAccount(bitbucket?.account ?? null)
+      if (!bitbucket?.configured) {
+        setBitbucketStatus('not-configured')
+      } else if (!bitbucket.authenticated) {
+        setBitbucketStatus('not-authenticated')
+      } else {
+        setBitbucketStatus('connected')
       }
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot mount check
@@ -173,6 +191,21 @@ export function IntegrationsPane(): React.JSX.Element {
         setGhStatus('not-authenticated')
       } else {
         setGhStatus('connected')
+      }
+    })
+  }
+
+  const handleRefreshBitbucket = (): void => {
+    setBitbucketStatus('checking')
+    void window.api.preflight.check({ force: true }).then((status) => {
+      const bitbucket = status.bitbucket
+      setBitbucketAccount(bitbucket?.account ?? null)
+      if (!bitbucket?.configured) {
+        setBitbucketStatus('not-configured')
+      } else if (!bitbucket.authenticated) {
+        setBitbucketStatus('not-authenticated')
+      } else {
+        setBitbucketStatus('connected')
       }
     })
   }
@@ -324,6 +357,89 @@ export function IntegrationsPane(): React.JSX.Element {
                     Learn more
                   </Button>
                   <Button variant="ghost" size="sm" onClick={handleRefreshGlab}>
+                    Re-check
+                  </Button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Bitbucket */}
+      <div className="rounded-md border border-border/50 bg-muted/30 px-4 py-3">
+        <div className="flex items-center gap-3">
+          <GitPullRequestArrow className="size-5 shrink-0 text-muted-foreground" />
+          <div className="min-w-0 flex-1 space-y-0.5">
+            <p className="text-sm font-medium">Bitbucket</p>
+            <p className="text-xs text-muted-foreground">
+              {bitbucketStatus === 'connected'
+                ? bitbucketAccount
+                  ? `${bitbucketAccount} · Pull requests and build statuses`
+                  : 'Pull requests and build statuses'
+                : 'Pull requests and build statuses via Bitbucket Cloud API tokens.'}
+            </p>
+          </div>
+          {bitbucketStatus === 'checking' ? (
+            <LoaderCircle className="size-4 shrink-0 animate-spin text-muted-foreground" />
+          ) : bitbucketStatus === 'connected' ? (
+            <span className="shrink-0 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-medium text-emerald-700 dark:text-emerald-300">
+              Connected
+            </span>
+          ) : (
+            <span className="shrink-0 rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-[11px] font-medium text-amber-700 dark:text-amber-300">
+              {bitbucketStatus === 'not-configured' ? 'Not configured' : 'Auth failed'}
+            </span>
+          )}
+        </div>
+
+        {bitbucketStatus !== 'checking' && bitbucketStatus !== 'connected' && (
+          <div className="mt-3 rounded-md border border-border/30 bg-background/50 px-3 py-2.5 space-y-2">
+            {bitbucketStatus === 'not-configured' ? (
+              <>
+                <p className="text-xs text-muted-foreground">
+                  Set <span className="font-mono text-[11px]">ORCA_BITBUCKET_EMAIL</span> and{' '}
+                  <span className="font-mono text-[11px]">ORCA_BITBUCKET_API_TOKEN</span>, or set{' '}
+                  <span className="font-mono text-[11px]">ORCA_BITBUCKET_ACCESS_TOKEN</span>.
+                </p>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() =>
+                      window.api.shell.openUrl(
+                        'https://support.atlassian.com/bitbucket-cloud/docs/using-api-tokens/'
+                      )
+                    }
+                  >
+                    <ExternalLink className="size-3.5 mr-1.5" />
+                    Learn more
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={handleRefreshBitbucket}>
+                    Re-check
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="text-xs text-muted-foreground">
+                  Bitbucket credentials are configured but could not authenticate. Check the token
+                  and repository permissions, then restart Orca if environment variables changed.
+                </p>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() =>
+                      window.api.shell.openUrl(
+                        'https://support.atlassian.com/bitbucket-cloud/docs/using-api-tokens/'
+                      )
+                    }
+                  >
+                    <ExternalLink className="size-3.5 mr-1.5" />
+                    Learn more
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={handleRefreshBitbucket}>
                     Re-check
                   </Button>
                 </div>

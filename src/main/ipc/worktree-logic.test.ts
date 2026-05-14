@@ -1,3 +1,6 @@
+/* eslint-disable max-lines -- Why: these worktree path/name tests share a
+single setup-free pure-logic module, and splitting them would make the related
+edge cases harder to audit together. */
 import { join, resolve } from 'path'
 import { describe, expect, it } from 'vitest'
 import {

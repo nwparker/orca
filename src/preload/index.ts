@@ -875,6 +875,15 @@ const api = {
     ): Promise<GitHubProjectMutationResult> => ipcRenderer.invoke('gh:updateIssueTypeBySlug', args)
   },
 
+  hostedReview: {
+    forBranch: (args: {
+      repoPath: string
+      branch: string
+      linkedGitHubPR?: number | null
+      linkedGitLabMR?: number | null
+    }): Promise<unknown> => ipcRenderer.invoke('hostedReview:forBranch', args)
+  },
+
   // Why: GitLab bindings live in `./gitlab` so adding or changing a
   // `gl.*` channel doesn't surface as a merge conflict on every
   // upstream sync of this central preload file.
@@ -1037,6 +1046,7 @@ const api = {
       git: { installed: boolean }
       gh: { installed: boolean; authenticated: boolean }
       glab?: { installed: boolean; authenticated: boolean }
+      bitbucket?: { configured: boolean; authenticated: boolean; account: string | null }
       linear: { connected: boolean }
     }> => ipcRenderer.invoke('preflight:check', args),
     detectAgents: (): Promise<string[]> => ipcRenderer.invoke('preflight:detectAgents'),
