@@ -97,6 +97,7 @@ import {
   ORCA_UPDATER_QUIT_AND_INSTALL_ABORTED_EVENT,
   ORCA_UPDATER_QUIT_AND_INSTALL_STARTED_EVENT
 } from '../shared/updater-renderer-events'
+import type { HostedReviewForBranchArgs } from '../shared/hosted-review'
 
 type NativeDropResolution =
   | { target: 'editor' }
@@ -876,12 +877,8 @@ const api = {
   },
 
   hostedReview: {
-    forBranch: (args: {
-      repoPath: string
-      branch: string
-      linkedGitHubPR?: number | null
-      linkedGitLabMR?: number | null
-    }): Promise<unknown> => ipcRenderer.invoke('hostedReview:forBranch', args)
+    forBranch: (args: HostedReviewForBranchArgs): Promise<unknown> =>
+      ipcRenderer.invoke('hostedReview:forBranch', args)
   },
 
   // Why: GitLab bindings live in `./gitlab` so adding or changing a

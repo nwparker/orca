@@ -100,9 +100,9 @@ export async function getMergeRequest(repoPath: string, iid: number): Promise<MR
 /**
  * Find the merge request whose source branch matches the given branch
  * name. Mirrors github/getPRForBranch — returns the most recently
- * updated open MR for the branch, or null when none exists. The branch
- * is the local checkout's current ref (Orca strips refs/heads/ prefix
- * upstream so we don't need to here).
+ * updated MR for the branch, or null when none exists. The branch is the
+ * local checkout's current ref (Orca strips refs/heads/ prefix upstream
+ * so we don't need to here).
  */
 export async function getMergeRequestForBranch(
   repoPath: string,
@@ -124,7 +124,7 @@ export async function getMergeRequestForBranch(
       const { stdout } = await glabExecFileAsync(
         [
           'api',
-          `projects/${encodedProject(projectRef.path)}/merge_requests?source_branch=${encodeURIComponent(branchName)}&state=opened&order_by=updated_at&sort=desc&per_page=1`
+          `projects/${encodedProject(projectRef.path)}/merge_requests?source_branch=${encodeURIComponent(branchName)}&order_by=updated_at&sort=desc&per_page=1`
         ],
         { cwd: repoPath }
       )
