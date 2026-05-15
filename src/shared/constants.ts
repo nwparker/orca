@@ -168,8 +168,8 @@ export function getDefaultSettings(homedir: string): GlobalSettings {
     terminalFontFamily: defaultTerminalFontFamily(),
     terminalFontWeight: DEFAULT_TERMINAL_FONT_WEIGHT,
     terminalLineHeight: 1,
-    // Why: VS Code defaults terminal GPU acceleration to "auto": prefer
-    // xterm WebGL for performance, but allow renderer failure to choose DOM.
+    // Why: keep the setting on "auto" so explicit user choices stay available,
+    // but renderer policy maps Linux auto to DOM to avoid GPU glyph corruption.
     terminalGpuAcceleration: 'auto',
     // Why 'auto': when the user has picked a known ligature font we want the
     // feature enabled by default, but we never force it if they pick a font
