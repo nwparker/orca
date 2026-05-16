@@ -1,15 +1,40 @@
 /* eslint-disable max-lines */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { rmSync } from 'fs'
 import type { CodexUsagePersistedState } from './types'
 
 const { getPathMock } = vi.hoisted(() => ({
   getPathMock: vi.fn(() => '/tmp/orca-test-userdata')
 }))
 
+const scannerMocks = vi.hoisted(() => ({
+  scanCodexUsageFiles: vi.fn(),
+  createWorktreeRefs: vi.fn(() => [{ repoId: 'repo-1', worktreeId: 'wt-1', path: '/repo' }])
+}))
+
+const usageMetadataMocks = vi.hoisted(() => ({
+  loadKnownUsageWorktreesByRepo: vi.fn(
+    () => new Map([['repo-1', [{ worktreeId: 'wt-1', path: '/repo', displayName: 'Repo' }]]])
+  )
+}))
+
 vi.mock('electron', () => ({
   app: {
     getPath: getPathMock
   }
+}))
+
+vi.mock('./scanner', async (importOriginal) => {
+  const actual = (await importOriginal()) as Record<string, unknown>
+  return {
+    ...actual,
+    createWorktreeRefs: scannerMocks.createWorktreeRefs,
+    scanCodexUsageFiles: scannerMocks.scanCodexUsageFiles
+  }
+})
+
+vi.mock('../usage-worktree-metadata', () => ({
+  loadKnownUsageWorktreesByRepo: usageMetadataMocks.loadKnownUsageWorktreesByRepo
 }))
 
 import { CodexUsageStore, normalizePersistedState } from './store'
@@ -42,6 +67,15 @@ describe('CodexUsageStore', () => {
   beforeEach(() => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-10T12:00:00.000-04:00'))
+    vi.clearAllMocks()
+    rmSync('/tmp/orca-test-userdata', { recursive: true, force: true })
+    getPathMock.mockReturnValue('/tmp/orca-test-userdata')
+    scannerMocks.createWorktreeRefs.mockReturnValue([
+      { repoId: 'repo-1', worktreeId: 'wt-1', path: '/repo' }
+    ])
+    usageMetadataMocks.loadKnownUsageWorktreesByRepo.mockReturnValue(
+      new Map([['repo-1', [{ worktreeId: 'wt-1', path: '/repo', displayName: 'Repo' }]]])
+    )
   })
 
   it('reports no data for Orca scope when only non-Orca Codex usage exists', async () => {
@@ -757,5 +791,153 @@ describe('CodexUsageStore', () => {
     expect(usage.cacheReadTokens).toBe(400)
     expect(usage.reasoningOutputTokens).toBe(100)
     expect(usage.estimatedCostUsd).toBeCloseTo(0.0033)
+  })
+
+  it('persists scan results, fingerprints worktrees, and skips fresh unchanged refreshes', async () => {
+    const sessions: CodexUsagePersistedState['sessions'] = [
+      {
+        sessionId: 'session-scan',
+        firstTimestamp: '2026-04-10T10:00:00.000Z',
+        lastTimestamp: '2026-04-10T10:05:00.000Z',
+        primaryModel: 'gpt-5',
+        hasMixedModels: false,
+        primaryProjectLabel: 'Repo',
+        hasMixedLocations: false,
+        primaryWorktreeId: 'wt-1',
+        primaryRepoId: 'repo-1',
+        eventCount: 1,
+        totalInputTokens: 10,
+        totalCachedInputTokens: 2,
+        totalOutputTokens: 5,
+        totalReasoningOutputTokens: 1,
+        totalTokens: 15,
+        hasInferredPricing: false,
+        locationBreakdown: [
+          {
+            locationKey: 'worktree:wt-1',
+            projectLabel: 'Repo',
+            repoId: 'repo-1',
+            worktreeId: 'wt-1',
+            eventCount: 1,
+            inputTokens: 10,
+            cachedInputTokens: 2,
+            outputTokens: 5,
+            reasoningOutputTokens: 1,
+            totalTokens: 15,
+            hasInferredPricing: false
+          }
+        ],
+        modelBreakdown: [
+          {
+            modelKey: 'gpt-5',
+            modelLabel: 'gpt-5',
+            eventCount: 1,
+            inputTokens: 10,
+            cachedInputTokens: 2,
+            outputTokens: 5,
+            reasoningOutputTokens: 1,
+            totalTokens: 15,
+            hasInferredPricing: false
+          }
+        ],
+        locationModelBreakdown: [
+          {
+            locationKey: 'worktree:wt-1',
+            modelKey: 'gpt-5',
+            modelLabel: 'gpt-5',
+            repoId: 'repo-1',
+            worktreeId: 'wt-1',
+            eventCount: 1,
+            inputTokens: 10,
+            cachedInputTokens: 2,
+            outputTokens: 5,
+            reasoningOutputTokens: 1,
+            totalTokens: 15,
+            hasInferredPricing: false
+          }
+        ]
+      }
+    ]
+    const dailyAggregates: CodexUsagePersistedState['dailyAggregates'] = [
+      {
+        day: '2026-04-10',
+        model: 'gpt-5',
+        projectKey: 'worktree:wt-1',
+        projectLabel: 'Repo',
+        repoId: 'repo-1',
+        worktreeId: 'wt-1',
+        eventCount: 1,
+        inputTokens: 10,
+        cachedInputTokens: 2,
+        outputTokens: 5,
+        reasoningOutputTokens: 1,
+        totalTokens: 15,
+        hasInferredPricing: false
+      }
+    ]
+    scannerMocks.scanCodexUsageFiles.mockResolvedValue({
+      processedFiles: [{ filePath: '/tmp/codex.jsonl', mtimeMs: 1, size: 10 }],
+      sessions,
+      dailyAggregates
+    })
+    const backingStore = {
+      getRepos: () => [{ id: 'repo-1', path: '/repo', displayName: 'Repo' }],
+      getWorktreeMeta: () => undefined
+    }
+    const store = new CodexUsageStore(backingStore as never)
+
+    await expect(store.setEnabled(true)).resolves.toMatchObject({ enabled: true })
+    await expect(store.refresh()).resolves.toMatchObject({
+      enabled: true,
+      lastScanStartedAt: Date.now(),
+      lastScanCompletedAt: Date.now(),
+      lastScanError: null,
+      hasAnyCodexData: true
+    })
+    expect(scannerMocks.scanCodexUsageFiles).toHaveBeenCalledWith(
+      [{ repoId: 'repo-1', worktreeId: 'wt-1', path: '/repo' }],
+      []
+    )
+
+    await store.refresh()
+    expect(scannerMocks.scanCodexUsageFiles).toHaveBeenCalledTimes(1)
+    await expect(store.getDaily('orca', '30d')).resolves.toEqual([
+      {
+        day: '2026-04-10',
+        inputTokens: 10,
+        cachedInputTokens: 2,
+        outputTokens: 5,
+        reasoningOutputTokens: 1,
+        totalTokens: 15
+      }
+    ])
+  })
+
+  it('rescans fresh data when worktree fingerprints change and records scan errors', async () => {
+    scannerMocks.scanCodexUsageFiles
+      .mockResolvedValueOnce({ processedFiles: [], sessions: [], dailyAggregates: [] })
+      .mockRejectedValueOnce(new Error('codex scan failed'))
+    const repos = [{ id: 'repo-1', path: '/repo', displayName: 'Repo' }]
+    const backingStore = {
+      getRepos: () => repos,
+      getWorktreeMeta: vi.fn(() => undefined)
+    }
+    const store = new CodexUsageStore(backingStore as never)
+    await store.setEnabled(true)
+    await store.refresh(true)
+
+    scannerMocks.createWorktreeRefs.mockReturnValue([
+      { repoId: 'repo-1', worktreeId: 'wt-2', path: '/repo-two' }
+    ])
+    usageMetadataMocks.loadKnownUsageWorktreesByRepo.mockReturnValue(
+      new Map([['repo-1', [{ worktreeId: 'wt-2', path: '/repo-two', displayName: 'Repo Two' }]]])
+    )
+    await store.refresh(false)
+
+    expect(scannerMocks.scanCodexUsageFiles).toHaveBeenCalledTimes(2)
+    expect(store.getScanState()).toMatchObject({
+      isScanning: false,
+      lastScanError: 'codex scan failed'
+    })
   })
 })

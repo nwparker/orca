@@ -4,7 +4,8 @@ import {
   execInTerminal,
   getTerminalContent,
   waitForActivePanePtyId,
-  waitForActiveTerminalManager
+  waitForActiveTerminalManager,
+  waitForTerminalOutput
 } from './helpers/terminal'
 import {
   ensureTerminalVisible,
@@ -12,7 +13,6 @@ import {
   waitForActiveWorktree,
   waitForSessionReady
 } from './helpers/store'
-import { getRendererTitleLog, installRendererTitleLog } from './helpers/terminal-title-log'
 import { POST_REPLAY_MODE_RESET } from '../../src/renderer/src/components/terminal-pane/layout-serialization'
 
 test.describe.configure({ mode: 'serial' })
@@ -178,28 +178,25 @@ test.describe('Terminal attention', () => {
     }
     const activePtyId = await waitForActivePanePtyId(orcaPage)
     await proveShellReadyWithSingleWrite(orcaPage, activePtyId)
-    await installRendererTitleLog(orcaPage)
 
-    // Emit the BEL, then a deterministic OSC title marker. When the marker
-    // title lands, all prior PTY bytes (including the BEL) have been
-    // processed — we can then safely assert unread state without racing the
-    // async PTY pipeline.
+    // Emit the BEL, then a deterministic visible marker. When the marker lands,
+    // all prior PTY bytes (including the BEL) have been processed, so we can
+    // assert unread state without racing the async PTY pipeline.
     await emitBell(orcaPage, activePtyId)
-    const MARKER_TITLE = 'focused-tab-bell-marker'
     // Why: printf is a shell builtin so it works even when CI launches the
     // shell with a stripped PATH (no /usr/bin → no `node` resolvable).
-    await execInTerminal(orcaPage, activePtyId, `printf '\\033]0;${MARKER_TITLE}\\007'`)
-
-    await expect
-      .poll(async () => (await getRendererTitleLog(orcaPage)).includes(MARKER_TITLE), {
-        timeout: 10_000,
-        message: 'Marker title did not land — byte stream may not have been flushed'
-      })
-      .toBe(true)
+    const marker = `__FOCUSED_TAB_BELL_FLUSH_${Date.now()}__`
+    await execInTerminal(orcaPage, activePtyId, `printf '${marker}\\n'`)
+    await waitForTerminalOutput(orcaPage, marker, 10_000)
 
     // The focused tab is now unread — the bell persists until the user
     // actually interacts with the pane.
-    expect((await getUnreadTerminalTabIds(orcaPage)).includes(activeTabId)).toBe(true)
+    await expect
+      .poll(async () => (await getUnreadTerminalTabIds(orcaPage)).includes(activeTabId), {
+        timeout: 10_000,
+        message: 'Focused tab did not become unread after BEL'
+      })
+      .toBe(true)
     const activeTabBell = orcaPage
       .locator(
         `[data-testid="sortable-tab"][data-tab-id="${activeTabId}"] [data-testid="tab-activity-bell"]`

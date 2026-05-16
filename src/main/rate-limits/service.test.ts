@@ -30,14 +30,17 @@ vi.mock('./opencode-go-usage-fetcher', () => ({
 type Deferred<T> = {
   promise: Promise<T>
   resolve: (value: T) => void
+  reject: (error: unknown) => void
 }
 
 function deferred<T>(): Deferred<T> {
   let resolve!: (value: T) => void
-  const promise = new Promise<T>((res) => {
+  let reject!: (error: unknown) => void
+  const promise = new Promise<T>((res, rej) => {
     resolve = res
+    reject = rej
   })
-  return { promise, resolve }
+  return { promise, resolve, reject }
 }
 
 function okProvider(
@@ -80,6 +83,7 @@ function serviceInternals(service: RateLimitService): { fetchAll: () => Promise<
 
 describe('RateLimitService', () => {
   beforeEach(() => {
+    vi.useRealTimers()
     vi.clearAllMocks()
     vi.mocked(fetchGeminiRateLimits).mockResolvedValue(okProvider('gemini', 0, Date.now()))
     vi.mocked(fetchOpenCodeGoRateLimits).mockResolvedValue(okProvider('opencode-go', 0, Date.now()))
@@ -440,5 +444,133 @@ describe('RateLimitService', () => {
         isFetching: false
       }
     ])
+  })
+
+  it('pushes state to listeners and the attached renderer while polling only active windows', async () => {
+    vi.useFakeTimers()
+    const service = new RateLimitService()
+    const listener = vi.fn()
+    const unsubscribe = service.onStateChange(listener)
+    const send = vi.fn()
+    const handlers = new Map<string, () => void>()
+    const mainWindow = {
+      webContents: { send },
+      isDestroyed: vi.fn(() => false),
+      isVisible: vi.fn(() => true),
+      isMinimized: vi.fn(() => false),
+      isFocused: vi.fn(() => true),
+      on: vi.fn((event: string, handler: () => void) => {
+        handlers.set(event, handler)
+      }),
+      removeListener: vi.fn((event: string, handler: () => void) => {
+        if (handlers.get(event) === handler) {
+          handlers.delete(event)
+        }
+      })
+    }
+
+    vi.mocked(fetchClaudeRateLimits).mockResolvedValue(okProvider('claude', 10))
+    vi.mocked(fetchCodexRateLimits).mockResolvedValue(okProvider('codex', 20))
+    service.attach(mainWindow as never)
+    service.setPollingInterval(30_000)
+    service.start()
+    await vi.runOnlyPendingTimersAsync()
+    await Promise.resolve()
+
+    expect(listener).toHaveBeenCalled()
+    expect(send).toHaveBeenCalledWith(
+      'rateLimits:update',
+      expect.objectContaining({
+        claude: expect.objectContaining({ provider: 'claude' }),
+        codex: expect.objectContaining({ provider: 'codex' })
+      })
+    )
+
+    vi.mocked(fetchClaudeRateLimits).mockClear()
+    vi.mocked(fetchCodexRateLimits).mockClear()
+    mainWindow.isFocused.mockReturnValue(false)
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(fetchClaudeRateLimits).not.toHaveBeenCalled()
+    expect(fetchCodexRateLimits).not.toHaveBeenCalled()
+
+    mainWindow.isFocused.mockReturnValue(true)
+    handlers.get('focus')?.()
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(fetchClaudeRateLimits).toHaveBeenCalledTimes(1)
+
+    unsubscribe()
+    handlers.get('closed')?.()
+    expect(mainWindow.removeListener).toHaveBeenCalled()
+    service.stop()
+  })
+
+  it('fetches, debounces, and evicts inactive Codex account usage', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-05-15T12:00:00Z'))
+    const service = new RateLimitService()
+    service.setInactiveCodexAccountsResolver(() => [
+      { id: 'codex-1', managedHomePath: '/tmp/codex-1' },
+      { id: 'codex-2', managedHomePath: '/tmp/codex-2' }
+    ])
+    const firstAccount = deferred<ProviderRateLimits>()
+    const secondAccount = deferred<ProviderRateLimits>()
+    vi.mocked(fetchCodexRateLimits)
+      .mockImplementationOnce(() => firstAccount.promise)
+      .mockImplementationOnce(() => secondAccount.promise)
+
+    const fetchOnOpen = service.fetchInactiveCodexAccountsOnOpen()
+    await Promise.resolve()
+    expect(service.getState().inactiveCodexAccounts).toEqual([
+      { accountId: 'codex-1', claude: null, updatedAt: 0, isFetching: true },
+      { accountId: 'codex-2', claude: null, updatedAt: 0, isFetching: true }
+    ])
+
+    firstAccount.resolve(okProvider('codex', 11))
+    secondAccount.reject(new Error('missing token'))
+    await fetchOnOpen
+    expect(fetchCodexRateLimits).toHaveBeenCalledWith({ codexHomePath: '/tmp/codex-1' })
+    expect(fetchCodexRateLimits).toHaveBeenCalledWith({ codexHomePath: '/tmp/codex-2' })
+    expect(service.getState().inactiveCodexAccounts).toEqual([
+      {
+        accountId: 'codex-1',
+        claude: expect.objectContaining({ session: expect.objectContaining({ usedPercent: 11 }) }),
+        updatedAt: expect.any(Number),
+        isFetching: false
+      }
+    ])
+
+    vi.mocked(fetchCodexRateLimits).mockClear()
+    await service.fetchInactiveCodexAccountsOnOpen()
+    expect(fetchCodexRateLimits).not.toHaveBeenCalled()
+
+    service.evictInactiveCodexCache('codex-1')
+    expect(service.getState().inactiveCodexAccounts).toEqual([])
+  })
+
+  it('queues opposite account-specific refreshes behind an in-flight account switch', async () => {
+    const service = new RateLimitService()
+    const firstCodex = deferred<ProviderRateLimits>()
+    const queuedClaude = deferred<ProviderRateLimits>()
+
+    vi.mocked(fetchCodexRateLimits).mockImplementationOnce(() => firstCodex.promise)
+    vi.mocked(fetchClaudeRateLimits).mockImplementationOnce(() => queuedClaude.promise)
+
+    const codexSwitch = service.refreshForCodexAccountChange()
+    await Promise.resolve()
+    const claudeSwitch = service.refreshForClaudeAccountChange()
+    await Promise.resolve()
+
+    firstCodex.resolve(okProvider('codex', 55))
+    await Promise.resolve()
+    queuedClaude.resolve(okProvider('claude', 66))
+
+    await codexSwitch
+    await claudeSwitch
+
+    expect(service.getState().codex?.session?.usedPercent).toBe(55)
+    expect(service.getState().claude?.session?.usedPercent).toBe(66)
+    expect(fetchCodexRateLimits).toHaveBeenCalledTimes(1)
+    expect(fetchClaudeRateLimits).toHaveBeenCalledTimes(1)
   })
 })

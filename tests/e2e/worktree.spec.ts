@@ -85,7 +85,6 @@ test.describe('Create Workspace', () => {
         }
         await window.api.repos.getBaseRefDefault({ repoId })
       })
-      await orcaPage.waitForTimeout(100)
 
       // 3. Type the workspace name into the unified smart-name input.
       // The composer's default mode is 'smart'; its placeholder advertises

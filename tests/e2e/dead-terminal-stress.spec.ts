@@ -9,6 +9,7 @@
  */
 
 import { test, expect } from './helpers/orca-app'
+import type { Page } from '@stablyai/playwright-test'
 import {
   waitForSessionReady,
   waitForActiveWorktree,
@@ -24,6 +25,23 @@ import {
 } from './helpers/dead-terminal'
 
 const STRESS_ITERATIONS = 5
+
+async function waitForRendererFrames(page: Page, count = 2): Promise<void> {
+  await page.evaluate((frameCount) => {
+    return new Promise<void>((resolve) => {
+      let remaining = frameCount
+      const tick = (): void => {
+        if (remaining <= 0) {
+          resolve()
+          return
+        }
+        remaining -= 1
+        requestAnimationFrame(tick)
+      }
+      requestAnimationFrame(tick)
+    })
+  }, count)
+}
 
 test.describe('Dead Terminal Stress @headful', () => {
   const createdWorktreeIds: string[] = []
@@ -90,7 +108,6 @@ test.describe('Dead Terminal Stress @headful', () => {
         console.log(`[ctxloss-${i}] Forced context loss on ${lostCount} canvases`)
       }
 
-      await orcaPage.waitForTimeout(500)
       await waitForAllPanesToHaveContent(orcaPage, `ctxloss-${i} after context loss`)
 
       await switchToWorktree(orcaPage, homeWorktreeId)
@@ -116,10 +133,12 @@ test.describe('Dead Terminal Stress @headful', () => {
       const newId = await createAndActivateWorktreeWithSetup(orcaPage, `rapid-${i}`, 'vertical')
       createdWorktreeIds.push(newId)
 
-      // Switch away during the ~200ms scheduleSplitScrollRestore window
-      await orcaPage.waitForTimeout(50)
+      // Switch away during the ~200ms scheduleSplitScrollRestore window.
+      // Waiting for renderer frames targets the scheduling boundary directly
+      // without relying on a wall-clock sleep.
+      await waitForRendererFrames(orcaPage)
       await switchToWorktree(orcaPage, homeWorktreeId)
-      await orcaPage.waitForTimeout(50)
+      await waitForRendererFrames(orcaPage)
 
       // Switch back — triggers resumeRendering on partially-initialized panes
       await switchToWorktree(orcaPage, newId)

@@ -22,6 +22,7 @@ function keyEvent(
     key,
     metaKey: false,
     ctrlKey: false,
+    altKey: false,
     shiftKey: false,
     isComposing: false,
     preventDefault: vi.fn(),
@@ -69,6 +70,30 @@ function emptyTopLevelOrderedList(): object {
       }
     ]
   }
+}
+
+function createFakeEditor() {
+  const chain = {
+    deleteRange: vi.fn(() => chain),
+    focus: vi.fn(() => chain),
+    insertContentAt: vi.fn(() => chain),
+    run: vi.fn(() => true),
+    toggleStrike: vi.fn(() => chain)
+  }
+  const editor = {
+    chain: vi.fn(() => chain),
+    commands: {
+      focus: vi.fn(),
+      insertContent: vi.fn(),
+      liftListItem: vi.fn(() => false),
+      sinkListItem: vi.fn(() => false)
+    },
+    getAttributes: vi.fn(() => ({ href: 'https://example.test' })),
+    getMarkdown: vi.fn(() => '# Saved'),
+    isActive: vi.fn(() => false),
+    view: { composing: false }
+  } as unknown as Editor
+  return { chain, editor }
 }
 
 describe('rich markdown key handler', () => {
@@ -144,5 +169,101 @@ describe('rich markdown key handler', () => {
     } finally {
       editor.destroy()
     }
+  })
+
+  it('handles search, save, strike, link-edit, and tab shortcuts', () => {
+    const { chain, editor } = createFakeEditor()
+    const ctx = createContext(editor, false)
+    const handler = createRichMarkdownKeyHandler(ctx)
+
+    expect(handler(null, keyEvent('f', { metaKey: true }))).toBe(true)
+    expect(ctx.openSearchRef.current).toHaveBeenCalled()
+
+    expect(handler(null, keyEvent('s', { metaKey: true }))).toBe(true)
+    expect(ctx.flushPendingSerialization).toHaveBeenCalled()
+    expect(ctx.onContentChangeRef.current).toHaveBeenCalledWith('# Saved')
+    expect(ctx.onSaveRef.current).toHaveBeenCalledWith('# Saved')
+
+    expect(handler(null, keyEvent('x', { metaKey: true, shiftKey: true }))).toBe(true)
+    expect(chain.toggleStrike).toHaveBeenCalled()
+
+    ctx.isEditingLinkRef.current = true
+    expect(handler(null, keyEvent('k', { metaKey: true }))).toBe(true)
+    expect(ctx.setIsEditingLink).toHaveBeenCalledWith(false)
+    expect(ctx.setLinkBubble).toHaveBeenCalledWith(null)
+    expect(editor.commands.focus).toHaveBeenCalled()
+
+    expect(handler(null, keyEvent('Tab', { shiftKey: true }))).toBe(true)
+    expect(editor.commands.liftListItem).toHaveBeenCalledWith('listItem')
+    expect(editor.commands.liftListItem).toHaveBeenCalledWith('taskItem')
+
+    vi.mocked(editor.isActive).mockReturnValueOnce(true)
+    expect(handler(null, keyEvent('Tab'))).toBe(true)
+    expect(editor.commands.insertContent).toHaveBeenCalledWith('  ')
+  })
+
+  it('navigates and commits doc-link menu rows before slash menu handling', () => {
+    const { chain, editor } = createFakeEditor()
+    const ctx = createContext(editor, false)
+    const actionRun = vi.fn()
+    ctx.docLinkMenuRef.current = { query: 'doc', from: 2, to: 7, left: 0, top: 0 }
+    ctx.filteredDocLinkRowsRef.current = [
+      { kind: 'action', id: 'create', label: 'Create doc', run: actionRun }
+    ]
+    const handler = createRichMarkdownKeyHandler(ctx)
+
+    expect(handler(null, keyEvent('ArrowDown'))).toBe(true)
+    expect(ctx.setSelectedDocLinkIndex).toHaveBeenCalledWith(expect.any(Function))
+    expect(handler(null, keyEvent('ArrowUp'))).toBe(true)
+    expect(handler(null, keyEvent('Enter'))).toBe(true)
+    expect(chain.deleteRange).toHaveBeenCalledWith({ from: 2, to: 7 })
+    expect(actionRun).toHaveBeenCalledWith(editor)
+    expect(handler(null, keyEvent('Escape'))).toBe(true)
+    expect(ctx.setDocLinkMenu).toHaveBeenCalledWith(null)
+
+    ctx.filteredDocLinkRowsRef.current = []
+    expect(handler(null, keyEvent('Tab'))).toBe(false)
+  })
+
+  it('updates, navigates, commits, and closes slash menus', () => {
+    const { chain, editor } = createFakeEditor()
+    const ctx = createContext(editor, false)
+    const commandRun = vi.fn()
+    let slashMenu = { query: 'ab', from: 1, to: 4, left: 0, top: 0 }
+    ctx.slashMenuRef.current = slashMenu
+    ctx.filteredSlashCommandsRef.current = [
+      {
+        id: 'text',
+        label: 'Text',
+        aliases: [],
+        description: '',
+        group: 'Basic blocks',
+        icon: { kind: 'text', value: 'T' },
+        run: commandRun
+      }
+    ]
+    ctx.setSlashMenu = vi.fn((next) => {
+      slashMenu = typeof next === 'function' ? next(slashMenu) : next
+      ctx.slashMenuRef.current = slashMenu
+    })
+    const handler = createRichMarkdownKeyHandler(ctx)
+
+    expect(handler(null, keyEvent('c'))).toBe(false)
+    expect(ctx.slashMenuRef.current?.query).toBe('ab')
+    expect(ctx.setSelectedCommandIndex).not.toHaveBeenCalledWith(0)
+
+    expect(handler(null, keyEvent('Backspace', { isComposing: true }))).toBe(false)
+    expect(ctx.slashMenuRef.current?.query).toBe('ab')
+
+    expect(handler(null, keyEvent('ArrowDown'))).toBe(true)
+    expect(ctx.setSelectedCommandIndex).toHaveBeenCalledWith(expect.any(Function))
+    expect(handler(null, keyEvent('ArrowUp'))).toBe(true)
+
+    expect(handler(null, keyEvent('Enter'))).toBe(true)
+    expect(chain.deleteRange).toHaveBeenCalledWith({ from: 1, to: 4 })
+    expect(commandRun).toHaveBeenCalledWith(editor)
+
+    expect(handler(null, keyEvent('Escape'))).toBe(true)
+    expect(ctx.setSlashMenu).toHaveBeenCalledWith(null)
   })
 })

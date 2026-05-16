@@ -371,6 +371,224 @@ describe('OrcaRuntimeService', () => {
     })
   })
 
+  it('cleans subscription callbacks by id and connection', () => {
+    const runtime = createRuntime()
+    const firstCleanup = vi.fn()
+    const replacementCleanup = vi.fn()
+    const secondCleanup = vi.fn()
+
+    runtime.registerSubscriptionCleanup('sub-a', firstCleanup, 'conn-1')
+    runtime.registerSubscriptionCleanup('sub-a', replacementCleanup, 'conn-1')
+    runtime.registerSubscriptionCleanup('sub-b', secondCleanup, 'conn-1')
+
+    expect(firstCleanup).toHaveBeenCalledTimes(1)
+    runtime.cleanupSubscriptionsForConnection('conn-1')
+
+    expect(replacementCleanup).toHaveBeenCalledTimes(1)
+    expect(secondCleanup).toHaveBeenCalledTimes(1)
+    runtime.cleanupSubscription('sub-a')
+    expect(replacementCleanup).toHaveBeenCalledTimes(1)
+  })
+
+  it('dispatches mobile notifications only to active subscribers', () => {
+    const runtime = createRuntime()
+    const first = vi.fn()
+    const second = vi.fn()
+    const unsubscribeFirst = runtime.onNotificationDispatched(first)
+    runtime.onNotificationDispatched(second)
+
+    expect(runtime.getMobileNotificationListenerCount()).toBe(2)
+    runtime.dispatchMobileNotification({
+      id: 'note-1',
+      type: 'agent-status',
+      title: 'Agent ready',
+      body: 'Done',
+      createdAt: 123
+    } as never)
+
+    unsubscribeFirst()
+    runtime.dispatchMobileNotification({
+      id: 'note-2',
+      type: 'agent-status',
+      title: 'Agent idle',
+      body: 'Idle',
+      createdAt: 456
+    } as never)
+
+    expect(first).toHaveBeenCalledTimes(1)
+    expect(second).toHaveBeenCalledTimes(2)
+    expect(runtime.getMobileNotificationListenerCount()).toBe(1)
+  })
+
+  it('bridges account service snapshots, mutations, refreshes, and change events', async () => {
+    const runtime = createRuntime()
+    const triggerStateChange: { current: (() => void) | null } = { current: null }
+    const services = {
+      claudeAccounts: {
+        listAccounts: vi.fn(() => ({ accounts: [{ id: 'claude-1' }], selectedAccountId: null })),
+        selectAccount: vi.fn(async (accountId: string | null) => ({
+          accounts: [],
+          selectedAccountId: accountId
+        })),
+        removeAccount: vi.fn(async (accountId: string) => ({
+          accounts: [],
+          removedAccountId: accountId
+        }))
+      },
+      codexAccounts: {
+        listAccounts: vi.fn(() => ({ accounts: [{ id: 'codex-1' }], selectedAccountId: null })),
+        selectAccount: vi.fn(async (accountId: string | null) => ({
+          accounts: [],
+          selectedAccountId: accountId
+        })),
+        removeAccount: vi.fn(async (accountId: string) => ({
+          accounts: [],
+          removedAccountId: accountId
+        }))
+      },
+      rateLimits: {
+        getState: vi.fn(() => ({ claude: {}, codex: {} })),
+        refresh: vi.fn(async () => {}),
+        fetchInactiveClaudeAccountsOnOpen: vi.fn(async () => {}),
+        fetchInactiveCodexAccountsOnOpen: vi.fn(async () => {}),
+        onStateChange: vi.fn((listener: () => void) => {
+          triggerStateChange.current = listener
+          return vi.fn()
+        })
+      }
+    }
+    runtime.setAccountServices(services as never)
+
+    expect(runtime.getAccountsSnapshot()).toMatchObject({
+      claude: { accounts: [{ id: 'claude-1' }] },
+      codex: { accounts: [{ id: 'codex-1' }] }
+    })
+
+    await runtime.refreshAccountsForMobile()
+    expect(services.rateLimits.refresh).toHaveBeenCalledTimes(1)
+    await expect(runtime.selectClaudeAccount('claude-1')).resolves.toMatchObject({
+      selectedAccountId: 'claude-1'
+    })
+    await expect(runtime.selectCodexAccount('codex-1')).resolves.toMatchObject({
+      selectedAccountId: 'codex-1'
+    })
+    await expect(runtime.removeClaudeAccount('claude-1')).resolves.toMatchObject({
+      removedAccountId: 'claude-1'
+    })
+    await expect(runtime.removeCodexAccount('codex-1')).resolves.toMatchObject({
+      removedAccountId: 'codex-1'
+    })
+
+    const accountListener = vi.fn()
+    runtime.onAccountsChanged(accountListener)
+    triggerStateChange.current?.()
+    expect(accountListener).toHaveBeenCalledWith(
+      expect.objectContaining({
+        claude: expect.objectContaining({ accounts: [{ id: 'claude-1' }] }),
+        codex: expect.objectContaining({ accounts: [{ id: 'codex-1' }] })
+      })
+    )
+  })
+
+  it('tracks preallocated handles, terminal data, and mobile layout listeners', async () => {
+    const runtime = createRuntime()
+    const write = vi.fn(() => true)
+    const resize = vi.fn(() => true)
+    const clearBuffer = vi.fn(async () => {})
+    const size = { cols: 100, rows: 30 }
+    runtime.setPtyController({
+      write,
+      kill: vi.fn(() => true),
+      getForegroundProcess: vi.fn(async () => null),
+      resize,
+      getSize: vi.fn(() => size),
+      clearBuffer
+    } as never)
+
+    const preallocated = runtime.preAllocateHandleForPty('pty-1')
+    expect(runtime.preAllocateHandleForPty('pty-1')).toBe(preallocated)
+    runtime.registerPreAllocatedHandleForPty('pty-1', 'term_known')
+    syncSinglePty(runtime, 'pty-1')
+    runtime.onPtySpawned('pty-1')
+
+    expect(runtime.resolveLeafForHandle('term_known')).toEqual({ ptyId: 'pty-1' })
+    await expect(runtime.clearTerminalBuffer('term_known')).resolves.toEqual({
+      handle: 'term_known',
+      cleared: true
+    })
+    expect(clearBuffer).toHaveBeenCalledWith('pty-1')
+
+    const dataListener = vi.fn()
+    const unsubscribeData = runtime.subscribeToTerminalData('pty-1', dataListener)
+    runtime.onPtyData('pty-1', 'hello\n', 111)
+    unsubscribeData()
+    runtime.onPtyData('pty-1', 'ignored\n', 112)
+    expect(dataListener).toHaveBeenCalledTimes(1)
+    expect(dataListener).toHaveBeenCalledWith('hello\n')
+
+    const fitListener = vi.fn()
+    const driverListener = vi.fn()
+    const resizeListener = vi.fn()
+    runtime.subscribeToFitOverrideChanges('pty-1', fitListener)
+    runtime.subscribeToDriverChanges('pty-1', driverListener)
+    runtime.subscribeToTerminalResize('pty-1', resizeListener)
+
+    await expect(
+      runtime.handleMobileSubscribe('pty-1', 'mobile-1', { cols: 48.4, rows: 18.6 })
+    ).resolves.toBe(true)
+    expect(runtime.getDriver('pty-1')).toEqual({ kind: 'mobile', clientId: 'mobile-1' })
+    expect(runtime.getTerminalFitOverride('pty-1')).toMatchObject({
+      mode: 'mobile-fit',
+      cols: 48,
+      rows: 19
+    })
+    expect(runtime.getAllTerminalFitOverrides().get('pty-1')).toMatchObject({
+      mode: 'mobile-fit',
+      cols: 48,
+      rows: 19
+    })
+    expect(fitListener).toHaveBeenCalledWith({ mode: 'mobile-fit', cols: 48, rows: 19 })
+    expect(driverListener).toHaveBeenCalledWith({ kind: 'mobile', clientId: 'mobile-1' })
+    expect(resizeListener).toHaveBeenCalledWith(
+      expect.objectContaining({ cols: 48, rows: 19, displayMode: 'phone' })
+    )
+
+    await expect(
+      runtime.updateMobileViewport('pty-1', 'mobile-1', { cols: 62, rows: 24 })
+    ).resolves.toBe(true)
+    expect(resize).toHaveBeenLastCalledWith('pty-1', 62, 24)
+
+    runtime.recordRendererGeometry('pty-1', 120, 40)
+    expect(runtime.getLastRendererSize('pty-1')).toEqual({ cols: 120, rows: 40 })
+    await expect(runtime.reclaimTerminalForDesktop('pty-1')).resolves.toBe(true)
+    expect(runtime.getMobileDisplayMode('pty-1')).toBe('auto')
+    expect(runtime.getDriver('pty-1')).toEqual({ kind: 'desktop' })
+    expect(fitListener).toHaveBeenCalledWith({ mode: 'desktop-fit', cols: 120, rows: 40 })
+
+    runtime.onPtyExit('pty-1', 0)
+    expect(runtime.getTerminalFitOverride('pty-1')).toBeNull()
+    expect(runtime.getDriver('pty-1')).toEqual({ kind: 'idle' })
+  })
+
+  it('persists and clamps mobile auto-restore settings', () => {
+    let settings = { ...store.getSettings(), mobileAutoRestoreFitMs: 1 }
+    const runtime = new OrcaRuntimeService({
+      ...store,
+      getSettings: () => settings,
+      updateSettings: (updates: Partial<typeof settings>) => {
+        settings = { ...settings, ...updates }
+      }
+    } as never)
+
+    expect(runtime.getMobileAutoRestoreFitMs()).toBeGreaterThan(1)
+    const clamped = runtime.setMobileAutoRestoreFitMs(Number.POSITIVE_INFINITY)
+    expect(clamped).toBeNull()
+    expect(settings.mobileAutoRestoreFitMs).toBeNull()
+    const finite = runtime.setMobileAutoRestoreFitMs(999_999_999)
+    expect(finite).toBeLessThan(999_999_999)
+    expect(settings.mobileAutoRestoreFitMs).toBe(finite)
+  })
+
   it('stays unavailable during initial loads before a graph is published', () => {
     const runtime = createRuntime()
 

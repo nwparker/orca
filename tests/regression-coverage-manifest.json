@@ -1,0 +1,290 @@
+{
+  "schemaVersion": 1,
+  "targetPercent": 90,
+  "method": "Feature-level regression surface coverage. A surface is covered when at least one listed E2E or integration test file exists and contains real test()/it() cases.",
+  "surfaces": [
+    {
+      "id": "onboarding-first-launch",
+      "title": "First-launch onboarding, progress, shortcuts, and persistence",
+      "kind": "e2e",
+      "coveredBy": ["tests/e2e/onboarding.spec.ts"]
+    },
+    {
+      "id": "workspace-composer-create",
+      "title": "Create Workspace composer creates and activates a worktree",
+      "kind": "e2e",
+      "coveredBy": ["tests/e2e/worktree.spec.ts"]
+    },
+    {
+      "id": "worktree-lifecycle-state",
+      "title": "Worktree removal, switching, and per-worktree state scoping",
+      "kind": "e2e",
+      "coveredBy": ["tests/e2e/worktree-lifecycle.spec.ts"]
+    },
+    {
+      "id": "worktree-sorting",
+      "title": "Recent and smart worktree ordering",
+      "kind": "e2e",
+      "coveredBy": [
+        "tests/e2e/worktree-recent-sort.spec.ts",
+        "tests/e2e/worktree-smart-sort.spec.ts"
+      ]
+    },
+    {
+      "id": "workspace-history-navigation",
+      "title": "Back and forward workspace navigation",
+      "kind": "e2e",
+      "coveredBy": ["tests/e2e/workspace-back-forward-navigation.spec.ts"]
+    },
+    {
+      "id": "tab-create-switch-reorder-close",
+      "title": "Tab creation, switching, reorder, and close flows",
+      "kind": "e2e",
+      "coveredBy": ["tests/e2e/tabs.spec.ts", "tests/e2e/tab-close-navigation.spec.ts"]
+    },
+    {
+      "id": "tab-rename",
+      "title": "Inline tab rename commit, cancel, blur, and width behavior",
+      "kind": "e2e",
+      "coveredBy": ["tests/e2e/tab-rename.spec.ts"]
+    },
+    {
+      "id": "sidebar-layout",
+      "title": "Collapsed sidebar layout does not cover the first tab",
+      "kind": "e2e",
+      "coveredBy": ["tests/e2e/tab-sidebar-closed-overlap.spec.ts"]
+    },
+    {
+      "id": "terminal-pane-layout",
+      "title": "Terminal pane split, resize, close, and retention flows",
+      "kind": "e2e",
+      "coveredBy": ["tests/e2e/terminal-panes.spec.ts"]
+    },
+    {
+      "id": "terminal-restart-persistence",
+      "title": "Terminal scrollback and active tab state survive restart",
+      "kind": "e2e",
+      "coveredBy": ["tests/e2e/terminal-restart-persistence.spec.ts"]
+    },
+    {
+      "id": "terminal-shortcuts",
+      "title": "Terminal shortcut routing to actions and PTY",
+      "kind": "e2e",
+      "coveredBy": ["tests/e2e/terminal-shortcuts.spec.ts"]
+    },
+    {
+      "id": "terminal-attention",
+      "title": "Terminal BEL attention and unread clearing",
+      "kind": "e2e",
+      "coveredBy": ["tests/e2e/terminal-attention.spec.ts"]
+    },
+    {
+      "id": "terminal-output-scheduler",
+      "title": "Background terminal output scheduling",
+      "kind": "e2e",
+      "coveredBy": ["tests/e2e/terminal-output-scheduler.spec.ts"]
+    },
+    {
+      "id": "dead-terminal-recovery",
+      "title": "Dead terminal setup-split recovery and stress flows",
+      "kind": "e2e",
+      "coveredBy": [
+        "tests/e2e/dead-terminal-repro.spec.ts",
+        "tests/e2e/dead-terminal-stress.spec.ts"
+      ]
+    },
+    {
+      "id": "file-explorer-editor",
+      "title": "File explorer opens editor tabs and preserves editor state",
+      "kind": "e2e",
+      "coveredBy": ["tests/e2e/file-open.spec.ts"]
+    },
+    {
+      "id": "notes-delete",
+      "title": "Saved note deletion from the diff/editor surface",
+      "kind": "e2e",
+      "coveredBy": ["tests/e2e/diff-note-delete.spec.ts"]
+    },
+    {
+      "id": "browser-tab-state",
+      "title": "Browser tab creation and state retention",
+      "kind": "e2e",
+      "coveredBy": ["tests/e2e/browser-tab.spec.ts"]
+    },
+    {
+      "id": "source-control-discard",
+      "title": "Source control discard confirmation flow",
+      "kind": "e2e",
+      "coveredBy": ["tests/e2e/source-control-discard-confirmation.spec.ts"]
+    },
+    {
+      "id": "tasks-page",
+      "title": "Tasks page navigation and return behavior",
+      "kind": "e2e",
+      "coveredBy": ["tests/e2e/tasks-page.spec.ts"]
+    },
+    {
+      "id": "feature-wall",
+      "title": "Feature wall menu entry, media rendering, and nudge",
+      "kind": "e2e",
+      "coveredBy": ["tests/e2e/feature-wall.spec.ts"]
+    },
+    {
+      "id": "ssh-localhost",
+      "title": "SSH localhost terminal and agent-hook route",
+      "kind": "e2e",
+      "coveredBy": ["tests/e2e/ssh-localhost.spec.ts"]
+    },
+    {
+      "id": "resource-usage-warm-reattach",
+      "title": "Warm reattached local PTY resource usage classification",
+      "kind": "e2e",
+      "coveredBy": ["tests/e2e/resource-usage-warm-reattach.spec.ts"]
+    },
+    {
+      "id": "settings-page",
+      "title": "Settings navigation, search, keyboard shortcuts, and escape behavior",
+      "kind": "e2e",
+      "coveredBy": ["tests/e2e/settings.spec.ts"]
+    },
+    {
+      "id": "runtime-orchestration",
+      "title": "Runtime orchestration DB, coordinator, and RPC methods",
+      "kind": "integration",
+      "coveredBy": [
+        "src/main/runtime/orchestration/db.test.ts",
+        "src/main/runtime/orchestration/coordinator.test.ts",
+        "src/main/runtime/rpc/methods/orchestration.test.ts"
+      ]
+    },
+    {
+      "id": "runtime-rpc",
+      "title": "Runtime RPC transport, schemas, streaming, and method contracts",
+      "kind": "integration",
+      "coveredBy": [
+        "src/main/runtime/runtime-rpc.test.ts",
+        "src/main/runtime/rpc/schemas.test.ts",
+        "src/main/runtime/rpc/streaming.test.ts"
+      ]
+    },
+    {
+      "id": "ssh-relay-providers",
+      "title": "SSH connections, relay deploy, providers, and filesystem paths",
+      "kind": "integration",
+      "coveredBy": [
+        "src/main/ssh/ssh-connection.test.ts",
+        "src/main/ssh/ssh-relay-session.test.ts",
+        "src/main/providers/ssh-filesystem-provider.test.ts",
+        "src/main/providers/ssh-pty-provider.test.ts"
+      ]
+    },
+    {
+      "id": "browser-bridge",
+      "title": "Browser manager, CDP bridge, cookie import, snapshots, and grab mode",
+      "kind": "integration",
+      "coveredBy": [
+        "src/main/browser/browser-manager.test.ts",
+        "src/main/browser/cdp-bridge-integration.test.ts",
+        "src/main/browser/browser-cookie-import.test.ts",
+        "src/main/browser/snapshot-engine.test.ts"
+      ]
+    },
+    {
+      "id": "ipc-boundaries",
+      "title": "Core IPC handlers for repos, worktrees, PTY, filesystem, runtime, and browser",
+      "kind": "integration",
+      "coveredBy": [
+        "src/main/ipc/register-core-handlers.test.ts",
+        "src/main/ipc/worktrees.test.ts",
+        "src/main/ipc/pty.test.ts",
+        "src/main/ipc/filesystem.test.ts",
+        "src/main/ipc/runtime.test.ts",
+        "src/main/ipc/browser.test.ts"
+      ]
+    },
+    {
+      "id": "git-hosting",
+      "title": "GitHub, GitLab, and Bitbucket clients and mappers",
+      "kind": "integration",
+      "coveredBy": [
+        "src/main/github/client.test.ts",
+        "src/main/gitlab/client.test.ts",
+        "src/main/bitbucket/client.test.ts"
+      ]
+    },
+    {
+      "id": "renderer-store",
+      "title": "Renderer store slices, persistence cascades, and hydration",
+      "kind": "integration",
+      "coveredBy": [
+        "src/renderer/src/store/slices/tabs.test.ts",
+        "src/renderer/src/store/slices/worktrees.test.ts",
+        "src/renderer/src/store/slices/store-cascades.test.ts",
+        "src/renderer/src/store/slices/terminals-hydration.test.ts"
+      ]
+    },
+    {
+      "id": "editor-markdown",
+      "title": "Editor markdown parsing, rendering, autosave, links, and tables",
+      "kind": "integration",
+      "coveredBy": [
+        "src/renderer/src/components/editor/markdown-round-trip.test.ts",
+        "src/renderer/src/components/editor/editor-autosave.test.ts",
+        "src/renderer/src/components/editor/markdown-preview-links.test.ts",
+        "src/renderer/src/components/editor/markdown-table-of-contents.test.ts"
+      ]
+    },
+    {
+      "id": "cli-core",
+      "title": "CLI parser, runtime client, flags, specs, and core dispatch",
+      "kind": "integration",
+      "coveredBy": [
+        "src/cli/index.test.ts",
+        "src/cli/args.test.ts",
+        "src/cli/flags.test.ts",
+        "src/cli/runtime-client.test.ts"
+      ]
+    },
+    {
+      "id": "relay-core",
+      "title": "Relay dispatcher, filesystem, git, PTY, plugin overlay, and protocol",
+      "kind": "integration",
+      "coveredBy": [
+        "src/relay/integration.test.ts",
+        "src/relay/dispatcher.test.ts",
+        "src/relay/fs-handler.test.ts",
+        "src/relay/git-handler.test.ts",
+        "src/relay/pty-handler.test.ts"
+      ]
+    },
+    {
+      "id": "telemetry-consent",
+      "title": "Telemetry consent, event validation, install id, and cohort classification",
+      "kind": "integration",
+      "coveredBy": [
+        "src/main/telemetry/consent.test.ts",
+        "src/main/telemetry/validator.test.ts",
+        "src/main/telemetry/install-id.test.ts",
+        "src/shared/telemetry-events.test.ts"
+      ]
+    },
+    {
+      "id": "automations-ui-e2e",
+      "title": "Automations page schedule creation and deletion through the renderer",
+      "kind": "gap",
+      "coveredBy": []
+    },
+    {
+      "id": "mobile-ui-e2e",
+      "title": "Mobile app UI workflow against a desktop runtime",
+      "kind": "gap",
+      "coveredBy": []
+    },
+    {
+      "id": "voice-dictation-e2e",
+      "title": "Voice dictation live capture through the renderer and native service",
+      "kind": "gap",
+      "coveredBy": []
+    }
+  ]
+}

@@ -15,11 +15,11 @@ import {
   type Page,
   type TestInfo
 } from '@stablyai/playwright-test'
-import { execSync } from 'child_process'
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
 import os from 'os'
 import path from 'path'
 import { cleanupE2EDaemons, closeElectronAppForE2E } from './electron-process-shutdown'
+import { isValidGitRepo } from './seeded-git-repo'
 
 type LaunchedOrca = {
   app: ElectronApplication
@@ -94,7 +94,12 @@ export function createRestartSession(testInfo: TestInfo): RestartSession {
     })
     const page = await app.firstWindow({ timeout: 120_000 })
     await page.waitForLoadState('domcontentloaded')
-    await page.waitForFunction(() => Boolean(window.__store), null, { timeout: 30_000 })
+    await expect
+      .poll(async () => page.evaluate(() => Boolean(window.__store)), {
+        timeout: 30_000,
+        message: 'Renderer store did not become available after restart launch'
+      })
+      .toBe(true)
     return { app, page }
   }
 
@@ -145,11 +150,15 @@ export async function attachRepoAndOpenTerminal(page: Page, repoPath: string): P
     }
   })
 
-  await page.waitForFunction(
-    () => window.__store?.getState().workspaceSessionReady === true,
-    null,
-    { timeout: 30_000 }
-  )
+  await expect
+    .poll(
+      async () => page.evaluate(() => window.__store?.getState().workspaceSessionReady === true),
+      {
+        timeout: 30_000,
+        message: 'attachRepoAndOpenTerminal: workspace session never became ready'
+      }
+    )
+    .toBe(true)
 
   // Why: fetchWorktrees() is async. Awaiting the outer page.evaluate returns
   // before the Zustand worktree slice has observed the hydrated state, so a
@@ -207,21 +216,4 @@ export async function attachRepoAndOpenTerminal(page: Page, repoPath: string): P
   }
 
   return worktreeId
-}
-
-function isValidGitRepo(repoPath: string): boolean {
-  if (!repoPath || !existsSync(repoPath)) {
-    return false
-  }
-  try {
-    return (
-      execSync('git rev-parse --is-inside-work-tree', {
-        cwd: repoPath,
-        stdio: 'pipe',
-        encoding: 'utf8'
-      }).trim() === 'true'
-    )
-  } catch {
-    return false
-  }
 }

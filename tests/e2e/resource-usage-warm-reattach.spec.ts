@@ -29,7 +29,7 @@
 import { existsSync, readFileSync } from 'fs'
 import type { ElectronApplication } from '@stablyai/playwright-test'
 import { test, expect } from './helpers/orca-app'
-import { TEST_REPO_PATH_FILE } from './global-setup'
+import { TEST_REPO_PATH_FILE } from './helpers/seeded-git-repo'
 import {
   discoverActivePtyId,
   waitForActiveTerminalManager,

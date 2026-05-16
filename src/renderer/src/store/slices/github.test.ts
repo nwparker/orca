@@ -3,9 +3,10 @@ envelope, and IssueSourceIndicator suppression tests in one file keeps the
 GitHub slice's cross-cutting invariants verifiable in one place. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { create } from 'zustand'
-import { createGitHubSlice } from './github'
+import { createGitHubSlice, projectViewCacheKey } from './github'
 import type { AppState } from '../types'
 import type { PRInfo } from '../../../../shared/types'
+import type { GitHubProjectTable } from '../../../../shared/github-project-types'
 import {
   createCompatibleRuntimeStatusResponseIfNeeded,
   type RuntimeEnvironmentCallRequest
@@ -20,8 +21,16 @@ const mockApi = {
     prForBranch: vi.fn().mockResolvedValue(null),
     issue: vi.fn().mockResolvedValue(null),
     prChecks: vi.fn().mockResolvedValue([]),
+    prComments: vi.fn().mockResolvedValue([]),
+    resolveReviewThread: vi.fn().mockResolvedValue(true),
     listWorkItems: vi.fn(),
-    getProjectViewTable: vi.fn()
+    countWorkItems: vi.fn(),
+    getProjectViewTable: vi.fn(),
+    updateProjectItemField: vi.fn(),
+    clearProjectItemField: vi.fn(),
+    updateIssueBySlug: vi.fn(),
+    updatePullRequestBySlug: vi.fn(),
+    updateIssueTypeBySlug: vi.fn()
   },
   runtimeEnvironments: {
     call: runtimeEnvironmentTransportCall
@@ -64,6 +73,106 @@ function makePR(overrides: Partial<PRInfo> = {}): PRInfo {
     mergeable: 'UNKNOWN',
     headSha: 'head-oid',
     ...overrides
+  }
+}
+
+function makeProjectTable(): GitHubProjectTable {
+  return {
+    project: {
+      id: 'project-1',
+      owner: 'acme',
+      ownerType: 'organization',
+      number: 7,
+      title: 'Roadmap',
+      url: 'https://github.com/orgs/acme/projects/7'
+    },
+    selectedView: {
+      id: 'view-1',
+      number: 1,
+      name: 'Table',
+      layout: 'TABLE_LAYOUT',
+      filter: '',
+      fields: [
+        {
+          kind: 'single-select',
+          id: 'field-status',
+          name: 'Status',
+          dataType: 'SINGLE_SELECT',
+          options: [{ id: 'todo', name: 'Todo', color: 'GRAY' }]
+        },
+        {
+          kind: 'iteration',
+          id: 'field-iteration',
+          name: 'Iteration',
+          dataType: 'ITERATION',
+          iterations: [
+            {
+              id: 'sprint-1',
+              title: 'Sprint 1',
+              startDate: '2026-01-01',
+              duration: 14,
+              completed: false
+            }
+          ]
+        }
+      ],
+      groupByFields: [],
+      sortByFields: []
+    },
+    rows: [
+      {
+        id: 'row-issue',
+        itemType: 'ISSUE',
+        content: {
+          number: 42,
+          title: 'Issue row',
+          body: 'Body',
+          url: 'https://github.com/acme/widgets/issues/42',
+          state: 'OPEN',
+          stateReason: null,
+          isDraft: null,
+          repository: 'acme/widgets',
+          assignees: [{ login: 'mona', name: null, avatarUrl: null }],
+          labels: [{ name: 'bug', color: 'red' }],
+          parentIssue: null,
+          issueType: null
+        },
+        fieldValuesByFieldId: {
+          'field-status': {
+            kind: 'single-select',
+            fieldId: 'field-status',
+            optionId: 'old',
+            name: 'Old',
+            color: 'RED'
+          }
+        },
+        updatedAt: '2026-01-01T00:00:00Z',
+        position: 0
+      },
+      {
+        id: 'row-pr',
+        itemType: 'PULL_REQUEST',
+        content: {
+          number: 43,
+          title: 'PR row',
+          body: 'Body',
+          url: 'https://github.com/acme/widgets/pull/43',
+          state: 'OPEN',
+          stateReason: null,
+          isDraft: false,
+          repository: 'acme/widgets',
+          assignees: [],
+          labels: [],
+          parentIssue: null,
+          issueType: null
+        },
+        fieldValuesByFieldId: {},
+        updatedAt: '2026-01-02T00:00:00Z',
+        position: 1
+      }
+    ],
+    totalCount: 2,
+    parentFieldDropped: false
   }
 }
 
@@ -498,6 +607,302 @@ describe('createGitHubSlice.fetchWorkItems source/error envelope', () => {
       },
       timeoutMs: 60_000
     })
+  })
+})
+
+describe('createGitHubSlice ProjectV2 optimistic cache updates', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    resetRemoteRuntimeMocks()
+    mockApi.gh.updateProjectItemField.mockResolvedValue({ ok: true })
+    mockApi.gh.clearProjectItemField.mockResolvedValue({ ok: true })
+    mockApi.gh.updateIssueBySlug.mockResolvedValue({ ok: true })
+    mockApi.gh.updatePullRequestBySlug.mockResolvedValue({ ok: true })
+    mockApi.gh.updateIssueTypeBySlug.mockResolvedValue({ ok: true })
+  })
+
+  function seedProject(store: ReturnType<typeof createTestStore>) {
+    const table = makeProjectTable()
+    const cacheKey = projectViewCacheKey('organization', 'acme', 7, 'view-1')
+    store.setState({
+      projectViewCache: {
+        [cacheKey]: { data: table, fetchedAt: Date.now() }
+      }
+    })
+    return { cacheKey }
+  }
+
+  it('optimistically updates and clears project field values', async () => {
+    const store = createTestStore()
+    const { cacheKey } = seedProject(store)
+
+    await expect(
+      store.getState().updateProjectFieldValue(cacheKey, 'row-issue', 'field-status', {
+        kind: 'single-select',
+        optionId: 'todo'
+      })
+    ).resolves.toEqual({ ok: true })
+    expect(
+      store.getState().projectViewCache[cacheKey]?.data?.rows[0].fieldValuesByFieldId[
+        'field-status'
+      ]
+    ).toMatchObject({ optionId: 'todo', name: 'Todo', color: 'GRAY' })
+    expect(mockApi.gh.updateProjectItemField).toHaveBeenCalledWith({
+      projectId: 'project-1',
+      itemId: 'row-issue',
+      fieldId: 'field-status',
+      value: { kind: 'single-select', optionId: 'todo' }
+    })
+
+    await expect(
+      store.getState().clearProjectFieldValue(cacheKey, 'row-issue', 'field-status')
+    ).resolves.toEqual({ ok: true })
+    expect(
+      store.getState().projectViewCache[cacheKey]?.data?.rows[0].fieldValuesByFieldId[
+        'field-status'
+      ]
+    ).toBeUndefined()
+  })
+
+  it('rolls back optimistic field updates when the mutation fails', async () => {
+    const store = createTestStore()
+    const { cacheKey } = seedProject(store)
+    mockApi.gh.updateProjectItemField.mockResolvedValueOnce({
+      ok: false,
+      error: { type: 'validation_error', message: 'Nope' }
+    })
+
+    await expect(
+      store.getState().updateProjectFieldValue(cacheKey, 'row-issue', 'field-status', {
+        kind: 'text',
+        text: 'bad'
+      })
+    ).resolves.toMatchObject({ ok: false })
+    expect(
+      store.getState().projectViewCache[cacheKey]?.data?.rows[0].fieldValuesByFieldId[
+        'field-status'
+      ]
+    ).toMatchObject({ optionId: 'old', name: 'Old' })
+  })
+
+  it('patches issues and pull requests through the correct slug endpoints', async () => {
+    const store = createTestStore()
+    const { cacheKey } = seedProject(store)
+
+    await expect(
+      store.getState().patchProjectIssueOrPr(cacheKey, 'row-issue', {
+        title: 'Updated issue',
+        body: 'Updated body',
+        addLabels: ['enhancement'],
+        removeLabels: ['bug'],
+        addAssignees: ['octo'],
+        removeAssignees: ['mona']
+      })
+    ).resolves.toEqual({ ok: true })
+    expect(mockApi.gh.updateIssueBySlug).toHaveBeenCalledWith({
+      owner: 'acme',
+      repo: 'widgets',
+      number: 42,
+      updates: {
+        title: 'Updated issue',
+        body: 'Updated body',
+        addLabels: ['enhancement'],
+        removeLabels: ['bug'],
+        addAssignees: ['octo'],
+        removeAssignees: ['mona']
+      }
+    })
+    expect(store.getState().projectViewCache[cacheKey]?.data?.rows[0].content).toMatchObject({
+      title: 'Updated issue',
+      labels: [{ name: 'enhancement', color: '808080' }],
+      assignees: [{ login: 'octo', name: null, avatarUrl: null }]
+    })
+
+    await expect(
+      store
+        .getState()
+        .patchProjectIssueOrPr(cacheKey, 'row-pr', { title: 'Updated PR', addLabels: ['review'] })
+    ).resolves.toEqual({ ok: true })
+    expect(mockApi.gh.updatePullRequestBySlug).toHaveBeenCalledWith({
+      owner: 'acme',
+      repo: 'widgets',
+      number: 43,
+      updates: { title: 'Updated PR' }
+    })
+    expect(mockApi.gh.updateIssueBySlug).toHaveBeenLastCalledWith({
+      owner: 'acme',
+      repo: 'widgets',
+      number: 43,
+      updates: { title: 'Updated PR', addLabels: ['review'] }
+    })
+  })
+
+  it('validates missing project rows and malformed slugs', async () => {
+    const store = createTestStore()
+    const { cacheKey } = seedProject(store)
+
+    await expect(
+      store.getState().updateProjectFieldValue(cacheKey, 'missing', 'field-status', {
+        kind: 'text',
+        text: 'no row'
+      })
+    ).resolves.toMatchObject({ ok: false, error: { message: 'Row not found' } })
+
+    store.setState((state) => ({
+      projectViewCache: {
+        ...state.projectViewCache,
+        [cacheKey]: {
+          ...state.projectViewCache[cacheKey],
+          data: {
+            ...state.projectViewCache[cacheKey].data!,
+            rows: [
+              {
+                ...state.projectViewCache[cacheKey].data!.rows[0],
+                content: {
+                  ...state.projectViewCache[cacheKey].data!.rows[0].content,
+                  repository: null
+                }
+              }
+            ]
+          }
+        }
+      }
+    }))
+
+    await expect(
+      store.getState().patchProjectIssueOrPr(cacheKey, 'row-issue', { title: 'No slug' })
+    ).resolves.toMatchObject({ ok: false, error: { type: 'validation_error' } })
+  })
+
+  it('patches issue type and validates non-issue rows', async () => {
+    const store = createTestStore()
+    const { cacheKey } = seedProject(store)
+
+    await expect(
+      store.getState().patchProjectRowIssueType(cacheKey, 'row-issue', {
+        id: 'bug',
+        name: 'Bug',
+        color: 'RED',
+        description: 'Breakage'
+      })
+    ).resolves.toEqual({ ok: true })
+    expect(store.getState().projectViewCache[cacheKey]?.data?.rows[0].content.issueType).toEqual({
+      id: 'bug',
+      name: 'Bug',
+      color: 'RED',
+      description: 'Breakage'
+    })
+    expect(mockApi.gh.updateIssueTypeBySlug).toHaveBeenCalledWith({
+      owner: 'acme',
+      repo: 'widgets',
+      number: 42,
+      issueTypeId: 'bug'
+    })
+
+    await expect(
+      store.getState().patchProjectRowIssueType(cacheKey, 'row-pr', null)
+    ).resolves.toMatchObject({
+      ok: false,
+      error: { type: 'validation_error', message: 'Issue Type can only be set on Issues.' }
+    })
+  })
+
+  it('patches project row content without IPC', () => {
+    const store = createTestStore()
+    const { cacheKey } = seedProject(store)
+
+    store.getState().patchProjectRowContent(cacheKey, 'row-issue', {
+      title: 'Local title',
+      body: 'Local body',
+      state: 'closed',
+      labels: ['bug', 'new'],
+      assignees: ['mona', 'octo']
+    })
+
+    expect(store.getState().projectViewCache[cacheKey]?.data?.rows[0].content).toMatchObject({
+      title: 'Local title',
+      body: 'Local body',
+      state: 'CLOSED',
+      labels: [
+        { name: 'bug', color: 'red' },
+        { name: 'new', color: '808080' }
+      ],
+      assignees: [
+        { login: 'mona', name: null, avatarUrl: null },
+        { login: 'octo', name: null, avatarUrl: null }
+      ]
+    })
+  })
+})
+
+describe('createGitHubSlice work item pagination and counts', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    resetRemoteRuntimeMocks()
+  })
+
+  it('fetches next pages across repos and records failures', async () => {
+    const store = createTestStore()
+    mockApi.gh.listWorkItems
+      .mockResolvedValueOnce({
+        items: [
+          { id: 'a', type: 'issue', number: 1, title: 'A', updatedAt: '2026-01-02T00:00:00Z' }
+        ],
+        sources: { issues: null, prs: null, upstreamCandidate: null }
+      })
+      .mockRejectedValueOnce(new Error('repo failed'))
+
+    const result = await store.getState().fetchWorkItemsNextPage(
+      [
+        { repoId: 'repo-a', path: '/repo/a' },
+        { repoId: 'repo-b', path: '/repo/b' }
+      ],
+      10,
+      10,
+      'is:open',
+      '2026-01-01T00:00:00Z'
+    )
+
+    expect(result).toMatchObject({
+      failedCount: 1,
+      items: [{ id: 'a', repoId: 'repo-a' }]
+    })
+    expect(mockApi.gh.listWorkItems).toHaveBeenCalledWith({
+      repoPath: '/repo/a',
+      repoId: 'repo-a',
+      limit: 10,
+      query: 'is:open',
+      before: '2026-01-01T00:00:00Z'
+    })
+  })
+
+  it('counts work items across repos and treats failures as zero', async () => {
+    const store = createTestStore()
+    mockApi.gh.countWorkItems.mockResolvedValueOnce(3).mockRejectedValueOnce(new Error('nope'))
+
+    await expect(
+      store.getState().countWorkItemsAcrossRepos(
+        [
+          { repoId: 'repo-a', path: '/repo/a' },
+          { repoId: 'repo-b', path: '/repo/b' }
+        ],
+        'assigned:@me'
+      )
+    ).resolves.toBe(3)
+  })
+
+  it('prefetches only when the cache is cold', async () => {
+    const store = createTestStore()
+    mockApi.gh.listWorkItems.mockResolvedValue({
+      items: [],
+      sources: { issues: null, prs: null, upstreamCandidate: null }
+    })
+
+    store.getState().prefetchWorkItems('repo-a', '/repo/a', 5, '')
+    await vi.waitFor(() => expect(mockApi.gh.listWorkItems).toHaveBeenCalledTimes(1))
+    mockApi.gh.listWorkItems.mockClear()
+    store.getState().prefetchWorkItems('repo-a', '/repo/a', 5, '')
+    expect(mockApi.gh.listWorkItems).not.toHaveBeenCalled()
   })
 })
 

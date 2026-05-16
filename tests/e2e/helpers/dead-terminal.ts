@@ -5,7 +5,7 @@
  * flow and verify that terminal panes render content after the split.
  */
 
-import { expect } from '@playwright/test'
+import { expect } from '@stablyai/playwright-test'
 import { execFileSync } from 'child_process'
 import { writeFileSync } from 'fs'
 import path from 'path'

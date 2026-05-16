@@ -27,7 +27,7 @@
 import { readFileSync, existsSync } from 'fs'
 import type { ElectronApplication, Page } from '@stablyai/playwright-test'
 import { test, expect } from './helpers/orca-app'
-import { TEST_REPO_PATH_FILE } from './global-setup'
+import { TEST_REPO_PATH_FILE } from './helpers/seeded-git-repo'
 import {
   discoverActivePtyId,
   execInTerminal,
@@ -99,6 +99,26 @@ async function bootstrapRestoredLaunch(page: Page, expectedWorktreeId: string): 
   // sure it exists before any content/layout assertion races.
   await waitForActiveTerminalManager(page, 30_000)
   await waitForPaneCount(page, 1, 30_000)
+}
+
+async function countSessionSetCallsDuringIdle(page: Page, observationMs: number): Promise<number> {
+  return page.evaluate(async (durationMs) => {
+    const api = (
+      window as unknown as { api: { session: { set: (...args: unknown[]) => unknown } } }
+    ).api
+    let count = 0
+    const originalSet = api.session.set.bind(api.session)
+    api.session.set = (...args: unknown[]) => {
+      count += 1
+      return originalSet(...args)
+    }
+    return new Promise<number>((resolve) => {
+      window.setTimeout(() => {
+        api.session.set = originalSet
+        resolve(count)
+      }, durationMs)
+    })
+  }, observationMs)
 }
 
 test.describe('Terminal restart persistence', () => {
@@ -251,20 +271,7 @@ test.describe('Terminal restart persistence', () => {
       // driven store activity (tab auto-create, worktree activation) doesn't
       // flake the test, while still catching an interval that fires every
       // couple of seconds.
-      const callCount = await page.evaluate(async () => {
-        const api = (
-          window as unknown as { api: { session: { set: (...args: unknown[]) => unknown } } }
-        ).api
-        let count = 0
-        const originalSet = api.session.set.bind(api.session)
-        api.session.set = (...args: unknown[]) => {
-          count += 1
-          return originalSet(...args)
-        }
-        await new Promise((resolve) => setTimeout(resolve, 10_000))
-        api.session.set = originalSet
-        return count
-      })
+      const callCount = await countSessionSetCallsDuringIdle(page, 10_000)
 
       expect(callCount).toBeLessThan(20)
     } finally {

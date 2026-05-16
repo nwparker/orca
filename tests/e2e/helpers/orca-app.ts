@@ -16,17 +16,17 @@
 import {
   test as base,
   _electron as electron,
+  expect,
   type Page,
   type ElectronApplication,
   type TestInfo
 } from '@stablyai/playwright-test'
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs'
-import { execSync } from 'child_process'
 import { randomUUID } from 'crypto'
 import os from 'os'
 import path from 'path'
-import { TEST_REPO_PATH_FILE } from '../global-setup'
 import { cleanupE2EDaemons, closeElectronAppForE2E } from './electron-process-shutdown'
+import { createSeededTestRepo, isValidGitRepo, TEST_REPO_PATH_FILE } from './seeded-git-repo'
 
 type OrcaTestFixtures = {
   electronApp: ElectronApplication
@@ -88,57 +88,38 @@ function forwardElectronProcessLogs(app: ElectronApplication, testInfo: TestInfo
   })
 }
 
-function isValidGitRepo(repoPath: string): boolean {
-  if (!repoPath || !existsSync(repoPath)) {
-    return false
+async function startRendererCoverage(page: Page): Promise<void> {
+  await page.coverage.startJSCoverage({ resetOnNavigation: false })
+  // Why: Playwright can only start renderer V8 coverage after firstWindow()
+  // returns. Reloading under the opt-in coverage flag captures module-load and
+  // first-render lines that would otherwise be missed.
+  await page.reload({ waitUntil: 'domcontentloaded' })
+}
+
+async function writeRendererCoverage(page: Page, testInfo: TestInfo): Promise<void> {
+  const coverageDir = process.env.ORCA_E2E_COVERAGE_DIR
+  if (!coverageDir) {
+    return
   }
 
   try {
-    return (
-      execSync('git rev-parse --is-inside-work-tree', {
-        cwd: repoPath,
-        stdio: 'pipe',
-        encoding: 'utf8'
-      }).trim() === 'true'
+    const coverage = await page.coverage.stopJSCoverage()
+    mkdirSync(coverageDir, { recursive: true })
+    const safeTitle = testInfo.titlePath
+      .join(' ')
+      .replace(/[^a-zA-Z0-9_.-]+/g, '-')
+      .slice(0, 120)
+    writeFileSync(
+      path.join(coverageDir, `renderer-${testInfo.workerIndex}-${safeTitle}-${randomUUID()}.json`),
+      `${JSON.stringify(coverage)}\n`
     )
-  } catch {
-    return false
+  } catch (error) {
+    console.warn(
+      `[orca-e2e] renderer coverage was not written for "${testInfo.title}": ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    )
   }
-}
-
-function createSeededTestRepo(): string {
-  const testRepoDir = mkdtempSync(path.join(os.tmpdir(), 'orca-e2e-repo-'))
-
-  execSync('git init', { cwd: testRepoDir, stdio: 'pipe' })
-  execSync('git config user.email "e2e@test.local"', { cwd: testRepoDir, stdio: 'pipe' })
-  execSync('git config user.name "E2E Test"', { cwd: testRepoDir, stdio: 'pipe' })
-
-  writeFileSync(
-    path.join(testRepoDir, 'README.md'),
-    '# Orca E2E Test Repo\n\nThis repo was created automatically for Playwright tests.\n'
-  )
-  writeFileSync(path.join(testRepoDir, 'CLAUDE.md'), '# CLAUDE.md\n\nTest instructions for E2E.\n')
-  writeFileSync(
-    path.join(testRepoDir, 'package.json'),
-    `${JSON.stringify({ name: 'orca-e2e-test', version: '0.0.0', private: true }, null, 2)}\n`
-  )
-  writeFileSync(path.join(testRepoDir, '.gitignore'), 'node_modules/\n')
-  mkdirSync(path.join(testRepoDir, 'src'), { recursive: true })
-  writeFileSync(path.join(testRepoDir, 'src', 'index.ts'), 'export const hello = "world"\n')
-
-  execSync('git add -A', { cwd: testRepoDir, stdio: 'pipe' })
-  execSync('git commit -m "Initial commit for E2E tests"', { cwd: testRepoDir, stdio: 'pipe' })
-
-  // Why: worker-scoped fixture fallbacks can run in parallel; UUIDs avoid
-  // colliding on the same temp repo/worktree when workers start together.
-  const worktreeDir = path.join(testRepoDir, '..', `orca-e2e-worktree-${randomUUID()}`)
-  execSync(`git worktree add "${worktreeDir}" -b e2e-secondary`, {
-    cwd: testRepoDir,
-    stdio: 'pipe'
-  })
-
-  writeFileSync(TEST_REPO_PATH_FILE, testRepoDir)
-  return testRepoDir
 }
 
 /**
@@ -159,7 +140,7 @@ export const test = base.extend<OrcaTestFixtures, OrcaWorkerFixtures>({
         : ''
       const repoPath = isValidGitRepo(persistedRepoPath)
         ? persistedRepoPath
-        : createSeededTestRepo()
+        : createSeededTestRepo().repoDir
       await provideFixture(repoPath)
     },
     { scope: 'worker' }
@@ -259,17 +240,26 @@ export const test = base.extend<OrcaTestFixtures, OrcaWorkerFixtures>({
 
   // Test-scoped: grab the first BrowserWindow, add the test repo, and wait
   // until the session is fully ready with a worktree active.
-  sharedPage: async ({ electronApp, testRepoPath }, provideFixture) => {
+  sharedPage: async ({ electronApp, testRepoPath }, provideFixture, testInfo) => {
     // Why: the Electron app may take a while to create the first window,
     // especially on cold start with no prior dev userData. Isolated per-test
     // profiles make late-suite launches slower, so use the full test budget.
     const page = await electronApp.firstWindow({ timeout: 120_000 })
     await page.waitForLoadState('domcontentloaded')
 
-    // Wait for the store to be available
-    await page.waitForFunction(() => Boolean(window.__store), null, { timeout: 30_000 })
+    const collectRendererCoverage = Boolean(process.env.ORCA_E2E_COVERAGE_DIR)
+    if (collectRendererCoverage) {
+      await startRendererCoverage(page)
+    }
 
-    const repoPath = isValidGitRepo(testRepoPath) ? testRepoPath : createSeededTestRepo()
+    await expect
+      .poll(async () => page.evaluate(() => Boolean(window.__store)), {
+        timeout: 30_000,
+        message: 'Renderer store did not become available in the Electron window'
+      })
+      .toBe(true)
+
+    const repoPath = isValidGitRepo(testRepoPath) ? testRepoPath : createSeededTestRepo().repoDir
 
     // Add the test repo via the IPC bridge
     // Why: calling window.api.repos.add() goes through the same code path as
@@ -302,15 +292,15 @@ export const test = base.extend<OrcaTestFixtures, OrcaWorkerFixtures>({
       }
     })
 
-    // Wait for workspaceSessionReady to become true
-    await page.waitForFunction(
-      () => {
-        const store = window.__store
-        return store?.getState().workspaceSessionReady === true
-      },
-      null,
-      { timeout: 30_000 }
-    )
+    await expect
+      .poll(
+        async () => page.evaluate(() => window.__store?.getState().workspaceSessionReady === true),
+        {
+          timeout: 30_000,
+          message: 'workspaceSessionReady did not become true during fixture setup'
+        }
+      )
+      .toBe(true)
 
     // Re-activate the test repo's primary worktree after session hydration.
     // Why: workspaceSessionReady restoration can overwrite activeWorktreeId
@@ -353,6 +343,10 @@ export const test = base.extend<OrcaTestFixtures, OrcaWorkerFixtures>({
     })
 
     await provideFixture(page)
+
+    if (collectRendererCoverage) {
+      await writeRendererCoverage(page, testInfo)
+    }
   },
 
   // Test-scoped: each test gets the shared page

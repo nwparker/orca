@@ -19,6 +19,7 @@ import {
   getAllWorktreeIds,
   ensureTerminalVisible
 } from './helpers/store'
+import { platformShortcutChord } from './helpers/shortcuts'
 
 /**
  * Record a visit through the same two store calls that
@@ -72,6 +73,43 @@ async function resetNavHistory(page: Page): Promise<void> {
   })
 }
 
+async function observeNavStateFor(
+  page: Page,
+  durationMs: number
+): Promise<{ activeWorktreeId: string | null; index: number; changed: boolean }> {
+  return page.evaluate((duration) => {
+    const store = window.__store
+    if (!store) {
+      throw new Error('window.__store is not available')
+    }
+    const initial = store.getState()
+    const initialActiveWorktreeId = initial.activeWorktreeId
+    const initialIndex = initial.worktreeNavHistoryIndex
+    let changed = false
+    const unsubscribe = store.subscribe((state) => {
+      if (
+        state.activeWorktreeId !== initialActiveWorktreeId ||
+        state.worktreeNavHistoryIndex !== initialIndex
+      ) {
+        changed = true
+      }
+    })
+    return new Promise<{ activeWorktreeId: string | null; index: number; changed: boolean }>(
+      (resolve) => {
+        window.setTimeout(() => {
+          unsubscribe()
+          const latest = store.getState()
+          resolve({
+            activeWorktreeId: latest.activeWorktreeId,
+            index: latest.worktreeNavHistoryIndex,
+            changed
+          })
+        }, duration)
+      }
+    )
+  }, durationMs)
+}
+
 async function getBackButton(page: Page) {
   return page.getByRole('button', { name: 'Go back' })
 }
@@ -79,9 +117,6 @@ async function getBackButton(page: Page) {
 async function getForwardButton(page: Page) {
   return page.getByRole('button', { name: 'Go forward' })
 }
-
-const isMac = process.platform === 'darwin'
-const mod = isMac ? 'Meta' : 'Control'
 
 test.describe('Workspace Back/Forward Navigation', () => {
   test.beforeEach(async ({ orcaPage }) => {
@@ -218,7 +253,7 @@ test.describe('Workspace Back/Forward Navigation', () => {
     await expect(await getForwardButton(orcaPage)).toBeDisabled()
   })
 
-  test(`${isMac ? 'Cmd' : 'Ctrl'}+Alt+Left/Right shortcuts walk history`, async ({ orcaPage }) => {
+  test('Cmd/Ctrl+Alt+Left/Right shortcuts walk history', async ({ orcaPage }) => {
     const worktreeIds = await getAllWorktreeIds(orcaPage)
     test.skip(worktreeIds.length < 2, 'Need at least two worktrees to exercise shortcuts')
     const [primaryId, secondaryId] = worktreeIds
@@ -233,17 +268,20 @@ test.describe('Workspace Back/Forward Navigation', () => {
     // hidden-window Electron run.
     await orcaPage.evaluate(() => document.body.focus())
 
-    await orcaPage.keyboard.press(`${mod}+Alt+ArrowLeft`)
+    const backChord = await platformShortcutChord(orcaPage, 'ArrowLeft', { alt: true })
+    const forwardChord = await platformShortcutChord(orcaPage, 'ArrowRight', { alt: true })
+
+    await orcaPage.keyboard.press(backChord)
     await expect
       .poll(async () => getActiveWorktreeId(orcaPage), {
-        message: `${mod}+Alt+Left did not navigate back`
+        message: `${backChord} did not navigate back`
       })
       .toBe(primaryId)
 
-    await orcaPage.keyboard.press(`${mod}+Alt+ArrowRight`)
+    await orcaPage.keyboard.press(forwardChord)
     await expect
       .poll(async () => getActiveWorktreeId(orcaPage), {
-        message: `${mod}+Alt+Right did not navigate forward`
+        message: `${forwardChord} did not navigate forward`
       })
       .toBe(secondaryId)
   })
@@ -268,13 +306,12 @@ test.describe('Workspace Back/Forward Navigation', () => {
 
     const idBefore = await getActiveWorktreeId(orcaPage)
     await orcaPage.evaluate(() => document.body.focus())
-    await orcaPage.keyboard.press(`${mod}+Alt+ArrowLeft`)
+    await orcaPage.keyboard.press(await platformShortcutChord(orcaPage, 'ArrowLeft', { alt: true }))
 
-    // Give any erroneous nav a beat to land, then assert the active worktree
-    // and the slice index both stayed put.
-    await orcaPage.waitForTimeout(150)
-    expect(await getActiveWorktreeId(orcaPage)).toBe(idBefore)
-    const snapshot = await getNavHistorySnapshot(orcaPage)
-    expect(snapshot.index).toBe(1)
+    // Why: this is a negative shortcut assertion. Observe the store for a
+    // short explicit window so an erroneous navigation cannot pass by checking
+    // only the immediate post-keydown state.
+    const observed = await observeNavStateFor(orcaPage, 150)
+    expect(observed).toEqual({ activeWorktreeId: idBefore, index: 1, changed: false })
   })
 })

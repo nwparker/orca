@@ -1,6 +1,6 @@
 import { test, expect } from './helpers/orca-app'
 import { waitForActiveWorktree, waitForSessionReady } from './helpers/store'
-import type { Page } from '@playwright/test'
+import type { Page } from '@stablyai/playwright-test'
 
 type SeededUntrackedFile = {
   relativePath: string

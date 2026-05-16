@@ -10,14 +10,14 @@
  * temp file so the worker fixture can pick it up at runtime.
  */
 
-import { execSync } from 'child_process'
-import { randomUUID } from 'crypto'
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'fs'
+import { execFileSync } from 'child_process'
+import { existsSync } from 'fs'
 import path from 'path'
-import os from 'os'
+import { createSeededTestRepo } from './helpers/seeded-git-repo'
 
-/** Temp file where the test repo path is stored for the fixture to read. */
-export const TEST_REPO_PATH_FILE = path.join(os.tmpdir(), 'orca-e2e-test-repo-path.txt')
+function executableName(command: string): string {
+  return process.platform === 'win32' ? `${command}.cmd` : command
+}
 
 export default function globalSetup(): void {
   const root = process.cwd()
@@ -30,12 +30,21 @@ export default function globalSetup(): void {
     // Why: --mode e2e loads .env.e2e which sets VITE_EXPOSE_STORE=true. This
     // makes window.__store available in the renderer build so tests can read
     // Zustand state directly instead of fragile DOM scraping.
-    console.log('[e2e] Building Electron app with electron-vite build --mode e2e...')
-    execSync('npx electron-vite build --mode e2e', {
-      cwd: root,
-      stdio: 'inherit',
-      timeout: 120_000
-    })
+    const sourcemapArgs = process.env.ORCA_E2E_COVERAGE_DIR ? ['--sourcemap'] : []
+    console.log(
+      `[e2e] Building Electron app with electron-vite build --mode e2e${sourcemapArgs.length > 0 ? ' --sourcemap' : ''}...`
+    )
+    // Why: pass args directly instead of through a shell so the setup command
+    // works in temp paths containing spaces and on Windows' cmd.exe.
+    execFileSync(
+      executableName('npx'),
+      ['electron-vite', 'build', '--mode', 'e2e', ...sourcemapArgs],
+      {
+        cwd: root,
+        stdio: 'inherit',
+        timeout: 120_000
+      }
+    )
     console.log('[e2e] Build complete.')
   }
   if (process.env.ORCA_E2E_SSH_LOCALHOST === '1') {
@@ -43,7 +52,7 @@ export default function globalSetup(): void {
     // normal Electron E2E build does not produce that bundle, so build it only
     // for the explicit local-machine SSH run.
     console.log('[e2e] Building SSH relay bundle for localhost SSH E2E...')
-    execSync('pnpm run build:relay', {
+    execFileSync(executableName('pnpm'), ['run', 'build:relay'], {
       cwd: root,
       stdio: 'inherit',
       timeout: 120_000
@@ -53,40 +62,7 @@ export default function globalSetup(): void {
   // ── 2. Create a seeded test git repo ───────────────────────────────
   // Why: each test run gets its own git repo so the suite is fully
   // idempotent. No test depends on whatever repos the user has open.
-  const testRepoDir = mkdtempSync(path.join(os.tmpdir(), 'orca-e2e-repo-'))
-
-  execSync('git init', { cwd: testRepoDir, stdio: 'pipe' })
-  execSync('git config user.email "e2e@test.local"', { cwd: testRepoDir, stdio: 'pipe' })
-  execSync('git config user.name "E2E Test"', { cwd: testRepoDir, stdio: 'pipe' })
-
-  // Seed test data files
-  writeFileSync(
-    path.join(testRepoDir, 'README.md'),
-    '# Orca E2E Test Repo\n\nThis repo was created automatically for Playwright tests.\n'
-  )
-  writeFileSync(path.join(testRepoDir, 'CLAUDE.md'), '# CLAUDE.md\n\nTest instructions for E2E.\n')
-  writeFileSync(
-    path.join(testRepoDir, 'package.json'),
-    `${JSON.stringify({ name: 'orca-e2e-test', version: '0.0.0', private: true }, null, 2)}\n`
-  )
-  writeFileSync(path.join(testRepoDir, '.gitignore'), 'node_modules/\n')
-  mkdirSync(path.join(testRepoDir, 'src'), { recursive: true })
-  writeFileSync(path.join(testRepoDir, 'src', 'index.ts'), 'export const hello = "world"\n')
-
-  execSync('git add -A', { cwd: testRepoDir, stdio: 'pipe' })
-  execSync('git commit -m "Initial commit for E2E tests"', { cwd: testRepoDir, stdio: 'pipe' })
-
-  // Why: several tests verify worktree-switching behavior (terminal content
-  // retention, browser tab retention). They need at least 2 worktrees.
-  // Creating one here makes those tests run instead of being skipped.
-  const worktreeDir = path.join(testRepoDir, '..', `orca-e2e-worktree-${randomUUID()}`)
-  execSync(`git worktree add "${worktreeDir}" -b e2e-secondary`, {
-    cwd: testRepoDir,
-    stdio: 'pipe'
-  })
-  console.log(`[e2e] Secondary worktree created at ${worktreeDir}`)
-
-  // Write the test repo path so the fixture can read it
-  writeFileSync(TEST_REPO_PATH_FILE, testRepoDir)
-  console.log(`[e2e] Test repo created at ${testRepoDir}`)
+  const { repoDir, secondaryWorktreeDir } = createSeededTestRepo()
+  console.log(`[e2e] Secondary worktree created at ${secondaryWorktreeDir}`)
+  console.log(`[e2e] Test repo created at ${repoDir}`)
 }

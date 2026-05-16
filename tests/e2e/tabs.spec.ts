@@ -30,6 +30,7 @@ import {
   getTabBarOrder,
   ensureTerminalVisible
 } from './helpers/store'
+import { pressShortcut } from './helpers/shortcuts'
 
 const SORTABLE_TAB = '[data-testid="sortable-tab"]'
 
@@ -97,21 +98,19 @@ test.describe('Tabs', () => {
    * - New tab works
    */
   test('Cmd/Ctrl+T creates a new terminal tab', async ({ orcaPage }) => {
-    const isMac = process.platform === 'darwin'
-    const mod = isMac ? 'Meta' : 'Control'
     const tabsBefore = await countRenderedTabs(orcaPage)
 
     // Why: focus body first so the window-level keydown handler on Terminal.tsx
     // actually sees the event. Without focus the key may be eaten by an
     // unrelated input (e.g. a stale search field from a previous test).
     await orcaPage.evaluate(() => document.body.focus())
-    await orcaPage.keyboard.press(`${mod}+t`)
+    await pressShortcut(orcaPage, 't')
 
     // DOM-level count increased — confirms a new tab actually rendered.
     await expect
       .poll(() => countRenderedTabs(orcaPage), {
         timeout: 5_000,
-        message: `${mod}+T did not add a tab to the tab bar`
+        message: 'Cmd/Ctrl+T did not add a tab to the tab bar'
       })
       .toBe(tabsBefore + 1)
 
@@ -264,8 +263,6 @@ test.describe('Tabs', () => {
    * id but the tab bar stops painting the active indicator on that tab.
    */
   test('Cmd/Ctrl+Shift+[ walks tabs in drag-reordered order', async ({ orcaPage }) => {
-    const isMac = process.platform === 'darwin'
-    const mod = isMac ? 'Meta' : 'Control'
     const worktreeId = (await getActiveWorktreeId(orcaPage))!
 
     // Ensure at least 3 terminal tabs so the order cycle is non-trivial.
@@ -320,11 +317,11 @@ test.describe('Tabs', () => {
     }, a)
     await expect.poll(() => getDomActiveTabId(orcaPage), { timeout: 3_000 }).toBe(a)
 
-    await orcaPage.keyboard.press(`${mod}+Shift+BracketLeft`)
+    await pressShortcut(orcaPage, 'BracketLeft', { shift: true })
     await expect.poll(() => getDomActiveTabId(orcaPage), { timeout: 3_000 }).toBe(c)
     await expect(tabLocator(orcaPage, c)).toHaveAttribute('data-active', 'true')
 
-    await orcaPage.keyboard.press(`${mod}+Shift+BracketLeft`)
+    await pressShortcut(orcaPage, 'BracketLeft', { shift: true })
     await expect.poll(() => getDomActiveTabId(orcaPage), { timeout: 3_000 }).toBe(b)
     await expect(tabLocator(orcaPage, b)).toHaveAttribute('data-active', 'true')
   })

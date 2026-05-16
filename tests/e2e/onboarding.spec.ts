@@ -12,6 +12,7 @@ import { test, expect } from './helpers/orca-app'
 import { waitForSessionReady } from './helpers/store'
 import type { Page } from '@stablyai/playwright-test'
 import type { GlobalSettings, TuiAgent } from '../../src/shared/types'
+import { platformShortcutChord, pressShortcut } from './helpers/shortcuts'
 
 type OnboardingState = {
   closedAt: number | null
@@ -178,11 +179,20 @@ test.describe('Onboarding flow', () => {
     // applies the choice immediately, not just on Continue.
     // Why: 'system' resolves async on mount, so wait for the class to settle
     // before snapshotting — otherwise startingTheme can be stale.
-    await orcaPage.waitForFunction(
-      () =>
-        document.documentElement.classList.contains('dark') ||
-        document.documentElement.classList.contains('light')
-    )
+    await expect
+      .poll(
+        async () =>
+          orcaPage.evaluate(
+            () =>
+              document.documentElement.classList.contains('dark') ||
+              document.documentElement.classList.contains('light')
+          ),
+        {
+          timeout: 5_000,
+          message: 'Document theme class did not resolve before theme selection'
+        }
+      )
+      .toBe(true)
     const startingTheme = await getDocumentThemeClass(orcaPage)
     const oppositeTheme: 'dark' | 'light' = startingTheme === 'dark' ? 'light' : 'dark'
     const oppositeTileName = oppositeTheme === 'light' ? /Bright & crisp/ : /Easy on the eyes/
@@ -281,16 +291,11 @@ test.describe('Onboarding flow', () => {
       timeout: 15_000
     })
 
-    // Why: the OS the renderer reports drives whether Cmd or Ctrl is the
-    // accelerator (OnboardingFlow.tsx checks navigator.userAgent).
-    const isMac = await orcaPage.evaluate(() => navigator.userAgent.includes('Mac'))
-    const accelerator = isMac ? 'Meta+Enter' : 'Control+Enter'
-
     // Why: in headless Linux CI the window-level capture-phase listener can
     // miss synthetic keyboard events when no element holds focus. Click an
     // inert area inside the overlay first to anchor focus, then press.
     await orcaPage.locator('footer').click({ position: { x: 1, y: 1 } })
-    await orcaPage.keyboard.press(accelerator)
+    await pressShortcut(orcaPage, 'Enter')
     await expect(orcaPage.getByRole('heading', { name: /Make it feel like home/i })).toBeVisible()
     await expect
       .poll(async () => (await getOnboardingState(orcaPage)).lastCompletedStep, {
@@ -456,16 +461,29 @@ test.describe('Onboarding flow', () => {
 
     // Why: focus the clone-url input and press Cmd/Ctrl+Enter. The capture-
     // phase keydown handler should bail via isEditableTarget, so the folder
-    // picker IPC must NOT fire (the heading should remain visible — no
-    // navigation, no opened OS dialog). A bare Enter press also must not
-    // submit the empty form (the Clone button is disabled when blank).
-    const isMac = await orcaPage.evaluate(() => navigator.userAgent.includes('Mac'))
-    const accelerator = isMac ? 'Meta+Enter' : 'Control+Enter'
+    // picker IPC must NOT fire. Spying on pickFolder checks the actual bad
+    // side effect instead of sleeping and hoping an OS dialog would appear.
+    await orcaPage.evaluate(() => {
+      const api = window.api as typeof window.api & {
+        __e2ePickFolderCalls?: number
+        __e2eOriginalPickFolder?: typeof window.api.repos.pickFolder
+      }
+      api.__e2ePickFolderCalls = 0
+      api.__e2eOriginalPickFolder ??= api.repos.pickFolder.bind(api.repos)
+      api.repos.pickFolder = async () => {
+        api.__e2ePickFolderCalls = (api.__e2ePickFolderCalls ?? 0) + 1
+        return null
+      }
+    })
+
     const input = orcaPage.getByPlaceholder('git@github.com:org/repo.git')
     await input.click()
-    await input.press(accelerator)
-    // Brief wait so any (incorrect) handler firing would have already happened.
-    await orcaPage.waitForTimeout(250)
+    await input.press(await platformShortcutChord(orcaPage, 'Enter'))
+    const pickFolderCalls = await orcaPage.evaluate(() => {
+      const api = window.api as typeof window.api & { __e2ePickFolderCalls?: number }
+      return api.__e2ePickFolderCalls ?? 0
+    })
+    expect(pickFolderCalls).toBe(0)
     await expect(orcaPage.getByRole('heading', { name: /Point Orca at some code/i })).toBeVisible()
     // Onboarding must still be open (closedAt remains null).
     expect((await getOnboardingState(orcaPage)).closedAt).toBeNull()

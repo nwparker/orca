@@ -1,10 +1,33 @@
+/* eslint-disable max-lines -- Why: store coverage shares one persisted-state
+   harness across load, refresh, reset, and aggregate cases. */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { rmSync } from 'fs'
 import type { ClaudeUsagePersistedState } from './types'
+
+const scannerMocks = vi.hoisted(() => ({
+  scanClaudeUsageFiles: vi.fn(),
+  createWorktreeRefs: vi.fn(() => [{ repoId: 'repo-1', worktreeId: 'wt-1', path: '/repo' }])
+}))
 
 vi.mock('electron', () => ({
   app: {
     getPath: vi.fn(() => '/tmp/orca-test-userdata')
   }
+}))
+
+vi.mock('./scanner', async (importOriginal) => {
+  const actual = (await importOriginal()) as Record<string, unknown>
+  return {
+    ...actual,
+    createWorktreeRefs: scannerMocks.createWorktreeRefs,
+    scanClaudeUsageFiles: scannerMocks.scanClaudeUsageFiles
+  }
+})
+
+vi.mock('../usage-worktree-metadata', () => ({
+  loadKnownUsageWorktreesByRepo: vi.fn(
+    () => new Map([['repo-1', [{ worktreeId: 'wt-1', path: '/repo' }]]])
+  )
 }))
 
 import { ClaudeUsageStore } from './store'
@@ -37,6 +60,11 @@ describe('ClaudeUsageStore', () => {
   beforeEach(() => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-09T12:00:00.000-04:00'))
+    vi.clearAllMocks()
+    rmSync('/tmp/orca-test-userdata', { recursive: true, force: true })
+    scannerMocks.createWorktreeRefs.mockReturnValue([
+      { repoId: 'repo-1', worktreeId: 'wt-1', path: '/repo' }
+    ])
   })
 
   it('reports no data for Orca scope when only non-Orca usage exists', async () => {
@@ -318,5 +346,111 @@ describe('ClaudeUsageStore', () => {
     expect(usage.providerSessionId).toBe('session-1')
     expect(usage.totalTokens).toBe(1800)
     expect(usage.estimatedCostUsd).toBeCloseTo(0.010935)
+  })
+
+  it('persists enabled scan results and skips fresh refreshes', async () => {
+    const sessions: ClaudeUsagePersistedState['sessions'] = [
+      {
+        sessionId: 'session-scan',
+        firstTimestamp: '2026-04-09T10:00:00.000Z',
+        lastTimestamp: '2026-04-09T10:05:00.000Z',
+        model: 'claude-haiku-3-5',
+        lastCwd: '/repo',
+        lastGitBranch: 'main',
+        primaryWorktreeId: 'wt-1',
+        primaryRepoId: 'repo-1',
+        turnCount: 1,
+        totalInputTokens: 10,
+        totalOutputTokens: 5,
+        totalCacheReadTokens: 0,
+        totalCacheWriteTokens: 0,
+        locationBreakdown: [
+          {
+            locationKey: 'worktree:wt-1',
+            projectLabel: 'Repo',
+            repoId: 'repo-1',
+            worktreeId: 'wt-1',
+            turnCount: 1,
+            inputTokens: 10,
+            outputTokens: 5,
+            cacheReadTokens: 0,
+            cacheWriteTokens: 0
+          }
+        ]
+      }
+    ]
+    const dailyAggregates: ClaudeUsagePersistedState['dailyAggregates'] = [
+      {
+        day: '2026-04-09',
+        model: 'claude-haiku-3-5',
+        projectKey: 'worktree:wt-1',
+        projectLabel: 'Repo',
+        repoId: 'repo-1',
+        worktreeId: 'wt-1',
+        turnCount: 1,
+        zeroCacheReadTurnCount: 1,
+        inputTokens: 10,
+        outputTokens: 5,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0
+      }
+    ]
+    scannerMocks.scanClaudeUsageFiles.mockResolvedValue({
+      processedFiles: [{ filePath: '/tmp/log.jsonl', mtimeMs: 1, size: 10 }],
+      sessions,
+      dailyAggregates
+    })
+    const backingStore = {
+      getRepos: () => [{ id: 'repo-1', path: '/repo', displayName: 'Repo' }],
+      getWorktreeMeta: () => undefined
+    }
+    const store = new ClaudeUsageStore(backingStore as never)
+
+    await expect(store.setEnabled(true)).resolves.toMatchObject({ enabled: true })
+    await expect(store.refresh()).resolves.toMatchObject({
+      enabled: true,
+      lastScanStartedAt: Date.now(),
+      lastScanCompletedAt: Date.now(),
+      lastScanError: null,
+      hasAnyClaudeData: true
+    })
+    expect(scannerMocks.createWorktreeRefs).toHaveBeenCalled()
+    expect(scannerMocks.scanClaudeUsageFiles).toHaveBeenCalledTimes(1)
+    await store.refresh()
+    expect(scannerMocks.scanClaudeUsageFiles).toHaveBeenCalledTimes(1)
+    await expect(store.getDaily('orca', '30d')).resolves.toEqual([
+      {
+        day: '2026-04-09',
+        inputTokens: 10,
+        outputTokens: 5,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0
+      }
+    ])
+  })
+
+  it('serializes concurrent scans and records scan errors without throwing', async () => {
+    const pendingScan = new Promise<never>((_resolve, reject) => {
+      setTimeout(() => reject(new Error('scan failed')), 10)
+    })
+    scannerMocks.scanClaudeUsageFiles.mockReturnValueOnce(pendingScan)
+    const store = new ClaudeUsageStore({
+      getRepos: () => [],
+      getWorktreeMeta: () => undefined
+    } as never)
+    await store.setEnabled(true)
+
+    const first = store.refresh(true)
+    const second = store.refresh(true)
+    await vi.advanceTimersByTimeAsync(10)
+    await first
+    await second
+
+    expect(scannerMocks.scanClaudeUsageFiles).toHaveBeenCalledTimes(1)
+    expect(store.getScanState()).toMatchObject({
+      enabled: true,
+      isScanning: false,
+      lastScanError: 'scan failed'
+    })
   })
 })

@@ -25,6 +25,12 @@ const {
   bulkUnstageFilesMock,
   bulkDiscardChangesMock,
   discardChangesMock,
+  getUpstreamStatusMock,
+  gitFetchMock,
+  gitPullMock,
+  gitPushMock,
+  validateGitPushTargetMock,
+  getRemoteFileUrlMock,
   listWorktreesMock,
   resolveCommitMessageSettingsMock,
   generateCommitMessageFromContextMock,
@@ -53,6 +59,12 @@ const {
   bulkUnstageFilesMock: vi.fn(),
   bulkDiscardChangesMock: vi.fn(),
   discardChangesMock: vi.fn(),
+  getUpstreamStatusMock: vi.fn(),
+  gitFetchMock: vi.fn(),
+  gitPullMock: vi.fn(),
+  gitPushMock: vi.fn(),
+  validateGitPushTargetMock: vi.fn(),
+  getRemoteFileUrlMock: vi.fn(),
   listWorktreesMock: vi.fn(),
   resolveCommitMessageSettingsMock: vi.fn(),
   generateCommitMessageFromContextMock: vi.fn(),
@@ -97,6 +109,24 @@ vi.mock('../git/status', () => ({
 
 vi.mock('../git/worktree', () => ({
   listWorktrees: listWorktreesMock
+}))
+
+vi.mock('../git/upstream', () => ({
+  getUpstreamStatus: getUpstreamStatusMock
+}))
+
+vi.mock('../git/remote', () => ({
+  gitFetch: gitFetchMock,
+  gitPull: gitPullMock,
+  gitPush: gitPushMock
+}))
+
+vi.mock('../git/push-target-validation', () => ({
+  validateGitPushTarget: validateGitPushTargetMock
+}))
+
+vi.mock('../git/repo', () => ({
+  getRemoteFileUrl: getRemoteFileUrlMock
 }))
 
 vi.mock('../providers/ssh-filesystem-dispatch', () => ({
@@ -183,6 +213,12 @@ describe('registerFilesystemHandlers', () => {
       bulkUnstageFilesMock,
       bulkDiscardChangesMock,
       discardChangesMock,
+      getUpstreamStatusMock,
+      gitFetchMock,
+      gitPullMock,
+      gitPushMock,
+      validateGitPushTargetMock,
+      getRemoteFileUrlMock,
       listWorktreesMock,
       resolveCommitMessageSettingsMock,
       generateCommitMessageFromContextMock,
@@ -214,6 +250,12 @@ describe('registerFilesystemHandlers', () => {
     trashItemMock.mockResolvedValue(undefined)
     getSshGitProviderMock.mockReturnValue(null)
     statMock.mockResolvedValue({ size: 10, isDirectory: () => false, mtimeMs: 123 })
+    getUpstreamStatusMock.mockResolvedValue({ hasUpstream: true, ahead: 1, behind: 2 })
+    gitFetchMock.mockResolvedValue(undefined)
+    gitPullMock.mockResolvedValue(undefined)
+    gitPushMock.mockResolvedValue(undefined)
+    validateGitPushTargetMock.mockResolvedValue(undefined)
+    getRemoteFileUrlMock.mockResolvedValue('https://example.com/repo/blob/main/src/file.ts#L7')
     openMock.mockResolvedValue({
       read: vi.fn(async (buffer: Buffer) => {
         buffer.fill(0x61)
@@ -1294,5 +1336,220 @@ describe('registerFilesystemHandlers', () => {
     expect(listFilesMock).toHaveBeenCalledWith('/home/user/repo', {
       excludePaths: ['/home/user/repo/worktrees/feature']
     })
+  })
+
+  it('routes SSH filesystem operations through the remote provider', async () => {
+    const provider = {
+      readDir: vi.fn().mockResolvedValue([{ name: 'README.md', isDirectory: false }]),
+      readFile: vi.fn().mockResolvedValue({ content: 'remote', isBinary: false }),
+      writeFile: vi.fn().mockResolvedValue(undefined),
+      deletePath: vi.fn().mockResolvedValue(undefined),
+      stat: vi.fn().mockResolvedValue({ size: 42, type: 'directory', mtime: 1234 }),
+      search: vi.fn().mockResolvedValue({ matches: [], truncated: false }),
+      listFiles: vi.fn().mockResolvedValue(['README.md'])
+    }
+    getSshFilesystemProviderMock.mockReturnValue(provider)
+
+    registerFilesystemHandlers(store as never)
+
+    await expect(
+      handlers.get('fs:readDir')!(null, { dirPath: '/remote/repo', connectionId: 'ssh-1' })
+    ).resolves.toEqual([{ name: 'README.md', isDirectory: false }])
+    await expect(
+      handlers.get('fs:readFile')!(null, {
+        filePath: '/remote/repo/README.md',
+        connectionId: 'ssh-1'
+      })
+    ).resolves.toEqual({ content: 'remote', isBinary: false })
+    await handlers.get('fs:writeFile')!(null, {
+      filePath: '/remote/repo/README.md',
+      content: 'updated',
+      connectionId: 'ssh-1'
+    })
+    await handlers.get('fs:deletePath')!(null, {
+      targetPath: '/remote/repo/old.txt',
+      recursive: true,
+      connectionId: 'ssh-1'
+    })
+    await expect(
+      handlers.get('fs:stat')!(null, {
+        filePath: '/remote/repo',
+        connectionId: 'ssh-1'
+      })
+    ).resolves.toEqual({ size: 42, isDirectory: true, mtime: 1234 })
+    await expect(
+      handlers.get('fs:search')!(
+        { sender: { id: 1 } },
+        { rootPath: '/remote/repo', query: 'needle', connectionId: 'ssh-1' }
+      )
+    ).resolves.toEqual({ matches: [], truncated: false })
+    await expect(
+      handlers.get('fs:listFiles')!(null, { rootPath: '/remote/repo', connectionId: 'ssh-1' })
+    ).resolves.toEqual(['README.md'])
+
+    expect(provider.readDir).toHaveBeenCalledWith('/remote/repo')
+    expect(provider.readFile).toHaveBeenCalledWith('/remote/repo/README.md')
+    expect(provider.writeFile).toHaveBeenCalledWith('/remote/repo/README.md', 'updated')
+    expect(provider.deletePath).toHaveBeenCalledWith('/remote/repo/old.txt', true)
+    expect(provider.stat).toHaveBeenCalledWith('/remote/repo')
+    expect(provider.search).toHaveBeenCalledWith({
+      rootPath: '/remote/repo',
+      query: 'needle',
+      connectionId: 'ssh-1'
+    })
+  })
+
+  it('routes local git fetch, pull, push, upstream, and remote URL handlers', async () => {
+    const pushTarget = { remoteName: 'origin', branchName: 'feature' }
+
+    registerFilesystemHandlers(store as never)
+
+    await expect(
+      handlers.get('git:upstreamStatus')!(null, { worktreePath: WORKTREE_FEATURE_PATH })
+    ).resolves.toEqual({ hasUpstream: true, ahead: 1, behind: 2 })
+    await handlers.get('git:fetch')!(null, { worktreePath: WORKTREE_FEATURE_PATH })
+    await handlers.get('git:pull')!(null, { worktreePath: WORKTREE_FEATURE_PATH })
+    await handlers.get('git:push')!(null, {
+      worktreePath: WORKTREE_FEATURE_PATH,
+      publish: 'true',
+      pushTarget
+    })
+    await expect(
+      handlers.get('git:remoteFileUrl')!(null, {
+        worktreePath: WORKTREE_FEATURE_PATH,
+        relativePath: 'src/file.ts',
+        line: 7
+      })
+    ).resolves.toBe('https://example.com/repo/blob/main/src/file.ts#L7')
+
+    expect(getUpstreamStatusMock).toHaveBeenCalledWith(WORKTREE_FEATURE_PATH)
+    expect(gitFetchMock).toHaveBeenCalledWith(WORKTREE_FEATURE_PATH)
+    expect(gitPullMock).toHaveBeenCalledWith(WORKTREE_FEATURE_PATH)
+    expect(validateGitPushTargetMock).toHaveBeenCalledWith(WORKTREE_FEATURE_PATH, pushTarget)
+    expect(gitPushMock).toHaveBeenCalledWith(WORKTREE_FEATURE_PATH, false, pushTarget)
+    expect(getRemoteFileUrlMock).toHaveBeenCalledWith(WORKTREE_FEATURE_PATH, 'src/file.ts', 7)
+  })
+
+  it('routes SSH git operations through the remote git provider', async () => {
+    const provider = {
+      getStatus: vi.fn().mockResolvedValue({ entries: [] }),
+      detectConflictOperation: vi.fn().mockResolvedValue({ type: 'merge' }),
+      getDiff: vi
+        .fn()
+        .mockResolvedValue({ kind: 'text', originalContent: '', modifiedContent: '' }),
+      getBranchCompare: vi.fn().mockResolvedValue({ summary: { status: 'ready' }, entries: [] }),
+      getUpstreamStatus: vi.fn().mockResolvedValue({ hasUpstream: true, ahead: 0, behind: 0 }),
+      fetchRemote: vi.fn().mockResolvedValue(undefined),
+      pushBranch: vi.fn().mockResolvedValue(undefined),
+      pullBranch: vi.fn().mockResolvedValue(undefined),
+      getBranchDiff: vi.fn().mockResolvedValue([]),
+      stageFile: vi.fn().mockResolvedValue(undefined),
+      unstageFile: vi.fn().mockResolvedValue(undefined),
+      discardChanges: vi.fn().mockResolvedValue(undefined),
+      bulkStageFiles: vi.fn().mockResolvedValue(undefined),
+      bulkUnstageFiles: vi.fn().mockResolvedValue(undefined),
+      bulkDiscardChanges: vi.fn().mockResolvedValue(undefined),
+      getRemoteFileUrl: vi.fn().mockResolvedValue('https://remote/repo/src/file.ts#L9')
+    }
+    const pushTarget = { remoteName: 'origin', branchName: 'feature' }
+    getSshGitProviderMock.mockReturnValue(provider)
+
+    registerFilesystemHandlers(store as never)
+
+    await handlers.get('git:status')!(null, { worktreePath: '/remote/repo', connectionId: 'ssh-1' })
+    await handlers.get('git:conflictOperation')!(null, {
+      worktreePath: '/remote/repo',
+      connectionId: 'ssh-1'
+    })
+    await handlers.get('git:diff')!(null, {
+      worktreePath: '/remote/repo',
+      filePath: 'src/file.ts',
+      staged: false,
+      compareAgainstHead: true,
+      connectionId: 'ssh-1'
+    })
+    await handlers.get('git:branchCompare')!(null, {
+      worktreePath: '/remote/repo',
+      baseRef: 'origin/main',
+      connectionId: 'ssh-1'
+    })
+    await handlers.get('git:upstreamStatus')!(null, {
+      worktreePath: '/remote/repo',
+      connectionId: 'ssh-1'
+    })
+    await handlers.get('git:fetch')!(null, { worktreePath: '/remote/repo', connectionId: 'ssh-1' })
+    await handlers.get('git:push')!(null, {
+      worktreePath: '/remote/repo',
+      publish: true,
+      pushTarget,
+      connectionId: 'ssh-1'
+    })
+    await handlers.get('git:pull')!(null, { worktreePath: '/remote/repo', connectionId: 'ssh-1' })
+    await expect(
+      handlers.get('git:branchDiff')!(null, {
+        worktreePath: '/remote/repo',
+        compare: { baseRef: 'origin/main', baseOid: 'base', headOid: 'head', mergeBase: 'merge' },
+        filePath: 'src/file.ts',
+        oldPath: 'src/old.ts',
+        connectionId: 'ssh-1'
+      })
+    ).resolves.toEqual({
+      kind: 'text',
+      originalContent: '',
+      modifiedContent: '',
+      originalIsBinary: false,
+      modifiedIsBinary: false
+    })
+    await handlers.get('git:stage')!(null, {
+      worktreePath: '/remote/repo',
+      filePath: 'src/file.ts',
+      connectionId: 'ssh-1'
+    })
+    await handlers.get('git:unstage')!(null, {
+      worktreePath: '/remote/repo',
+      filePath: 'src/file.ts',
+      connectionId: 'ssh-1'
+    })
+    await handlers.get('git:discard')!(null, {
+      worktreePath: '/remote/repo',
+      filePath: 'src/file.ts',
+      connectionId: 'ssh-1'
+    })
+    await handlers.get('git:bulkStage')!(null, {
+      worktreePath: '/remote/repo',
+      filePaths: ['a.ts'],
+      connectionId: 'ssh-1'
+    })
+    await handlers.get('git:bulkUnstage')!(null, {
+      worktreePath: '/remote/repo',
+      filePaths: ['b.ts'],
+      connectionId: 'ssh-1'
+    })
+    await handlers.get('git:remoteFileUrl')!(null, {
+      worktreePath: '/remote/repo',
+      relativePath: 'src/file.ts',
+      line: 9,
+      connectionId: 'ssh-1'
+    })
+
+    expect(provider.getStatus).toHaveBeenCalledWith('/remote/repo', { includeIgnored: false })
+    expect(provider.detectConflictOperation).toHaveBeenCalledWith('/remote/repo')
+    expect(provider.getDiff).toHaveBeenCalledWith('/remote/repo', 'src/file.ts', false, true)
+    expect(provider.getBranchCompare).toHaveBeenCalledWith('/remote/repo', 'origin/main')
+    expect(provider.getUpstreamStatus).toHaveBeenCalledWith('/remote/repo')
+    expect(provider.fetchRemote).toHaveBeenCalledWith('/remote/repo')
+    expect(provider.pushBranch).toHaveBeenCalledWith('/remote/repo', true, pushTarget)
+    expect(provider.pullBranch).toHaveBeenCalledWith('/remote/repo')
+    expect(provider.getBranchDiff).toHaveBeenCalledWith('/remote/repo', 'merge', {
+      includePatch: true,
+      filePath: 'src/file.ts',
+      oldPath: 'src/old.ts'
+    })
+    expect(provider.stageFile).toHaveBeenCalledWith('/remote/repo', 'src/file.ts')
+    expect(provider.unstageFile).toHaveBeenCalledWith('/remote/repo', 'src/file.ts')
+    expect(provider.discardChanges).toHaveBeenCalledWith('/remote/repo', 'src/file.ts')
+    expect(provider.bulkStageFiles).toHaveBeenCalledWith('/remote/repo', ['a.ts'])
+    expect(provider.bulkUnstageFiles).toHaveBeenCalledWith('/remote/repo', ['b.ts'])
+    expect(provider.getRemoteFileUrl).toHaveBeenCalledWith('/remote/repo', 'src/file.ts', 9)
   })
 })

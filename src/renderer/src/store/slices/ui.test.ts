@@ -2,7 +2,7 @@
 import { createStore, type StoreApi } from 'zustand/vanilla'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { getDefaultUIState } from '../../../../shared/constants'
-import type { PersistedUIState } from '../../../../shared/types'
+import type { PersistedUIState, UpdateStatus } from '../../../../shared/types'
 import { createUISlice } from './ui'
 import { createWorktreeNavHistorySlice } from './worktree-nav-history'
 import type { AppState } from '../types'
@@ -492,5 +492,303 @@ describe('createUISlice space navigation', () => {
     store.getState().closeSpacePage()
 
     expect(store.getState().activeView).toBe('tasks')
+  })
+})
+
+describe('createUISlice action mutators', () => {
+  function stubPersistence() {
+    const setUI = vi.fn().mockResolvedValue(undefined)
+    const deletePet = vi.fn().mockResolvedValue(undefined)
+    const dismissNudge = vi.fn().mockResolvedValue(undefined)
+    vi.stubGlobal('window', {
+      api: {
+        pet: { delete: deletePet },
+        ui: { set: setUI },
+        updater: { dismissNudge }
+      }
+    })
+    return { deletePet, dismissNudge, setUI }
+  }
+
+  it('acknowledges and unacknowledges agent pane keys without rewriting no-ops', () => {
+    const now = 1_700_000_000_000
+    vi.useFakeTimers()
+    vi.setSystemTime(now)
+
+    try {
+      const store = createUIStore()
+      const beforeEmptyAck = store.getState()
+      store.getState().acknowledgeAgents([])
+      expect(store.getState()).toBe(beforeEmptyAck)
+
+      store.getState().acknowledgeAgents(['tab-1:1', 'tab-2:1'])
+      expect(store.getState().acknowledgedAgentsByPaneKey).toEqual({
+        'tab-1:1': now,
+        'tab-2:1': now
+      })
+
+      const beforeDuplicateAck = store.getState()
+      store.getState().acknowledgeAgents(['tab-1:1'])
+      expect(store.getState()).toBe(beforeDuplicateAck)
+
+      store.getState().unacknowledgeAgents(['missing', 'tab-1:1'])
+      expect(store.getState().acknowledgedAgentsByPaneKey).toEqual({ 'tab-2:1': now })
+
+      const beforeEmptyUnack = store.getState()
+      store.getState().unacknowledgeAgents([])
+      expect(store.getState()).toBe(beforeEmptyUnack)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('opens task page and prefetches the matching GitHub work-item query', () => {
+    stubPersistence()
+    const store = createUIStore()
+    const prefetchWorkItems = vi.fn()
+    store.setState({
+      repos: [
+        {
+          id: 'repo1',
+          path: '/repo1',
+          displayName: 'Repo 1',
+          badgeColor: '#000',
+          addedAt: 0
+        }
+      ],
+      settings: {
+        defaultRepoSelection: ['repo1'],
+        defaultTaskSource: 'github',
+        defaultTaskViewPreset: 'my-prs'
+      },
+      prefetchWorkItems,
+      taskResumeState: { githubMode: 'items' }
+    } as unknown as Partial<AppState>)
+
+    store.getState().openTaskPage({ preselectedRepoId: 'repo1' })
+
+    expect(store.getState().activeView).toBe('tasks')
+    expect(store.getState().taskPageData).toEqual({ preselectedRepoId: 'repo1' })
+    expect(prefetchWorkItems).toHaveBeenCalledWith(
+      'repo1',
+      '/repo1',
+      expect.any(Number),
+      'author:@me is:pr is:open'
+    )
+
+    store.setState({
+      taskResumeState: {
+        githubMode: 'items',
+        githubItemsPreset: null,
+        githubItemsQuery: '  label:bug  '
+      }
+    } as Partial<AppState>)
+    store.getState().openTaskPage()
+
+    expect(prefetchWorkItems).toHaveBeenLastCalledWith(
+      'repo1',
+      '/repo1',
+      expect.any(Number),
+      'label:bug'
+    )
+  })
+
+  it('updates navigation, modal, grouping, filter, status-bar, and workspace-board state', () => {
+    const { setUI } = stubPersistence()
+    const store = createUIStore()
+
+    store.getState().openActivityPage()
+    expect(store.getState().activeView).toBe('activity')
+    store.getState().closeActivityPage()
+    expect(store.getState().activeView).toBe('terminal')
+
+    store.getState().setSelectedAutomationId('auto-1')
+    store.getState().openAutomationsPage()
+    expect(store.getState().activeView).toBe('automations')
+    expect(store.getState().selectedAutomationId).toBe('auto-1')
+    store.getState().closeAutomationsPage()
+    expect(store.getState().activeView).toBe('terminal')
+
+    store.getState().openSettingsTarget({ pane: 'repo', repoId: 'repo1', sectionId: 'hooks' })
+    expect(store.getState().settingsNavigationTarget).toEqual({
+      pane: 'repo',
+      repoId: 'repo1',
+      sectionId: 'hooks'
+    })
+    store.getState().clearSettingsTarget()
+    expect(store.getState().settingsNavigationTarget).toBeNull()
+
+    store.getState().setNewWorkspaceDraft({
+      agent: 'codex',
+      attachments: [],
+      linkedIssue: '',
+      linkedPR: null,
+      linkedWorkItem: null,
+      name: 'feature',
+      note: '',
+      prompt: 'Build it',
+      repoId: 'repo1'
+    })
+    expect(store.getState().newWorkspaceDraft?.name).toBe('feature')
+    store.getState().clearNewWorkspaceDraft()
+    expect(store.getState().newWorkspaceDraft).toBeNull()
+
+    store.getState().openModal('add-repo', { source: 'test' })
+    expect(store.getState().activeModal).toBe('add-repo')
+    expect(store.getState().modalData).toEqual({ source: 'test' })
+    store.getState().closeModal()
+    expect(store.getState().activeModal).toBe('none')
+
+    store.getState().setGroupBy('pr-status')
+    expect(store.getState().groupBy).toBe('pr-status')
+    expect(store.getState().collapsedGroups).toEqual(new Set())
+    store.getState().setSortBy('name')
+    store.getState().setShowActiveOnly(true)
+    store.getState().setHideDefaultBranchWorkspace(true)
+    store.getState().setFilterRepoIds(['repo1'])
+    expect(store.getState().sortBy).toBe('name')
+    expect(store.getState().showActiveOnly).toBe(true)
+    expect(store.getState().hideDefaultBranchWorkspace).toBe(true)
+    expect(store.getState().filterRepoIds).toEqual(['repo1'])
+
+    store.getState().toggleCollapsedGroup('repo1')
+    expect(store.getState().collapsedGroups).toEqual(new Set(['repo1']))
+    store.getState().toggleCollapsedGroup('repo1')
+    expect(store.getState().collapsedGroups).toEqual(new Set())
+
+    const firstCardProperty = store.getState().worktreeCardProperties[0]
+    store.getState().toggleWorktreeCardProperty(firstCardProperty)
+    expect(store.getState().worktreeCardProperties).not.toContain(firstCardProperty)
+    store.getState().toggleWorktreeCardProperty(firstCardProperty)
+    expect(store.getState().worktreeCardProperties).toContain(firstCardProperty)
+
+    store.getState().setWorkspaceStatuses([{ id: 'custom', label: 'Custom', color: 'blue' }])
+    expect(store.getState().workspaceStatuses[0]?.id).toBe('custom')
+    store.getState().setWorkspaceBoardOpacity(2)
+    expect(store.getState().workspaceBoardOpacity).toBe(1)
+    store.getState().setWorkspaceBoardCompact(true)
+    expect(store.getState().workspaceBoardCompact).toBe(true)
+
+    const firstStatusBarItem = store.getState().statusBarItems[0]
+    store.getState().toggleStatusBarItem(firstStatusBarItem)
+    expect(store.getState().statusBarItems).not.toContain(firstStatusBarItem)
+    store.getState().toggleStatusBarItem(firstStatusBarItem)
+    expect(store.getState().statusBarItems).toContain(firstStatusBarItem)
+    store.getState().setStatusBarVisible(false)
+    expect(store.getState().statusBarVisible).toBe(false)
+
+    expect(setUI).toHaveBeenCalled()
+  })
+
+  it('persists pet state and falls back when removing the active custom pet', () => {
+    const { deletePet, setUI } = stubPersistence()
+    const store = createUIStore()
+    const customPet = {
+      id: 'custom-pet',
+      label: 'Custom pet',
+      fileName: 'custom-pet.webp',
+      mimeType: 'image/webp',
+      kind: 'image' as const
+    }
+
+    store.getState().setPetVisible(false)
+    store.getState().setPetId('custom-pet')
+    store.getState().setPetSize(9999)
+    store.getState().addCustomPet(customPet)
+
+    expect(store.getState().petVisible).toBe(false)
+    expect(store.getState().petId).toBe('custom-pet')
+    expect(store.getState().customPets).toEqual([customPet])
+
+    store.getState().removeCustomPet('missing')
+    expect(store.getState().customPets).toEqual([customPet])
+
+    store.getState().removeCustomPet('custom-pet')
+
+    expect(store.getState().customPets).toEqual([])
+    expect(store.getState().petId).not.toBe('custom-pet')
+    expect(deletePet).toHaveBeenCalledWith('custom-pet', 'custom-pet.webp', 'image')
+    expect(setUI).toHaveBeenCalledWith({ customPets: [], petId: expect.any(String) })
+  })
+
+  it('persists hook trust changes and skips duplicate approvals', () => {
+    const now = 1_700_000_000_000
+    vi.useFakeTimers()
+    vi.setSystemTime(now)
+    const { setUI } = stubPersistence()
+
+    try {
+      const store = createUIStore()
+
+      store.getState().markOrcaHookScriptConfirmed('repo1', 'setup', 'hash-1')
+      expect(store.getState().trustedOrcaHooks.repo1?.setup).toEqual({
+        contentHash: 'hash-1',
+        approvedAt: now
+      })
+      expect(setUI).toHaveBeenCalledTimes(1)
+
+      const beforeDuplicate = store.getState()
+      store.getState().markOrcaHookScriptConfirmed('repo1', 'setup', 'hash-1')
+      expect(store.getState()).toBe(beforeDuplicate)
+
+      store.getState().markOrcaHookRepoAlwaysTrusted('repo1')
+      expect(store.getState().trustedOrcaHooks.repo1?.all).toEqual({ approvedAt: now })
+
+      store.getState().clearOrcaHookTrustForRepo('missing')
+      expect(store.getState().trustedOrcaHooks.repo1).toBeDefined()
+      store.getState().clearOrcaHookTrustForRepo('repo1')
+      expect(store.getState().trustedOrcaHooks.repo1).toBeUndefined()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('tracks update, fullscreen, and browser default state', () => {
+    const { dismissNudge, setUI } = stubPersistence()
+    const store = createUIStore()
+    const changelog = { title: 'New build' } as unknown as NonNullable<
+      Extract<UpdateStatus, { state: 'available' }>['changelog']
+    >
+
+    store.getState().setUpdateStatus({
+      state: 'available',
+      version: '1.2.3',
+      changelog,
+      activeNudgeId: 'nudge-1'
+    } as UpdateStatus)
+    expect(store.getState().updateChangelog).toBe(changelog)
+    expect(store.getState().updateCardCollapsed).toBe(false)
+
+    store.getState().setUpdateCardCollapsed(true)
+    store.getState().setUpdateStatus({ state: 'downloading', version: '1.2.3' } as UpdateStatus)
+    expect(store.getState().updateChangelog).toBe(changelog)
+    expect(store.getState().updateCardCollapsed).toBe(false)
+
+    store.getState().setUpdateStatus({ state: 'idle' })
+    expect(store.getState().updateChangelog).toBeNull()
+
+    store.getState().setUpdateStatus({
+      state: 'available',
+      version: '1.2.4',
+      activeNudgeId: 'nudge-2'
+    } as UpdateStatus)
+    store.getState().dismissUpdate()
+    expect(store.getState().dismissedUpdateVersion).toBe('1.2.4')
+    expect(dismissNudge).toHaveBeenCalled()
+
+    store.getState().clearDismissedUpdateVersion()
+    store.getState().markUpdateReassuranceSeen()
+    store.getState().setIsFullScreen(true)
+    store.getState().setBrowserDefaultUrl('https://example.test')
+    store.getState().setBrowserDefaultSearchEngine('kagi')
+    store.getState().setBrowserKagiSessionLink('https://kagi.com/search?token=secret&q=%s')
+
+    expect(store.getState().dismissedUpdateVersion).toBeNull()
+    expect(store.getState().updateReassuranceSeen).toBe(true)
+    expect(store.getState().isFullScreen).toBe(true)
+    expect(store.getState().browserDefaultUrl).toBe('https://example.test')
+    expect(store.getState().browserDefaultSearchEngine).toBe('kagi')
+    expect(store.getState().browserKagiSessionLink).toBe('https://kagi.com/search?token=secret')
+    expect(setUI).toHaveBeenCalledWith({ updateReassuranceSeen: true })
   })
 })

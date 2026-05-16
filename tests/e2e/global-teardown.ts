@@ -7,7 +7,7 @@
 
 import { readFileSync, existsSync, rmSync, readdirSync } from 'fs'
 import path from 'path'
-import { TEST_REPO_PATH_FILE } from './global-setup'
+import { TEST_REPO_PATH_FILE } from './helpers/seeded-git-repo'
 
 export default function globalTeardown(): void {
   if (!existsSync(TEST_REPO_PATH_FILE)) {

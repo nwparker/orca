@@ -1,21 +1,50 @@
 import type { Page } from '@stablyai/playwright-test'
 
 type ShortcutOptions = {
+  alt?: boolean
   shift?: boolean
 }
 
 const modifierKeyByPage = new WeakMap<Page, 'Meta' | 'Control'>()
+const isMacByPage = new WeakMap<Page, boolean>()
 
-async function getModifierKey(page: Page): Promise<'Meta' | 'Control'> {
+export async function isMacPage(page: Page): Promise<boolean> {
+  const cached = isMacByPage.get(page)
+  if (cached !== undefined) {
+    return cached
+  }
+
+  const isMac = await page.evaluate(() => navigator.userAgent.includes('Mac'))
+  isMacByPage.set(page, isMac)
+  return isMac
+}
+
+export async function getPlatformShortcutModifier(page: Page): Promise<'Meta' | 'Control'> {
   const cached = modifierKeyByPage.get(page)
   if (cached) {
     return cached
   }
 
-  const isMac = await page.evaluate(() => navigator.userAgent.includes('Mac'))
+  const isMac = await isMacPage(page)
   const modifierKey = isMac ? 'Meta' : 'Control'
   modifierKeyByPage.set(page, modifierKey)
   return modifierKey
+}
+
+export async function platformShortcutChord(
+  page: Page,
+  key: string,
+  options: ShortcutOptions = {}
+): Promise<string> {
+  const parts = [await getPlatformShortcutModifier(page)]
+  if (options.alt) {
+    parts.push('Alt')
+  }
+  if (options.shift) {
+    parts.push('Shift')
+  }
+  parts.push(key)
+  return parts.join('+')
 }
 
 /**
@@ -30,10 +59,5 @@ export async function pressShortcut(
   key: string,
   options: ShortcutOptions = {}
 ): Promise<void> {
-  const parts = [await getModifierKey(page)]
-  if (options.shift) {
-    parts.push('Shift')
-  }
-  parts.push(key)
-  await page.keyboard.press(parts.join('+'))
+  await page.keyboard.press(await platformShortcutChord(page, key, options))
 }

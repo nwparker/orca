@@ -26,6 +26,7 @@ import {
   getTerminalContent
 } from './helpers/terminal'
 import { waitForSessionReady, waitForActiveWorktree, ensureTerminalVisible } from './helpers/store'
+import { isMacPage, platformShortcutChord } from './helpers/shortcuts'
 
 // Why: contextBridge freezes window.api so the renderer cannot spy on
 // pty.write directly. Intercept in the main process instead — pty:write is an
@@ -111,15 +112,19 @@ async function pressAndExpectWrite(
     .toBe(true)
 }
 
-const isMac = process.platform === 'darwin'
-const mod = isMac ? 'Meta' : 'Control'
-
-// Why: split chords differ by platform. On macOS Cmd+D splits vertically and
-// Cmd+Shift+D horizontally. On Linux/Windows Ctrl+D is reserved for EOF
-// (see terminal-shortcut-policy.ts and #586), so vertical is Ctrl+Shift+D
-// and horizontal is Alt+Shift+D (Windows Terminal convention).
-const splitVerticalChord = isMac ? `${mod}+d` : `${mod}+Shift+d`
-const splitHorizontalChord = isMac ? `${mod}+Shift+d` : 'Alt+Shift+d'
+async function getSplitChords(page: Page): Promise<{ vertical: string; horizontal: string }> {
+  const isMac = await isMacPage(page)
+  // Why: split chords differ by platform. On macOS Cmd+D splits vertically and
+  // Cmd+Shift+D horizontally. On Linux/Windows Ctrl+D is reserved for EOF
+  // (see terminal-shortcut-policy.ts and #586), so vertical is Ctrl+Shift+D
+  // and horizontal is Alt+Shift+D (Windows Terminal convention).
+  return {
+    vertical: isMac
+      ? await platformShortcutChord(page, 'd')
+      : await platformShortcutChord(page, 'd', { shift: true }),
+    horizontal: isMac ? await platformShortcutChord(page, 'd', { shift: true }) : 'Alt+Shift+d'
+  }
+}
 
 // Why: serial mode is load-bearing. Tests mutate shared Electron app state
 // (pane layout, terminal buffer, expand toggle) and the pty:write spy log is
@@ -146,6 +151,8 @@ test.describe('Terminal Shortcuts', () => {
     electronApp
   }) => {
     await installMainProcessPtyWriteSpy(electronApp)
+    const isMac = await isMacPage(orcaPage)
+    const splitChords = await getSplitChords(orcaPage)
 
     // Seed the buffer so Cmd+K has something to clear.
     const ptyId = await discoverActivePtyId(orcaPage)
@@ -191,7 +198,7 @@ test.describe('Terminal Shortcuts', () => {
 
     // Cmd/Ctrl+K clears the pane.
     await focusActiveTerminal(orcaPage)
-    await orcaPage.keyboard.press(`${mod}+k`)
+    await orcaPage.keyboard.press(await platformShortcutChord(orcaPage, 'k'))
     await expect
       .poll(async () => (await getTerminalContent(orcaPage)).includes(marker), {
         timeout: 5_000,
@@ -199,17 +206,17 @@ test.describe('Terminal Shortcuts', () => {
       })
       .toBe(false)
 
-    // Split vertically (chord varies by platform — see splitVerticalChord).
+    // Split vertically (chord varies by platform).
     const panesBeforeSplit = await countVisibleTerminalPanes(orcaPage)
     await focusActiveTerminal(orcaPage)
-    await orcaPage.keyboard.press(splitVerticalChord)
+    await orcaPage.keyboard.press(splitChords.vertical)
     await waitForPaneCount(orcaPage, panesBeforeSplit + 1)
 
     // Cmd/Ctrl+] and Cmd/Ctrl+[ cycle focus (no pane-count change).
     await focusActiveTerminal(orcaPage)
-    await orcaPage.keyboard.press(`${mod}+BracketRight`)
+    await orcaPage.keyboard.press(await platformShortcutChord(orcaPage, 'BracketRight'))
     await focusActiveTerminal(orcaPage)
-    await orcaPage.keyboard.press(`${mod}+BracketLeft`)
+    await orcaPage.keyboard.press(await platformShortcutChord(orcaPage, 'BracketLeft'))
     expect(await countVisibleTerminalPanes(orcaPage)).toBe(panesBeforeSplit + 1)
 
     // Cmd/Ctrl+Shift+Enter toggles expand on the active pane. Requires >1 pane,
@@ -225,12 +232,12 @@ test.describe('Terminal Shortcuts', () => {
       })
     expect(await readExpanded()).toBe(false)
     await focusActiveTerminal(orcaPage)
-    await orcaPage.keyboard.press(`${mod}+Shift+Enter`)
+    await orcaPage.keyboard.press(await platformShortcutChord(orcaPage, 'Enter', { shift: true }))
     await expect
       .poll(readExpanded, { timeout: 3_000, message: 'Cmd+Shift+Enter did not expand pane' })
       .toBe(true)
     await focusActiveTerminal(orcaPage)
-    await orcaPage.keyboard.press(`${mod}+Shift+Enter`)
+    await orcaPage.keyboard.press(await platformShortcutChord(orcaPage, 'Enter', { shift: true }))
     await expect
       .poll(readExpanded, { timeout: 3_000, message: 'Cmd+Shift+Enter did not collapse pane' })
       .toBe(false)
@@ -242,23 +249,23 @@ test.describe('Terminal Shortcuts', () => {
     // instead of closing immediately. Confirm it if it appears — the test
     // only needs to prove the chord routed to the close handler.
     await focusActiveTerminal(orcaPage)
-    await orcaPage.keyboard.press(`${mod}+w`)
+    await orcaPage.keyboard.press(await platformShortcutChord(orcaPage, 'w'))
     await confirmCloseDialogIfShown(orcaPage)
     await waitForPaneCount(orcaPage, panesBeforeSplit)
 
-    // Split horizontally (chord varies by platform — see splitHorizontalChord).
+    // Split horizontally (chord varies by platform).
     const panesBeforeHSplit = await countVisibleTerminalPanes(orcaPage)
     await focusActiveTerminal(orcaPage)
-    await orcaPage.keyboard.press(splitHorizontalChord)
+    await orcaPage.keyboard.press(splitChords.horizontal)
     await waitForPaneCount(orcaPage, panesBeforeHSplit + 1)
     await focusActiveTerminal(orcaPage)
-    await orcaPage.keyboard.press(`${mod}+w`)
+    await orcaPage.keyboard.press(await platformShortcutChord(orcaPage, 'w'))
     await confirmCloseDialogIfShown(orcaPage)
     await waitForPaneCount(orcaPage, panesBeforeHSplit)
 
     // Cmd/Ctrl+F toggles the search overlay.
     await focusActiveTerminal(orcaPage)
-    await orcaPage.keyboard.press(`${mod}+f`)
+    await orcaPage.keyboard.press(await platformShortcutChord(orcaPage, 'f'))
     const searchInput = orcaPage.locator('[data-terminal-search-root] input').first()
     // Why: Escape is handled by TerminalSearch's React onKeyDown, which only
     // fires when focus is inside the overlay. The overlay auto-focuses its

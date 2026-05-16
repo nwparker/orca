@@ -32,6 +32,11 @@ import { stat } from 'fs/promises'
 import { subscribe as subscribeParcelWatcher } from '@parcel/watcher'
 
 type HandlerMap = Record<string, (_event: unknown, args: unknown) => Promise<unknown> | unknown>
+type ParcelCallback = (
+  err: Error | null,
+  events: { type: 'create' | 'update' | 'delete'; path: string }[]
+) => void
+type DestroyedListener = () => void
 
 describe('registerFilesystemWatcherHandlers', () => {
   const handlers: HandlerMap = {}
@@ -54,6 +59,109 @@ describe('registerFilesystemWatcherHandlers', () => {
       handlers[channel] = handler
     })
     registerFilesystemWatcherHandlers()
+  })
+
+  it('batches local watcher events, coalesces path churn, and tears down after grace', async () => {
+    vi.useFakeTimers()
+    const sendMock = vi.fn()
+    const unsubscribeMock = vi.fn().mockResolvedValue(undefined)
+    let parcelCallback: ParcelCallback | null = null
+    vi.mocked(stat).mockImplementation(
+      async (targetPath) =>
+        ({
+          isDirectory: () =>
+            String(targetPath).endsWith('dir') || String(targetPath).endsWith('repo')
+        }) as never
+    )
+    vi.mocked(subscribeParcelWatcher).mockImplementation(async (_root, callback) => {
+      parcelCallback = callback as typeof parcelCallback
+      return { unsubscribe: unsubscribeMock } as never
+    })
+
+    await handlers['fs:watchWorktree'](
+      { sender: { isDestroyed: () => false, send: sendMock, once: vi.fn(), id: 1 } },
+      { worktreePath: '/workspace/repo' }
+    )
+
+    ;(parcelCallback as unknown as ParcelCallback)(null, [
+      { type: 'create', path: '/workspace/repo/file.txt' },
+      { type: 'update', path: '/workspace/repo/file.txt' },
+      { type: 'delete', path: '/workspace/repo/dir' },
+      { type: 'create', path: '/workspace/repo/dir' }
+    ])
+    await vi.advanceTimersByTimeAsync(151)
+
+    expect(sendMock).toHaveBeenCalledWith('fs:changed', {
+      worktreePath: expect.stringContaining('/workspace/repo'),
+      events: [
+        {
+          kind: 'delete',
+          absolutePath: expect.stringContaining('/workspace/repo/dir'),
+          isDirectory: undefined
+        },
+        {
+          kind: 'update',
+          absolutePath: expect.stringContaining('/workspace/repo/file.txt'),
+          isDirectory: false
+        },
+        {
+          kind: 'create',
+          absolutePath: expect.stringContaining('/workspace/repo/dir'),
+          isDirectory: true
+        }
+      ]
+    })
+
+    handlers['fs:unwatchWorktree']({ sender: { id: 1 } }, { worktreePath: '/workspace/repo' })
+    expect(unsubscribeMock).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(unsubscribeMock).toHaveBeenCalledTimes(1)
+    vi.useRealTimers()
+  })
+
+  it('cleans up local watchers immediately when the sender is destroyed', async () => {
+    const sendMock = vi.fn()
+    const unsubscribeMock = vi.fn().mockResolvedValue(undefined)
+    let destroyedListener: DestroyedListener | null = null
+    vi.mocked(stat).mockResolvedValue({ isDirectory: () => true } as never)
+    vi.mocked(subscribeParcelWatcher).mockResolvedValue({ unsubscribe: unsubscribeMock } as never)
+
+    await handlers['fs:watchWorktree'](
+      {
+        sender: {
+          isDestroyed: () => false,
+          send: sendMock,
+          once: vi.fn((_event, listener) => {
+            destroyedListener = listener as () => void
+          }),
+          id: 7
+        }
+      },
+      { worktreePath: '/workspace/repo' }
+    )
+
+    ;(destroyedListener as unknown as DestroyedListener)()
+
+    expect(unsubscribeMock).toHaveBeenCalledTimes(1)
+    await closeAllWatchers()
+  })
+
+  it('marks invalid local watch roots as unwatchable instead of subscribing', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    vi.mocked(stat).mockResolvedValue({ isDirectory: () => false } as never)
+
+    await handlers['fs:watchWorktree'](
+      { sender: { isDestroyed: () => false, send: vi.fn(), once: vi.fn(), id: 1 } },
+      { worktreePath: '/workspace/file.txt' }
+    )
+    await handlers['fs:watchWorktree'](
+      { sender: { isDestroyed: () => false, send: vi.fn(), once: vi.fn(), id: 1 } },
+      { worktreePath: '/workspace/file.txt' }
+    )
+
+    expect(subscribeParcelWatcher).not.toHaveBeenCalled()
+    expect(warnSpy).toHaveBeenCalledTimes(1)
+    warnSpy.mockRestore()
   })
 
   it('pins Parcel to the Windows backend for local Windows watches', async () => {
