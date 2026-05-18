@@ -211,6 +211,7 @@ function Settings(): React.JSX.Element {
   const removeRepo = useAppStore((s) => s.removeRepo)
   const settingsNavigationTarget = useAppStore((s) => s.settingsNavigationTarget)
   const clearSettingsTarget = useAppStore((s) => s.clearSettingsTarget)
+  const settingsSearchInputQuery = useAppStore((s) => s.settingsSearchInputQuery)
   const settingsSearchQuery = useAppStore((s) => s.settingsSearchQuery)
   const setSettingsSearchQuery = useAppStore((s) => s.setSettingsSearchQuery)
 
@@ -941,7 +942,7 @@ function Settings(): React.JSX.Element {
         generalSections={generalNavSections}
         repoSections={repoNavSections}
         hasRepos={repos.length > 0}
-        searchQuery={settingsSearchQuery}
+        searchQuery={settingsSearchInputQuery}
         searchInputRef={searchInputRef}
         onBack={closeSettingsPageWithPromptGuard}
         onSearchChange={setSettingsSearchQuery}
