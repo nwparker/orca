@@ -1233,6 +1233,8 @@ const api = {
     }> => ipcRenderer.invoke('preflight:check', args),
     detectAgents: (args?: { wslDistro?: string | null }): Promise<string[]> =>
       ipcRenderer.invoke('preflight:detectAgents', args),
+    getAgentVersion: (args: { agent: string; wslDistro?: string | null }): Promise<string | null> =>
+      ipcRenderer.invoke('preflight:getAgentVersion', args),
     refreshAgents: (args?: { wslDistro?: string | null }): Promise<RefreshAgentsResult> =>
       ipcRenderer.invoke('preflight:refreshAgents', args),
     detectRemoteAgents: (args: { connectionId: string }): Promise<string[]> =>

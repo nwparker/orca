@@ -58,11 +58,15 @@ vi.mock('../gitea/client', () => ({
 import {
   _resetPreflightCache,
   detectInstalledAgents,
+  getInstalledAgentVersion,
   registerPreflightHandlers,
   runPreflightCheck
 } from './preflight'
 
-type HandlerMap = Record<string, (_event?: unknown, args?: { force?: boolean }) => Promise<unknown>>
+type HandlerMap = Record<
+  string,
+  (_event?: unknown, args?: Record<string, unknown>) => Promise<unknown>
+>
 
 describe('preflight', () => {
   const originalPlatform = process.platform
@@ -379,6 +383,59 @@ describe('preflight', () => {
     })
 
     await expect(detectInstalledAgents({ wslDistro: 'Ubuntu' })).resolves.toEqual(['claude'])
+  })
+
+  it('gets a known agent version from stdout and stderr', async () => {
+    execFileAsyncMock.mockResolvedValueOnce({
+      stdout: '2.1.143 (Claude Code)\n',
+      stderr: ''
+    })
+
+    await expect(getInstalledAgentVersion({ agent: 'claude' })).resolves.toBe(
+      '2.1.143 (Claude Code)'
+    )
+    expect(execFileAsyncMock).toHaveBeenCalledWith('claude', ['--version'], {
+      encoding: 'utf-8',
+      timeout: 5000
+    })
+  })
+
+  it('returns null for unknown agents instead of executing arbitrary commands', async () => {
+    await expect(getInstalledAgentVersion({ agent: 'rm -rf /' })).resolves.toBeNull()
+    expect(execFileAsyncMock).not.toHaveBeenCalled()
+  })
+
+  it('gets a known agent version through the selected WSL distro', async () => {
+    Object.defineProperty(process, 'platform', {
+      configurable: true,
+      value: 'win32'
+    })
+    execFileAsyncMock.mockResolvedValueOnce({
+      stdout: '2.1.143 (Claude Code)\n',
+      stderr: ''
+    })
+
+    await expect(getInstalledAgentVersion({ agent: 'claude', wslDistro: 'Ubuntu' })).resolves.toBe(
+      '2.1.143 (Claude Code)'
+    )
+    expect(execFileAsyncMock).toHaveBeenCalledWith(
+      'wsl.exe',
+      ['-d', 'Ubuntu', '--', 'bash', '-lc', "'claude' --version"],
+      { encoding: 'utf-8', timeout: 5000 }
+    )
+  })
+
+  it('registers the agent version IPC handler', async () => {
+    execFileAsyncMock.mockResolvedValueOnce({
+      stdout: '2.1.143 (Claude Code)\n',
+      stderr: ''
+    })
+
+    registerPreflightHandlers()
+
+    await expect(handlers['preflight:getAgentVersion'](null, { agent: 'claude' })).resolves.toBe(
+      '2.1.143 (Claude Code)'
+    )
   })
 
   it('refreshes via preflight:refreshAgents by re-hydrating PATH before re-detecting', async () => {

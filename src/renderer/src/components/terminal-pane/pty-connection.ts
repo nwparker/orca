@@ -29,6 +29,8 @@ import { createTerminalCommandLifecycle } from './terminal-command-lifecycle'
 import { e2eConfig } from '@/lib/e2e-config'
 import type { AgentStatusEntry } from '../../../../shared/agent-status-types'
 import { isWebTerminalSurfaceTabId } from '@/runtime/web-terminal-surface-id'
+import { getConnectionId } from '@/lib/connection-context'
+import { shouldSuppressWebglForLocalClaudeCode } from './claude-code-webgl-guard'
 
 const pendingSpawnByPaneKey = new Map<string, Promise<string | null>>()
 const SSH_SESSION_EXPIRED_ERROR = 'SSH_SESSION_EXPIRED'
@@ -169,6 +171,8 @@ export function connectPanePty(
   let agentTaskCompleteStatusUnsubscribe: (() => void) | null = null
   let terminalBellNotificationTimer: ReturnType<typeof setTimeout> | null = null
   let pendingTerminalBellNotification = false
+  let disableGpuForOldClaudeCode = false
+  let checkedClaudeCodeVersionForPty = false
   // Why: passphrase-gate waits register a teardown here so dispose() can
   // actively unsubscribe + resolve them. Without this, a pane disposed
   // mid-wait leaks its zustand subscriber and the surrounding async IIFE
@@ -242,8 +246,39 @@ export function connectPanePty(
   let hasConsideredInitialCacheTimerSeed = false
   let allowInitialIdleCacheSeed = false
 
+  const applyPaneGpuRenderingPolicy = (rawTitle: string): void => {
+    manager.setPaneGpuRendering(
+      pane.id,
+      !isGeminiTerminalTitle(rawTitle) && !disableGpuForOldClaudeCode
+    )
+  }
+
+  const maybeDisableWebglForOldLocalClaudeCode = (rawTitle: string): void => {
+    if (checkedClaudeCodeVersionForPty || !isClaudeAgent(rawTitle)) {
+      return
+    }
+    if (isRemoteRuntimePtyId(deps.restoredPtyIdByLeafId?.[pane.leafId])) {
+      return
+    }
+    const connectionId = getConnectionId(deps.worktreeId)
+    if (connectionId !== null) {
+      return
+    }
+    checkedClaudeCodeVersionForPty = true
+    void shouldSuppressWebglForLocalClaudeCode().then((shouldSuppress) => {
+      if (disposed || !shouldSuppress) {
+        return
+      }
+      // Why: Claude Code 2.1.143 and older can corrupt repeated glyph columns
+      // in xterm's WebGL renderer during long chats. Keep only this pane on DOM.
+      disableGpuForOldClaudeCode = true
+      applyPaneGpuRenderingPolicy(rawTitle)
+    })
+  }
+
   const onTitleChange = (title: string, rawTitle: string): void => {
-    manager.setPaneGpuRendering(pane.id, !isGeminiTerminalTitle(rawTitle))
+    maybeDisableWebglForOldLocalClaudeCode(rawTitle)
+    applyPaneGpuRenderingPolicy(rawTitle)
     deps.setRuntimePaneTitle(deps.tabId, pane.id, title)
     // Why: only the focused pane should drive the tab title — otherwise two
     // agents in split panes cause rapid title flickering as each emits OSC

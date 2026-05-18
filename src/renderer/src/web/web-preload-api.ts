@@ -897,6 +897,7 @@ function createPreflightApi(): NonNullable<Partial<PreloadApi>['preflight']> {
       }
       return callRuntimeResult<string[]>('preflight.detectAgents').catch(() => [])
     },
+    getAgentVersion: async () => null,
     refreshAgents: () =>
       requireActiveEnvironmentOrNull()
         ? callRuntimeResult('preflight.refreshAgents')

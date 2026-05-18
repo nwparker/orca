@@ -16,6 +16,10 @@ type PreflightRuntimeContext = {
   wslDistro?: string | null
 }
 
+type AgentVersionRequest = PreflightRuntimeContext & {
+  agent: string
+}
+
 export type PreflightStatus = {
   git: { installed: boolean }
   gh: { installed: boolean; authenticated: boolean }
@@ -98,6 +102,10 @@ const KNOWN_AGENT_COMMANDS = Object.entries(TUI_AGENT_CONFIG).map(([id, config])
   cmd: config.detectCmd
 }))
 
+const KNOWN_AGENT_COMMAND_BY_ID = new Map(
+  Object.entries(TUI_AGENT_CONFIG).map(([id, config]) => [id, config.detectCmd])
+)
+
 function getPreflightWslDistro(context?: PreflightRuntimeContext): string | null {
   const distro = context?.wslDistro?.trim()
   return process.platform === 'win32' && distro ? distro : null
@@ -127,6 +135,27 @@ export async function detectInstalledAgents(context?: PreflightRuntimeContext): 
     }))
   )
   return checks.filter((c) => c.installed).map((c) => c.id)
+}
+
+export async function getInstalledAgentVersion(
+  request: AgentVersionRequest
+): Promise<string | null> {
+  const command = KNOWN_AGENT_COMMAND_BY_ID.get(request.agent)
+  if (!command) {
+    return null
+  }
+  const wslDistro = getPreflightWslDistro(request)
+  try {
+    const result = wslDistro
+      ? await execCommandInWsl(wslDistro, `${shellQuote(command)} --version`)
+      : ((await execFileAsync(command, ['--version'], {
+          encoding: 'utf-8',
+          timeout: 5000
+        })) as { stdout: string; stderr: string })
+    return `${result.stdout ?? ''}${result.stderr ?? ''}`.trim() || null
+  } catch {
+    return null
+  }
 }
 
 export type RefreshAgentsResult = {
@@ -279,6 +308,13 @@ export function registerPreflightHandlers(): void {
     'preflight:detectAgents',
     async (_event, args?: PreflightRuntimeContext): Promise<string[]> => {
       return detectInstalledAgents(args)
+    }
+  )
+
+  ipcMain.handle(
+    'preflight:getAgentVersion',
+    async (_event, args: AgentVersionRequest): Promise<string | null> => {
+      return getInstalledAgentVersion(args)
     }
   )
 

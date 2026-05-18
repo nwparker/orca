@@ -392,6 +392,7 @@ export type RefreshAgentsResult = {
 export type PreflightApi = {
   check: (args?: { force?: boolean; wslDistro?: string | null }) => Promise<PreflightStatus>
   detectAgents: (args?: { wslDistro?: string | null }) => Promise<string[]>
+  getAgentVersion: (args: { agent: string; wslDistro?: string | null }) => Promise<string | null>
   refreshAgents: (args?: { wslDistro?: string | null }) => Promise<RefreshAgentsResult>
   detectRemoteAgents: (args: { connectionId: string }) => Promise<string[]>
 }

@@ -329,6 +329,9 @@ describe('connectPanePty', () => {
         notifications: {
           dispatch: vi.fn().mockResolvedValue({ delivered: true }),
           playSound: vi.fn().mockResolvedValue({ played: true })
+        },
+        preflight: {
+          getAgentVersion: vi.fn().mockResolvedValue(null)
         }
       }
     }
@@ -412,6 +415,58 @@ describe('connectPanePty', () => {
     expect(transport.sendInput).not.toHaveBeenCalledWith(
       expect.stringContaining("claude 'say test'")
     )
+  })
+
+  it('disables pane WebGL after launching an affected local Claude Code version', async () => {
+    const agentStatus = await import('@/lib/agent-status')
+    vi.mocked(agentStatus.isClaudeAgent).mockReturnValue(true)
+    vi.mocked(window.api.preflight.getAgentVersion).mockResolvedValue('2.1.143 (Claude Code)')
+    const { connectPanePty } = await import('./pty-connection')
+
+    const transport = createMockTransport()
+    transportFactoryQueue.push(transport)
+    mockStoreState = {
+      ...mockStoreState,
+      tabsByWorktree: { 'wt-1': [{ id: 'tab-1', ptyId: null }] },
+      repos: [{ id: 'repo1', connectionId: null }]
+    }
+    const manager = createManager(1)
+
+    connectPanePty(createPane(1) as never, manager as never, createDeps() as never)
+    ;(createdTransportOptions[0].onTitleChange as (title: string, rawTitle: string) => void)(
+      '* Claude working',
+      '* Claude working'
+    )
+    await flushAsyncTicks()
+
+    expect(window.api.preflight.getAgentVersion).toHaveBeenCalledWith({ agent: 'claude' })
+    expect(manager.setPaneGpuRendering).toHaveBeenCalledWith(1, false)
+  })
+
+  it('does not run the local Claude version guard for SSH worktrees', async () => {
+    const agentStatus = await import('@/lib/agent-status')
+    vi.mocked(agentStatus.isClaudeAgent).mockReturnValue(true)
+    const { connectPanePty } = await import('./pty-connection')
+
+    const transport = createMockTransport()
+    transportFactoryQueue.push(transport)
+    mockStoreState = {
+      ...mockStoreState,
+      tabsByWorktree: { 'wt-1': [{ id: 'tab-1', ptyId: null }] },
+      repos: [{ id: 'repo1', connectionId: 'ssh-1' }]
+    }
+    const manager = createManager(1)
+
+    connectPanePty(createPane(1) as never, manager as never, createDeps() as never)
+    ;(createdTransportOptions[0].onTitleChange as (title: string, rawTitle: string) => void)(
+      '* Claude working',
+      '* Claude working'
+    )
+    await flushAsyncTicks()
+
+    expect(window.api.preflight.getAgentVersion).not.toHaveBeenCalled()
+    expect(manager.setPaneGpuRendering).toHaveBeenCalledWith(1, true)
+    expect(manager.setPaneGpuRendering).not.toHaveBeenCalledWith(1, false)
   })
 
   it('does not reuse a sibling split pane pending spawn after remount', async () => {
