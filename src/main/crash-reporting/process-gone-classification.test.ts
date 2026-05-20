@@ -54,6 +54,60 @@ describe('shouldRecordProcessGoneCrash', () => {
     ).toBe(false)
   })
 
+  it('skips Windows control termination killed events outside expected lifecycle teardown', () => {
+    expect(
+      shouldRecordProcessGoneCrash({
+        source: 'renderer',
+        reason: 'killed',
+        exitCode: -1073741510,
+        expectedTeardown: 'none'
+      })
+    ).toBe(false)
+    expect(
+      shouldRecordProcessGoneCrash({
+        source: 'child',
+        reason: 'killed',
+        exitCode: 1073807364,
+        expectedTeardown: 'none'
+      })
+    ).toBe(false)
+  })
+
+  it('skips non-fatal Chromium child process exits', () => {
+    expect(
+      shouldRecordProcessGoneCrash({
+        source: 'child',
+        processType: 'GPU',
+        reason: 'crashed',
+        exitCode: 34,
+        expectedTeardown: 'none'
+      })
+    ).toBe(false)
+    expect(
+      shouldRecordProcessGoneCrash({
+        source: 'child',
+        processType: 'Utility',
+        serviceName: 'network.mojom.NetworkService',
+        reason: 'killed',
+        exitCode: 1,
+        expectedTeardown: 'none'
+      })
+    ).toBe(false)
+  })
+
+  it('still records unknown child process crashes', () => {
+    expect(
+      shouldRecordProcessGoneCrash({
+        source: 'child',
+        processType: 'Utility',
+        serviceName: 'com.orca.unexpected',
+        reason: 'crashed',
+        exitCode: 5,
+        expectedTeardown: 'none'
+      })
+    ).toBe(true)
+  })
+
   it('records non-SIGTERM killed process exits outside expected lifecycle teardown', () => {
     expect(
       shouldRecordProcessGoneCrash({
