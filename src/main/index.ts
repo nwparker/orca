@@ -96,6 +96,7 @@ import { AutomationService } from './automations/service'
 import { AgentAwakeService } from './agent-awake-service'
 import {
   getCrashBreadcrumbSnapshot,
+  recordCoalescedCrashBreadcrumb,
   recordCrashBreadcrumb
 } from './crash-reporting/crash-breadcrumb-store'
 import { CrashReportStore } from './crash-reporting/crash-report-store'
@@ -139,6 +140,7 @@ let watcherShutdownDone = false
 let automations: AutomationService | null = null
 let keybindings: KeybindingService | null = null
 let expectedRendererReload: { webContentsId: number; until: number } | null = null
+const AGENT_STATE_CRASH_BREADCRUMB_MIN_INTERVAL_MS = 30_000
 const isServeMode = process.argv.includes('--serve')
 const appImageCliRedirect = maybeRedirectAppImageCliLaunch({
   isPackaged: app.isPackaged,
@@ -284,6 +286,18 @@ function getExpectedTeardownScope(webContentsId?: number): ExpectedTeardownScope
   return webContentsId !== undefined && expectedRendererReload.webContentsId === webContentsId
     ? 'renderer-reload'
     : 'none'
+}
+
+function recordAgentStateCrashBreadcrumb(agentType: string, state: string): void {
+  // Why: hook pings can arrive many times per second while an agent works.
+  // Coalescing preserves crash-report room for renderer errors and memory
+  // samples instead of filling all 30 breadcrumbs with identical state pings.
+  recordCoalescedCrashBreadcrumb({
+    name: 'agent_state_changed',
+    data: { agentType, state },
+    coalesceKey: `agent:${agentType}:${state}`,
+    minIntervalMs: AGENT_STATE_CRASH_BREADCRUMB_MIN_INTERVAL_MS
+  })
 }
 
 // Why: the lock must be acquired AFTER configureDevUserDataPath — Electron
@@ -599,10 +613,7 @@ function openMainWindow(): BrowserWindow {
         stateStartedAt,
         ...(orchestration ? { orchestration } : {})
       })
-      recordCrashBreadcrumb('agent_state_changed', {
-        agentType: payload.agentType ?? 'unknown',
-        state: payload.state
-      })
+      recordAgentStateCrashBreadcrumb(payload.agentType ?? 'unknown', payload.state)
       // Why: cursor-agent's OSC title stays "Cursor Agent" for the whole turn,
       // and opencode's stays bare "OpenCode" — neither carries a working/idle
       // signal the title heuristic can read. Synthesize an OSC title update

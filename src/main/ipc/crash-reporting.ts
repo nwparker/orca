@@ -3,6 +3,7 @@
 import os from 'node:os'
 import { app, clipboard, ipcMain } from 'electron'
 import {
+  type CrashReportBreadcrumbData,
   formatCrashReportText,
   type ReactErrorBoundaryReportArgs,
   type ReactErrorBoundaryReportResult,
@@ -11,7 +12,10 @@ import {
 } from '../../shared/crash-reporting'
 import { submitFeedback } from './feedback'
 import type { CrashReportStore } from '../crash-reporting/crash-report-store'
-import { getCrashBreadcrumbSnapshot } from '../crash-reporting/crash-breadcrumb-store'
+import {
+  getCrashBreadcrumbSnapshot,
+  recordCrashBreadcrumb
+} from '../crash-reporting/crash-breadcrumb-store'
 
 const inFlightSubmissions = new Set<string>()
 const submittedReportIds = new Set<string>()
@@ -236,6 +240,21 @@ async function getLatestSendableReport(
   )
 }
 
+function sanitizeRendererBreadcrumbData(value: unknown): CrashReportBreadcrumbData | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined
+  }
+  const sanitized: CrashReportBreadcrumbData = {}
+  for (const [key, entry] of Object.entries(value)) {
+    if (typeof entry === 'string' || typeof entry === 'boolean' || entry === null) {
+      sanitized[key] = entry
+    } else if (typeof entry === 'number' && Number.isFinite(entry)) {
+      sanitized[key] = entry
+    }
+  }
+  return Object.keys(sanitized).length > 0 ? sanitized : undefined
+}
+
 export function registerCrashReportingHandlers(store: CrashReportStore): void {
   ipcMain.removeHandler('crashReports:getLatestPending')
   ipcMain.handle('crashReports:getLatestPending', () => getLatestPendingReport(store))
@@ -254,6 +273,17 @@ export function registerCrashReportingHandlers(store: CrashReportStore): void {
     }
     return store.dismiss(args.reportId)
   })
+
+  ipcMain.removeAllListeners('crashReports:recordBreadcrumb')
+  ipcMain.on(
+    'crashReports:recordBreadcrumb',
+    (_event, args?: { name?: unknown; data?: unknown }) => {
+      if (!args || typeof args.name !== 'string') {
+        return
+      }
+      recordCrashBreadcrumb(args.name, sanitizeRendererBreadcrumbData(args.data))
+    }
+  )
 
   ipcMain.removeHandler('crashReports:copyLatestDiagnostics')
   ipcMain.handle(

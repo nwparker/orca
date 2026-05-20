@@ -432,6 +432,7 @@ function createWebPreloadApi(): Partial<PreloadApi> {
       getLatestReport: () => Promise.resolve(null),
       dismiss: () => Promise.resolve(null),
       recordRendererError: () => Promise.resolve({ ok: true, report: null, deduped: true }),
+      recordBreadcrumb: () => {},
       submit: () =>
         Promise.resolve({
           ok: false,

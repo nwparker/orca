@@ -2,10 +2,18 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { CrashReportRecord } from '../../shared/crash-reporting'
 
-const { handlers, clipboardWriteTextMock, submitFeedbackMock } = vi.hoisted(() => ({
+const {
+  handlers,
+  listeners,
+  clipboardWriteTextMock,
+  submitFeedbackMock,
+  recordCrashBreadcrumbMock
+} = vi.hoisted(() => ({
   handlers: new Map<string, (_event: unknown, args?: unknown) => unknown>(),
+  listeners: new Map<string, (_event: unknown, args?: unknown) => void>(),
   clipboardWriteTextMock: vi.fn(),
-  submitFeedbackMock: vi.fn()
+  submitFeedbackMock: vi.fn(),
+  recordCrashBreadcrumbMock: vi.fn()
 }))
 
 vi.mock('electron', () => ({
@@ -15,12 +23,21 @@ vi.mock('electron', () => ({
     removeHandler: vi.fn((channel: string) => handlers.delete(channel)),
     handle: vi.fn((channel: string, handler: (_event: unknown, args?: unknown) => unknown) => {
       handlers.set(channel, handler)
+    }),
+    removeAllListeners: vi.fn((channel: string) => listeners.delete(channel)),
+    on: vi.fn((channel: string, listener: (_event: unknown, args?: unknown) => void) => {
+      listeners.set(channel, listener)
     })
   }
 }))
 
 vi.mock('./feedback', () => ({
   submitFeedback: submitFeedbackMock
+}))
+
+vi.mock('../crash-reporting/crash-breadcrumb-store', () => ({
+  getCrashBreadcrumbSnapshot: vi.fn(() => []),
+  recordCrashBreadcrumb: (...args: unknown[]) => recordCrashBreadcrumbMock(...args)
 }))
 
 import {
@@ -54,8 +71,10 @@ function report(
 describe('registerCrashReportingHandlers', () => {
   beforeEach(() => {
     handlers.clear()
+    listeners.clear()
     clipboardWriteTextMock.mockReset()
     submitFeedbackMock.mockReset()
+    recordCrashBreadcrumbMock.mockReset()
     submitFeedbackMock.mockResolvedValue({ ok: true })
     _resetRendererErrorReportDedupeForTests()
   })
@@ -378,5 +397,55 @@ describe('registerCrashReportingHandlers', () => {
     })
 
     expect(recordMock).toHaveBeenCalledTimes(261)
+  })
+
+  it('records sanitized renderer breadcrumbs', () => {
+    registerCrashReportingHandlers({
+      getLatestPending: vi.fn(),
+      getById: vi.fn(),
+      dismiss: vi.fn(),
+      markSent: vi.fn(),
+      listRecent: vi.fn(),
+      record: vi.fn(),
+      formatDiagnosticText: vi.fn()
+    } as never)
+
+    listeners.get('crashReports:recordBreadcrumb')?.(null, {
+      name: 'renderer_error',
+      data: {
+        message: 'boom',
+        count: 2,
+        ok: true,
+        empty: null,
+        badNumber: Number.POSITIVE_INFINITY,
+        object: { ignored: true }
+      }
+    })
+
+    expect(recordCrashBreadcrumbMock).toHaveBeenCalledWith('renderer_error', {
+      message: 'boom',
+      count: 2,
+      ok: true,
+      empty: null
+    })
+  })
+
+  it('ignores renderer breadcrumbs without a string name', () => {
+    registerCrashReportingHandlers({
+      getLatestPending: vi.fn(),
+      getById: vi.fn(),
+      dismiss: vi.fn(),
+      markSent: vi.fn(),
+      listRecent: vi.fn(),
+      record: vi.fn(),
+      formatDiagnosticText: vi.fn()
+    } as never)
+
+    listeners.get('crashReports:recordBreadcrumb')?.(null, {
+      name: 123,
+      data: { message: 'boom' }
+    })
+
+    expect(recordCrashBreadcrumbMock).not.toHaveBeenCalled()
   })
 })
