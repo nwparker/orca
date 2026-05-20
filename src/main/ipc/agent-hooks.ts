@@ -13,6 +13,7 @@ import {
 import { claudeHookService } from '../claude/hook-service'
 import { codexHookService } from '../codex/hook-service'
 import { geminiHookService } from '../gemini/hook-service'
+import { antigravityHookService } from '../antigravity/hook-service'
 import { cursorHookService } from '../cursor/hook-service'
 import { droidHookService } from '../droid/hook-service'
 import { grokHookService } from '../grok/hook-service'
@@ -33,6 +34,7 @@ export function registerAgentHookHandlers(): void {
   ipcMain.removeHandler('agentHooks:claudeStatus')
   ipcMain.removeHandler('agentHooks:codexStatus')
   ipcMain.removeHandler('agentHooks:geminiStatus')
+  ipcMain.removeHandler('agentHooks:antigravityStatus')
   ipcMain.removeHandler('agentHooks:cursorStatus')
   ipcMain.removeHandler('agentHooks:droidStatus')
   ipcMain.removeHandler('agentHooks:grokStatus')
@@ -114,6 +116,19 @@ export function registerAgentHookHandlers(): void {
     } catch (err) {
       return {
         agent: 'gemini',
+        state: 'error',
+        configPath: '',
+        managedHooksPresent: false,
+        detail: err instanceof Error ? err.message : String(err)
+      }
+    }
+  })
+  ipcMain.handle('agentHooks:antigravityStatus', (): AgentHookInstallStatus => {
+    try {
+      return antigravityHookService.getStatus()
+    } catch (err) {
+      return {
+        agent: 'antigravity',
         state: 'error',
         configPath: '',
         managedHooksPresent: false,

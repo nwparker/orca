@@ -57,6 +57,7 @@ import { setMigrationUnsupportedPtyListener } from './agent-hooks/migration-unsu
 import { claudeHookService } from './claude/hook-service'
 import { codexHookService } from './codex/hook-service'
 import { geminiHookService } from './gemini/hook-service'
+import { antigravityHookService } from './antigravity/hook-service'
 import { cursorHookService } from './cursor/hook-service'
 import { droidHookService } from './droid/hook-service'
 import { grokHookService } from './grok/hook-service'
@@ -899,6 +900,7 @@ app.whenReady().then(async () => {
     ['claude', () => claudeHookService.install()],
     ['codex', () => codexHookService.install()],
     ['gemini', () => geminiHookService.install()],
+    ['antigravity', () => antigravityHookService.install()],
     ['cursor', () => cursorHookService.install()],
     ['droid', () => droidHookService.install()],
     ['grok', () => grokHookService.install()],

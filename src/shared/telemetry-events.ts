@@ -41,6 +41,7 @@ export const AGENT_KIND_VALUES = [
   'opencode',
   'pi',
   'gemini',
+  'antigravity',
   'aider',
   'goose',
   'amp',

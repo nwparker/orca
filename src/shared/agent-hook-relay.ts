@@ -34,6 +34,7 @@ export type AgentHookSource =
   | 'claude'
   | 'codex'
   | 'gemini'
+  | 'antigravity'
   | 'opencode'
   | 'cursor'
   | 'pi'

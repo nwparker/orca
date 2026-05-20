@@ -957,7 +957,16 @@ function createCliApi(): NonNullable<Partial<PreloadApi>['cli']> {
 
 function createAgentHooksApi(): NonNullable<Partial<PreloadApi>['agentHooks']> {
   const status = (
-    agent: 'claude' | 'codex' | 'gemini' | 'cursor' | 'droid' | 'grok' | 'copilot' | 'hermes'
+    agent:
+      | 'claude'
+      | 'codex'
+      | 'gemini'
+      | 'antigravity'
+      | 'cursor'
+      | 'droid'
+      | 'grok'
+      | 'copilot'
+      | 'hermes'
   ) =>
     Promise.resolve({
       agent,
@@ -970,6 +979,7 @@ function createAgentHooksApi(): NonNullable<Partial<PreloadApi>['agentHooks']> {
     claudeStatus: () => status('claude'),
     codexStatus: () => status('codex'),
     geminiStatus: () => status('gemini'),
+    antigravityStatus: () => status('antigravity'),
     cursorStatus: () => status('cursor'),
     droidStatus: () => status('droid'),
     grokStatus: () => status('grok'),

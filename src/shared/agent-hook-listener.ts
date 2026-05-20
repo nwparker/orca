@@ -323,6 +323,7 @@ const TOOL_INPUT_KEYS_BY_TOOL: Record<string, readonly string[]> = {
   edit_file: ['file_path', 'path'],
   replace: ['file_path', 'path'],
   run_shell_command: ['command'],
+  run_command: ['CommandLine', 'command', 'cmd'],
   glob: ['pattern'],
   search_file_content: ['pattern'],
   web_fetch: ['url'],
@@ -353,7 +354,20 @@ const TOOL_INPUT_KEYS_BY_TOOL: Record<string, readonly string[]> = {
   browser_type: ['text', 'target', 'selector'],
   session_search: ['query'],
   skill_manage: ['action', 'name', 'file_path'],
-  delegate_task: ['task', 'prompt', 'description']
+  delegate_task: ['task', 'prompt', 'description'],
+  view_file: ['AbsolutePath', 'path', 'file_path'],
+  write_to_file: ['TargetFile', 'path', 'file_path'],
+  replace_file_content: ['TargetFile', 'path', 'file_path'],
+  multi_replace_file_content: ['TargetFile', 'path', 'file_path'],
+  list_dir: ['DirectoryPath', 'path'],
+  find_by_name: ['SearchDirectory', 'Pattern', 'query'],
+  grep_search: ['SearchPath', 'Query', 'query', 'pattern'],
+  search_web: ['query'],
+  read_url_content: ['Url', 'url'],
+  manage_task: ['TaskId', 'Action'],
+  schedule: ['Prompt', 'DurationSeconds', 'CronExpression'],
+  ask_question: ['question', 'questions'],
+  ask_permission: ['Action', 'Target', 'Reason']
 }
 
 const FALLBACK_TOOL_INPUT_KEYS = [
@@ -371,7 +385,15 @@ const FALLBACK_TOOL_INPUT_KEYS = [
   'text',
   'action',
   'name',
-  'description'
+  'description',
+  'CommandLine',
+  'AbsolutePath',
+  'TargetFile',
+  'DirectoryPath',
+  'SearchPath',
+  'Query',
+  'Url',
+  'Prompt'
 ] as const
 
 function deriveToolInputPreview(
@@ -501,6 +523,14 @@ function extractAssistantTextFromLine(line: string): string | undefined {
       }
     }
   }
+  if (
+    record.source === 'MODEL' &&
+    record.type === 'PLANNER_RESPONSE' &&
+    typeof record.content === 'string' &&
+    record.content.trim().length > 0
+  ) {
+    return record.content
+  }
   const nestedMessage = record.message as Record<string, unknown> | undefined
   const role =
     record.role ?? nestedMessage?.role ?? (record.type === 'assistant' ? 'assistant' : undefined)
@@ -603,6 +633,8 @@ function readLastAssistantFromGrokChatHistory(
 }
 
 export function hasPendingAgentResultText(source: AgentHookSource, body: unknown): boolean {
+  const envelope =
+    typeof body === 'object' && body !== null ? (body as Record<string, unknown>) : null
   const record = parseHookBodyPayloadRecord(body)
   if (!record) {
     return false
@@ -614,6 +646,15 @@ export function hasPendingAgentResultText(source: AgentHookSource, body: unknown
   }
   if (source === 'copilot') {
     const transcriptPath = record.transcript_path ?? record.transcriptPath
+    return typeof transcriptPath === 'string' && transcriptPath.trim().length > 0
+  }
+  const eventName =
+    envelope?.hook_event_name ??
+    envelope?.hookEventName ??
+    record.hook_event_name ??
+    record.hookEventName
+  if (source === 'antigravity' && eventName === 'Stop') {
+    const transcriptPath = record.transcriptPath ?? record.transcript_path
     return typeof transcriptPath === 'string' && transcriptPath.trim().length > 0
   }
   if (
@@ -774,6 +815,44 @@ function extractGeminiToolFields(
   }
   if (eventName === 'AfterAgent') {
     const message = readString(hookPayload, 'prompt_response')
+    if (message) {
+      return { lastAssistantMessage: message }
+    }
+  }
+  return {}
+}
+
+function readAntigravityToolCall(hookPayload: Record<string, unknown>): {
+  toolName?: string
+  toolInputSource?: unknown
+} {
+  const toolCall = hookPayload.toolCall
+  if (typeof toolCall !== 'object' || toolCall === null) {
+    return {}
+  }
+  const record = toolCall as Record<string, unknown>
+  return {
+    toolName: readFirstString(record, ['name', 'toolName', 'tool_name']),
+    toolInputSource: record.args
+  }
+}
+
+function extractAntigravityToolFields(
+  eventName: unknown,
+  hookPayload: Record<string, unknown>
+): ToolSnapshot {
+  if (eventName === 'PreToolUse' || eventName === 'PostToolUse') {
+    const toolCall = readAntigravityToolCall(hookPayload)
+    const toolName = toolCall.toolName
+    const toolInput =
+      deriveToolInputPreview(toolName, toolCall.toolInputSource) ??
+      deriveFallbackToolInputPreview(toolCall.toolInputSource)
+    return { toolName, toolInput }
+  }
+  if (eventName === 'Stop') {
+    const message =
+      readString(hookPayload, 'last_assistant_message') ??
+      readLastAssistantFromTranscript(hookPayload.transcriptPath ?? hookPayload.transcript_path)
     if (message) {
       return { lastAssistantMessage: message }
     }
@@ -1286,6 +1365,8 @@ function isNewTurnEvent(source: AgentHookSource, eventName: unknown): boolean {
       return eventName === 'SessionStart' || eventName === 'UserPromptSubmit'
     case 'gemini':
       return eventName === 'BeforeAgent'
+    case 'antigravity':
+      return eventName === 'PreInvocation'
     case 'opencode':
       return false
     case 'cursor':
@@ -1324,6 +1405,8 @@ function extractToolFields(
       return extractCodexToolFields(eventName, hookPayload)
     case 'gemini':
       return extractGeminiToolFields(eventName, hookPayload)
+    case 'antigravity':
+      return extractAntigravityToolFields(eventName, hookPayload)
     case 'opencode':
       return extractOpenCodeToolFields(eventName, hookPayload)
     case 'cursor':
@@ -1429,6 +1512,57 @@ function normalizeGeminiEvent(
         resetOnNewTurn: isNewTurnEvent('gemini', eventName)
       }),
       agentType: 'gemini',
+      toolName: snapshot.toolName,
+      toolInput: snapshot.toolInput,
+      lastAssistantMessage: snapshot.lastAssistantMessage
+    })
+  )
+}
+
+function isAntigravityFeedbackTool(toolName: string | undefined): boolean {
+  return toolName === 'ask_question' || toolName === 'ask_permission'
+}
+
+function normalizeAntigravityEvent(
+  state: HookListenerState,
+  eventName: unknown,
+  promptText: string,
+  paneKey: string,
+  hookPayload: Record<string, unknown>
+): ParsedAgentStatusPayload | null {
+  const toolName = readAntigravityToolCall(hookPayload).toolName
+  const stateName =
+    eventName === 'PreToolUse' && isAntigravityFeedbackTool(toolName)
+      ? 'waiting'
+      : eventName === 'Stop'
+        ? hookPayload.fullyIdle === false
+          ? 'working'
+          : 'done'
+        : eventName === 'PreInvocation' ||
+            eventName === 'PostInvocation' ||
+            eventName === 'PreToolUse' ||
+            eventName === 'PostToolUse'
+          ? 'working'
+          : null
+
+  if (!stateName) {
+    return null
+  }
+
+  const snapshot = resolveToolState(
+    state,
+    paneKey,
+    extractToolFields('antigravity', eventName, hookPayload),
+    { resetOnNewTurn: isNewTurnEvent('antigravity', eventName) }
+  )
+
+  return parseAgentStatusPayload(
+    JSON.stringify({
+      state: stateName,
+      prompt: resolvePrompt(state, paneKey, promptText, {
+        resetOnNewTurn: isNewTurnEvent('antigravity', eventName)
+      }),
+      agentType: 'antigravity',
       toolName: snapshot.toolName,
       toolInput: snapshot.toolInput,
       lastAssistantMessage: snapshot.lastAssistantMessage
@@ -1952,6 +2086,9 @@ export function normalizeHookPayload(
     case 'gemini':
       payload = normalizeGeminiEvent(state, eventName, promptText, paneKey, hookPayloadRecord)
       break
+    case 'antigravity':
+      payload = normalizeAntigravityEvent(state, eventName, promptText, paneKey, hookPayloadRecord)
+      break
     case 'opencode':
       payload = normalizeOpenCodeEvent(state, eventName, promptText, paneKey, hookPayloadRecord)
       break
@@ -2002,6 +2139,7 @@ export const HOOK_SOURCE_BY_PATHNAME: Readonly<Record<string, AgentHookSource>> 
   '/hook/claude': 'claude',
   '/hook/codex': 'codex',
   '/hook/gemini': 'gemini',
+  '/hook/antigravity': 'antigravity',
   '/hook/opencode': 'opencode',
   '/hook/cursor': 'cursor',
   '/hook/pi': 'pi',

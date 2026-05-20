@@ -1406,6 +1406,7 @@ export type TuiAgent =
   | 'opencode' // OpenCode
   | 'pi' // Pi (pi.dev)
   | 'gemini' // Gemini CLI
+  | 'antigravity' // Google Antigravity CLI
   | 'aider' // Aider
   | 'goose' // Goose
   | 'amp' // Amp

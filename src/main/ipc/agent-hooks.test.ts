@@ -52,6 +52,9 @@ vi.mock('../codex/hook-service', () => ({
 vi.mock('../gemini/hook-service', () => ({
   geminiHookService: { getStatus: vi.fn(() => ({ agent: 'gemini', state: 'absent' })) }
 }))
+vi.mock('../antigravity/hook-service', () => ({
+  antigravityHookService: { getStatus: vi.fn(() => ({ agent: 'antigravity', state: 'absent' })) }
+}))
 vi.mock('../cursor/hook-service', () => ({
   cursorHookService: { getStatus: vi.fn(() => ({ agent: 'cursor', state: 'absent' })) }
 }))
@@ -98,6 +101,17 @@ describe('agentStatus:getSnapshot IPC', () => {
     const handler = handleHandlers.get('agentStatus:getSnapshot')
     expect(handler).toBeDefined()
     expect(handler!({})).toEqual(snapshot)
+  })
+})
+
+describe('agentHooks:antigravityStatus IPC', () => {
+  it('returns Antigravity hook installation status', async () => {
+    const { registerAgentHookHandlers } = await import('./agent-hooks')
+    registerAgentHookHandlers()
+
+    const handler = handleHandlers.get('agentHooks:antigravityStatus')
+    expect(handler).toBeDefined()
+    expect(handler!({})).toEqual({ agent: 'antigravity', state: 'absent' })
   })
 })
 
