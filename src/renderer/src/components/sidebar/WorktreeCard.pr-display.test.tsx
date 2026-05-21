@@ -114,6 +114,10 @@ function makeHostedReview(overrides: Partial<HostedReviewInfo> = {}): HostedRevi
   }
 }
 
+function renderWorktreeCardMarkup(element: ReactNode): string {
+  return renderToStaticMarkup(<>{element}</>)
+}
+
 describe('WorktreeCard linked PR display', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -124,7 +128,7 @@ describe('WorktreeCard linked PR display', () => {
   it('keeps an icon-only linked GH PR badge visible before hosted review details are cached', async () => {
     const { default: WorktreeCard } = await import('./WorktreeCard')
 
-    const markup = renderToStaticMarkup(
+    const markup = renderWorktreeCardMarkup(
       <WorktreeCard worktree={makeWorktree({ linkedPR: 456 })} repo={makeRepo()} isActive={false} />
     )
 
@@ -136,7 +140,7 @@ describe('WorktreeCard linked PR display', () => {
     worktreeCardProperties = ['issue', 'pr', 'comment']
     const { default: WorktreeCard } = await import('./WorktreeCard')
 
-    const markup = renderToStaticMarkup(
+    const markup = renderWorktreeCardMarkup(
       <WorktreeCard
         worktree={makeWorktree({
           linkedIssue: 123,
@@ -170,7 +174,7 @@ describe('WorktreeCard linked PR display', () => {
     }
     const { default: WorktreeCard } = await import('./WorktreeCard')
 
-    const markup = renderToStaticMarkup(
+    const markup = renderWorktreeCardMarkup(
       <WorktreeCard worktree={makeWorktree({ linkedPR: 456 })} repo={makeRepo()} isActive={false} />
     )
 
