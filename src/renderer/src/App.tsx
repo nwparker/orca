@@ -56,6 +56,7 @@ import {
   FloatingTerminalToggleButton
 } from './components/floating-terminal/FloatingTerminalPanel'
 import { TOGGLE_FLOATING_TERMINAL_EVENT } from '@/lib/floating-terminal'
+import { shouldMinimizeFloatingWorkspacePanelOnCloseShortcut } from '@/lib/floating-workspace-terminal-actions'
 import { DictationController } from './components/dictation/DictationController'
 import { WorkspacePortScanner } from './components/ports/WorkspacePortScanner'
 import { CrashReportDialog } from './components/crash-report/CrashReportDialog'
@@ -104,6 +105,7 @@ import {
 import type { VirtualizedScrollAnchor } from './hooks/useVirtualizedScrollAnchor'
 import type { RemoteWorkspacePatchResult } from '../../shared/remote-workspace-types'
 import type { OnboardingState } from '../../shared/types'
+import { FLOATING_TERMINAL_WORKTREE_ID } from '../../shared/constants'
 import { getFeatureTipsAppOpenDecision } from './components/feature-tips/feature-tip-startup-gate'
 
 const isMac = navigator.userAgent.includes('Mac')
@@ -284,6 +286,9 @@ function App(): React.JSX.Element {
   const worktreeSidebarScrollOffsetRef = useRef(0)
   const worktreeSidebarScrollAnchorRef = useRef<VirtualizedScrollAnchor>(null)
   const tabsByWorktree = useAppStore((s) => s.tabsByWorktree)
+  const floatingUnifiedTabCount = useAppStore(
+    (s) => s.unifiedTabsByWorktree[FLOATING_TERMINAL_WORKTREE_ID]?.length ?? 0
+  )
   const activeTabId = useAppStore((s) => s.activeTabId)
   const expandedPaneByTabId = useAppStore((s) => s.expandedPaneByTabId)
   const canExpandPaneByTabId = useAppStore((s) => s.canExpandPaneByTabId)
@@ -1095,6 +1100,24 @@ function App(): React.JSX.Element {
         return
       }
 
+      // Why: after the last floating tab is closed, the empty overlay has no
+      // pane-level handler; Cmd/Ctrl+W should minimize only that landing state.
+      if (
+        !e.altKey &&
+        !e.shiftKey &&
+        e.key.toLowerCase() === 'w' &&
+        shouldMinimizeFloatingWorkspacePanelOnCloseShortcut({
+          activeView,
+          activeWorktreeId,
+          floatingTerminalOpen,
+          floatingUnifiedTabCount
+        })
+      ) {
+        e.preventDefault()
+        setFloatingTerminalOpenWithFocus(false)
+        return
+      }
+
       // Cmd/Ctrl+B — toggle left sidebar
       if (!e.altKey && !e.shiftKey && e.key.toLowerCase() === 'b') {
         e.preventDefault()
@@ -1153,7 +1176,14 @@ function App(): React.JSX.Element {
 
     window.addEventListener('keydown', onKeyDown, { capture: true })
     return () => window.removeEventListener('keydown', onKeyDown, { capture: true })
-  }, [activeView, activeWorktreeId, actions])
+  }, [
+    activeView,
+    activeWorktreeId,
+    actions,
+    floatingTerminalOpen,
+    floatingUnifiedTabCount,
+    setFloatingTerminalOpenWithFocus
+  ])
 
   useLayoutEffect(() => {
     const controls = titlebarLeftControlsRef.current
