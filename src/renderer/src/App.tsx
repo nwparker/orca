@@ -56,7 +56,10 @@ import {
   FloatingTerminalToggleButton
 } from './components/floating-terminal/FloatingTerminalPanel'
 import { TOGGLE_FLOATING_TERMINAL_EVENT } from '@/lib/floating-terminal'
-import { shouldMinimizeFloatingWorkspacePanelOnCloseShortcut } from '@/lib/floating-workspace-terminal-actions'
+import {
+  isFloatingWorkspacePanelFocused,
+  shouldMinimizeFloatingWorkspacePanelOnCloseShortcut
+} from '@/lib/floating-workspace-terminal-actions'
 import { DictationController } from './components/dictation/DictationController'
 import { WorkspacePortScanner } from './components/ports/WorkspacePortScanner'
 import { CrashReportDialog } from './components/crash-report/CrashReportDialog'
@@ -1097,6 +1100,10 @@ function App(): React.JSX.Element {
       }
 
       if (!mod) {
+        return
+      }
+
+      if (isFloatingWorkspacePanelFocused()) {
         return
       }
 

@@ -74,6 +74,7 @@ type FloatingTerminalPanelProps = {
 
 const FLOATING_TERMINAL_NO_DRAG_SELECTOR =
   'button,input,textarea,select,[role="menuitem"],[data-testid="sortable-tab"],[data-floating-terminal-no-drag]'
+const FLOATING_TERMINAL_SHORTCUT_SURFACE_SELECTOR = '[data-floating-terminal-shortcut-surface]'
 
 function isFloatingTerminalDragTarget(target: EventTarget): boolean {
   return !(target instanceof HTMLElement && target.closest(FLOATING_TERMINAL_NO_DRAG_SELECTOR))
@@ -640,6 +641,66 @@ export function FloatingTerminalPanel({
     )
   }, [activeGroup, closeFloatingItems])
 
+  const focusPanelForShortcuts = useCallback(() => {
+    panelRef.current?.focus({ preventScroll: true })
+  }, [])
+
+  const handleShortcutSurfaceKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLDivElement>) => {
+      if (!open || event.defaultPrevented || event.repeat) {
+        return
+      }
+      const target = event.target
+      if (
+        !(target instanceof HTMLElement) ||
+        (target !== panelRef.current &&
+          target.closest(FLOATING_TERMINAL_SHORTCUT_SURFACE_SELECTOR) === null)
+      ) {
+        return
+      }
+
+      const isMac = navigator.userAgent.includes('Mac')
+      const mod = isMac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey
+      if (!mod || event.altKey) {
+        return
+      }
+
+      const key = event.key.toLowerCase()
+      if (!event.shiftKey && key === 't') {
+        event.preventDefault()
+        createFloatingTerminalTab()
+        return
+      }
+      if (event.shiftKey && key === 'b') {
+        event.preventDefault()
+        createFloatingBrowserTab()
+        return
+      }
+      if (event.shiftKey && key === 'm') {
+        event.preventDefault()
+        createFloatingMarkdownTab()
+        return
+      }
+      if (!event.shiftKey && key === 'w') {
+        event.preventDefault()
+        if (activeTab) {
+          closeFloatingItem(activeTab.id)
+        } else {
+          onOpenChange(false)
+        }
+      }
+    },
+    [
+      activeTab,
+      closeFloatingItem,
+      createFloatingBrowserTab,
+      createFloatingMarkdownTab,
+      createFloatingTerminalTab,
+      onOpenChange,
+      open
+    ]
+  )
+
   const toggleMaximized = useCallback(() => {
     setMaximized((current) => {
       if (current) {
@@ -664,6 +725,9 @@ export function FloatingTerminalPanel({
     if (!isFloatingTerminalDragTarget(target)) {
       return
     }
+    // Why: clicking the draggable titlebar should make the floating workspace
+    // own shortcuts even when the main app is still on Landing.
+    focusPanelForShortcuts()
     dragRef.current = {
       pointerId: event.pointerId,
       startX: event.clientX,
@@ -713,6 +777,7 @@ export function FloatingTerminalPanel({
       ref={panelRef}
       data-floating-terminal-panel
       aria-hidden={!open}
+      tabIndex={-1}
       className={`fixed z-50 flex min-h-[280px] min-w-[420px] overflow-hidden rounded-lg border border-border bg-card text-card-foreground shadow-[0_10px_24px_rgba(0,0,0,0.18)] ${open ? 'opacity-100' : 'invisible pointer-events-none opacity-0'}`}
       style={{
         visibility: open ? 'visible' : 'hidden',
@@ -730,10 +795,12 @@ export function FloatingTerminalPanel({
           clampFloatingTerminalBounds({ ...prev, width: rect.width, height: rect.height })
         )
       }}
+      onKeyDownCapture={handleShortcutSurfaceKeyDown}
     >
       <div className="flex min-h-0 flex-1 flex-col">
         <div
           className="flex h-9 shrink-0 cursor-grab items-center border-b border-border bg-[var(--bg-titlebar,var(--card))] active:cursor-grabbing"
+          data-floating-terminal-shortcut-surface
           onPointerDown={handleDragStart}
           onPointerMove={handleDragMove}
           onPointerUp={handleDragEnd}
@@ -863,6 +930,7 @@ export function FloatingTerminalPanel({
               onOpenMarkdown={openFloatingMarkdownTab}
               onNewBrowser={createFloatingBrowserTab}
               onClose={() => onOpenChange(false)}
+              onFocusPanel={focusPanelForShortcuts}
             />
           ) : null}
         </div>
@@ -958,16 +1026,22 @@ function FloatingTerminalEmptyState({
   onNewMarkdown,
   onOpenMarkdown,
   onNewBrowser,
-  onClose
+  onClose,
+  onFocusPanel
 }: {
   onNewTerminal: () => void
   onNewMarkdown: () => void
   onOpenMarkdown: () => void
   onNewBrowser: () => void
   onClose: () => void
+  onFocusPanel: () => void
 }): React.JSX.Element {
   return (
-    <div className="absolute inset-0 flex items-center justify-center">
+    <div
+      className="absolute inset-0 flex items-center justify-center"
+      data-floating-terminal-shortcut-surface
+      onPointerDown={onFocusPanel}
+    >
       <div className="flex w-[230px] flex-col items-center gap-1.5" data-floating-terminal-no-drag>
         <Button
           type="button"

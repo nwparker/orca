@@ -3,6 +3,7 @@ import { FLOATING_TERMINAL_WORKTREE_ID } from '../../../shared/constants'
 import type { TerminalTab } from '../../../shared/types'
 import {
   createFloatingWorkspaceTerminalTab,
+  isFloatingWorkspacePanelFocused,
   isFloatingWorkspacePanelVisible,
   shouldMinimizeFloatingWorkspacePanelOnCloseShortcut
 } from './floating-workspace-terminal-actions'
@@ -47,6 +48,22 @@ describe('isFloatingWorkspacePanelVisible', () => {
     expect(isFloatingWorkspacePanelVisible({ querySelector: vi.fn().mockReturnValue(null) })).toBe(
       false
     )
+  })
+})
+
+describe('isFloatingWorkspacePanelFocused', () => {
+  it('detects focus inside the floating workspace panel', () => {
+    const activeElement = {
+      closest: vi.fn().mockReturnValue({})
+    }
+    vi.stubGlobal('HTMLElement', class {})
+
+    Object.setPrototypeOf(activeElement, HTMLElement.prototype)
+
+    expect(isFloatingWorkspacePanelFocused({ activeElement } as never)).toBe(true)
+    expect(activeElement.closest).toHaveBeenCalledWith('[data-floating-terminal-panel]')
+
+    vi.unstubAllGlobals()
   })
 })
 
