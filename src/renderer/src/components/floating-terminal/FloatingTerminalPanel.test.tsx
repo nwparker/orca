@@ -603,6 +603,56 @@ describe('FloatingTerminalPanel close behavior', () => {
     expect(mocks.activateTab).toHaveBeenCalledWith('created-tab')
   })
 
+  it('preserves terminal focus when dragging the titlebar from inside the floating panel', async () => {
+    setFloatingTabs([makeTab({ id: 'tab-1' })])
+    const element = await renderPanel(true)
+    const panel = findByProp(element, 'data-floating-terminal-panel')
+    const titlebar = findByProp(element, 'data-floating-terminal-shortcut-surface')
+    const panelElement = { focus: vi.fn() }
+    const activeElement = { closest: vi.fn().mockReturnValue(panelElement) }
+    const titlebarTarget = { closest: vi.fn().mockReturnValue(null) }
+    Object.setPrototypeOf(activeElement, HTMLElement.prototype)
+    Object.setPrototypeOf(titlebarTarget, HTMLElement.prototype)
+    ;(panel.props.ref as { current: unknown }).current = panelElement
+    vi.stubGlobal('document', { activeElement })
+
+    ;(titlebar.props.onPointerDown as (event: unknown) => void)({
+      button: 0,
+      clientX: 10,
+      clientY: 20,
+      currentTarget: { setPointerCapture: vi.fn() },
+      pointerId: 1,
+      target: titlebarTarget
+    })
+
+    expect(panelElement.focus).not.toHaveBeenCalled()
+  })
+
+  it('focuses the floating panel for titlebar shortcuts when focus starts outside it', async () => {
+    setFloatingTabs([makeTab({ id: 'tab-1' })])
+    const element = await renderPanel(true)
+    const panel = findByProp(element, 'data-floating-terminal-panel')
+    const titlebar = findByProp(element, 'data-floating-terminal-shortcut-surface')
+    const panelElement = { focus: vi.fn() }
+    const activeElement = { closest: vi.fn().mockReturnValue(null) }
+    const titlebarTarget = { closest: vi.fn().mockReturnValue(null) }
+    Object.setPrototypeOf(activeElement, HTMLElement.prototype)
+    Object.setPrototypeOf(titlebarTarget, HTMLElement.prototype)
+    ;(panel.props.ref as { current: unknown }).current = panelElement
+    vi.stubGlobal('document', { activeElement })
+
+    ;(titlebar.props.onPointerDown as (event: unknown) => void)({
+      button: 0,
+      clientX: 10,
+      clientY: 20,
+      currentTarget: { setPointerCapture: vi.fn() },
+      pointerId: 1,
+      target: titlebarTarget
+    })
+
+    expect(panelElement.focus).toHaveBeenCalledWith({ preventScroll: true })
+  })
+
   it('minimizes the empty floating workspace on Cmd+W after landing focus', async () => {
     const onOpenChange = vi.fn()
     const element = await renderPanel(true, onOpenChange)

@@ -642,6 +642,15 @@ export function FloatingTerminalPanel({
   }, [activeGroup, closeFloatingItems])
 
   const focusPanelForShortcuts = useCallback(() => {
+    const active = document.activeElement
+    if (
+      active instanceof HTMLElement &&
+      active.closest('[data-floating-terminal-panel]') !== null
+    ) {
+      // Why: dragging the titlebar while xterm/editor already has focus should
+      // not steal the typing target just to keep panel shortcuts scoped.
+      return
+    }
     panelRef.current?.focus({ preventScroll: true })
   }, [])
 
