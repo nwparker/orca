@@ -24,13 +24,14 @@ diff --git a/src/GlyphRenderer.ts b/src/GlyphRenderer.ts
 index 46b8efe..4b36a78 100644
 --- a/src/GlyphRenderer.ts
 +++ b/src/GlyphRenderer.ts
-@@ -387,8 +387,12 @@ export class GlyphRenderer extends Disposable {
+@@ -387,8 +387,13 @@ export class GlyphRenderer extends Disposable {
      gl.bindTexture(gl.TEXTURE_2D, this._atlasTextures[i].texture);
      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
 +    // Why: glyph atlas pages are sampled 1:1. ANGLE/OpenGL drivers on Linux
 +    // Wayland can fail mipmap allocation for large atlas uploads, corrupting
 +    // terminal glyph textures instead of cleanly losing the WebGL context.
++    // Separate from upstream atlas-merge fix: https://github.com/xtermjs/xterm.js/pull/5883
 +    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
 +    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, atlas.pages[i].canvas);
