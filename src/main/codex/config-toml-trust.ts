@@ -95,7 +95,7 @@ export function computeTrustedHash(entry: CodexTrustEntry): string {
     event_name: entry.eventLabel,
     hooks: [handler]
   }
-  if (entry.matcher !== undefined) {
+  if (entry.matcher !== undefined && codexEventSupportsMatcher(entry.eventLabel)) {
     identity.matcher = entry.matcher
   }
   const serialized = JSON.stringify(canonicalize(identity))
@@ -179,6 +179,12 @@ function isCodexEventLabel(value: string): value is CodexEventLabel {
     value === 'user_prompt_submit' ||
     value === 'stop'
   )
+}
+
+function codexEventSupportsMatcher(eventLabel: CodexEventLabel): boolean {
+  // Why: Codex accepts matcher fields on every event shape but ignores them for
+  // these two events before hashing and dispatching.
+  return eventLabel !== 'user_prompt_submit' && eventLabel !== 'stop'
 }
 
 // Why: TOML 1.0 forbids BOMs but real-world editors (especially on Windows) sometimes

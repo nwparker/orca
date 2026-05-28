@@ -226,7 +226,6 @@ describe('CodexHookService', () => {
           command: 'user-hook',
           timeoutSec: 12,
           async: true,
-          matcher: '*',
           statusMessage: 'Running user hook'
         }
       ]),

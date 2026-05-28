@@ -147,6 +147,42 @@ describe('computeTrustedHash', () => {
     expect(a).not.toBe(b)
   })
 
+  it('ignores matcher for Codex events whose matchers are not dispatched', () => {
+    const stopWithoutMatcher = computeTrustedHash({
+      sourcePath: '/x/hooks.json',
+      eventLabel: 'stop',
+      groupIndex: 0,
+      handlerIndex: 0,
+      command: 'foo'
+    })
+    const stopWithMatcher = computeTrustedHash({
+      sourcePath: '/x/hooks.json',
+      eventLabel: 'stop',
+      groupIndex: 0,
+      handlerIndex: 0,
+      command: 'foo',
+      matcher: 'ignored'
+    })
+    const promptWithMatcher = computeTrustedHash({
+      sourcePath: '/x/hooks.json',
+      eventLabel: 'user_prompt_submit',
+      groupIndex: 0,
+      handlerIndex: 0,
+      command: 'foo',
+      matcher: 'ignored'
+    })
+    const promptWithoutMatcher = computeTrustedHash({
+      sourcePath: '/x/hooks.json',
+      eventLabel: 'user_prompt_submit',
+      groupIndex: 0,
+      handlerIndex: 0,
+      command: 'foo'
+    })
+
+    expect(stopWithMatcher).toBe(stopWithoutMatcher)
+    expect(promptWithMatcher).toBe(promptWithoutMatcher)
+  })
+
   it('produces a different hash when statusMessage is set', () => {
     const a = computeTrustedHash({
       sourcePath: '/x/hooks.json',
