@@ -388,7 +388,14 @@ jobs:
           if [[ "$EVENT_NAME" == "schedule" ]]; then
             commit_message="$commit_message [rc-slot:$SLOT]"
           fi
-          git commit -m "$commit_message"
+          if git diff --cached --quiet; then
+            # Why: a failed cut can push the version bump to main before the
+            # release is published. Re-cutting then needs a fresh taggable
+            # release commit even though package.json is already at VERSION.
+            git commit --allow-empty -m "$commit_message"
+          else
+            git commit -m "$commit_message"
+          fi
           git tag -a "v$VERSION" -m "v$VERSION"
           echo "tag=v$VERSION" >>"$GITHUB_OUTPUT"
           echo "sha=$(git rev-parse HEAD)" >>"$GITHUB_OUTPUT"
