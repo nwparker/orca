@@ -127,8 +127,7 @@ async function installElectronPackageBinary() {
       process.exit(1)
     }
 
-    rmSync(electronDistDir, { recursive: true, force: true })
-    cpSync(extractDir, electronDistDir, { recursive: true })
+    moveExtractedElectronDist(extractDir, electronDistDir)
 
     const srcTypeDefPath = resolve(electronDistDir, 'electron.d.ts')
     if (existsSync(srcTypeDefPath)) {
@@ -154,6 +153,24 @@ function extractElectronArchive(zipPath, extractDir) {
   }
   if (result.status !== 0) {
     throw new Error(formatExtractorFailure(command, result))
+  }
+}
+
+function moveExtractedElectronDist(extractDir, electronDistDir) {
+  rmSync(electronDistDir, { recursive: true, force: true })
+  try {
+    // Why: macOS Electron archives rely on framework symlinks. Moving the
+    // verified tree preserves them exactly; copying has broken them in CI.
+    renameSync(extractDir, electronDistDir)
+  } catch (/** @type {any} */ err) {
+    if (err?.code !== 'EXDEV') {
+      throw err
+    }
+    cpSync(extractDir, electronDistDir, {
+      recursive: true,
+      dereference: false,
+      verbatimSymlinks: true
+    })
   }
 }
 

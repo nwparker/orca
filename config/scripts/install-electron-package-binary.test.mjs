@@ -1,6 +1,7 @@
 import {
   copyFileSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -35,6 +36,13 @@ describe('install-electron-package-binary', () => {
       expect(readFileSync(join(projectDir, 'node_modules', 'electron', 'path.txt'), 'utf8')).toBe(
         'electron'
       )
+      if (process.platform !== 'win32') {
+        expect(
+          lstatSync(
+            join(projectDir, 'node_modules', 'electron', 'dist', 'version-link')
+          ).isSymbolicLink()
+        ).toBe(true)
+      }
       expect(result.stdout).toContain('Repaired Electron path.txt -> electron')
     } finally {
       rmSync(projectDir, { recursive: true, force: true })
@@ -153,13 +161,16 @@ function writeFakeExtractor(projectDir, { createExecutable }) {
   writeFileSync(
     join(projectDir, 'fake-extractor.cjs'),
     `
-const { mkdirSync, writeFileSync } = require('node:fs')
+const { mkdirSync, symlinkSync, writeFileSync } = require('node:fs')
 const { join } = require('node:path')
 const extractDir = process.argv[3]
 mkdirSync(join(extractDir, 'locales'), { recursive: true })
 if (${JSON.stringify(createExecutable)}) {
   writeFileSync(join(extractDir, 'electron'), '')
   writeFileSync(join(extractDir, 'version'), 'v41.5.0')
+  if (process.platform !== 'win32') {
+    symlinkSync('version', join(extractDir, 'version-link'))
+  }
 }
 `
   )
