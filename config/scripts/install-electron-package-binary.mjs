@@ -24,12 +24,16 @@ const { downloadArtifact } = electronRequire('@electron/get')
 const extract = electronRequire('extract-zip')
 const platformPath = getElectronPlatformPath()
 
-main().catch((error) => {
+try {
+  // Why: Electron's own install.js can exit 0 while an async extract promise is
+  // still unsettled, leaving a partial dist/. Top-level await makes that fail.
+  await main()
+} catch (error) {
   console.error('[electron-package] Failed to install Electron package binary.')
   console.error(error)
   logElectronInstallDiagnostics()
   process.exit(1)
-})
+}
 
 async function main() {
   if (electronPackageIsUsable()) {

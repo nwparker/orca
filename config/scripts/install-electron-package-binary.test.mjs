@@ -1,6 +1,7 @@
 import {
   chmodSync,
   copyFileSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -58,6 +59,24 @@ describe('install-electron-package-binary', () => {
       expect(result.status).toBe(1)
       expect(result.stderr).toContain('Electron archive extract did not contain executable')
       expect(result.stderr).toContain('extractEntries=locales')
+    } finally {
+      rmSync(projectDir, { recursive: true, force: true })
+    }
+  })
+
+  it('does not exit successfully when Electron extract never settles', () => {
+    const projectDir = mkTempProject()
+
+    try {
+      writeFakeElectronPackage(projectDir)
+      writeFakeElectronGet(projectDir)
+      writeFakeExtractZip(projectDir, { createExecutable: false, neverSettles: true })
+
+      const result = runInstallScript(projectDir)
+
+      expect(result.status).not.toBe(0)
+      expect(result.stderr).toContain('Detected unsettled top-level await')
+      expect(existsSync(join(projectDir, 'node_modules', 'electron', 'path.txt'))).toBe(false)
     } finally {
       rmSync(projectDir, { recursive: true, force: true })
     }
@@ -127,7 +146,7 @@ exports.downloadArtifact = async function downloadArtifact(details) {
   )
 }
 
-function writeFakeExtractZip(projectDir, { createExecutable }) {
+function writeFakeExtractZip(projectDir, { createExecutable, neverSettles = false }) {
   const extractDir = join(projectDir, 'node_modules', 'electron', 'node_modules', 'extract-zip')
   mkdirSync(extractDir, { recursive: true })
   writeFileSync(
@@ -137,6 +156,9 @@ const { mkdirSync, writeFileSync } = require('node:fs')
 const { join } = require('node:path')
 module.exports = async function extract(_zipPath, options) {
   mkdirSync(join(options.dir, 'locales'), { recursive: true })
+  if (${JSON.stringify(neverSettles)}) {
+    return new Promise(() => {})
+  }
   if (${JSON.stringify(createExecutable)}) {
     writeFileSync(join(options.dir, 'electron'), '')
     writeFileSync(join(options.dir, 'version'), 'v41.5.0')
