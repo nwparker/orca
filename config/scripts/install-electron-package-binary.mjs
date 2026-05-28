@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import {
+  cpSync,
   existsSync,
   mkdtempSync,
   readdirSync,
@@ -95,6 +96,7 @@ async function installElectronPackageBinary() {
   const electronDistDir = resolve(electronPackageDir, 'dist')
   const tempDir = mkdtempSync(resolve(tmpdir(), 'orca-electron-'))
   const cacheRoot = join(tempDir, 'cache')
+  const extractDir = join(tempDir, 'extract')
 
   try {
     const zipPath = await downloadArtifact({
@@ -108,8 +110,20 @@ async function installElectronPackageBinary() {
       ...(shouldUseRemoteChecksums() ? {} : { checksums: electronRequire('./checksums.json') })
     })
 
+    // Why: CI has observed partial extracts directly under node_modules/electron
+    // that leave only dist/locales. Verify in temp before replacing package dist.
+    await extract(zipPath, { dir: extractDir })
+    const extractedExecutable = resolve(extractDir, platformPath)
+    if (!existsSync(extractedExecutable)) {
+      console.error('[electron-package] Electron archive extract did not contain executable.')
+      console.error(`  platformPath=${platformPath}`)
+      console.error(`  extractDir=${extractDir}`)
+      console.error(`  extractEntries=${safeReaddir(extractDir).join(', ')}`)
+      process.exit(1)
+    }
+
     rmSync(electronDistDir, { recursive: true, force: true })
-    await extract(zipPath, { dir: electronDistDir })
+    cpSync(extractDir, electronDistDir, { recursive: true })
 
     const srcTypeDefPath = resolve(electronDistDir, 'electron.d.ts')
     if (existsSync(srcTypeDefPath)) {
@@ -123,7 +137,7 @@ async function installElectronPackageBinary() {
 function shouldUseRemoteChecksums() {
   return Boolean(
     process.env.electron_use_remote_checksums ||
-      process.env.npm_config_electron_use_remote_checksums
+    process.env.npm_config_electron_use_remote_checksums
   )
 }
 

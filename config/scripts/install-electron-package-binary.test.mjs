@@ -1,4 +1,12 @@
-import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  chmodSync,
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
@@ -48,10 +56,8 @@ describe('install-electron-package-binary', () => {
       const result = runInstallScript(projectDir)
 
       expect(result.status).toBe(1)
-      expect(result.stderr).toContain('Electron package is still unavailable after install')
-      expect(result.stderr).toContain('distEntries=locales')
-      expect(result.stderr).toContain('pathFile=')
-      expect(result.stderr).toContain('exists=false')
+      expect(result.stderr).toContain('Electron archive extract did not contain executable')
+      expect(result.stderr).toContain('extractEntries=locales')
     } finally {
       rmSync(projectDir, { recursive: true, force: true })
     }
