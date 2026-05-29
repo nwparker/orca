@@ -27,6 +27,7 @@ export type KeybindingActionId =
   | 'worktree.palette'
   | 'worktree.navigateUp'
   | 'worktree.navigateDown'
+  | 'worktree.deleteCurrent'
   | 'app.settings'
   | 'app.forceReload'
   | 'file.exportPdf'
@@ -220,6 +221,14 @@ export const KEYBINDING_DEFINITIONS: readonly KeybindingDefinition[] = [
     scope: 'global',
     searchKeywords: ['shortcut', 'global', 'worktree', 'next', 'down'],
     defaultBindings: platformBindings(['Mod+Shift+ArrowDown'])
+  },
+  {
+    id: 'worktree.deleteCurrent',
+    title: 'Delete Current Workspace',
+    group: 'Global',
+    scope: 'global',
+    searchKeywords: ['shortcut', 'global', 'worktree', 'workspace', 'delete', 'remove', 'trash'],
+    defaultBindings: platformBindings(['Mod+Shift+Backspace'])
   },
   {
     id: 'workspace.create',

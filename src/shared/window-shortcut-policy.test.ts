@@ -67,6 +67,20 @@ describe('resolveWindowShortcutAction', () => {
 
     expect(
       resolveWindowShortcutAction(
+        {
+          code: 'Backspace',
+          key: 'Backspace',
+          meta: true,
+          control: false,
+          alt: false,
+          shift: true
+        },
+        'darwin'
+      )
+    ).toEqual({ type: 'deleteCurrentWorkspace' })
+
+    expect(
+      resolveWindowShortcutAction(
         { code: 'Digit3', key: '3', meta: true, control: false, alt: false, shift: false },
         'darwin'
       )

@@ -5,6 +5,7 @@ import { getWorktreeMapFromState, getRepoMapFromState } from '@/store/selectors'
 import { applyUIZoom } from '@/lib/ui-zoom'
 import { activateAndRevealWorktree } from '@/lib/worktree-activation'
 import { runSleepWorktree } from '@/components/sidebar/sleep-worktree-flow'
+import { runWorktreeDelete } from '@/components/sidebar/delete-worktree-flow'
 import {
   BACKGROUND_MOUNT_TERMINAL_WORKTREE_EVENT,
   SPLIT_TERMINAL_PANE_EVENT,
@@ -785,6 +786,15 @@ export function useIpcEvents(): void {
           return
         }
         store.openTaskPage()
+      })
+    )
+
+    unsubs.push(
+      window.api.ui.onDeleteCurrentWorkspace(() => {
+        const activeWorktreeId = useAppStore.getState().activeWorktreeId
+        if (activeWorktreeId) {
+          runWorktreeDelete(activeWorktreeId)
+        }
       })
     )
 

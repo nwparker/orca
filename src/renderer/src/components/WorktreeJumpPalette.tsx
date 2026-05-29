@@ -64,6 +64,7 @@ import {
   type CmdJActiveGroupSnapshot
 } from '@/components/cmd-j/quick-action-context'
 import { CMD_J_QUICK_ACTIONS } from '@/components/cmd-j/quick-actions'
+import { runWorktreeDelete } from '@/components/sidebar/delete-worktree-flow'
 import type { SettingsNavTarget } from '@/lib/settings-navigation-types'
 import type { BrowserPage, BrowserWorkspace, Worktree } from '../../../shared/types'
 import { isGitRepoKind } from '../../../shared/repo-kind'
@@ -502,7 +503,8 @@ export default function WorktreeJumpPalette(): React.JSX.Element | null {
         openNewMarkdownFile: openNewMarkdownInActiveWorkspace,
         openNewTerminalTab: openNewTerminalTabInActiveWorkspace,
         openCreateWorkspace: openCreateWorkspaceAction,
-        openAddQuickCommand: openAddQuickCommandAction
+        openAddQuickCommand: openAddQuickCommandAction,
+        deleteCurrentWorkspace: runWorktreeDelete
       }),
     [
       openAddQuickCommandAction,

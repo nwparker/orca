@@ -6,6 +6,7 @@ import type { SshConnectionStatus } from '../../../../shared/ssh-types'
 export type CmdJUnavailableReason =
   | 'loading'
   | 'no-active-workspace'
+  | 'main-workspace'
   | 'ssh-disconnected'
   | 'no-active-group'
 
@@ -30,6 +31,7 @@ export type CmdJQuickActionContext = {
   openNewTerminalTab: (groupId: string) => Promise<void>
   openCreateWorkspace: () => void
   openAddQuickCommand: () => void
+  deleteCurrentWorkspace: (worktreeId: string) => void
 }
 
 export function resolveCmdJActiveGroupId(
@@ -108,6 +110,21 @@ export function getWorkspaceScopedActionAvailability(
   return { available: true }
 }
 
+export function getCurrentWorkspaceDeleteAvailability(
+  ctx: Pick<CmdJQuickActionContext, 'activeWorktree' | 'activeWorktreeId' | 'isLoading'>
+): CmdJQuickActionAvailability {
+  if (!ctx.activeWorktreeId) {
+    return { available: false, reason: 'no-active-workspace' }
+  }
+  if (ctx.isLoading) {
+    return { available: false, reason: 'loading' }
+  }
+  if (ctx.activeWorktree?.isMainWorktree) {
+    return { available: false, reason: 'main-workspace' }
+  }
+  return { available: true }
+}
+
 export function buildCmdJQuickActionContext(args: {
   state: AppState
   activeGroupSnapshot: CmdJActiveGroupSnapshot | null
@@ -116,6 +133,7 @@ export function buildCmdJQuickActionContext(args: {
   openNewTerminalTab: (groupId: string) => Promise<void>
   openCreateWorkspace: () => void
   openAddQuickCommand: () => void
+  deleteCurrentWorkspace: (worktreeId: string) => void
 }): CmdJQuickActionContext {
   const activeWorktreeId = args.state.activeWorktreeId
   const activeWorktree = activeWorktreeId
@@ -145,7 +163,8 @@ export function buildCmdJQuickActionContext(args: {
     openNewMarkdownFile: args.openNewMarkdownFile,
     openNewTerminalTab: args.openNewTerminalTab,
     openCreateWorkspace: args.openCreateWorkspace,
-    openAddQuickCommand: args.openAddQuickCommand
+    openAddQuickCommand: args.openAddQuickCommand,
+    deleteCurrentWorkspace: args.deleteCurrentWorkspace
   }
 }
 
@@ -158,6 +177,8 @@ export function getUnavailableQuickActionMessage(
       return `Can't ${actionTitle.toLowerCase()} — workspace is still loading.`
     case 'no-active-workspace':
       return `Can't ${actionTitle.toLowerCase()} — no workspace is active.`
+    case 'main-workspace':
+      return `Can't ${actionTitle.toLowerCase()} — main workspaces can't be deleted.`
     case 'ssh-disconnected':
       return `Can't ${actionTitle.toLowerCase()} — workspace is disconnected.`
     case 'no-active-group':

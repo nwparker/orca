@@ -29,6 +29,7 @@ export type WindowShortcutAction =
   | { type: 'exportPdf' }
   | { type: 'forceReload' }
   | { type: 'toggleWorktreePalette' }
+  | { type: 'deleteCurrentWorkspace' }
   | { type: 'toggleFloatingTerminal' }
   | { type: 'toggleLeftSidebar' }
   | { type: 'toggleRightSidebar' }
@@ -159,6 +160,10 @@ export function resolveWindowShortcutAction(
     return { type: 'toggleWorktreePalette' }
   }
 
+  if (actionMatches('worktree.deleteCurrent', input, platform, keybindings, options)) {
+    return { type: 'deleteCurrentWorkspace' }
+  }
+
   if (actionMatches('sidebar.left.toggle', input, platform, keybindings, options)) {
     return { type: 'toggleLeftSidebar' }
   }
@@ -228,6 +233,8 @@ export function getWindowShortcutActionId(action: WindowShortcutAction): Keybind
       return 'app.forceReload'
     case 'toggleWorktreePalette':
       return 'worktree.palette'
+    case 'deleteCurrentWorkspace':
+      return 'worktree.deleteCurrent'
     case 'toggleFloatingTerminal':
       return 'floatingTerminal.toggle'
     case 'toggleLeftSidebar':

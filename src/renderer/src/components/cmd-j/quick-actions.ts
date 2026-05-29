@@ -1,7 +1,10 @@
-import { FileText, FolderPlus, Globe, Play, SquareTerminal } from 'lucide-react'
+import { FileText, FolderPlus, Globe, Play, SquareTerminal, Trash2 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import type { CmdJQuickActionAvailability, CmdJQuickActionContext } from './quick-action-context'
-import { getWorkspaceScopedActionAvailability } from './quick-action-context'
+import {
+  getCurrentWorkspaceDeleteAvailability,
+  getWorkspaceScopedActionAvailability
+} from './quick-action-context'
 
 export type CmdJQuickActionRunResult =
   | { status: 'ok' }
@@ -84,6 +87,26 @@ export const CMD_J_QUICK_ACTIONS: readonly CmdJQuickAction[] = [
     isAvailable: () => ({ available: true }),
     run: async (ctx) => {
       ctx.openCreateWorkspace()
+      return { status: 'ok' }
+    }
+  },
+  {
+    id: 'delete-current-workspace',
+    kind: 'action',
+    title: 'Delete Current Workspace',
+    description: 'Open the delete confirmation for the active workspace.',
+    icon: Trash2,
+    verbKeywords: ['delete workspace', 'delete current workspace', 'remove workspace'],
+    isAvailable: getCurrentWorkspaceDeleteAvailability,
+    run: async (ctx) => {
+      const availability = getCurrentWorkspaceDeleteAvailability(ctx)
+      if (!availability.available) {
+        return { status: 'unavailable', reason: availability.reason }
+      }
+      if (!ctx.activeWorktreeId) {
+        return { status: 'unavailable', reason: 'no-active-workspace' }
+      }
+      ctx.deleteCurrentWorkspace(ctx.activeWorktreeId)
       return { status: 'ok' }
     }
   },

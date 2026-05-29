@@ -115,6 +115,23 @@ describe('keybindings', () => {
     expect(formatKeybindingList(['Mod+Shift+O'], 'darwin')).toBe('⌘⇧O')
   })
 
+  it('defines a default shortcut for deleting the current workspace', () => {
+    const input = {
+      key: 'Backspace',
+      code: 'Backspace',
+      control: true,
+      meta: false,
+      alt: false,
+      shift: true
+    }
+
+    expect(getEffectiveKeybindingsForAction('worktree.deleteCurrent', 'linux')).toEqual([
+      'Mod+Shift+Backspace'
+    ])
+    expect(formatKeybindingList(['Mod+Shift+Backspace'], 'darwin')).toBe('⌘⇧Backspace')
+    expect(keybindingMatchesAction('worktree.deleteCurrent', input, 'linux')).toBe(true)
+  })
+
   it('uses overrides as the complete effective binding list for an action', () => {
     const overrides = {
       'worktree.quickOpen': ['Ctrl+Alt+O', 'not-a-shortcut']

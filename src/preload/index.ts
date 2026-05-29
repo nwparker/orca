@@ -2413,6 +2413,11 @@ const api = {
       ipcRenderer.on('ui:openTasks', listener)
       return () => ipcRenderer.removeListener('ui:openTasks', listener)
     },
+    onDeleteCurrentWorkspace: (callback: () => void): (() => void) => {
+      const listener = (_event: Electron.IpcRendererEvent) => callback()
+      ipcRenderer.on('ui:deleteCurrentWorkspace', listener)
+      return () => ipcRenderer.removeListener('ui:deleteCurrentWorkspace', listener)
+    },
     onJumpToWorktreeIndex: (callback: (index: number) => void): (() => void) => {
       const listener = (_event: Electron.IpcRendererEvent, index: number) => callback(index)
       ipcRenderer.on('ui:jumpToWorktreeIndex', listener)

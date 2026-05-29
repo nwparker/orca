@@ -81,7 +81,8 @@ describe('Cmd+J quick action context', () => {
       openNewMarkdownFile: async () => {},
       openNewTerminalTab: async () => {},
       openCreateWorkspace: () => {},
-      openAddQuickCommand: () => {}
+      openAddQuickCommand: () => {},
+      deleteCurrentWorkspace: () => {}
     } satisfies CmdJQuickActionContext
 
     expect(
@@ -97,6 +98,7 @@ describe('Cmd+J quick action context', () => {
 
   it('applies the availability matrix across curated actions', () => {
     const workspaceActions = ['new-browser-tab', 'new-markdown-file', 'new-terminal-tab']
+    const currentWorkspaceActions = ['delete-current-workspace']
     const workspaceAgnosticActions = ['create-workspace', 'add-quick-command']
     const actionById = new Map(CMD_J_QUICK_ACTIONS.map((action) => [action.id, action]))
     const baseContext = {
@@ -107,7 +109,8 @@ describe('Cmd+J quick action context', () => {
       openNewMarkdownFile: async () => {},
       openNewTerminalTab: async () => {},
       openCreateWorkspace: () => {},
-      openAddQuickCommand: () => {}
+      openAddQuickCommand: () => {},
+      deleteCurrentWorkspace: () => {}
     } satisfies CmdJQuickActionContext
 
     for (const actionId of workspaceActions) {
@@ -129,6 +132,27 @@ describe('Cmd+J quick action context', () => {
       expect(
         actionById.get(actionId)?.isAvailable({ ...baseContext, sshStatus: 'disconnected' })
       ).toEqual({ available: false, reason: 'ssh-disconnected' })
+    }
+
+    for (const actionId of currentWorkspaceActions) {
+      expect(actionById.get(actionId)?.isAvailable(baseContext)).toEqual({ available: true })
+      expect(
+        actionById.get(actionId)?.isAvailable({
+          ...baseContext,
+          activeWorktree: { id: 'main', isMainWorktree: true } as Worktree
+        })
+      ).toEqual({ available: false, reason: 'main-workspace' })
+      expect(
+        actionById.get(actionId)?.isAvailable({
+          ...baseContext,
+          activeWorktreeId: null,
+          activeGroupId: null
+        })
+      ).toEqual({ available: false, reason: 'no-active-workspace' })
+      expect(actionById.get(actionId)?.isAvailable({ ...baseContext, isLoading: true })).toEqual({
+        available: false,
+        reason: 'loading'
+      })
     }
 
     for (const actionId of workspaceAgnosticActions) {
@@ -172,7 +196,8 @@ describe('Cmd+J quick action context', () => {
       openNewMarkdownFile: async () => {},
       openNewTerminalTab: async () => {},
       openCreateWorkspace: () => {},
-      openAddQuickCommand: () => {}
+      openAddQuickCommand: () => {},
+      deleteCurrentWorkspace: () => {}
     })
 
     expect(context.activeGroupId).toBe('first-group')
@@ -196,7 +221,8 @@ describe('Cmd+J quick action context', () => {
       openNewMarkdownFile: async () => {},
       openNewTerminalTab: async () => {},
       openCreateWorkspace: () => {},
-      openAddQuickCommand: () => {}
+      openAddQuickCommand: () => {},
+      deleteCurrentWorkspace: () => {}
     })
 
     expect(context.isLoading).toBe(true)
@@ -215,7 +241,8 @@ describe('Cmd+J quick action context', () => {
         calls.push(groupId)
       },
       openCreateWorkspace: () => {},
-      openAddQuickCommand: () => {}
+      openAddQuickCommand: () => {},
+      deleteCurrentWorkspace: () => {}
     } satisfies CmdJQuickActionContext
 
     await expect(action?.run(context)).resolves.toEqual({
@@ -223,5 +250,26 @@ describe('Cmd+J quick action context', () => {
       reason: 'no-active-group'
     })
     expect(calls).toEqual([])
+  })
+
+  it('delete current workspace quick action routes the active id through the delete flow', async () => {
+    const deletedIds: string[] = []
+    const action = CMD_J_QUICK_ACTIONS.find((entry) => entry.id === 'delete-current-workspace')
+    const context = {
+      ...ctx({}),
+      activeWorktree: { id: 'wt-1', isMainWorktree: false } as Worktree,
+      runtimeMode: 'local-desktop' as const,
+      openNewBrowserTab: async () => {},
+      openNewMarkdownFile: async () => {},
+      openNewTerminalTab: async () => {},
+      openCreateWorkspace: () => {},
+      openAddQuickCommand: () => {},
+      deleteCurrentWorkspace: (worktreeId: string) => {
+        deletedIds.push(worktreeId)
+      }
+    } satisfies CmdJQuickActionContext
+
+    await expect(action?.run(context)).resolves.toEqual({ status: 'ok' })
+    expect(deletedIds).toEqual(['wt-1'])
   })
 })

@@ -821,6 +821,14 @@ export function createMainWindow(
       return
     }
 
+    if (action.type === 'deleteCurrentWorkspace') {
+      // Why: the renderer owns workspace selection and the existing
+      // confirmation modal; main only forwards the global shortcut so it works
+      // from terminal panes and browser guests.
+      mainWindow.webContents.send('ui:deleteCurrentWorkspace')
+      return
+    }
+
     if (action.type === 'toggleFloatingTerminal') {
       mainWindow.webContents.send('ui:toggleFloatingTerminal')
       return
