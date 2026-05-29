@@ -3973,6 +3973,47 @@ describe('OrcaRuntimeService', () => {
     }
   })
 
+  it('injects pending orchestration messages into Cursor Agent without auto-submitting', async () => {
+    vi.useFakeTimers()
+    try {
+      const runtime = new OrcaRuntimeService(store)
+      const db = new InMemoryOrchestrationMessages()
+      const write = vi.fn().mockReturnValue(true)
+      setInMemoryOrchestrationMessages(runtime, db)
+      runtime.setPtyController({
+        write,
+        kill: vi.fn(),
+        getForegroundProcess: async () => null
+      })
+      syncSinglePty(runtime)
+
+      const [terminal] = (await runtime.listTerminals()).terminals
+      runtime.onPtyData('pty-1', '\x1b]0;\u280b Cursor Agent\x07', 100)
+      runtime.onPtyData('pty-1', '\x1b]0;Cursor ready\x07', 101)
+      db.insertMessage({ from: 'term_sender', to: terminal.handle, subject: 'hello cursor' })
+
+      runtime.deliverPendingMessagesForHandle(terminal.handle)
+
+      expect(write).toHaveBeenCalledWith('pty-1', expect.stringContaining('Subject: hello cursor'))
+      await vi.advanceTimersByTimeAsync(500)
+      const submitWrites = write.mock.calls.filter(
+        ([ptyId, text]) => ptyId === 'pty-1' && text === '\r'
+      )
+      expect(submitWrites).toHaveLength(0)
+
+      // Why: Cursor Agent treats injected PTY text as editable prompt input.
+      // The user must submit it manually, but the banner should not replay on
+      // the next idle transition.
+      const unread = db.getUnreadMessages(terminal.handle)
+      expect(unread).toHaveLength(1)
+      expect(unread[0].read).toBe(0)
+      expect(unread[0].delivered_at).not.toBeNull()
+      db.close()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('does not replay an already-delivered message on a later idle transition', async () => {
     vi.useFakeTimers()
     try {

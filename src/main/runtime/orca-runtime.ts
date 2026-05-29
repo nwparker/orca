@@ -4,6 +4,7 @@
 import {
   extractLastOscTitle,
   detectAgentStatusFromTitle,
+  getAgentLabel,
   isShellProcess
 } from '../../shared/agent-detection'
 import type { AgentStatus } from '../../shared/agent-detection'
@@ -551,6 +552,15 @@ type RuntimeLeafRecord = RuntimeSyncedLeaf & {
   // serving a stale `lastAgentStatus` after the agent process exits and the
   // shell takes over the title — the bug behind issue #1437.
   lastOscTitle: string | null
+}
+
+function isCursorAgentOrchestrationTarget(
+  leaf: RuntimeLeafRecord,
+  tabTitle: string | null | undefined
+): boolean {
+  return [leaf.lastOscTitle, leaf.paneTitle, tabTitle].some(
+    (title) => typeof title === 'string' && getAgentLabel(title) === 'Cursor'
+  )
 }
 
 type RuntimePtyWorktreeRecord = {
@@ -11686,6 +11696,15 @@ export class OrcaRuntimeService {
     const payload = formatMessagesForInjection(unread)
     const wrote = this.ptyController?.write(leaf.ptyId, payload) ?? false
     if (!wrote) {
+      return
+    }
+
+    const tabTitle = this.tabs.get(leaf.tabId)?.title
+    if (isCursorAgentOrchestrationTarget(leaf, tabTitle)) {
+      // Why: Cursor Agent treats injected PTY text as editable prompt input.
+      // Push-on-idle may surface the message, but submitting it must stay
+      // under user control.
+      this._orchestrationDb.markAsDelivered(unread.map((m) => m.id))
       return
     }
 
