@@ -33,6 +33,7 @@ import { FLOATING_TERMINAL_WORKTREE_ID } from '../../../../shared/constants'
 import type { RemoteOpKind } from '@/components/right-sidebar/source-control-primary-action'
 import { shouldForcePushWithLeaseForUpstream } from '../../../../shared/git-upstream-status'
 import {
+  fastForwardRuntimeGit,
   fetchRuntimeGit,
   getRuntimeGitUpstreamStatus,
   pullRuntimeGit,
@@ -430,6 +431,12 @@ export type EditorSlice = {
     options?: { forceWithLease?: boolean }
   ) => Promise<void>
   pullBranch: (
+    worktreeId: string,
+    worktreePath: string,
+    connectionId?: string,
+    pushTarget?: GitPushTarget
+  ) => Promise<void>
+  fastForwardBranch: (
     worktreeId: string,
     worktreePath: string,
     connectionId?: string,
@@ -864,6 +871,7 @@ export function resolveRemoteOperationErrorMessage(
     isPush?: boolean
     isSync?: boolean
     isFetch?: boolean
+    isFastForward?: boolean
     isRebase?: boolean
   }
 ): string {
@@ -918,6 +926,9 @@ export function resolveRemoteOperationErrorMessage(
     if (options?.isRebase) {
       return 'Rebase blocked — commit or stash your local changes first.'
     }
+    if (options?.isFastForward) {
+      return 'Fast-forward blocked — commit or stash your local changes first.'
+    }
     return 'Pull blocked — commit or stash your local changes first.'
   }
 
@@ -958,6 +969,13 @@ export function resolveRemoteOperationErrorMessage(
       extractPublishFailureDetail(error.message) ??
       truncateDetail(stripCredentialsFromMessage(error.message))
     return `Fetch failed. ${detail}`
+  }
+
+  if (options?.isFastForward) {
+    const detail =
+      extractPublishFailureDetail(error.message) ??
+      truncateDetail(stripCredentialsFromMessage(error.message))
+    return `Fast-forward failed. ${detail}`
   }
 
   if (options?.isRebase) {
@@ -2804,6 +2822,25 @@ export const createEditorSlice: StateCreator<AppState, [], [], EditorSlice> = (s
       )
     } catch (error) {
       toast.error(resolveRemoteOperationErrorMessage(error))
+      throw error
+    } finally {
+      get().endRemoteOperation()
+    }
+    void get().fetchUpstreamStatus(worktreeId, worktreePath, connectionId, pushTarget)
+    const refreshGitHubForWorktree = get().refreshGitHubForWorktree
+    if (typeof refreshGitHubForWorktree === 'function') {
+      refreshGitHubForWorktree(worktreeId)
+    }
+  },
+  fastForwardBranch: async (worktreeId, worktreePath, connectionId, pushTarget) => {
+    get().beginRemoteOperation('fast_forward')
+    try {
+      await fastForwardRuntimeGit(
+        { settings: get().settings, worktreeId, worktreePath, connectionId },
+        pushTarget
+      )
+    } catch (error) {
+      toast.error(resolveRemoteOperationErrorMessage(error, { isFastForward: true }))
       throw error
     } finally {
       get().endRemoteOperation()

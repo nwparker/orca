@@ -816,6 +816,7 @@ function resolveRemoteActionError(kind: RemoteOpKind, error: unknown): string {
     isPush: kind === 'push',
     isSync: kind === 'sync',
     isFetch: kind === 'fetch',
+    isFastForward: kind === 'fast_forward',
     isRebase: kind === 'rebase'
   })
 }
@@ -954,6 +955,7 @@ function SourceControlInner(): React.JSX.Element {
   const setUpstreamStatus = useAppStore((s) => s.setUpstreamStatus)
   const pushBranch = useAppStore((s) => s.pushBranch)
   const pullBranch = useAppStore((s) => s.pullBranch)
+  const fastForwardBranch = useAppStore((s) => s.fastForwardBranch)
   const syncBranch = useAppStore((s) => s.syncBranch)
   const rebaseFromBase = useAppStore((s) => s.rebaseFromBase)
   const fetchBranch = useAppStore((s) => s.fetchBranch)
@@ -2012,7 +2014,9 @@ function SourceControlInner(): React.JSX.Element {
   // place — store slices already surface actionable toasts, so additional
   // try/catch here would duplicate the notification.
   const runRemoteAction = useCallback(
-    async (kind: 'push' | 'pull' | 'sync' | 'fetch' | 'publish' | 'rebase'): Promise<void> => {
+    async (
+      kind: 'push' | 'pull' | 'fast_forward' | 'sync' | 'fetch' | 'publish' | 'rebase'
+    ): Promise<void> => {
       if (!activeWorktreeId || !worktreePath) {
         return
       }
@@ -2043,6 +2047,15 @@ function SourceControlInner(): React.JSX.Element {
         }
         if (kind === 'pull') {
           await pullBranch(activeWorktreeId, worktreePath, connectionId, activeWorktree?.pushTarget)
+          return
+        }
+        if (kind === 'fast_forward') {
+          await fastForwardBranch(
+            activeWorktreeId,
+            worktreePath,
+            connectionId,
+            activeWorktree?.pushTarget
+          )
           return
         }
         if (kind === 'fetch') {
@@ -2093,6 +2106,7 @@ function SourceControlInner(): React.JSX.Element {
       activeWorktree?.pushTarget,
       activeWorktreeId,
       fetchBranch,
+      fastForwardBranch,
       effectiveBaseRef,
       pullBranch,
       pushBranch,
@@ -2797,6 +2811,7 @@ function SourceControlInner(): React.JSX.Element {
           return
         case 'push':
         case 'pull':
+        case 'fast_forward':
         case 'sync':
         case 'fetch':
         case 'publish':
