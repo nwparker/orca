@@ -14,6 +14,7 @@ import { registerFileSearchSelectedTextProvider } from '@/lib/file-search-select
 import { useContextualCopySetup } from './useContextualCopySetup'
 import { MAX_REVEAL_CONTENT_WAIT_FRAMES, performReveal } from './monaco-reveal'
 import { syncContentOnMount, syncContentUpdate } from './monaco-content-sync'
+import { getMonacoCodebaseSearchQuery } from './monaco-codebase-search'
 import {
   beginProgrammaticContentSync,
   endProgrammaticContentSync,
@@ -371,6 +372,29 @@ export default function MonacoEditor({
           propsRef.current.onSave(value)
         }
       )
+      const searchInFilesAction = editorInstance.addAction({
+        id: 'orca.searchInFiles',
+        label: 'Search in Files',
+        contextMenuGroupId: 'navigation',
+        contextMenuOrder: 2,
+        run: () => {
+          if (!worktreeId) {
+            return
+          }
+          const query = getMonacoCodebaseSearchQuery(
+            editorInstance.getModel(),
+            editorInstance.getSelection(),
+            editorInstance.getPosition()
+          )
+          if (!query) {
+            return
+          }
+          const state = useAppStore.getState()
+          state.seedFileSearchQuery(worktreeId, query)
+          state.setRightSidebarTab('search')
+          state.setRightSidebarOpen(true)
+        }
+      })
 
       // Track cursor line for "copy path to line" feature
       const pos = editorInstance.getPosition()
@@ -387,6 +411,7 @@ export default function MonacoEditor({
 
       editorInstance.onDidDispose(() => {
         cleanupSaveShortcut()
+        searchInFilesAction.dispose()
         autoHeightSub?.dispose()
         if (autoHeightFrame !== null) {
           window.cancelAnimationFrame(autoHeightFrame)
@@ -473,7 +498,8 @@ export default function MonacoEditor({
       setEditorCursorLine,
       updateMarkdownCompletionDocuments,
       viewStateKey,
-      autoHeight
+      autoHeight,
+      worktreeId
     ]
   )
 
