@@ -94,5 +94,10 @@ jobs:
       - name: Test
         run: pnpm test
 
-      - name: Build
-        run: pnpm build
+      - name: Build unpacked app
+        run: pnpm build:unpack
+
+      # Why: the packaged CLI runs outside Electron's asar integration, so
+      # bare runtime imports must be present in app.asar.unpacked.
+      - name: Smoke packaged CLI
+        run: dist/linux-unpacked/resources/bin/orca --help
