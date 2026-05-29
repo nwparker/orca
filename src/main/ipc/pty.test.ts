@@ -381,7 +381,12 @@ describe('registerPtyHandlers', () => {
     argsEnv?: Record<string, string>,
     processEnvOverrides?: Record<string, string | undefined>,
     getSelectedCodexHomePath?: () => string | null,
-    getSettings?: () => { enableGitHubAttribution?: boolean; agentStatusHooksEnabled?: boolean },
+    getSettings?: () => {
+      enableGitHubAttribution?: boolean
+      agentStatusHooksEnabled?: boolean
+      httpProxyUrl?: string
+      httpProxyBypassRules?: string
+    },
     // Why: PR #2662 finding 2 — the threading from IPC `args.command` through
     // buildPtyHostEnv to piTitlebarExtensionService.buildPtyEnv was untested
     // for the OMP case because this helper never forwarded a command. Accept
@@ -858,6 +863,18 @@ describe('registerPtyHandlers', () => {
       expect(env.ORCA_CODEX_HOME).toBe('/tmp/orca-codex-home')
     })
 
+    it('injects explicit proxy settings into local PTY env', async () => {
+      const env = await spawnAndGetEnv(undefined, undefined, undefined, () => ({
+        httpProxyUrl: 'http://proxy.example:8080',
+        httpProxyBypassRules: 'localhost,*.internal'
+      }))
+
+      expect(env.HTTP_PROXY).toBe('http://proxy.example:8080')
+      expect(env.HTTPS_PROXY).toBe('http://proxy.example:8080')
+      expect(env.ALL_PROXY).toBe('http://proxy.example:8080')
+      expect(env.NO_PROXY).toBe('localhost,*.internal')
+    })
+
     describe('daemon-active provider (parity with LocalPtyProvider)', () => {
       // Why: these tests guard the regression the daemon-parity refactor was
       // written to fix — under the daemon, LocalPtyProvider.buildSpawnEnv is
@@ -900,7 +917,11 @@ describe('registerPtyHandlers', () => {
       async function daemonSpawnAndGetOptions(
         argsEnv?: Record<string, string>,
         getSelectedCodexHomePath?: () => string | null,
-        getSettings?: () => { enableGitHubAttribution: boolean },
+        getSettings?: () => {
+          enableGitHubAttribution?: boolean
+          httpProxyUrl?: string
+          httpProxyBypassRules?: string
+        },
         processEnvOverrides?: Record<string, string | undefined>,
         // Why: daemon spawn tests need to exercise both WSL launch metadata
         // from main and PR #2662 command threading for OMP overlay selection.
@@ -947,7 +968,11 @@ describe('registerPtyHandlers', () => {
       async function daemonSpawnAndGetEnv(
         argsEnv?: Record<string, string>,
         getSelectedCodexHomePath?: () => string | null,
-        getSettings?: () => { enableGitHubAttribution: boolean },
+        getSettings?: () => {
+          enableGitHubAttribution?: boolean
+          httpProxyUrl?: string
+          httpProxyBypassRules?: string
+        },
         processEnvOverrides?: Record<string, string | undefined>,
         spawnArgs?: { cwd?: string; shellOverride?: string; command?: string }
       ): Promise<Record<string, string>> {
@@ -1044,6 +1069,17 @@ describe('registerPtyHandlers', () => {
         const env = await daemonSpawnAndGetEnv({}, () => '/tmp/orca-codex-home')
         expect(env.CODEX_HOME).toBe('/tmp/orca-codex-home')
         expect(env.ORCA_CODEX_HOME).toBe('/tmp/orca-codex-home')
+      })
+
+      it('injects explicit proxy settings on the daemon path', async () => {
+        const env = await daemonSpawnAndGetEnv({}, undefined, () => ({
+          httpProxyUrl: 'http://proxy.example:8080',
+          httpProxyBypassRules: 'localhost;*.internal'
+        }))
+
+        expect(env.HTTP_PROXY).toBe('http://proxy.example:8080')
+        expect(env.HTTPS_PROXY).toBe('http://proxy.example:8080')
+        expect(env.NO_PROXY).toBe('localhost,*.internal')
       })
 
       it('skips host Codex home when a daemon-backed Windows spawn targets a WSL cwd', async () => {
@@ -1432,7 +1468,10 @@ describe('registerPtyHandlers', () => {
           mainWindow as never,
           undefined,
           undefined,
-          undefined,
+          (() => ({
+            httpProxyUrl: 'http://proxy.example:8080',
+            httpProxyBypassRules: 'localhost'
+          })) as never,
           undefined,
           store as never
         )
@@ -1462,6 +1501,9 @@ describe('registerPtyHandlers', () => {
         expect(env.ORCA_PI_CODING_AGENT_DIR).toBeUndefined()
         expect(env.ORCA_PI_SOURCE_AGENT_DIR).toBeUndefined()
         expect(env.CODEX_HOME).toBeUndefined()
+        expect(env.HTTP_PROXY).toBeUndefined()
+        expect(env.HTTPS_PROXY).toBeUndefined()
+        expect(env.NO_PROXY).toBeUndefined()
         expect(env.FOO).toBe('bar')
         expect(openCodeBuildPtyEnvMock).not.toHaveBeenCalled()
         expect(piBuildPtyEnvMock).not.toHaveBeenCalled()

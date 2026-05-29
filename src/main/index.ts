@@ -111,6 +111,7 @@ import {
 import { shouldSendSyntheticTitleFrame } from './synthetic-title-visibility'
 import { isCrashReportReason } from '../shared/crash-reporting'
 import { KeybindingService } from './keybindings/keybinding-service'
+import { applyElectronProxySettings } from './network/proxy-settings'
 
 let mainWindow: BrowserWindow | null = null
 /** Whether a manual app.quit() (Cmd+Q, etc.) is in progress. Shared with the
@@ -1060,6 +1061,13 @@ app.whenReady().then(async () => {
   }
 
   store = new Store()
+  try {
+    // Why: Dock/Launchpad launches do not inherit shell proxy env vars, so the
+    // persisted proxy must be applied before any app-owned network fetchers run.
+    await applyElectronProxySettings(store.getSettings())
+  } catch {
+    console.warn('[proxy] Failed to apply network proxy settings')
+  }
   agentAwakeService = new AgentAwakeService()
   agentAwakeService.setEnabled(store.getSettings().keepComputerAwakeWhileAgentsRun)
   // Why: disk-hydrated status rows are UI continuity only. The service starts

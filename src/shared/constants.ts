@@ -230,6 +230,8 @@ export function getDefaultSettings(homedir: string): GlobalSettings {
     terminalAllowOsc52Clipboard: false,
     setupScriptLaunchMode: 'new-tab',
     terminalScrollbackBytes: 10_000_000,
+    httpProxyUrl: '',
+    httpProxyBypassRules: '',
     openLinksInApp: true,
     openInApplications: [],
     rightSidebarOpenByDefault: true,

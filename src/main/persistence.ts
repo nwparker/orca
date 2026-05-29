@@ -1534,10 +1534,13 @@ export class Store {
         const raw = readFileSync(dataFile, 'utf-8')
         const parsed = JSON.parse(raw) as PersistedState
 
-        // Why: opencodeSessionCookie is stored encrypted on disk via safeStorage.
+        // Why: secret settings are stored encrypted on disk via safeStorage.
         // Decrypt at the load boundary so the rest of the app sees plaintext.
         if (parsed.settings?.opencodeSessionCookie) {
           parsed.settings.opencodeSessionCookie = decrypt(parsed.settings.opencodeSessionCookie)
+        }
+        if (parsed.settings?.httpProxyUrl) {
+          parsed.settings.httpProxyUrl = decrypt(parsed.settings.httpProxyUrl)
         }
         if (parsed.ui?.browserKagiSessionLink) {
           parsed.ui.browserKagiSessionLink = decryptOptionalSecret(parsed.ui.browserKagiSessionLink)
@@ -2069,13 +2072,14 @@ export class Store {
     await mkdir(dir, { recursive: true }).catch(() => {})
     const tmpFile = `${dataFile}.${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}.tmp`
 
-    // Why: opencodeSessionCookie must be encrypted on disk. Clone state so
-    // the in-memory this.state stays plaintext for the rest of the app.
+    // Why: secrets must be encrypted on disk. Clone state so the in-memory
+    // this.state stays plaintext for the rest of the app.
     const stateToSave = {
       ...this.state,
       settings: {
         ...this.state.settings,
-        opencodeSessionCookie: encrypt(this.state.settings.opencodeSessionCookie)
+        opencodeSessionCookie: encrypt(this.state.settings.opencodeSessionCookie),
+        httpProxyUrl: encrypt(this.state.settings.httpProxyUrl ?? '')
       },
       ui: {
         ...this.state.ui,
@@ -2123,13 +2127,14 @@ export class Store {
     }
     const tmpFile = `${dataFile}.${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}.tmp`
 
-    // Why: opencodeSessionCookie must be encrypted on disk. Clone state so
-    // the in-memory this.state stays plaintext for the rest of the app.
+    // Why: secrets must be encrypted on disk. Clone state so the in-memory
+    // this.state stays plaintext for the rest of the app.
     const stateToSave = {
       ...this.state,
       settings: {
         ...this.state.settings,
-        opencodeSessionCookie: encrypt(this.state.settings.opencodeSessionCookie)
+        opencodeSessionCookie: encrypt(this.state.settings.opencodeSessionCookie),
+        httpProxyUrl: encrypt(this.state.settings.httpProxyUrl ?? '')
       },
       ui: {
         ...this.state.ui,

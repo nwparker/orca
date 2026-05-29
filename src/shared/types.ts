@@ -1987,6 +1987,11 @@ export type GlobalSettings = {
    *  usable without the setup output crowding the initial pane. */
   setupScriptLaunchMode: SetupScriptLaunchMode
   terminalScrollbackBytes: number
+  /** Optional app-level proxy for Electron networking and locally spawned PTYs.
+   *  Empty preserves system proxy settings plus inherited proxy env behavior. */
+  httpProxyUrl?: string
+  /** Optional semicolon/comma/newline-separated bypass rules for httpProxyUrl. */
+  httpProxyBypassRules?: string
   /** Why: opening arbitrary links inside Orca uses an isolated guest browser surface.
    *  The setting stays opt-in so existing workflows continue to use the system browser
    *  until the user explicitly wants worktree-scoped in-app browsing. */

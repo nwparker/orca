@@ -64,6 +64,7 @@ import { parseWslPath } from '../wsl'
 import { mergePersistedWindowsPath } from '../pty/windows-environment-path'
 import type { CodexAccountSelectionTarget } from '../codex-accounts/runtime-selection'
 import { isHostCodexHomeForWsl, isWslCodexHomeForHost } from '../pty/codex-home-wsl-env'
+import { buildConfiguredProxyEnv, type NetworkProxySettings } from '../../shared/network-proxy'
 
 // ─── Provider Registry ──────────────────────────────────────────────
 // Routes PTY operations by connectionId. null = local provider.
@@ -303,6 +304,7 @@ export type BuildPtyHostEnvOptions = {
    *  the bug this option fixes (cross-agent shadowing when both dirs exist). */
   launchCommand?: string
   agentStatusHooksEnabled: boolean
+  networkProxySettings?: NetworkProxySettings
 }
 
 function readInheritedPath(baseEnv: Record<string, string>): string {
@@ -502,6 +504,7 @@ export function buildPtyHostEnv(
   opts: BuildPtyHostEnvOptions
 ): Record<string, string> {
   mergePersistedWindowsPath(baseEnv)
+  Object.assign(baseEnv, buildConfiguredProxyEnv(opts.networkProxySettings))
 
   // Why: the Local path passes a baseEnv that already includes process.env
   // (LocalPtyProvider.spawn merges it before calling buildSpawnEnv). The
@@ -919,7 +922,8 @@ export function registerPtyHandlers(
           skipCodexHomeEnv: ctx?.isWsl === true && !selectedCodexHomePath,
           githubAttributionEnabled: getSettings?.()?.enableGitHubAttribution ?? false,
           launchCommand: ctx?.command,
-          agentStatusHooksEnabled: isAgentStatusHooksEnabled(getSettings?.())
+          agentStatusHooksEnabled: isAgentStatusHooksEnabled(getSettings?.()),
+          networkProxySettings: getSettings?.()
         })
         // Why: agents need their own terminal handle at process start so they
         // can self-identify in orchestration messages without an extra RPC.
@@ -1449,7 +1453,8 @@ export function registerPtyHandlers(
           skipCodexHomeEnv,
           githubAttributionEnabled: getSettings?.()?.enableGitHubAttribution ?? false,
           launchCommand: args.command,
-          agentStatusHooksEnabled: isAgentStatusHooksEnabled(getSettings?.())
+          agentStatusHooksEnabled: isAgentStatusHooksEnabled(getSettings?.()),
+          networkProxySettings: getSettings?.()
         })
       }
 
@@ -1893,7 +1898,8 @@ export function registerPtyHandlers(
             skipCodexHomeEnv,
             githubAttributionEnabled: getSettings?.()?.enableGitHubAttribution ?? false,
             launchCommand: args.command,
-            agentStatusHooksEnabled: isAgentStatusHooksEnabled(getSettings?.())
+            agentStatusHooksEnabled: isAgentStatusHooksEnabled(getSettings?.()),
+            networkProxySettings: getSettings?.()
           })
         } catch (err) {
           // Why: buildPtyHostEnv has filesystem side-effects (Pi overlay
