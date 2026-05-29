@@ -554,6 +554,17 @@ describe('FloatingTerminalPanel close behavior', () => {
     expect(mocks.closeBrowserTab).not.toHaveBeenCalled()
   })
 
+  it('focuses the empty floating workspace so Cmd+W can minimize after tabs close', async () => {
+    const element = await renderPanel(true)
+    const panel = findByProp(element, 'data-floating-terminal-panel')
+    const panelElement = { focus: vi.fn() }
+    ;(panel.props.ref as { current: unknown }).current = panelElement
+
+    runEffects()
+
+    expect(panelElement.focus).toHaveBeenCalledWith({ preventScroll: true })
+  })
+
   it('creates new floating terminal tabs without globally activating createTab', async () => {
     setFloatingTabs([makeTab({ id: 'tab-1' })])
 

@@ -346,6 +346,15 @@ export function FloatingTerminalPanel({
     focusTerminalTabSurface(activeTerminalId)
   }, [activeTerminalId, open])
 
+  useEffect(() => {
+    if (!open || activeTab !== null) {
+      return
+    }
+    // Why: after the last tab closes, focus can fall back outside the panel;
+    // keep the empty floating workspace able to receive Cmd/Ctrl+W.
+    panelRef.current?.focus({ preventScroll: true })
+  }, [activeTab, open])
+
   const refreshOrchestrationSetupVisibility = useCallback(async (): Promise<void> => {
     if (isOrchestrationSetupDismissed()) {
       setShowOrchestrationSetup(false)
