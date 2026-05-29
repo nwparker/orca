@@ -100,9 +100,9 @@ import {
 import PRFilterDropdowns, { type PRFilterChange } from '@/components/github/PRFilterDropdowns'
 import { buildGitHubRepoUrl, parseGitHubIssueOrPRLink } from '@/lib/github-links'
 import {
-  findGithubPrWorkspaceAttachment,
-  getGithubPrWorkspaceAttachmentLabel
-} from '@/lib/github-pr-workspace-attachment'
+  findWorkItemWorkspaceAttachment,
+  getWorkItemWorkspaceAttachmentLabel
+} from '@/lib/work-item-workspace-attachment'
 import { activateAndRevealWorktree } from '@/lib/worktree-activation'
 import { useRepoAssigneesBySlug } from '@/hooks/useGitHubSlugMetadata'
 import GitHubItemDialog, { type ItemDialogTab } from '@/components/GitHubItemDialog'
@@ -3805,12 +3805,16 @@ export default function TaskPage(): React.JSX.Element {
     [openComposerForItem]
   )
 
-  const handleOpenOrUseGitHubPR = useCallback(
+  const handleOpenOrUseGitHubItem = useCallback(
     (item: GitHubWorkItem): void => {
-      const currentAttached = findGithubPrWorkspaceAttachment(
+      const currentAttached = findWorkItemWorkspaceAttachment(
         useAppStore.getState().allWorktrees(),
-        item.repoId,
-        item.number
+        {
+          provider: 'github',
+          type: item.type,
+          repoId: item.repoId,
+          number: item.number
+        }
       )
       if (!currentAttached) {
         handleUseWorkItem(item)
@@ -3819,7 +3823,9 @@ export default function TaskPage(): React.JSX.Element {
 
       const result = activateAndRevealWorktree(currentAttached.id)
       if (result === false) {
-        toast.error('Unable to open the workspace attached to this pull request.')
+        toast.error(
+          `Unable to open the workspace attached to this ${item.type === 'pr' ? 'pull request' : 'issue'}.`
+        )
       }
     },
     [handleUseWorkItem]
@@ -5172,13 +5178,16 @@ export default function TaskPage(): React.JSX.Element {
                   {!showGitHubTaskSkeletons &&
                     filteredWorkItems.map((item) => {
                       const itemRepo = repoMap.get(item.repoId) ?? null
-                      const attachedWorkspace =
-                        item.type === 'pr'
-                          ? findGithubPrWorkspaceAttachment(allWorktrees, item.repoId, item.number)
-                          : null
+                      const attachedWorkspace = findWorkItemWorkspaceAttachment(allWorktrees, {
+                        provider: 'github',
+                        type: item.type,
+                        repoId: item.repoId,
+                        number: item.number
+                      })
                       const attachedWorkspaceLabel = attachedWorkspace
-                        ? getGithubPrWorkspaceAttachmentLabel(attachedWorkspace)
+                        ? getWorkItemWorkspaceAttachmentLabel(attachedWorkspace)
                         : null
+                      const itemKindLabel = item.type === 'pr' ? 'PR' : 'issue'
                       return (
                         // Why: the row is a clickable container rather than a
                         // <button> because it holds nested interactive elements
@@ -5262,9 +5271,12 @@ export default function TaskPage(): React.JSX.Element {
                                 </span>
                               ) : null}
                               {attachedWorkspaceLabel ? (
-                                <span className="inline-flex min-w-0 items-center gap-1">
+                                <span className="inline-flex max-w-full min-w-0 items-center gap-1 rounded-full border border-border/50 bg-background/80 px-1.5 py-0.5 text-[10px] font-medium text-foreground">
                                   <FolderKanban className="size-3 shrink-0" />
-                                  <span className="truncate">{attachedWorkspaceLabel}</span>
+                                  <span className="shrink-0">In progress</span>
+                                  <span className="min-w-0 truncate text-muted-foreground">
+                                    {attachedWorkspaceLabel}
+                                  </span>
                                 </span>
                               ) : null}
                               {item.labels.slice(0, 3).map((label) => (
@@ -5324,7 +5336,7 @@ export default function TaskPage(): React.JSX.Element {
                           </Tooltip>
 
                           <div className="flex items-center justify-start gap-1 lg:justify-end">
-                            {item.type === 'pr' ? (
+                            {item.type === 'pr' || attachedWorkspace ? (
                               <DropdownMenu modal={false}>
                                 <ButtonGroup>
                                   <Button
@@ -5333,13 +5345,13 @@ export default function TaskPage(): React.JSX.Element {
                                     size="xs"
                                     onClick={(event) => {
                                       event.stopPropagation()
-                                      handleOpenOrUseGitHubPR(item)
+                                      handleOpenOrUseGitHubItem(item)
                                     }}
                                     className="bg-background/80"
                                     aria-label={
                                       attachedWorkspace
-                                        ? 'Open workspace attached to PR'
-                                        : 'Start workspace from PR'
+                                        ? `Open workspace attached to ${itemKindLabel}`
+                                        : `Start workspace from ${itemKindLabel}`
                                     }
                                   >
                                     {attachedWorkspace ? 'Open' : 'Start'}
@@ -5352,7 +5364,7 @@ export default function TaskPage(): React.JSX.Element {
                                       size="icon-xs"
                                       onClick={(event) => event.stopPropagation()}
                                       className="bg-background/80"
-                                      aria-label="More PR actions"
+                                      aria-label={`More ${itemKindLabel} workspace actions`}
                                     >
                                       <ChevronDown className="size-3" />
                                     </Button>
@@ -5381,15 +5393,16 @@ export default function TaskPage(): React.JSX.Element {
                                 type="button"
                                 onClick={(event) => {
                                   event.stopPropagation()
-                                  handleUseWorkItem(item)
+                                  handleOpenOrUseGitHubItem(item)
                                 }}
                                 className="inline-flex items-center gap-1 rounded-md border border-border/50 bg-background/80 px-2 py-1 text-[11px] text-foreground transition hover:bg-muted/60"
+                                aria-label={`Start workspace from ${itemKindLabel}`}
                               >
                                 Start
                                 <ArrowRight className="size-3" />
                               </button>
                             )}
-                            {item.type !== 'pr' ? (
+                            {item.type !== 'pr' && !attachedWorkspace ? (
                               <DropdownMenu modal={false}>
                                 <DropdownMenuTrigger asChild>
                                   <button
