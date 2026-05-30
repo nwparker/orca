@@ -413,14 +413,18 @@ afterEach(() => {
   getIssueMock.mockResolvedValue(null)
 })
 
-function syncSinglePty(runtime: OrcaRuntimeService, ptyId: string | null = 'pty-1'): void {
+function syncSinglePty(
+  runtime: OrcaRuntimeService,
+  ptyId: string | null = 'pty-1',
+  options: { tabTitle?: string | null; paneTitle?: string | null } = {}
+): void {
   runtime.attachWindow(1)
   runtime.syncWindowGraph(1, {
     tabs: [
       {
         tabId: 'tab-1',
         worktreeId: TEST_WORKTREE_ID,
-        title: 'Codex',
+        title: options.tabTitle ?? 'Codex',
         activeLeafId: 'pane:1',
         layout: null
       }
@@ -432,7 +436,7 @@ function syncSinglePty(runtime: OrcaRuntimeService, ptyId: string | null = 'pty-
         leafId: 'pane:1',
         paneRuntimeId: 1,
         ptyId,
-        paneTitle: null
+        paneTitle: options.paneTitle ?? null
       }
     ]
   })
@@ -4008,6 +4012,36 @@ describe('OrcaRuntimeService', () => {
       expect(unread).toHaveLength(1)
       expect(unread[0].read).toBe(0)
       expect(unread[0].delivered_at).not.toBeNull()
+      db.close()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('still auto-submits to a non-Cursor agent when its idle title mentions Cursor Agent', async () => {
+    vi.useFakeTimers()
+    try {
+      const runtime = new OrcaRuntimeService(store)
+      const db = new InMemoryOrchestrationMessages()
+      const write = vi.fn().mockReturnValue(true)
+      setInMemoryOrchestrationMessages(runtime, db)
+      runtime.setPtyController({
+        write,
+        kill: vi.fn(),
+        getForegroundProcess: async () => null
+      })
+      syncSinglePty(runtime, 'pty-1', { tabTitle: 'cursor-repro-branch' })
+
+      const [terminal] = (await runtime.listTerminals()).terminals
+      runtime.onPtyData('pty-1', '\x1b]0;. Investigate Cursor Agent\x07', 100)
+      runtime.onPtyData('pty-1', '\x1b]0;* Investigate Cursor Agent\x07', 101)
+      db.insertMessage({ from: 'term_sender', to: terminal.handle, subject: 'hello claude' })
+
+      runtime.deliverPendingMessagesForHandle(terminal.handle)
+      await vi.advanceTimersByTimeAsync(500)
+
+      expect(write).toHaveBeenCalledWith('pty-1', expect.stringContaining('Subject: hello claude'))
+      expect(write).toHaveBeenCalledWith('pty-1', '\r')
       db.close()
     } finally {
       vi.useRealTimers()

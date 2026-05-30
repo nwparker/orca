@@ -4,7 +4,6 @@
 import {
   extractLastOscTitle,
   detectAgentStatusFromTitle,
-  getAgentLabel,
   isShellProcess
 } from '../../shared/agent-detection'
 import type { AgentStatus } from '../../shared/agent-detection'
@@ -558,9 +557,25 @@ function isCursorAgentOrchestrationTarget(
   leaf: RuntimeLeafRecord,
   tabTitle: string | null | undefined
 ): boolean {
-  return [leaf.lastOscTitle, leaf.paneTitle, tabTitle].some(
-    (title) => typeof title === 'string' && getAgentLabel(title) === 'Cursor'
-  )
+  return [leaf.lastOscTitle, leaf.paneTitle, tabTitle].some(isCursorAgentTitle)
+}
+
+function isCursorAgentTitle(title: string | null | undefined): boolean {
+  if (typeof title !== 'string') {
+    return false
+  }
+  const trimmed = title.trim()
+  const lower = trimmed.toLowerCase()
+  if (
+    lower === 'cursor agent' ||
+    lower === 'cursor ready' ||
+    lower === 'cursor - action required'
+  ) {
+    return true
+  }
+  // Why: display labels can mention Cursor in another agent's task text. Only
+  // treat the controlled synthetic Cursor spinner title as Cursor identity.
+  return /^[\u2800-\u28ff] Cursor Agent$/u.test(trimmed)
 }
 
 type RuntimePtyWorktreeRecord = {
