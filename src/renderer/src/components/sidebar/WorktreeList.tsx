@@ -142,7 +142,7 @@ import {
   pruneWorktreeSelection,
   updateWorktreeSelection
 } from './worktree-multi-selection'
-import { branchDisplayName } from './WorktreeCardHelpers'
+import { branchDisplayName, FilledBellIcon } from './WorktreeCardHelpers'
 import { callRuntimeRpc, getActiveRuntimeTarget } from '@/runtime/runtime-rpc-client'
 import { getRepoHeaderCreateState } from './repo-header-create-state'
 import type { PendingSidebarWorktreeReveal } from '@/store/slices/ui'
@@ -157,6 +157,12 @@ import {
 } from '../../../../shared/worktree-ownership'
 import { RepoIconGlyph } from '@/components/repo/repo-icon'
 import { RepoBadgeMark } from '@/components/repo/RepoBadgeLabel'
+import {
+  buildWorktreeSectionActivitySummaries,
+  EMPTY_WORKTREE_SECTION_ACTIVITY,
+  type WorktreeSectionActivityState,
+  type WorktreeSectionActivitySummary
+} from './worktree-section-activity'
 
 type ProjectGroupNameDialogState =
   | { type: 'create-from-repo'; repo: Repo }
@@ -369,6 +375,9 @@ type VirtualizedWorktreeViewportProps = {
     dropIndex: number
   }) => void
   showInlineAgentCards: boolean
+  showSectionStatus: boolean
+  showSectionUnread: boolean
+  sectionActivityByGroupKey: ReadonlyMap<string, WorktreeSectionActivitySummary>
   // Why: broad grouping changes still remount the viewport, while add/delete
   // stays mounted for row-key anchoring and layout animation. These refs bridge
   // both paths so the virtualizer never falls back to scrollTop 0.
@@ -377,6 +386,67 @@ type VirtualizedWorktreeViewportProps = {
 }
 
 type WorktreeItemRow = Extract<Row, { type: 'item' }>
+
+function formatSectionActivityLabel(count: number, label: string): string {
+  return `${count} ${label}${count === 1 ? '' : 's'}`
+}
+
+function SectionActivityBadges({
+  summary,
+  collapsed,
+  showStatus,
+  showUnread
+}: {
+  summary: WorktreeSectionActivitySummary
+  collapsed: boolean
+  showStatus: boolean
+  showUnread: boolean
+}): React.JSX.Element | null {
+  const runningCount = showStatus ? summary.runningCount : 0
+  const unreadCount = showUnread ? summary.unreadCount : 0
+
+  if (runningCount === 0 && unreadCount === 0) {
+    return null
+  }
+
+  return (
+    <div
+      className={cn(
+        'flex shrink-0 items-center gap-1 transition-opacity',
+        !collapsed && 'opacity-70 group-hover:opacity-100 group-focus-within:opacity-100'
+      )}
+    >
+      {runningCount > 0 ? (
+        <span
+          className={cn(
+            'inline-flex h-4 min-w-4 items-center justify-center gap-1 rounded-full border border-amber-500/25 bg-amber-500/10 px-1 text-[10px] font-semibold leading-none text-amber-700 dark:text-amber-300',
+            collapsed && 'border-amber-500/35 bg-amber-500/15'
+          )}
+          title={formatSectionActivityLabel(runningCount, 'running workspace')}
+          aria-label={formatSectionActivityLabel(runningCount, 'running workspace')}
+        >
+          <span className="inline-flex size-3 items-center justify-center" aria-hidden="true">
+            <span className="block size-2.5 rounded-full border-[1.5px] border-amber-500 border-t-transparent animate-spin" />
+          </span>
+          <span>{runningCount}</span>
+        </span>
+      ) : null}
+      {unreadCount > 0 ? (
+        <span
+          className={cn(
+            'inline-flex h-4 min-w-4 items-center justify-center gap-1 rounded-full border border-sidebar-border bg-sidebar-accent px-1 text-[10px] font-semibold leading-none text-muted-foreground',
+            collapsed && 'text-foreground'
+          )}
+          title={formatSectionActivityLabel(unreadCount, 'unread workspace')}
+          aria-label={formatSectionActivityLabel(unreadCount, 'unread workspace')}
+        >
+          <FilledBellIcon className="size-2.5 text-amber-500" />
+          <span>{unreadCount}</span>
+        </span>
+      ) : null}
+    </div>
+  )
+}
 
 type WorktreeRowDragState = {
   draggingWorktreeId: string | null
@@ -618,6 +688,9 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
   onPinWorktrees,
   onReorderWorktrees,
   showInlineAgentCards,
+  showSectionStatus,
+  showSectionUnread,
+  sectionActivityByGroupKey,
   scrollOffsetRef,
   scrollAnchorRef
 }: VirtualizedWorktreeViewportProps) {
@@ -2228,6 +2301,9 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
                   })
                 : null
               const projectGroupDepth = row.projectGroupDepth ?? 0
+              const isCollapsed = collapsedGroups.has(row.key)
+              const sectionActivity =
+                sectionActivityByGroupKey.get(row.key) ?? EMPTY_WORKTREE_SECTION_ACTIVITY
               return (
                 <div
                   key={vItem.key}
@@ -2340,11 +2416,18 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
                       </div>
                     </div>
 
+                    <SectionActivityBadges
+                      summary={sectionActivity}
+                      collapsed={isCollapsed}
+                      showStatus={showSectionStatus}
+                      showUnread={showSectionUnread}
+                    />
+
                     <div className="flex size-4 shrink-0 cursor-pointer items-center justify-center text-muted-foreground/60 opacity-0 transition-opacity group-hover:opacity-100">
                       <ChevronDown
                         className={cn(
                           'size-3.5 cursor-pointer transition-transform [&_path]:cursor-pointer',
-                          collapsedGroups.has(row.key) && '-rotate-90'
+                          isCollapsed && '-rotate-90'
                         )}
                       />
                     </div>
@@ -2941,6 +3024,15 @@ const WorktreeList = React.memo(function WorktreeList({
     groupBy === 'pr-status' || cardProps.includes('pr') ? s.prCache : null
   )
   const settings = useAppStore((s) => s.settings)
+  const sectionActivityTabsByWorktree = useAppStore((s) => s.tabsByWorktree)
+  const sectionActivityBrowserTabsByWorktree = useAppStore((s) => s.browserTabsByWorktree)
+  const sectionActivityPtyIdsByTabId = useAppStore((s) => s.ptyIdsByTabId)
+  const sectionActivityRuntimePaneTitlesByTabId = useAppStore((s) => s.runtimePaneTitlesByTabId)
+  const sectionActivityAgentStatusEpoch = useAppStore((s) => s.agentStatusEpoch)
+  const sectionActivityMigrationUnsupportedByPtyId = useAppStore(
+    (s) => s.migrationUnsupportedByPtyId
+  )
+  const sectionActivityRetainedAgentsByPaneKey = useAppStore((s) => s.retainedAgentsByPaneKey)
 
   const sortEpoch = useAppStore((s) => s.sortEpoch)
 
@@ -3237,6 +3329,59 @@ const WorktreeList = React.memo(function WorktreeList({
   const allRepoIds = useMemo(() => repos.map((r) => r.id), [repos])
   const reorderReposAction = useAppStore((s) => s.reorderRepos)
   const projectGroupOrdering = getProjectGroupOrdering(groupBy, sortBy)
+  const showSectionStatus = cardProps.includes('status')
+  const showSectionUnread = cardProps.includes('unread')
+  const sectionActivityState: WorktreeSectionActivityState = useMemo(() => {
+    const current = useAppStore.getState()
+    return {
+      tabsByWorktree: sectionActivityTabsByWorktree,
+      browserTabsByWorktree: sectionActivityBrowserTabsByWorktree,
+      ptyIdsByTabId: sectionActivityPtyIdsByTabId,
+      runtimePaneTitlesByTabId: sectionActivityRuntimePaneTitlesByTabId,
+      agentStatusEpoch: sectionActivityAgentStatusEpoch,
+      // Why: agentStatusByPaneKey can tick for same-state tool details. The
+      // section counts only need structural status transitions, tracked by
+      // agentStatusEpoch, so read the current map without subscribing to it.
+      agentStatusByPaneKey: current.agentStatusByPaneKey,
+      migrationUnsupportedByPtyId: sectionActivityMigrationUnsupportedByPtyId,
+      retainedAgentsByPaneKey: sectionActivityRetainedAgentsByPaneKey
+    }
+  }, [
+    sectionActivityAgentStatusEpoch,
+    sectionActivityBrowserTabsByWorktree,
+    sectionActivityMigrationUnsupportedByPtyId,
+    sectionActivityPtyIdsByTabId,
+    sectionActivityRetainedAgentsByPaneKey,
+    sectionActivityRuntimePaneTitlesByTabId,
+    sectionActivityTabsByWorktree
+  ])
+  const sectionActivityByGroupKey = useMemo(
+    () =>
+      showSectionStatus || showSectionUnread
+        ? buildWorktreeSectionActivitySummaries({
+            groupBy,
+            worktrees,
+            repoMap,
+            prCache,
+            workspaceStatuses,
+            projectGroups,
+            settings,
+            state: sectionActivityState
+          })
+        : new Map<string, WorktreeSectionActivitySummary>(),
+    [
+      groupBy,
+      prCache,
+      projectGroups,
+      repoMap,
+      sectionActivityState,
+      settings,
+      showSectionStatus,
+      showSectionUnread,
+      workspaceStatuses,
+      worktrees
+    ]
+  )
 
   // Build flat row list for rendering
   const rows: Row[] = useMemo(
@@ -3736,6 +3881,9 @@ const WorktreeList = React.memo(function WorktreeList({
         onPinWorktrees={pinWorktrees}
         onReorderWorktrees={reorderWorktrees}
         showInlineAgentCards={cardProps.includes('inline-agents')}
+        showSectionStatus={showSectionStatus}
+        showSectionUnread={showSectionUnread}
+        sectionActivityByGroupKey={sectionActivityByGroupKey}
         scrollOffsetRef={scrollOffsetRef}
         scrollAnchorRef={scrollAnchorRef}
       />
