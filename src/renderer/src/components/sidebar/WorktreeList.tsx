@@ -402,8 +402,11 @@ function SectionMetricsBadge({
   const runningCount = showStatus ? summary.runningCount : 0
   const hasRunning = runningCount > 0
   const totalLabel = formatSectionActivityLabel(count, 'workspace')
-  const runningLabel = formatSectionActivityLabel(runningCount, 'running workspace')
+  const runningLabel = hasRunning
+    ? formatSectionActivityLabel(runningCount, 'running workspace')
+    : 'no running workspaces'
   const badgeLabel = showStatus ? `${totalLabel}; ${runningLabel}` : totalLabel
+  const totalTooltipLabel = showStatus && !hasRunning ? badgeLabel : totalLabel
 
   return (
     <span
@@ -417,24 +420,15 @@ function SectionMetricsBadge({
           </span>
         </TooltipTrigger>
         <TooltipContent side="bottom" sideOffset={6}>
-          {totalLabel}
+          {totalTooltipLabel}
         </TooltipContent>
       </Tooltip>
-      {showStatus ? (
+      {showStatus && hasRunning ? (
         <Tooltip>
           <TooltipTrigger asChild>
-            <span
-              className={cn(
-                'inline-flex h-full min-w-4 items-center justify-center gap-1 border-l border-sidebar-border/80 px-1.5',
-                hasRunning &&
-                  'bg-amber-500/10 text-amber-700 dark:text-amber-300 dark:bg-amber-500/15'
-              )}
-            >
+            <span className="inline-flex h-full min-w-4 items-center justify-center gap-1 border-l border-sidebar-border/80 bg-amber-500/10 px-1.5 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300">
               <span
-                className={cn(
-                  'block size-1.5 rounded-full',
-                  hasRunning ? 'bg-amber-500 animate-pulse' : 'bg-current opacity-40'
-                )}
+                className="block size-1.5 rounded-full bg-amber-500 animate-pulse"
                 aria-hidden="true"
               />
               <span>{runningCount}</span>
