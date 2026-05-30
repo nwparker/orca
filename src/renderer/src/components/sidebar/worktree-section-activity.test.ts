@@ -116,7 +116,7 @@ function buildSummaries({
 }
 
 describe('buildWorktreeSectionActivitySummaries', () => {
-  it('counts running and unread worktrees across repo project-group ancestors', () => {
+  it('counts running worktrees across repo project-group ancestors', () => {
     const parent = makeProjectGroup({ id: 'parent', name: 'Parent' })
     const child = makeProjectGroup({
       id: 'child',
@@ -124,7 +124,7 @@ describe('buildWorktreeSectionActivitySummaries', () => {
       parentGroupId: parent.id
     })
     const repo = makeRepo({ projectGroupId: child.id })
-    const worktree = makeWorktree({ repoId: repo.id, isUnread: true })
+    const worktree = makeWorktree({ repoId: repo.id })
     const state = makeState({
       tabsByWorktree: {
         [worktree.id]: [
@@ -144,22 +144,19 @@ describe('buildWorktreeSectionActivitySummaries', () => {
     })
 
     expect(summaries.get(getProjectGroupHeaderKey(parent.id))).toEqual({
-      runningCount: 1,
-      unreadCount: 1
+      runningCount: 1
     })
     expect(summaries.get(getProjectGroupHeaderKey(child.id))).toEqual({
-      runningCount: 1,
-      unreadCount: 1
+      runningCount: 1
     })
     expect(summaries.get(`repo:${repo.id}`)).toEqual({
-      runningCount: 1,
-      unreadCount: 1
+      runningCount: 1
     })
   })
 
   it('keeps pinned workspace activity on the pinned header only', () => {
     const repo = makeRepo({ projectGroupId: 'group-1' })
-    const worktree = makeWorktree({ repoId: repo.id, isPinned: true, isUnread: true })
+    const worktree = makeWorktree({ repoId: repo.id, isPinned: true })
     const now = Date.now()
     const entry: AgentStatusEntry = {
       state: 'working',
@@ -187,8 +184,7 @@ describe('buildWorktreeSectionActivitySummaries', () => {
     })
 
     expect(summaries.get(PINNED_GROUP_KEY)).toEqual({
-      runningCount: 1,
-      unreadCount: 1
+      runningCount: 1
     })
     expect(summaries.get(`repo:${repo.id}`)).toBeUndefined()
     expect(summaries.get(getProjectGroupHeaderKey('group-1'))).toBeUndefined()

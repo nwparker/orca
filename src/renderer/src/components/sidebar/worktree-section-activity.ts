@@ -31,12 +31,10 @@ export type WorktreeSectionActivityState = Pick<
 
 export type WorktreeSectionActivitySummary = {
   runningCount: number
-  unreadCount: number
 }
 
 export const EMPTY_WORKTREE_SECTION_ACTIVITY: WorktreeSectionActivitySummary = {
-  runningCount: 0,
-  unreadCount: 0
+  runningCount: 0
 }
 
 export function buildWorktreeSectionActivitySummaries({
@@ -81,9 +79,6 @@ export function buildWorktreeSectionActivitySummaries({
       const summary = summaries.get(groupKey) ?? { ...EMPTY_WORKTREE_SECTION_ACTIVITY }
       if (status === 'working') {
         summary.runningCount++
-      }
-      if (worktree.isUnread) {
-        summary.unreadCount++
       }
       summaries.set(groupKey, summary)
     }

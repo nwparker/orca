@@ -142,7 +142,7 @@ import {
   pruneWorktreeSelection,
   updateWorktreeSelection
 } from './worktree-multi-selection'
-import { branchDisplayName, FilledBellIcon } from './WorktreeCardHelpers'
+import { branchDisplayName } from './WorktreeCardHelpers'
 import { callRuntimeRpc, getActiveRuntimeTarget } from '@/runtime/runtime-rpc-client'
 import { getRepoHeaderCreateState } from './repo-header-create-state'
 import type { PendingSidebarWorktreeReveal } from '@/store/slices/ui'
@@ -376,7 +376,6 @@ type VirtualizedWorktreeViewportProps = {
   }) => void
   showInlineAgentCards: boolean
   showSectionStatus: boolean
-  showSectionUnread: boolean
   sectionActivityByGroupKey: ReadonlyMap<string, WorktreeSectionActivitySummary>
   // Why: broad grouping changes still remount the viewport, while add/delete
   // stays mounted for row-key anchoring and layout animation. These refs bridge
@@ -391,60 +390,50 @@ function formatSectionActivityLabel(count: number, label: string): string {
   return `${count} ${label}${count === 1 ? '' : 's'}`
 }
 
-function SectionActivityBadges({
-  summary,
-  collapsed,
-  showStatus,
-  showUnread
-}: {
-  summary: WorktreeSectionActivitySummary
-  collapsed: boolean
+function formatSectionCountBadgeLabel(
+  workspaceCount: number,
+  runningCount: number,
   showStatus: boolean
-  showUnread: boolean
-}): React.JSX.Element | null {
-  const runningCount = showStatus ? summary.runningCount : 0
-  const unreadCount = showUnread ? summary.unreadCount : 0
-
-  if (runningCount === 0 && unreadCount === 0) {
-    return null
+): string {
+  const workspaceLabel = formatSectionActivityLabel(workspaceCount, 'workspace')
+  if (!showStatus) {
+    return workspaceLabel
   }
+  return runningCount > 0
+    ? `${workspaceLabel}, ${formatSectionActivityLabel(runningCount, 'running workspace')}`
+    : `${workspaceLabel}, none running`
+}
+
+function SectionCountBadge({
+  count,
+  summary,
+  showStatus
+}: {
+  count: number
+  summary: WorktreeSectionActivitySummary
+  showStatus: boolean
+}): React.JSX.Element {
+  const runningCount = showStatus ? summary.runningCount : 0
+  const hasRunning = runningCount > 0
+  const label = formatSectionCountBadgeLabel(count, runningCount, showStatus)
 
   return (
-    <div
-      className={cn(
-        'flex shrink-0 items-center gap-1 transition-opacity',
-        !collapsed && 'opacity-70 group-hover:opacity-100 group-focus-within:opacity-100'
-      )}
+    <span
+      className="inline-flex h-4 min-w-4 shrink-0 items-center justify-center gap-1 rounded-full border border-sidebar-border bg-sidebar-accent px-1.5 text-[9px] font-medium leading-none text-muted-foreground/90"
+      title={label}
+      aria-label={label}
     >
-      {runningCount > 0 ? (
-        <span
-          className={cn(
-            'inline-flex h-4 min-w-4 items-center justify-center gap-1 rounded-full border border-amber-500/25 bg-amber-500/10 px-1 text-[10px] font-semibold leading-none text-amber-700 dark:text-amber-300',
-            collapsed && 'border-amber-500/35 bg-amber-500/15'
+      {showStatus ? (
+        <span className="inline-flex size-2.5 items-center justify-center" aria-hidden="true">
+          {hasRunning ? (
+            <span className="block size-1.5 rounded-full bg-amber-500 animate-pulse" />
+          ) : (
+            <span className="block size-1.5 rounded-full bg-current opacity-40" />
           )}
-          title={formatSectionActivityLabel(runningCount, 'running workspace')}
-          aria-label={formatSectionActivityLabel(runningCount, 'running workspace')}
-        >
-          <span className="inline-flex size-3 items-center justify-center" aria-hidden="true">
-            <span className="block size-2.5 rounded-full border-[1.5px] border-amber-500 border-t-transparent animate-spin" />
-          </span>
-          <span>{runningCount}</span>
         </span>
       ) : null}
-      {unreadCount > 0 ? (
-        <span
-          className={cn(
-            'inline-flex h-4 min-w-4 items-center justify-center gap-1 rounded-full border border-sidebar-border bg-sidebar-accent px-1 text-[10px] font-semibold leading-none text-muted-foreground',
-            collapsed && 'text-foreground'
-          )}
-          title={formatSectionActivityLabel(unreadCount, 'unread workspace')}
-          aria-label={formatSectionActivityLabel(unreadCount, 'unread workspace')}
-        >
-          <FilledBellIcon className="size-2.5 text-amber-500" />
-          <span>{unreadCount}</span>
-        </span>
-      ) : null}
-    </div>
+      <span>{count}</span>
+    </span>
   )
 }
 
@@ -689,7 +678,6 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
   onReorderWorktrees,
   showInlineAgentCards,
   showSectionStatus,
-  showSectionUnread,
   sectionActivityByGroupKey,
   scrollOffsetRef,
   scrollAnchorRef
@@ -2410,14 +2398,10 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
                         <div className="min-w-0 truncate text-[13px] font-semibold leading-none">
                           {row.label}
                         </div>
-                        <div className="shrink-0 rounded-full bg-black/12 px-1.5 py-0.5 text-[9px] font-medium leading-none text-muted-foreground/90">
-                          {row.count}
-                        </div>
-                        <SectionActivityBadges
+                        <SectionCountBadge
+                          count={row.count}
                           summary={sectionActivity}
-                          collapsed={isCollapsed}
                           showStatus={showSectionStatus}
-                          showUnread={showSectionUnread}
                         />
                       </div>
                     </div>
@@ -3329,7 +3313,6 @@ const WorktreeList = React.memo(function WorktreeList({
   const reorderReposAction = useAppStore((s) => s.reorderRepos)
   const projectGroupOrdering = getProjectGroupOrdering(groupBy, sortBy)
   const showSectionStatus = cardProps.includes('status')
-  const showSectionUnread = cardProps.includes('unread')
   const sectionActivityState: WorktreeSectionActivityState = useMemo(() => {
     const current = useAppStore.getState()
     return {
@@ -3356,7 +3339,7 @@ const WorktreeList = React.memo(function WorktreeList({
   ])
   const sectionActivityByGroupKey = useMemo(
     () =>
-      showSectionStatus || showSectionUnread
+      showSectionStatus
         ? buildWorktreeSectionActivitySummaries({
             groupBy,
             worktrees,
@@ -3376,7 +3359,6 @@ const WorktreeList = React.memo(function WorktreeList({
       sectionActivityState,
       settings,
       showSectionStatus,
-      showSectionUnread,
       workspaceStatuses,
       worktrees
     ]
@@ -3881,7 +3863,6 @@ const WorktreeList = React.memo(function WorktreeList({
         onReorderWorktrees={reorderWorktrees}
         showInlineAgentCards={cardProps.includes('inline-agents')}
         showSectionStatus={showSectionStatus}
-        showSectionUnread={showSectionUnread}
         sectionActivityByGroupKey={sectionActivityByGroupKey}
         scrollOffsetRef={scrollOffsetRef}
         scrollAnchorRef={scrollAnchorRef}
