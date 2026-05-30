@@ -390,21 +390,7 @@ function formatSectionActivityLabel(count: number, label: string): string {
   return `${count} ${label}${count === 1 ? '' : 's'}`
 }
 
-function formatSectionCountBadgeLabel(
-  workspaceCount: number,
-  runningCount: number,
-  showStatus: boolean
-): string {
-  const workspaceLabel = formatSectionActivityLabel(workspaceCount, 'workspace')
-  if (!showStatus) {
-    return workspaceLabel
-  }
-  return runningCount > 0
-    ? `${workspaceLabel}, ${formatSectionActivityLabel(runningCount, 'running workspace')}`
-    : `${workspaceLabel}, none running`
-}
-
-function SectionCountBadge({
+function SectionMetricsBadge({
   count,
   summary,
   showStatus
@@ -415,24 +401,50 @@ function SectionCountBadge({
 }): React.JSX.Element {
   const runningCount = showStatus ? summary.runningCount : 0
   const hasRunning = runningCount > 0
-  const label = formatSectionCountBadgeLabel(count, runningCount, showStatus)
+  const totalLabel = formatSectionActivityLabel(count, 'workspace')
+  const runningLabel = formatSectionActivityLabel(runningCount, 'running workspace')
+  const badgeLabel = showStatus ? `${totalLabel}; ${runningLabel}` : totalLabel
 
   return (
     <span
-      className="inline-flex h-4 min-w-4 shrink-0 items-center justify-center gap-1 rounded-full border border-sidebar-border bg-sidebar-accent px-1.5 text-[9px] font-medium leading-none text-muted-foreground/90"
-      title={label}
-      aria-label={label}
+      className="inline-flex h-4 shrink-0 overflow-hidden rounded-full border border-sidebar-border bg-sidebar-accent text-[9px] font-medium leading-none text-muted-foreground/90"
+      aria-label={badgeLabel}
     >
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className="inline-flex h-full min-w-4 items-center justify-center px-1.5">
+            {count}
+          </span>
+        </TooltipTrigger>
+        <TooltipContent side="bottom" sideOffset={6}>
+          {totalLabel}
+        </TooltipContent>
+      </Tooltip>
       {showStatus ? (
-        <span className="inline-flex size-2.5 items-center justify-center" aria-hidden="true">
-          {hasRunning ? (
-            <span className="block size-1.5 rounded-full bg-amber-500 animate-pulse" />
-          ) : (
-            <span className="block size-1.5 rounded-full bg-current opacity-40" />
-          )}
-        </span>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span
+              className={cn(
+                'inline-flex h-full min-w-4 items-center justify-center gap-1 border-l border-sidebar-border/80 px-1.5',
+                hasRunning &&
+                  'bg-amber-500/10 text-amber-700 dark:text-amber-300 dark:bg-amber-500/15'
+              )}
+            >
+              <span
+                className={cn(
+                  'block size-1.5 rounded-full',
+                  hasRunning ? 'bg-amber-500 animate-pulse' : 'bg-current opacity-40'
+                )}
+                aria-hidden="true"
+              />
+              <span>{runningCount}</span>
+            </span>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" sideOffset={6}>
+            {runningLabel}
+          </TooltipContent>
+        </Tooltip>
       ) : null}
-      <span>{count}</span>
     </span>
   )
 }
@@ -2398,7 +2410,7 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
                         <div className="min-w-0 truncate text-[13px] font-semibold leading-none">
                           {row.label}
                         </div>
-                        <SectionCountBadge
+                        <SectionMetricsBadge
                           count={row.count}
                           summary={sectionActivity}
                           showStatus={showSectionStatus}
