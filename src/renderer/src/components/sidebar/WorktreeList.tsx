@@ -2406,22 +2406,21 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
                     ) : null}
 
                     <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-1.5">
-                        <div className="truncate text-[13px] font-semibold leading-none">
+                      <div className="flex min-w-0 items-center gap-1.5">
+                        <div className="min-w-0 truncate text-[13px] font-semibold leading-none">
                           {row.label}
                         </div>
-                        <div className="rounded-full bg-black/12 px-1.5 py-0.5 text-[9px] font-medium leading-none text-muted-foreground/90">
+                        <div className="shrink-0 rounded-full bg-black/12 px-1.5 py-0.5 text-[9px] font-medium leading-none text-muted-foreground/90">
                           {row.count}
                         </div>
+                        <SectionActivityBadges
+                          summary={sectionActivity}
+                          collapsed={isCollapsed}
+                          showStatus={showSectionStatus}
+                          showUnread={showSectionUnread}
+                        />
                       </div>
                     </div>
-
-                    <SectionActivityBadges
-                      summary={sectionActivity}
-                      collapsed={isCollapsed}
-                      showStatus={showSectionStatus}
-                      showUnread={showSectionUnread}
-                    />
 
                     <div className="flex size-4 shrink-0 cursor-pointer items-center justify-center text-muted-foreground/60 opacity-0 transition-opacity group-hover:opacity-100">
                       <ChevronDown
