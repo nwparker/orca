@@ -93,6 +93,38 @@ describe('resolveEffectiveTerminalAppearance', () => {
   })
 })
 
+function hexChannelToLinear(value: string): number {
+  const channel = parseInt(value, 16) / 255
+  return channel <= 0.03928 ? channel / 12.92 : Math.pow((channel + 0.055) / 1.055, 2.4)
+}
+
+function relativeLuminance(hex: string): number {
+  const clean = hex.replace('#', '')
+  const r = hexChannelToLinear(clean.slice(0, 2))
+  const g = hexChannelToLinear(clean.slice(2, 4))
+  const b = hexChannelToLinear(clean.slice(4, 6))
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b
+}
+
+function contrastRatio(foreground: string, background: string): number {
+  const fg = relativeLuminance(foreground)
+  const bg = relativeLuminance(background)
+  const lighter = Math.max(fg, bg)
+  const darker = Math.min(fg, bg)
+  return (lighter + 0.05) / (darker + 0.05)
+}
+
+describe('default light terminal theme contrast', () => {
+  it('keeps ANSI white text readable on its white background', () => {
+    const theme = getTerminalThemePreview(DEFAULT_TERMINAL_THEME_LIGHT)
+
+    // Why: agent TUIs commonly use ANSI white/bright-white for dim code and
+    // diff metadata; near-white values disappear in Orca light mode.
+    expect(contrastRatio(theme!.white!, theme!.background!)).toBeGreaterThanOrEqual(4.5)
+    expect(contrastRatio(theme!.brightWhite!, theme!.background!)).toBeGreaterThanOrEqual(4.5)
+  })
+})
+
 describe('isTerminalBackgroundLight', () => {
   it('classifies common terminal background color formats by luminance', () => {
     expect(isTerminalBackgroundLight('#ffffff')).toBe(true)

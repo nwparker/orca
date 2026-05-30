@@ -41,7 +41,9 @@ export const DEFAULT_TERMINAL_THEMES: TerminalThemeMap = {
     blue: '#3465a4',
     magenta: '#75507b',
     cyan: '#06989a',
-    white: '#d3d7cf',
+    // Why: many agent TUIs use ANSI white for code/diff metadata; Tango's
+    // pale aluminium values disappear against Orca's white light theme.
+    white: '#555753',
     brightBlack: '#555753',
     brightRed: '#ef2929',
     brightGreen: '#8ae234',
@@ -49,6 +51,6 @@ export const DEFAULT_TERMINAL_THEMES: TerminalThemeMap = {
     brightBlue: '#729fcf',
     brightMagenta: '#ad7fa8',
     brightCyan: '#34e2e2',
-    brightWhite: '#eeeeec'
+    brightWhite: '#2e3436'
   }
 }
