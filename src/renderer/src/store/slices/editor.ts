@@ -932,6 +932,26 @@ export function resolveRemoteOperationErrorMessage(
     return 'Pull blocked — commit or stash your local changes first.'
   }
 
+  if (/Pull would overwrite local changes/i.test(error.message)) {
+    if (options?.isRebase) {
+      return 'Rebase blocked — commit or stash your local changes first.'
+    }
+    if (options?.isFastForward) {
+      return 'Fast-forward blocked — commit or stash your local changes first.'
+    }
+    return 'Pull blocked — commit or stash your local changes first.'
+  }
+
+  if (/Pull would overwrite untracked files/i.test(error.message)) {
+    if (options?.isRebase) {
+      return 'Rebase blocked — move, remove, or add untracked files first.'
+    }
+    if (options?.isFastForward) {
+      return 'Fast-forward blocked — move, remove, or add untracked files first.'
+    }
+    return 'Pull blocked — move, remove, or add untracked files first.'
+  }
+
   if (options?.publish) {
     // Why: publish failures often bubble up as raw wrapped git/IPC payloads; this
     // keeps the toast human-readable while preserving the actionable fatal reason.
