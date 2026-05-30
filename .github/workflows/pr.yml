@@ -100,4 +100,4 @@ jobs:
       # Why: the packaged CLI runs outside Electron's asar integration, so
       # bare runtime imports must be present in app.asar.unpacked.
       - name: Smoke packaged CLI
-        run: dist/linux-unpacked/resources/bin/orca --help
+        run: dist/linux-unpacked/resources/bin/orca-ide --help

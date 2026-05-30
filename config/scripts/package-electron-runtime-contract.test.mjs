@@ -84,4 +84,14 @@ describe('Electron runtime package contract', () => {
 
     expect(installStep.run).toBe('node config/scripts/install-electron-package-binary.mjs')
   })
+
+  it('smokes the packaged Linux CLI launcher that is shipped in resources', () => {
+    const prWorkflow = readFileSync(join(projectDir, '.github/workflows/pr.yml'), 'utf8')
+    const parsedWorkflow = parse(prWorkflow)
+    const smokeStep = parsedWorkflow.jobs.verify.steps.find(
+      (step) => step.name === 'Smoke packaged CLI'
+    )
+
+    expect(smokeStep.run).toBe('dist/linux-unpacked/resources/bin/orca-ide --help')
+  })
 })
