@@ -1,3 +1,4 @@
+/* oxlint-disable max-lines -- Why: queue/cache regression cases share one mocked IPC harness so stale revision sequencing stays visible. */
 import { ipcMain } from 'electron'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Store } from '../persistence'
@@ -250,5 +251,75 @@ describe('remoteWorkspace:setForConnectedTargets patch queue', () => {
       })
     ).resolves.toMatchObject([{ targetId: 'target-reset', result: { ok: true } }])
     expect(patchBaseRevisions).toEqual([7, 0])
+  })
+
+  it('does not retry stale writes when the relay reports a newer revision', async () => {
+    const newerTarget: SshTarget = {
+      id: 'target-newer',
+      label: 'Newer Target',
+      host: 'newer.example.com',
+      port: 22,
+      username: 'alice'
+    }
+    getSshConnectionStoreMock.mockReturnValue({
+      listTargets: () => [newerTarget]
+    })
+    getRepoMock.mockImplementation((repoId: string) =>
+      repoId === 'repo-newer'
+        ? ({
+            id: 'repo-newer',
+            path: '/remote/repo',
+            displayName: 'Repo',
+            badgeColor: 'blue',
+            addedAt: 1,
+            connectionId: 'target-newer'
+          } as never)
+        : undefined
+    )
+
+    const patchBaseRevisions: number[] = []
+    const request = vi
+      .fn()
+      .mockImplementation(async (method: string, params: Record<string, unknown>) => {
+        if (method === 'workspace.get') {
+          return snapshot(
+            {
+              activeWorktreePath: '/previous',
+              activeTabId: null,
+              tabsByWorktreePath: {},
+              terminalLayoutsByTabId: {}
+            },
+            7
+          )
+        }
+        if (method === 'workspace.patch') {
+          patchBaseRevisions.push(params.baseRevision as number)
+          return {
+            ok: false,
+            reason: 'stale-revision',
+            snapshot: snapshot(
+              {
+                activeWorktreePath: '/other-device',
+                activeTabId: null,
+                tabsByWorktreePath: {},
+                terminalLayoutsByTabId: {}
+              },
+              8
+            )
+          }
+        }
+        throw new Error(`Unexpected method ${method}`)
+      })
+    muxByTargetId.set('target-newer', { request })
+
+    await expect(
+      callSetForConnectedTargets({
+        session: sessionWithTab('repo-newer::/remote/workspace', 'tab-local'),
+        hydratedTargetIds: ['target-newer']
+      })
+    ).resolves.toMatchObject([
+      { targetId: 'target-newer', result: { ok: false, reason: 'stale-revision' } }
+    ])
+    expect(patchBaseRevisions).toEqual([7])
   })
 })
