@@ -510,6 +510,11 @@ function getPanelStyleBounds(element: unknown): FloatingTerminalPanelBounds {
   }
 }
 
+function getPanelClassName(element: unknown): string {
+  const panel = findByProp(element, 'data-floating-terminal-panel')
+  return panel.props.className as string
+}
+
 function getMockedLocalStorage(): {
   getItem: ReturnType<typeof vi.fn>
   setItem: ReturnType<typeof vi.fn>
@@ -616,6 +621,12 @@ describe('FloatingTerminalPanel close behavior', () => {
     const element = await renderPanel(true)
 
     expect(getPanelStyleBounds(element)).toEqual(savedBounds)
+  })
+
+  it('layers below root notification cards', async () => {
+    const element = await renderPanel(true)
+
+    expect(getPanelClassName(element)).toContain('z-30')
   })
 
   it('falls back to default bounds when persisted geometry is malformed', async () => {
