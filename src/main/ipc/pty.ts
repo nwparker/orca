@@ -79,6 +79,12 @@ const ptyOwnership = new Map<string, string | null>()
 // Why: mobile clients must mirror desktop PTY geometry even when the renderer
 // cannot provide an xterm snapshot yet, such as immediately after tab creation.
 const ptySizes = new Map<string, { cols: number; rows: number }>()
+type ResizeAndSignalArgs = {
+  id: string
+  cols: number
+  rows: number
+  signal: string
+}
 // Why: PTY data batching is window-bound, but the "recent user input" signal
 // is PTY-scoped and must be cleared by every teardown path, including SSH and
 // daemon shutdowns that do not flow through the local provider exit listener.
@@ -934,6 +940,7 @@ export function registerPtyHandlers(
   ipcMain.removeHandler('pty:clearPendingPaneSerializer')
   ipcMain.removeHandler('pty:getMainBufferSnapshot')
   ipcMain.removeHandler('pty:writeAccepted')
+  ipcMain.removeHandler('pty:resizeAndSignal')
   ipcMain.removeAllListeners('pty:write')
   ipcMain.removeAllListeners('pty:ackColdRestore')
   ipcMain.removeAllListeners('pty:serializeBuffer:response')
@@ -2395,6 +2402,33 @@ export function registerPtyHandlers(
       ?.sendSignal(args.id, args.signal)
       .catch(() => {})
   })
+
+  ipcMain.handle(
+    'pty:resizeAndSignal',
+    async (_event, args: ResizeAndSignalArgs): Promise<boolean> => {
+      if (runtime?.isResizeSuppressed()) {
+        return false
+      }
+      if (runtime?.getDriver(args.id).kind === 'mobile') {
+        return false
+      }
+      const provider = tryGetProviderForPty(args.id)
+      if (!provider) {
+        return false
+      }
+      // Why: alternate-screen TUIs repaint on SIGWINCH; send it only after
+      // the PTY size is applied so the app observes the new grid.
+      try {
+        ptySizes.set(args.id, { cols: args.cols, rows: args.rows })
+        provider.resize(args.id, args.cols, args.rows)
+        runtime?.onExternalPtyResize(args.id, args.cols, args.rows)
+        await provider.sendSignal(args.id, args.signal)
+        return true
+      } catch {
+        return false
+      }
+    }
+  )
 
   ipcMain.handle('pty:kill', async (_event, args: { id: string; keepHistory?: boolean }) => {
     const ownedConnectionId = ptyOwnership.get(args.id)

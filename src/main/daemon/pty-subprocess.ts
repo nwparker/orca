@@ -25,6 +25,7 @@ import { parseWslPath } from '../wsl'
 import { addWslEnvKeys } from '../wsl-env'
 import { getWslContextFromSessionId } from './wsl-session-context'
 import { addOrcaWslInteropEnv } from '../pty/wsl-orca-env'
+import { signalForegroundProcessGroup } from '../pty/foreground-process-group-signal'
 import { isWindowsGitBashShellPath, resolveWindowsGitBashShellPath } from '../git-bash'
 import { WINDOWS_GIT_BASH_SHELL } from '../../shared/windows-terminal-shell'
 
@@ -526,6 +527,11 @@ export function createPtySubprocess(opts: PtySubprocessOptions): SubprocessHandl
         return
       }
       try {
+        // Why: foreground TUIs run in their own process group; same-size
+        // SIGWINCH repaints must target that group, not the original shell PID.
+        if (sig === 'SIGWINCH' && signalForegroundProcessGroup(proc.pid, sig)) {
+          return
+        }
         process.kill(proc.pid, sig)
       } catch {
         // Process may already be dead

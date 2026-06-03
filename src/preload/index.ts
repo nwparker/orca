@@ -667,6 +667,14 @@ const api = {
       ipcRenderer.send('pty:resize', { id, cols, rows })
     },
 
+    resizeAndSignal: (id: string, cols: number, rows: number, signal: string): Promise<boolean> =>
+      ipcRenderer.invoke('pty:resizeAndSignal', {
+        id,
+        cols,
+        rows,
+        signal
+      }),
+
     /** Why: measurement-only sibling of resize. Fires when a desktop pane
      * container measures real geometry (e.g. previously hidden tab becomes
      * visible) so the runtime's restore-target baseline can stay fresh

@@ -21,8 +21,14 @@ import { restoreScrollStateAfterLayout } from '@/lib/pane-manager/pane-scroll'
 import { useTerminalScrollVisibilityMemory } from './use-terminal-scroll-visibility-memory'
 import { useTerminalContainerFitSync } from './use-terminal-container-fit-sync'
 import { pasteTerminalText } from './terminal-bracketed-paste'
+import {
+  captureHiddenPaneSizes,
+  reconcileVisiblePanesAfterHiddenResume,
+  type HiddenPaneSizes
+} from './terminal-hidden-resume-reconcile'
 
 const VISIBLE_RESUME_FLUSH_CHARS = 256 * 1024
+const HIDDEN_RESUME_LAYOUT_SETTLE_MS = 220
 
 type UseTerminalPaneGlobalEffectsArgs = {
   tabId: string
@@ -64,6 +70,10 @@ export function useTerminalPaneGlobalEffects({
   // otherwise leak WebGL contexts — openTerminal() unconditionally creates
   // one — and exhaust Chromium's ~8-context budget across worktrees.
   const wasVisibleRef = useRef(true)
+  const hasReconciledVisibleGeometryRef = useRef(false)
+  const hiddenPaneSizesRef = useRef<HiddenPaneSizes>(new Map())
+  const hiddenResumeReconcileRafRef = useRef<number | null>(null)
+  const hiddenResumeReconcileTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const {
     captureViewportPositions,
     withSuppressedScrollTracking,
@@ -78,13 +88,54 @@ export function useTerminalPaneGlobalEffects({
   useTerminalContainerFitSync({ isVisible, isSyncFitEnabled, managerRef, containerRef })
 
   useEffect(() => {
-    const manager = managerRef.current
-    if (!manager) {
-      return
+    const clearPendingHiddenResumeReconcile = (): void => {
+      if (hiddenResumeReconcileRafRef.current !== null) {
+        cancelAnimationFrame(hiddenResumeReconcileRafRef.current)
+        hiddenResumeReconcileRafRef.current = null
+      }
+      if (hiddenResumeReconcileTimerRef.current !== null) {
+        clearTimeout(hiddenResumeReconcileTimerRef.current)
+        hiddenResumeReconcileTimerRef.current = null
+      }
     }
+    const scheduleSettledHiddenResumeReconcile = (hiddenPaneSizes: HiddenPaneSizes): void => {
+      clearPendingHiddenResumeReconcile()
+      const reconcileIfStillVisible = (): void => {
+        const currentManager = managerRef.current
+        if (!currentManager || !isVisibleRef.current) {
+          return
+        }
+        reconcileVisiblePanesAfterHiddenResume({
+          manager: currentManager,
+          paneTransports: paneTransportsRef.current,
+          hiddenPaneSizes
+        })
+      }
+      hiddenResumeReconcileRafRef.current = requestAnimationFrame(() => {
+        hiddenResumeReconcileRafRef.current = null
+        reconcileIfStillVisible()
+      })
+      // Why: overlay anchor updates and the debounced visible ResizeObserver
+      // fit can land after the visibility effect. Reconcile again after that
+      // window so idle full-screen TUIs see final dimensions.
+      hiddenResumeReconcileTimerRef.current = setTimeout(() => {
+        hiddenResumeReconcileTimerRef.current = null
+        reconcileIfStillVisible()
+      }, HIDDEN_RESUME_LAYOUT_SETTLE_MS)
+    }
+
+    const manager = managerRef.current
     isActiveRef.current = isActive
     isVisibleRef.current = isVisible
+    if (!manager) {
+      wasVisibleRef.current = isVisible
+      return
+    }
     if (isVisible) {
+      const resumedFromHidden = !wasVisibleRef.current
+      const shouldReconcileVisibleGeometry =
+        resumedFromHidden || !hasReconciledVisibleGeometryRef.current
+      const hiddenPaneSizes = new Map(hiddenPaneSizesRef.current)
       // Why: WebGL resume can disturb xterm's viewport bookkeeping before the
       // post-resume fit runs. Capture numeric viewport positions first; the
       // restore path avoids content matching so duplicate agent log lines do
@@ -112,6 +163,13 @@ export function useTerminalPaneGlobalEffects({
         } else {
           fitPanes(manager)
         }
+        if (shouldReconcileVisibleGeometry) {
+          reconcileVisiblePanesAfterHiddenResume({
+            manager,
+            paneTransports: paneTransportsRef.current,
+            hiddenPaneSizes
+          })
+        }
         for (const pane of manager.getPanes()) {
           const position = viewportPositions.get(pane.id)
           if (position) {
@@ -120,12 +178,19 @@ export function useTerminalPaneGlobalEffects({
         }
       })
       wasVisibleRef.current = true
+      hasReconciledVisibleGeometryRef.current = true
+      hiddenPaneSizesRef.current.clear()
+      if (shouldReconcileVisibleGeometry && resumedFromHidden) {
+        scheduleSettledHiddenResumeReconcile(hiddenPaneSizes)
+      }
       applyPendingFollowOutputRequests()
       return
     } else if (wasVisibleRef.current) {
+      clearPendingHiddenResumeReconcile()
       // Why: hidden DOM/layout churn can mutate xterm's viewport before the
       // pane becomes visible again. Preserve the last visible position.
       captureViewportPositions(false)
+      hiddenPaneSizesRef.current = captureHiddenPaneSizes(manager, paneTransportsRef.current)
       // Suspend WebGL when going hidden. xterm.write() continues to land in
       // the (now DOM-renderer-fallback or paused-canvas) terminal; the
       // suspend is purely a GPU resource decision.

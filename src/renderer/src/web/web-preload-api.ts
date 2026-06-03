@@ -2142,6 +2142,7 @@ function createPtyApi(): NonNullable<Partial<PreloadApi>['pty']> {
     write: () => {},
     writeAccepted: () => Promise.resolve(false),
     resize: () => {},
+    resizeAndSignal: () => Promise.resolve(false),
     reportGeometry: () => {},
     signal: () => {},
     kill: () => Promise.resolve(),

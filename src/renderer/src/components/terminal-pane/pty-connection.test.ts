@@ -292,6 +292,24 @@ function createPane(paneId: number) {
   }
 }
 
+type ResizeListener = (event: { cols: number; rows: number }) => void
+
+function captureResizeListener(pane: ReturnType<typeof createPane>): () => ResizeListener {
+  let listener: ResizeListener | undefined
+  vi.mocked(
+    pane.terminal.onResize as unknown as (nextListener: ResizeListener) => { dispose: () => void }
+  ).mockImplementation((nextListener) => {
+    listener = nextListener
+    return { dispose: vi.fn() }
+  })
+  return () => {
+    if (!listener) {
+      throw new Error('Expected terminal resize listener to be registered')
+    }
+    return listener
+  }
+}
+
 function createManager(paneCount = 1) {
   return {
     setPaneGpuRendering: vi.fn(),
@@ -464,6 +482,7 @@ describe('connectPanePty', () => {
         },
         pty: {
           signal: vi.fn(),
+          resizeAndSignal: vi.fn().mockResolvedValue(true),
           getMainBufferSnapshot: vi.fn().mockResolvedValue(null),
           getForegroundProcess: vi.fn().mockResolvedValue(null),
           hasChildProcesses: vi.fn().mockResolvedValue(false),
@@ -533,6 +552,39 @@ describe('connectPanePty', () => {
     expect((globalThis as Record<string, unknown>).__ptyConnectDiag).toBeUndefined()
     expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining('[pty-connect]'))
     logSpy.mockRestore()
+  })
+
+  it('uses ordered resize and signal for alternate-screen terminal resizes', async () => {
+    const { connectPanePty } = await import('./pty-connection')
+    const transport = createMockTransport('pty-1')
+    transportFactoryQueue.push(transport)
+    const pane = createPane(1)
+    const getOnResize = captureResizeListener(pane)
+
+    connectPanePty(pane as never, createManager(1) as never, createDeps() as never)
+    const onResize = getOnResize()
+
+    ;(pane.terminal.buffer.active as { type?: string }).type = 'alternate'
+    onResize({ cols: 140, rows: 50 })
+
+    expect(window.api.pty.resizeAndSignal).toHaveBeenCalledWith('tab-pty', 140, 50, 'SIGWINCH')
+    expect(transport.resize).not.toHaveBeenCalled()
+  })
+
+  it('keeps normal-buffer terminal resizes on the transport resize path', async () => {
+    const { connectPanePty } = await import('./pty-connection')
+    const transport = createMockTransport('pty-1')
+    transportFactoryQueue.push(transport)
+    const pane = createPane(1)
+    const getOnResize = captureResizeListener(pane)
+
+    connectPanePty(pane as never, createManager(1) as never, createDeps() as never)
+    const onResize = getOnResize()
+
+    onResize({ cols: 140, rows: 50 })
+
+    expect(transport.resize).toHaveBeenCalledWith(140, 50)
+    expect(window.api.pty.resizeAndSignal).not.toHaveBeenCalled()
   })
 
   it('observes live terminal GitHub PR URLs before agent completion', async () => {

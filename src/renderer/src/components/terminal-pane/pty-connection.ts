@@ -1411,6 +1411,13 @@ export function connectPanePty(
     )
   }
 
+  const shouldResizeAndPulsePty = (ptyId: string): boolean => {
+    if (isRemoteRuntimePtyId(ptyId)) {
+      return false
+    }
+    return (pane.terminal.buffer.active as { type?: string }).type === 'alternate'
+  }
+
   const forwardPtyResize = (cols: number, rows: number): void => {
     // Why: when a mobile-fit override is active OR mobile is currently the
     // driver of this PTY, the PTY is already at phone dims and any desktop
@@ -1422,6 +1429,14 @@ export function connectPanePty(
     // The pty:resize IPC has a defense-in-depth twin. See
     // docs/mobile-presence-lock.md.
     if (shouldSuppressDesktopPtyResize()) {
+      return
+    }
+    const ptyId = transport.getPtyId()
+    if (!ptyId) {
+      return
+    }
+    if (shouldResizeAndPulsePty(ptyId)) {
+      void window.api.pty.resizeAndSignal(ptyId, cols, rows, 'SIGWINCH').catch(() => {})
       return
     }
     transport.resize(cols, rows)
@@ -1443,7 +1458,7 @@ export function connectPanePty(
     if (queuePanePtyResizeIfHeld(pane.container, cols, rows)) {
       return
     }
-    transport.resize(cols, rows)
+    forwardPtyResize(cols, rows)
   })
 
   // Why: while a mobile-fit override is active, the onResize listener above

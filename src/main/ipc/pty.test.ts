@@ -2161,6 +2161,52 @@ describe('registerPtyHandlers', () => {
     )
   })
 
+  it('resizes a PTY before sending a repaint signal through acknowledged IPC', async () => {
+    const order: string[] = []
+    const resize = vi.fn(() => {
+      order.push('resize')
+    })
+    const sendSignal = vi.fn(async () => {
+      order.push('signal')
+    })
+    setLocalPtyProvider({
+      spawn: vi.fn(),
+      write: vi.fn(),
+      resize,
+      shutdown: vi.fn(),
+      sendSignal,
+      getCwd: vi.fn(),
+      getInitialCwd: vi.fn(),
+      clearBuffer: vi.fn(),
+      acknowledgeDataEvent: vi.fn(),
+      hasChildProcesses: vi.fn(),
+      getForegroundProcess: vi.fn(),
+      serialize: vi.fn(),
+      revive: vi.fn(),
+      onData: vi.fn(() => () => {}),
+      onReplay: vi.fn(() => () => {}),
+      onExit: vi.fn(() => () => {}),
+      listProcesses: vi.fn(async () => []),
+      attach: vi.fn(),
+      getDefaultShell: vi.fn(),
+      getProfiles: vi.fn()
+    } as never)
+    registerPtyHandlers(mainWindow as never)
+
+    await expect(
+      handlers.get('pty:resizeAndSignal')!(null, {
+        id: 'local-pty',
+        cols: 120,
+        rows: 30,
+        signal: 'SIGWINCH'
+      })
+    ).resolves.toBe(true)
+
+    expect(resize).toHaveBeenCalledWith('local-pty', 120, 30)
+    expect(sendSignal).toHaveBeenCalledWith('local-pty', 'SIGWINCH')
+    expect(order).toEqual(['resize', 'signal'])
+  })
+
   it('lists sessions from both local and SSH providers', async () => {
     registerPtyHandlers(mainWindow as never)
     const sshListProcesses = vi.fn(async () => [

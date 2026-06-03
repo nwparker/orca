@@ -31,6 +31,7 @@ import {
   STARTUP_COMMAND_READY_MAX_WAIT_MS
 } from './local-pty-shell-ready'
 import { removeInheritedNoColor } from '../pty/terminal-color-env'
+import { signalForegroundProcessGroup } from '../pty/foreground-process-group-signal'
 import { isHostCodexHomeForWsl, isWslCodexHomeForHost } from '../pty/codex-home-wsl-env'
 import { addWslEnvKeys } from '../wsl-env'
 import {
@@ -626,6 +627,11 @@ export class LocalPtyProvider implements IPtyProvider {
       return
     }
     try {
+      // Why: the shell PID is not necessarily the foreground TUI. SIGWINCH
+      // must reach the PTY foreground process group to force a same-size repaint.
+      if (signal === 'SIGWINCH' && signalForegroundProcessGroup(proc.pid, signal)) {
+        return
+      }
       process.kill(proc.pid, signal)
     } catch {
       /* Process may already be dead */
