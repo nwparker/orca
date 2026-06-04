@@ -1710,6 +1710,7 @@ export type PreloadApi = {
     get: () => Promise<WorkspaceSessionState>
     set: (args: WorkspaceSessionState) => Promise<void>
     patch: (args: WorkspaceSessionPatch) => Promise<void>
+    readTerminalScrollback: (args: { ref: string }) => string | null
     setSync: (args: WorkspaceSessionState) => void
   }
   remoteWorkspace: {

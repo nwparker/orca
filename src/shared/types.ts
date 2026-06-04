@@ -647,6 +647,8 @@ export type TerminalLayoutSnapshot = {
   ptyIdsByLeafId?: Record<string, string>
   /** Serialized terminal buffers per leaf for scrollback restoration on restart. */
   buffersByLeafId?: Record<string, string>
+  /** Durable scrollback snapshot refs per leaf; raw bytes live outside session JSON. */
+  scrollbackRefsByLeafId?: Record<string, string>
   /** User-assigned pane titles, keyed by stable layout leaf UUID.
    *  Persisted alongside buffers via the existing session:set flow. */
   titlesByLeafId?: Record<string, string>

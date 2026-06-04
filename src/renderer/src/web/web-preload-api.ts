@@ -485,6 +485,7 @@ function createWebPreloadApi(): Partial<PreloadApi> {
           })
         )
       },
+      readTerminalScrollback: () => null,
       setSync: (session) => {
         writeJson(SESSION_STORAGE_KEY, sanitizeWebRuntimeWorkspaceSession(session))
       }

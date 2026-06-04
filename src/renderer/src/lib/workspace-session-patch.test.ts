@@ -159,6 +159,7 @@ describe('buildWorkspaceSessionPatch', () => {
             activeLeafId: null,
             expandedLeafId: null,
             buffersByLeafId: { 'pane:1': 'serialized-local-scrollback' },
+            scrollbackRefsByLeafId: { 'pane:1': 'v1-local' },
             ptyIdsByLeafId: { 'pane:1': 'pty-1' }
           }
         },
@@ -177,6 +178,7 @@ describe('buildWorkspaceSessionPatch', () => {
     )
     expect('pendingActivationSpawn' in patch.tabsByWorktree![localWorktreeId][0]).toBe(false)
     expect(patch.terminalLayoutsByTabId?.['tab-local'].buffersByLeafId).toBeUndefined()
+    expect(patch.terminalLayoutsByTabId?.['tab-local'].scrollbackRefsByLeafId).toBeUndefined()
   })
 
   it('keeps optional clearing keys in patches', () => {

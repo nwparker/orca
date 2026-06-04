@@ -196,6 +196,7 @@ describe('buildWorkspaceSessionPayload', () => {
             activeLeafId: null,
             expandedLeafId: null,
             buffersByLeafId: { 'pane:1': 'serialized-local-scrollback' },
+            scrollbackRefsByLeafId: { 'pane:1': 'v1-local' },
             ptyIdsByLeafId: { 'pane:1': 'pty-1' },
             titlesByLeafId: { 'pane:1': 'build' }
           }
