@@ -19,7 +19,7 @@
  * renderer polls never produces overlapping child processes.
  */
 
-import { basename } from 'node:path'
+import { basename, join } from 'node:path'
 import { exec } from 'node:child_process'
 import { promisify } from 'node:util'
 import os from 'node:os'
@@ -29,12 +29,14 @@ import type {
   AppMemory,
   MemorySnapshot,
   HostMemory,
+  ProcessMemoryDetail,
   SessionMemory,
   WorktreeMemory
 } from '../../shared/types'
 import type { Store } from '../persistence'
 import { ORPHAN_WORKTREE_ID } from '../../shared/constants'
 import { listRegisteredPtys } from './pty-registry'
+import { getDaemonSocketPath, getDaemonTokenPath } from '../daemon/daemon-spawner'
 
 export type MemorySnapshotStore = Pick<Store, 'getRepo' | 'getWorktreeMeta'>
 
@@ -77,6 +79,8 @@ type ProcRow = {
   cpu: number
   /** Resident memory in bytes. */
   memory: number
+  command: string | null
+  name: string | null
 }
 
 /** Indexed view of a single `ps`/`wmic` sweep. */
@@ -109,7 +113,7 @@ function hostMetrics(): HostMemory {
 function emptySnapshot(): MemorySnapshot {
   const zero = { cpu: 0, memory: 0 }
   return {
-    app: { ...zero, main: zero, renderer: zero, other: zero, history: [] },
+    app: { ...zero, main: zero, renderer: zero, other: zero, processes: [], history: [] },
     worktrees: [],
     host: hostMetrics(),
     totalCpu: 0,
@@ -184,19 +188,21 @@ async function enumerateUnix(): Promise<ProcRow[]> {
   // silently drops the fractional part at a comma. Forcing C locale keeps
   // decimals as dots.
   try {
-    const { stdout } = await execAsync('ps -eo pid=,ppid=,pcpu=,rss=', {
+    const { stdout } = await execAsync('ps -eo pid=,ppid=,pcpu=,rss=,command=', {
       maxBuffer: PS_MAX_BUFFER,
       timeout: PS_EXEC_TIMEOUT_MS,
       env: { ...process.env, LC_ALL: 'C', LANG: 'C' }
     })
-    return parsePsOutput(stdout)
+    const rows = parsePsOutput(stdout)
+    await hydrateUnixWideCommands(rows)
+    return rows
   } catch (err) {
     console.warn('[memory] ps enumeration failed', err)
     return []
   }
 }
 
-/** Exported for tests: parses `ps -eo pid=,ppid=,pcpu=,rss=` output. */
+/** Exported for tests: parses `ps -eo pid=,ppid=,pcpu=,rss=,command=` output. */
 export function parsePsOutput(stdout: string): ProcRow[] {
   const rows: ProcRow[] = []
   const lines = stdout.split('\n')
@@ -205,15 +211,15 @@ export function parsePsOutput(stdout: string): ProcRow[] {
     if (line.length === 0) {
       continue
     }
-    // Split on runs of whitespace. We requested exactly 4 columns.
-    const fields = line.split(/\s+/, 4)
-    if (fields.length < 4) {
+    const match = /^(\d+)\s+(\d+)\s+(\S+)\s+(\S+)(?:\s+(.*))?$/.exec(line)
+    if (!match) {
       continue
     }
-    const pid = Number.parseInt(fields[0], 10)
-    const ppid = Number.parseInt(fields[1], 10)
-    const cpu = Number.parseFloat(fields[2])
-    const rssKb = Number.parseInt(fields[3], 10)
+    const pid = Number.parseInt(match[1], 10)
+    const ppid = Number.parseInt(match[2], 10)
+    const cpu = Number.parseFloat(match[3])
+    const rssKb = Number.parseInt(match[4], 10)
+    const command = (match[5] ?? '').trim()
     if (Number.isNaN(pid) || Number.isNaN(ppid)) {
       continue
     }
@@ -221,10 +227,69 @@ export function parsePsOutput(stdout: string): ProcRow[] {
       pid,
       ppid,
       cpu: Number.isFinite(cpu) && cpu > 0 ? cpu : 0,
-      memory: Number.isFinite(rssKb) && rssKb > 0 ? rssKb * 1024 : 0
+      memory: Number.isFinite(rssKb) && rssKb > 0 ? rssKb * 1024 : 0,
+      command: command || null,
+      name: command ? commandName(command) : null
     })
   }
   return rows
+}
+
+function shouldHydrateUnixWideCommand(row: ProcRow): boolean {
+  const command = row.command ?? ''
+  return command.includes('daemon-entry') && !command.includes('.token')
+}
+
+function parseWideCommandOutput(stdout: string): Map<number, string> {
+  const commands = new Map<number, string>()
+  for (const raw of stdout.split('\n')) {
+    const line = raw.trim()
+    if (!line) {
+      continue
+    }
+    const match = /^(\d+)\s+(.*)$/.exec(line)
+    if (!match) {
+      continue
+    }
+    const pid = Number.parseInt(match[1], 10)
+    const command = match[2].trim()
+    if (Number.isFinite(pid) && command) {
+      commands.set(pid, command)
+    }
+  }
+  return commands
+}
+
+async function hydrateUnixWideCommands(rows: ProcRow[]): Promise<void> {
+  const candidatePids = rows.filter(shouldHydrateUnixWideCommand).map((row) => row.pid)
+  if (candidatePids.length === 0) {
+    return
+  }
+
+  // Why: daemon attribution needs socket/token args that may be truncated in
+  // the cheap host-wide sweep. Hydrate only daemon rows whose token arg did
+  // not survive, so most snapshots stay at one cheap `ps` process.
+  const chunkSize = 50
+  for (let start = 0; start < candidatePids.length; start += chunkSize) {
+    const chunk = candidatePids.slice(start, start + chunkSize)
+    try {
+      const { stdout } = await execAsync(`ps -ww -p ${chunk.join(',')} -o pid=,command=`, {
+        maxBuffer: PS_MAX_BUFFER,
+        timeout: PS_EXEC_TIMEOUT_MS,
+        env: { ...process.env, LC_ALL: 'C', LANG: 'C' }
+      })
+      const wideCommands = parseWideCommandOutput(stdout)
+      for (const row of rows) {
+        const command = wideCommands.get(row.pid)
+        if (command) {
+          row.command = command
+          row.name = commandName(command)
+        }
+      }
+    } catch {
+      // Best effort only; the regular RSS/CPU attribution remains valid.
+    }
+  }
 }
 
 async function enumerateWindows(): Promise<ProcRow[]> {
@@ -234,7 +299,7 @@ async function enumerateWindows(): Promise<ProcRow[]> {
   // v1 we report 0% on Windows — memory attribution is the primary signal.
   try {
     const { stdout } = await execAsync(
-      'wmic process get ProcessId,ParentProcessId,WorkingSetSize /format:value',
+      'wmic process get ProcessId,ParentProcessId,WorkingSetSize,Name,CommandLine /format:value',
       { maxBuffer: PS_MAX_BUFFER, timeout: PS_EXEC_TIMEOUT_MS }
     )
     return parseWmicOutput(stdout)
@@ -252,6 +317,8 @@ export function parseWmicOutput(stdout: string): ProcRow[] {
   let pid = Number.NaN
   let ppid = Number.NaN
   let ws = Number.NaN
+  let command: string | null = null
+  let name: string | null = null
 
   const flush = (): void => {
     if (!Number.isNaN(pid) && !Number.isNaN(ppid)) {
@@ -259,12 +326,16 @@ export function parseWmicOutput(stdout: string): ProcRow[] {
         pid,
         ppid,
         cpu: 0,
-        memory: Number.isFinite(ws) && ws > 0 ? ws : 0
+        memory: Number.isFinite(ws) && ws > 0 ? ws : 0,
+        command,
+        name: name || (command ? commandName(command) : null)
       })
     }
     pid = Number.NaN
     ppid = Number.NaN
     ws = Number.NaN
+    command = null
+    name = null
   }
 
   for (const raw of stdout.split(/\r?\n/)) {
@@ -285,6 +356,10 @@ export function parseWmicOutput(stdout: string): ProcRow[] {
       ppid = Number.parseInt(value, 10)
     } else if (key === 'WorkingSetSize') {
       ws = Number.parseInt(value, 10)
+    } else if (key === 'CommandLine') {
+      command = value.trim() || null
+    } else if (key === 'Name') {
+      name = value.trim() || null
     }
   }
   flush()
@@ -322,6 +397,23 @@ export function collectSubtree(index: ProcIndex, root: number): number[] {
 
 type AppBucketsRaw = Omit<AppMemory, 'history'>
 
+function commandName(command: string): string {
+  const firstToken = command.trim().split(/\s+/, 1)[0]?.trim() ?? ''
+  const unquoted = firstToken.replace(/^["']|["']$/g, '')
+  const parts = unquoted.split(/[\\/]+/)
+  return parts.at(-1) || unquoted || command.trim()
+}
+
+function appMetricPrivateMemoryBytes(
+  proc: ReturnType<typeof app.getAppMetrics>[number]
+): number | null {
+  const privateBytes = proc.memory?.privateBytes
+  if (typeof privateBytes !== 'number' || !Number.isFinite(privateBytes) || privateBytes <= 0) {
+    return null
+  }
+  return privateBytes * 1024
+}
+
 function electronMetricMemoryBytes(
   proc: ReturnType<typeof app.getAppMetrics>[number],
   processIndex: ProcIndex
@@ -336,14 +428,109 @@ function electronMetricMemoryBytes(
   return clampNumber(proc.memory?.workingSetSize) * 1024
 }
 
+function getCurrentDaemonPaths(): { socketPath: string; tokenPath: string } | null {
+  try {
+    const runtimeDir = join(app.getPath('userData'), 'daemon')
+    return {
+      socketPath: getDaemonSocketPath(runtimeDir),
+      tokenPath: getDaemonTokenPath(runtimeDir)
+    }
+  } catch {
+    return null
+  }
+}
+
+function isCurrentDaemonProcess(
+  row: ProcRow | undefined,
+  daemonPaths: { socketPath: string; tokenPath: string } | null
+): boolean {
+  if (!row?.command || !daemonPaths) {
+    return false
+  }
+  return (
+    row.command.includes('daemon-entry') &&
+    row.command.includes(daemonPaths.socketPath) &&
+    row.command.includes(daemonPaths.tokenPath)
+  )
+}
+
+function classifyAppProcess(
+  proc: ReturnType<typeof app.getAppMetrics>[number],
+  row: ProcRow | undefined,
+  daemonPaths: { socketPath: string; tokenPath: string } | null
+): { role: string; label: string } {
+  if (isCurrentDaemonProcess(row, daemonPaths)) {
+    return { role: 'Daemon', label: 'Terminal daemon' }
+  }
+
+  const type = (typeof proc.type === 'string' ? proc.type : '').toLowerCase()
+  const name = typeof proc.name === 'string' ? proc.name.trim() : ''
+  const command = row?.command ?? ''
+
+  if (type === 'browser') {
+    return { role: 'Main', label: 'Main process' }
+  }
+  if (type === 'renderer' || type === 'tab') {
+    return { role: 'Renderer', label: name || 'Renderer process' }
+  }
+  if (type === 'gpu' || command.includes('--type=gpu-process')) {
+    return { role: 'GPU', label: 'GPU process' }
+  }
+  if (name) {
+    return { role: 'Utility', label: name }
+  }
+  if (type) {
+    return { role: 'Other', label: `${type[0].toUpperCase()}${type.slice(1)} process` }
+  }
+  return { role: 'Other', label: 'Electron helper' }
+}
+
+function makeProcessDetail(args: {
+  row: ProcRow | undefined
+  pid: number
+  cpu: number
+  memory: number
+  role: string
+  label: string
+  privateMemory?: number | null
+}): ProcessMemoryDetail {
+  return {
+    pid: args.pid,
+    ...(args.row ? { ppid: args.row.ppid } : {}),
+    role: args.role,
+    label: args.label,
+    command: args.row?.command ?? null,
+    cpu: clampNumber(args.cpu),
+    memory: clampNumber(args.memory),
+    privateMemory: args.privateMemory ?? null
+  }
+}
+
+function daemonProcessDetail(row: ProcRow): ProcessMemoryDetail {
+  return makeProcessDetail({
+    row,
+    pid: row.pid,
+    cpu: row.cpu,
+    memory: row.memory,
+    role: 'Daemon',
+    label: 'Terminal daemon'
+  })
+}
+
 function bucketElectronMetrics(processIndex: ProcIndex): AppBucketsRaw {
   const main = { cpu: 0, memory: 0 }
   const renderer = { cpu: 0, memory: 0 }
   const other = { cpu: 0, memory: 0 }
+  const processes: ProcessMemoryDetail[] = []
+  const metricPids = new Set<number>()
+  const daemonPaths = getCurrentDaemonPaths()
 
   for (const proc of app.getAppMetrics()) {
     const cpu = clampNumber(proc.cpu?.percentCPUUsage)
     const memoryBytes = electronMetricMemoryBytes(proc, processIndex)
+    const row = processIndex.byPid.get(proc.pid)
+    const classified = classifyAppProcess(proc, row, daemonPaths)
+    metricPids.add(proc.pid)
 
     // Why: lowercase once so future Electron versions emitting different
     // casing ('browser' vs 'Browser') still bucket correctly.
@@ -357,14 +544,37 @@ function bucketElectronMetrics(processIndex: ProcIndex): AppBucketsRaw {
 
     target.cpu += cpu
     target.memory += memoryBytes
+    processes.push(
+      makeProcessDetail({
+        row,
+        pid: proc.pid,
+        cpu,
+        memory: memoryBytes,
+        role: classified.role,
+        label: classified.label,
+        privateMemory: appMetricPrivateMemoryBytes(proc)
+      })
+    )
   }
+
+  for (const row of processIndex.byPid.values()) {
+    if (metricPids.has(row.pid) || !isCurrentDaemonProcess(row, daemonPaths)) {
+      continue
+    }
+    other.cpu += row.cpu
+    other.memory += row.memory
+    processes.push(daemonProcessDetail(row))
+  }
+
+  processes.sort((a, b) => b.memory - a.memory)
 
   return {
     main,
     renderer,
     other,
     cpu: main.cpu + renderer.cpu + other.cpu,
-    memory: main.memory + renderer.memory + other.memory
+    memory: main.memory + renderer.memory + other.memory,
+    processes
   }
 }
 
@@ -413,6 +623,65 @@ function makeEmptyBucket(
   return { worktreeId, worktreeName, repoId, repoName, cpu: 0, memory: 0, sessions: [] }
 }
 
+function classifyTerminalProcess(row: ProcRow): { role: string; label: string } {
+  const command = row.command ?? ''
+  const executable = (row.name || (command ? commandName(command) : '')).toLowerCase()
+
+  if (
+    executable === 'codex' ||
+    executable === 'claude' ||
+    executable === 'opencode' ||
+    executable === 'gemini' ||
+    executable === 'aider' ||
+    executable === 'cursor-agent'
+  ) {
+    return { role: 'Agent CLI', label: row.name ?? commandName(command) }
+  }
+  if (
+    executable === 'bash' ||
+    executable === 'zsh' ||
+    executable === 'fish' ||
+    executable === 'sh' ||
+    executable === 'pwsh' ||
+    executable === 'powershell.exe' ||
+    executable === 'cmd.exe'
+  ) {
+    return { role: 'Shell', label: row.name ?? commandName(command) }
+  }
+  if (
+    executable === 'node' ||
+    executable === 'npm' ||
+    executable === 'pnpm' ||
+    executable === 'yarn' ||
+    executable === 'bun' ||
+    executable === 'deno' ||
+    executable === 'vite' ||
+    executable === 'tsserver' ||
+    executable === 'esbuild'
+  ) {
+    return { role: 'Node/dev', label: row.name ?? commandName(command) }
+  }
+  if (executable === 'git') {
+    return { role: 'Git', label: 'git' }
+  }
+  return {
+    role: 'Subprocess',
+    label: row.name ?? (command ? commandName(command) : `pid ${row.pid}`)
+  }
+}
+
+function terminalProcessDetail(row: ProcRow): ProcessMemoryDetail {
+  const classified = classifyTerminalProcess(row)
+  return makeProcessDetail({
+    row,
+    pid: row.pid,
+    cpu: row.cpu,
+    memory: row.memory,
+    role: classified.role,
+    label: classified.label
+  })
+}
+
 // ─── Main collection path ───────────────────────────────────────────
 
 async function runSnapshot(store: MemorySnapshotStore): Promise<MemorySnapshot> {
@@ -437,6 +706,7 @@ async function runSnapshot(store: MemorySnapshotStore): Promise<MemorySnapshot> 
   for (const pty of ptys) {
     let sessionCpu = 0
     let sessionMemory = 0
+    const sessionProcesses: ProcessMemoryDetail[] = []
 
     if (pty.pid != null) {
       for (const pid of collectSubtree(processIndex, pty.pid)) {
@@ -450,15 +720,18 @@ async function runSnapshot(store: MemorySnapshotStore): Promise<MemorySnapshot> 
         claimed.add(pid)
         sessionCpu += row.cpu
         sessionMemory += row.memory
+        sessionProcesses.push(terminalProcessDetail(row))
       }
     }
+    sessionProcesses.sort((a, b) => b.memory - a.memory)
 
     const session: SessionMemory = {
       sessionId: pty.sessionId ?? pty.ptyId,
       paneKey: pty.paneKey,
       pid: pty.pid ?? 0,
       cpu: clampNumber(sessionCpu),
-      memory: clampNumber(sessionMemory)
+      memory: clampNumber(sessionMemory),
+      processes: sessionProcesses
     }
 
     let bucket: WorktreeBucket

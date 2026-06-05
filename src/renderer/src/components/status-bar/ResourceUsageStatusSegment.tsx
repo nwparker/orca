@@ -69,6 +69,8 @@ import {
   getResourceManagerAriaLabel,
   getResourceManagerTooltipLines
 } from './resource-manager-terminal-copy'
+import { ResourceMemoryDiagnosticsCopyButton } from './ResourceMemoryDiagnosticsCopyButton'
+import { ResourceProcessDetailRows, ResourceProcessDisclosure } from './ResourceProcessDetails'
 
 const POLL_MS = 2_000
 const SESSIONS_POLL_MS = 10_000
@@ -238,6 +240,8 @@ function AppSection({
   isCollapsed: boolean
   onToggle: () => void
 }): React.JSX.Element {
+  const appProcesses = app.processes ?? []
+
   return (
     <div className="border-t border-border/50">
       <div className="flex items-center">
@@ -271,6 +275,19 @@ function AppSection({
           <AppSubRow label="Renderer" values={app.renderer} />
           {(app.other.cpu > 0 || app.other.memory > 0) && (
             <AppSubRow label="Other" values={app.other} />
+          )}
+          {appProcesses.length > 0 && (
+            <ResourceProcessDisclosure
+              title="Local processes"
+              subtitle={`${appProcesses.length} sampled process${
+                appProcesses.length === 1 ? '' : 'es'
+              }`}
+              metric={formatMemory(app.memory)}
+              processes={appProcesses}
+              limit={12}
+              buttonClassName="pl-6"
+              rowClassName="pl-9"
+            />
           )}
         </div>
       )}
@@ -332,7 +349,9 @@ function SessionRow({
   onNavigate: (tabId: string, paneKey: string | null) => void
   onKill: (session: UnifiedSessionRow) => void
 }): React.JSX.Element {
+  const [processesOpen, setProcessesOpen] = useState(false)
   const clickable = session.tabId !== null && session.bound
+  const hasProcessDetails = session.hasLocalSamples && session.processes.length > 0
   const handleClick = (): void => {
     if (clickable && session.tabId) {
       onNavigate(session.tabId, session.paneKey)
@@ -340,59 +359,93 @@ function SessionRow({
   }
 
   return (
-    <div
-      className={cn(
-        'group/sessrow flex items-center gap-2 pl-10 pr-3 py-1.5',
-        clickable && 'cursor-pointer hover:bg-accent/40'
-      )}
-      onClick={clickable ? handleClick : undefined}
-      role={clickable ? 'button' : undefined}
-      tabIndex={clickable ? 0 : -1}
-      onKeyDown={
-        clickable
-          ? (e) => {
+    <>
+      <div
+        className={cn(
+          'group/sessrow flex items-center gap-2 pl-6 pr-3 py-1.5 transition-colors',
+          clickable && 'hover:bg-accent/40'
+        )}
+        data-worktree-id={worktreeId}
+      >
+        {hasProcessDetails ? (
+          <button
+            type="button"
+            onClick={() => setProcessesOpen((value) => !value)}
+            className="-ml-1 inline-flex size-4 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
+            aria-label={
+              processesOpen
+                ? `Collapse process details for ${session.label}`
+                : `Expand process details for ${session.label}`
+            }
+            aria-expanded={processesOpen}
+          >
+            {processesOpen ? (
+              <ChevronDown className="size-3" />
+            ) : (
+              <ChevronRight className="size-3" />
+            )}
+          </button>
+        ) : (
+          <span className="-ml-1 size-4 shrink-0" aria-hidden />
+        )}
+        <span
+          className={cn(
+            'size-1.5 shrink-0 rounded-full',
+            session.bound ? 'bg-emerald-500' : 'bg-muted-foreground/40'
+          )}
+        />
+        {clickable ? (
+          <button
+            type="button"
+            onClick={handleClick}
+            className="min-w-0 flex-1 truncate text-left text-[11px] text-muted-foreground"
+            onKeyDown={(e) => {
               if (isResourceSessionActivationKey(e.key)) {
                 e.preventDefault()
                 handleClick()
               }
-            }
-          : undefined
-      }
-      data-worktree-id={worktreeId}
-    >
-      <span
-        className={cn(
-          'size-1.5 shrink-0 rounded-full',
-          session.bound ? 'bg-emerald-500' : 'bg-muted-foreground/40'
+            }}
+          >
+            {session.label}
+          </button>
+        ) : (
+          <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">
+            {session.label}
+          </span>
         )}
-      />
-      <span className="text-[11px] text-muted-foreground truncate min-w-0 flex-1">
-        {session.label}
-      </span>
-      <MetricPair cpu={session.cpu} memory={session.memory} size="small" />
-      {/* Why: kill X lives inside the shared trailing gutter so CPU/Memory
-          columns stay aligned with the column header (whose gutter is empty).
-          Bound sessions hide the X until the row is hovered/focused (calm
-          list); orphan sessions show it always so the "this is reclaimable"
-          affordance survives. Mirrors Settings > Manage Sessions. */}
-      <span className={ROW_TRAILING_GUTTER_CLS}>
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation()
-            onKill(session)
-          }}
-          className={cn(
-            'rounded p-0.5 text-muted-foreground transition-opacity hover:bg-destructive/10 hover:text-destructive',
-            session.bound &&
-              'opacity-0 group-hover/sessrow:opacity-100 group-focus-within/sessrow:opacity-100 focus-visible:opacity-100'
-          )}
-          aria-label={`Kill session ${session.sessionId}`}
-        >
-          <X className="size-3" />
-        </button>
-      </span>
-    </div>
+        <MetricPair cpu={session.cpu} memory={session.memory} size="small" />
+        {/* Why: kill X lives inside the shared trailing gutter so CPU/Memory
+            columns stay aligned with the column header (whose gutter is empty).
+            Bound sessions hide the X until the row is hovered/focused (calm
+            list); orphan sessions show it always so the "this is reclaimable"
+            affordance survives. Mirrors Settings > Manage Sessions. */}
+        <span className={ROW_TRAILING_GUTTER_CLS}>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation()
+              onKill(session)
+            }}
+            className={cn(
+              'rounded p-0.5 text-muted-foreground transition-opacity hover:bg-destructive/10 hover:text-destructive',
+              session.bound &&
+                'opacity-0 group-hover/sessrow:opacity-100 group-focus-within/sessrow:opacity-100 focus-visible:opacity-100'
+            )}
+            aria-label={`Kill session ${session.sessionId}`}
+          >
+            <X className="size-3" />
+          </button>
+        </span>
+      </div>
+      {processesOpen ? (
+        <ResourceProcessDetailRows
+          processes={session.processes}
+          limit={10}
+          className="border-t border-border/20 bg-background/70"
+          rowClassName="pl-14"
+        />
+      ) : null}
+    </>
   )
 }
 
@@ -1198,6 +1251,12 @@ export function ResourceUsageStatusSegment({
           </div>
 
           <div className="flex items-center gap-0.5">
+            {resourceSnapshot ? (
+              <ResourceMemoryDiagnosticsCopyButton
+                snapshot={resourceSnapshot}
+                repos={unifiedRepos}
+              />
+            ) : null}
             <Tooltip delayDuration={200}>
               <TooltipTrigger asChild>
                 <button

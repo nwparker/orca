@@ -24,6 +24,7 @@
 
 import type {
   MemorySnapshot,
+  ProcessMemoryDetail,
   SessionMemory,
   TerminalTab,
   WorktreeMemory
@@ -56,6 +57,7 @@ export type UnifiedSessionRow = {
   cpu: Metric
   memory: Metric
   hasLocalSamples: boolean
+  processes: ProcessMemoryDetail[]
 }
 
 export type UnifiedWorktreeRow = {
@@ -300,7 +302,8 @@ export function mergeSnapshotAndSessions(
           tabId,
           cpu: s.cpu,
           memory: s.memory,
-          hasLocalSamples: true
+          hasLocalSamples: true,
+          processes: s.processes ?? []
         }
       })
       repo.worktrees.push({
@@ -379,7 +382,8 @@ export function mergeSnapshotAndSessions(
       tabId,
       cpu: null,
       memory: null,
-      hasLocalSamples: false
+      hasLocalSamples: false,
+      processes: []
     })
   }
 

@@ -8,15 +8,17 @@ type AppMetricFixture = {
   memory: { workingSetSize: number }
 }
 
-const { appMetricsMock, execMock, listRegisteredPtysMock } = vi.hoisted(() => ({
+const { appMetricsMock, execMock, listRegisteredPtysMock, getPathMock } = vi.hoisted(() => ({
   appMetricsMock: vi.fn<() => AppMetricFixture[]>(() => []),
   execMock: vi.fn(),
-  listRegisteredPtysMock: vi.fn()
+  listRegisteredPtysMock: vi.fn(),
+  getPathMock: vi.fn(() => '/fake/userData')
 }))
 
 vi.mock('electron', () => ({
   app: {
-    getAppMetrics: appMetricsMock
+    getAppMetrics: appMetricsMock,
+    getPath: getPathMock
   }
 }))
 
@@ -47,10 +49,25 @@ describe('parsePsOutput', () => {
     const rows = parsePsOutput(stdout)
 
     expect(rows).toEqual([
-      { pid: 1, ppid: 0, cpu: 0.1, memory: 1024 * 1024 },
-      { pid: 123, ppid: 1, cpu: 5.5, memory: 2048 * 1024 },
-      { pid: 456, ppid: 123, cpu: 0, memory: 512 * 1024 }
+      { pid: 1, ppid: 0, cpu: 0.1, memory: 1024 * 1024, command: null, name: null },
+      { pid: 123, ppid: 1, cpu: 5.5, memory: 2048 * 1024, command: null, name: null },
+      { pid: 456, ppid: 123, cpu: 0, memory: 512 * 1024, command: null, name: null }
     ])
+  })
+
+  it('keeps the full command after the numeric columns', async () => {
+    const { parsePsOutput } = await loadCollector()
+    const rows = parsePsOutput(
+      '10 1 12.5 1024 /usr/bin/node /repo/node_modules/.bin/vite --host 127.0.0.1'
+    )
+    expect(rows[0]).toMatchObject({
+      pid: 10,
+      ppid: 1,
+      cpu: 12.5,
+      memory: 1024 * 1024,
+      command: '/usr/bin/node /repo/node_modules/.bin/vite --host 127.0.0.1',
+      name: 'node'
+    })
   })
 
   it('parses dot-decimal cpu values (LC_ALL=C contract)', async () => {
@@ -66,7 +83,9 @@ describe('parsePsOutput', () => {
   it('skips blank lines and rows with too few fields', async () => {
     const { parsePsOutput } = await loadCollector()
     const rows = parsePsOutput('\n  \n10 1 0.0\n20 1 0.0 512\n')
-    expect(rows).toEqual([{ pid: 20, ppid: 1, cpu: 0, memory: 512 * 1024 }])
+    expect(rows).toEqual([
+      { pid: 20, ppid: 1, cpu: 0, memory: 512 * 1024, command: null, name: null }
+    ])
   })
 
   it('skips rows whose pid or ppid fail to parse', async () => {
@@ -87,10 +106,14 @@ describe('parseWmicOutput', () => {
   it('emits one row per blank-line-delimited stanza', async () => {
     const { parseWmicOutput } = await loadCollector()
     const stdout = [
+      'CommandLine=C:\\\\Windows\\\\System32\\\\cmd.exe /c npm run dev',
+      'Name=cmd.exe',
       'ParentProcessId=1',
       'ProcessId=100',
       'WorkingSetSize=2048',
       '',
+      'CommandLine=node server.js',
+      'Name=node.exe',
       'ParentProcessId=100',
       'ProcessId=200',
       'WorkingSetSize=1024',
@@ -100,15 +123,29 @@ describe('parseWmicOutput', () => {
     const rows = parseWmicOutput(stdout)
 
     expect(rows).toEqual([
-      { pid: 100, ppid: 1, cpu: 0, memory: 2048 },
-      { pid: 200, ppid: 100, cpu: 0, memory: 1024 }
+      {
+        pid: 100,
+        ppid: 1,
+        cpu: 0,
+        memory: 2048,
+        command: 'C:\\\\Windows\\\\System32\\\\cmd.exe /c npm run dev',
+        name: 'cmd.exe'
+      },
+      {
+        pid: 200,
+        ppid: 100,
+        cpu: 0,
+        memory: 1024,
+        command: 'node server.js',
+        name: 'node.exe'
+      }
     ])
   })
 
   it('flushes the final stanza even without a trailing blank line', async () => {
     const { parseWmicOutput } = await loadCollector()
     const rows = parseWmicOutput('ProcessId=100\nParentProcessId=1\nWorkingSetSize=512')
-    expect(rows).toEqual([{ pid: 100, ppid: 1, cpu: 0, memory: 512 }])
+    expect(rows).toEqual([{ pid: 100, ppid: 1, cpu: 0, memory: 512, command: null, name: null }])
   })
 
   it('skips stanzas missing pid or ppid', async () => {
@@ -118,22 +155,25 @@ describe('parseWmicOutput', () => {
     // injecting ghost zero-pid entries into the index.
     const stdout = ['WorkingSetSize=999', '', 'ProcessId=100', 'ParentProcessId=1'].join('\n')
     const rows = parseWmicOutput(stdout)
-    expect(rows).toEqual([{ pid: 100, ppid: 1, cpu: 0, memory: 0 }])
+    expect(rows).toEqual([{ pid: 100, ppid: 1, cpu: 0, memory: 0, command: null, name: null }])
   })
 
   it('ignores lines without an equals separator', async () => {
     const { parseWmicOutput } = await loadCollector()
     const rows = parseWmicOutput(['garbage line', 'ProcessId=5', 'ParentProcessId=1'].join('\n'))
-    expect(rows).toEqual([{ pid: 5, ppid: 1, cpu: 0, memory: 0 }])
+    expect(rows).toEqual([{ pid: 5, ppid: 1, cpu: 0, memory: 0, command: null, name: null }])
   })
 })
 
 describe('collectSubtree', () => {
   function makeIndex(rows: { pid: number; ppid: number }[]) {
-    const byPid = new Map<number, { pid: number; ppid: number; cpu: number; memory: number }>()
+    const byPid = new Map<
+      number,
+      { pid: number; ppid: number; cpu: number; memory: number; command: null; name: null }
+    >()
     const childrenOf = new Map<number, number[]>()
     for (const r of rows) {
-      byPid.set(r.pid, { ...r, cpu: 0, memory: 0 })
+      byPid.set(r.pid, { ...r, cpu: 0, memory: 0, command: null, name: null })
       const kids = childrenOf.get(r.ppid)
       if (kids) {
         kids.push(r.pid)
@@ -180,7 +220,7 @@ describe('collectSubtree', () => {
     // exited between sampling its parent and sampling itself). We list
     // those as "walked" but do not fabricate a row for them.
     const index = {
-      byPid: new Map([[1, { pid: 1, ppid: 0, cpu: 0, memory: 0 }]]),
+      byPid: new Map([[1, { pid: 1, ppid: 0, cpu: 0, memory: 0, command: null, name: null }]]),
       childrenOf: new Map([[1, [2]]])
     }
 
@@ -192,6 +232,8 @@ describe('collectMemorySnapshot', () => {
   beforeEach(() => {
     appMetricsMock.mockReset()
     appMetricsMock.mockReturnValue([])
+    getPathMock.mockReset()
+    getPathMock.mockReturnValue('/fake/userData')
     execMock.mockReset()
     listRegisteredPtysMock.mockReset()
     listRegisteredPtysMock.mockReturnValue([])
@@ -264,6 +306,65 @@ describe('collectMemorySnapshot', () => {
     expect(snap.totalMemory).toBe((111 + 222 + 333) * 1024)
   })
 
+  it('includes the current profile daemon helper in the Orca app process breakdown', async () => {
+    execMock.mockImplementation((cmd, _opts, cb) => {
+      if (cmd.startsWith('ps -eo ')) {
+        cb(null, {
+          stdout: [
+            '700 1 0.5 4096 /usr/bin/node /fake/app/out/main/daemon-entry.js',
+            '800 1 0.0 8192 /usr/bin/node /fake/app/out/main/daemon-entry.js'
+          ].join('\n'),
+          stderr: ''
+        })
+        return
+      }
+      cb(null, {
+        stdout: [
+          '700 /usr/bin/node /fake/app/out/main/daemon-entry.js --socket /fake/userData/daemon/daemon-v11.sock --token /fake/userData/daemon/daemon-v11.token',
+          '800 /usr/bin/node /fake/app/out/main/daemon-entry.js --socket /tmp/other/daemon-v11.sock --token /tmp/other/daemon-v11.token'
+        ].join('\n'),
+        stderr: ''
+      })
+    })
+
+    const { collectMemorySnapshot } = await loadCollector()
+    const snap = await collectMemorySnapshot(emptyStore)
+
+    expect(execMock).toHaveBeenCalledWith(
+      expect.stringContaining('ps -ww -p 700,800'),
+      expect.anything(),
+      expect.any(Function)
+    )
+    expect(snap.app.other.memory).toBe(4096 * 1024)
+    expect(snap.app.processes).toEqual([
+      expect.objectContaining({
+        pid: 700,
+        role: 'Daemon',
+        label: 'Terminal daemon',
+        memory: 4096 * 1024
+      })
+    ])
+    expect(snap.totalMemory).toBe(4096 * 1024)
+  })
+
+  it('does not run wide daemon command hydration when the cheap ps output is complete', async () => {
+    mockPsResponse(
+      '700 1 0.5 4096 /usr/bin/node /fake/app/out/main/daemon-entry.js --socket /fake/userData/daemon/daemon-v11.sock --token /fake/userData/daemon/daemon-v11.token'
+    )
+
+    const { collectMemorySnapshot } = await loadCollector()
+    const snap = await collectMemorySnapshot(emptyStore)
+
+    expect(execMock).toHaveBeenCalledTimes(1)
+    expect(snap.app.processes).toEqual([
+      expect.objectContaining({
+        pid: 700,
+        role: 'Daemon',
+        memory: 4096 * 1024
+      })
+    ])
+  })
+
   it('falls back to Electron working set when a host process row is missing', async () => {
     mockPsResponse('10 1 1.5 111')
     appMetricsMock.mockReturnValue([
@@ -322,8 +423,12 @@ describe('collectMemorySnapshot', () => {
 
     // pty-a claims all three pids (1024 + 512 + 256 KiB).
     expect(a?.memory).toBe((1024 + 512 + 256) * 1024)
+    expect(a?.sessions[0].processes?.map((p) => p.pid).sort((x, y) => x - y)).toEqual([
+      100, 101, 102
+    ])
     // pty-b gets zero because everything it would walk is already claimed.
     expect(b?.memory).toBe(0)
+    expect(b?.sessions[0].processes).toEqual([])
     // And the overall session memory equals the unique sum, not the
     // double-walked sum — this is the actual regression we care about.
     expect(snap.totalMemory).toBe((1024 + 512 + 256) * 1024)

@@ -2666,7 +2666,14 @@ function mapRuntimeNamespaceArg(prefix: string, args: unknown): unknown {
 function createEmptyMemorySnapshot(): MemorySnapshot {
   const emptyUsage = { cpu: 0, memory: 0 }
   return {
-    app: { ...emptyUsage, main: emptyUsage, renderer: emptyUsage, other: emptyUsage, history: [] },
+    app: {
+      ...emptyUsage,
+      main: emptyUsage,
+      renderer: emptyUsage,
+      other: emptyUsage,
+      processes: [],
+      history: []
+    },
     worktrees: [],
     host: {
       totalMemory: 0,

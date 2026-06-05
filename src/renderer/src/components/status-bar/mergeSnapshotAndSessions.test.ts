@@ -74,7 +74,26 @@ describe('mergeSnapshotAndSessions', () => {
       cpu: 1.5,
       memory: 100_000_000,
       history: [1, 2, 3],
-      sessions: [{ sessionId: 'pty-1', paneKey: null, pid: 1234, cpu: 1.5, memory: 100_000_000 }]
+      sessions: [
+        {
+          sessionId: 'pty-1',
+          paneKey: null,
+          pid: 1234,
+          cpu: 1.5,
+          memory: 100_000_000,
+          processes: [
+            {
+              pid: 1234,
+              ppid: 1,
+              role: 'Agent CLI',
+              label: 'codex',
+              command: 'codex',
+              cpu: 1.5,
+              memory: 100_000_000
+            }
+          ]
+        }
+      ]
     }
     const out = mergeSnapshotAndSessions(makeSnapshot([wt]), [], baseCtx())
     expect(out).toHaveLength(1)
@@ -97,6 +116,7 @@ describe('mergeSnapshotAndSessions', () => {
       memory: 100_000_000,
       hasLocalSamples: true
     })
+    expect(out[0].worktrees[0].sessions[0].processes).toHaveLength(1)
   })
 
   it('dedups: a session present in both snapshot and daemon list renders once with numeric metrics', () => {

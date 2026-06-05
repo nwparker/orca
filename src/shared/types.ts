@@ -2944,11 +2944,21 @@ export type UsageValues = {
   memory: number
 }
 
+export type ProcessMemoryDetail = UsageValues & {
+  pid: number
+  ppid?: number
+  role: string
+  label: string
+  command: string | null
+  privateMemory?: number | null
+}
+
 /** The top-level cpu/memory are the sum of main + renderer + other. */
 export type AppMemory = UsageValues & {
   main: UsageValues
   renderer: UsageValues
   other: UsageValues
+  processes?: ProcessMemoryDetail[]
   /** Oldest-first memory samples (bytes) for the whole Orca app, one per
    *  successful collection. Used to render the sparkline in the dashboard.
    *  Empty before the first snapshot is recorded. */
@@ -2959,6 +2969,7 @@ export type SessionMemory = UsageValues & {
   sessionId: string
   paneKey: string | null
   pid: number
+  processes?: ProcessMemoryDetail[]
 }
 
 /** The top-level cpu/memory are the sum of sessions. */
