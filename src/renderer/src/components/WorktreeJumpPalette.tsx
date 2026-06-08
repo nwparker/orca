@@ -13,7 +13,7 @@ import {
 } from '@/components/ui/command'
 import { branchName } from '@/lib/git-utils'
 import { parseGitHubIssueOrPRNumber, parseGitHubIssueOrPRLink } from '@/lib/github-links'
-import { getLinkedWorkItemSuggestedName, getWorkspaceIntentName } from '@/lib/new-workspace'
+import { getLinkedWorkItemSuggestedName, getLinkedWorkItemWorkspaceName } from '@/lib/new-workspace'
 import type { LinkedWorkItemSummary } from '@/lib/new-workspace'
 import { sortWorktreesSmart } from '@/components/sidebar/smart-sort'
 import { isDefaultBranchWorkspace } from '@/components/sidebar/visible-worktrees'
@@ -1037,7 +1037,7 @@ export default function WorktreeJumpPalette(): React.JSX.Element | null {
             }
             data.linkedWorkItem = linkedWorkItem
             data.prefilledName =
-              getWorkspaceIntentName({ sourceText: trimmed, workItem: linkedWorkItem })?.seedName ??
+              getLinkedWorkItemWorkspaceName(linkedWorkItem)?.seedName ??
               getLinkedWorkItemSuggestedName({ title: item.title })
           } else {
             // Fallback: we couldn't resolve the URL, just seed the name.
@@ -1102,7 +1102,7 @@ export default function WorktreeJumpPalette(): React.JSX.Element | null {
             }
             data.linkedWorkItem = linkedWorkItem
             data.prefilledName =
-              getWorkspaceIntentName({ sourceText: trimmed, workItem: linkedWorkItem })?.seedName ??
+              getLinkedWorkItemWorkspaceName(linkedWorkItem)?.seedName ??
               getLinkedWorkItemSuggestedName({ title: item.title })
           } else {
             data.prefilledName = trimmed

@@ -45,8 +45,8 @@ import {
   getAttachmentLabel,
   getLinkedWorkItemProvider,
   getLinkedWorkItemSuggestedName,
+  getLinkedWorkItemWorkspaceName,
   getSetupConfig,
-  getWorkspaceIntentName,
   getWorkspaceSeedName,
   isGitLabIssueUrl,
   PER_REPO_FETCH_LIMIT,
@@ -1154,10 +1154,7 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
         url: item.url
       })
       const suggestedName =
-        getWorkspaceIntentName({
-          sourceText: name,
-          workItem: item
-        })?.seedName ?? getLinkedWorkItemSuggestedName(item)
+        getLinkedWorkItemWorkspaceName(item)?.seedName ?? getLinkedWorkItemSuggestedName(item)
       if (suggestedName && (!name.trim() || name === lastAutoNameRef.current)) {
         setName(suggestedName)
         lastAutoNameRef.current = suggestedName
@@ -1192,9 +1189,7 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
         throw new Error('Could not resolve the GitHub item before creating the workspace.')
       }
 
-      const resolution = getSmartGitHubSubmitResolution(item, {
-        sourceText: [name, agentPrompt, noteRef.current].filter(Boolean).join('\n')
-      })
+      const resolution = getSmartGitHubSubmitResolution(item)
       // Why: Create can be clicked before the debounced smart field commits
       // its selected source. Commit the resolved item here so failures leave
       // the form showing the title instead of the raw URL.
@@ -1211,7 +1206,7 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
       branchAutoNameRef.current = ''
       setStartFromResetHint(null)
       return resolution
-    }, [agentPrompt, linkedWorkItem, name, selectedRepo, selectedRepoIsGit])
+    }, [linkedWorkItem, name, selectedRepo, selectedRepoIsGit])
 
   // Why: parallel of applyLinkedWorkItem for GitLab. Touches the GitLab
   // state slots only — the GitHub linkedIssue/linkedPR remain unchanged
@@ -1241,16 +1236,13 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
         title: item.title,
         branchName: item.branchName
       } as unknown as GitHubWorkItem)
-      const intentName = getWorkspaceIntentName({
-        sourceText: name,
-        workItem: {
-          type: item.type,
-          provider: 'gitlab',
-          number: item.number,
-          title: item.title
-        }
+      const titleName = getLinkedWorkItemWorkspaceName({
+        type: item.type,
+        provider: 'gitlab',
+        number: item.number,
+        title: item.title
       })
-      const nextName = intentName?.seedName ?? suggestedName
+      const nextName = titleName?.seedName ?? suggestedName
       if (nextName && (!name.trim() || name === lastAutoNameRef.current)) {
         setName(nextName)
         lastAutoNameRef.current = nextName
@@ -1894,16 +1886,13 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
       const submitLinkedIssueNumber =
         smartGitHubResolution?.linkedIssueNumber ?? parsedLinkedIssueNumber
       const submitLinkedPR = smartGitHubResolution?.linkedPR ?? effectiveLinkedPR
-      const submitIntentName = submitLinkedWorkItem
-        ? getWorkspaceIntentName({
-            sourceText: [name, agentPrompt, note].filter(Boolean).join('\n'),
-            workItem: submitLinkedWorkItem
-          })
+      const submitTitleName = submitLinkedWorkItem
+        ? getLinkedWorkItemWorkspaceName(submitLinkedWorkItem)
         : null
       const nameIsAutoManaged = !name.trim() || name === lastAutoNameRef.current
       const workspaceName =
         smartGitHubResolution?.workspaceName ??
-        (nameIsAutoManaged && submitIntentName ? submitIntentName.seedName : workspaceSeedName)
+        (nameIsAutoManaged && submitTitleName ? submitTitleName.seedName : workspaceSeedName)
       if (!workspaceName) {
         return
       }
@@ -1971,7 +1960,7 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
       })
       const createDisplayName =
         smartGitHubResolution?.displayName ??
-        (nameIsAutoManaged ? submitIntentName?.displayName : undefined)
+        (nameIsAutoManaged ? submitTitleName?.displayName : undefined)
       // Why: the first-work hook only renames blank, auto-generated git workspaces
       // that actually launch an agent. Persist that known-pending state for the card.
       const pendingFirstAgentMessageRename =
@@ -2168,16 +2157,13 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
         const submitLinkedIssueNumber =
           smartGitHubResolution?.linkedIssueNumber ?? parsedLinkedIssueNumber
         const submitLinkedPR = smartGitHubResolution?.linkedPR ?? effectiveLinkedPR
-        const submitIntentName = submitLinkedWorkItem
-          ? getWorkspaceIntentName({
-              sourceText: [name, agentPrompt, note].filter(Boolean).join('\n'),
-              workItem: submitLinkedWorkItem
-            })
+        const submitTitleName = submitLinkedWorkItem
+          ? getLinkedWorkItemWorkspaceName(submitLinkedWorkItem)
           : null
         const nameIsAutoManaged = !name.trim() || name === lastAutoNameRef.current
         const workspaceName =
           smartGitHubResolution?.workspaceName ??
-          (nameIsAutoManaged && submitIntentName ? submitIntentName.seedName : workspaceNameSeed)
+          (nameIsAutoManaged && submitTitleName ? submitTitleName.seedName : workspaceNameSeed)
         if (!workspaceName) {
           return
         }
@@ -2228,7 +2214,7 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
         })
         const createDisplayName =
           smartGitHubResolution?.displayName ??
-          (nameIsAutoManaged ? submitIntentName?.displayName : undefined)
+          (nameIsAutoManaged ? submitTitleName?.displayName : undefined)
         // Why: quick create uses the same blank-name creature branch flow; the card
         // needs an explicit marker rather than guessing from the generated title.
         const pendingFirstAgentMessageRename =
@@ -2346,7 +2332,6 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
       }
     },
     [
-      agentPrompt,
       baseBranch,
       branchNameOverride,
       branchNameOverridePreservesNameEdits,
