@@ -1,19 +1,15 @@
 import React from 'react'
-import { Bell, CalendarClock, EyeOff, Search, Smartphone } from 'lucide-react'
+import { Bell, CalendarClock, Search, Smartphone } from 'lucide-react'
 import { useAppStore } from '@/store'
 import { cn } from '@/lib/utils'
 import type { GlobalSettings } from '../../../../shared/types'
 import { useActivityUnreadCount } from '@/components/activity/useActivityUnreadCount'
 import { useShortcutLabel } from '@/hooks/useShortcutLabel'
 import { useMobileSidebarOnboardingBadge } from './mobile-sidebar-onboarding-badge'
-import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuTrigger
-} from '@/components/ui/context-menu'
+import { ContextMenu, ContextMenuTrigger } from '@/components/ui/context-menu'
 import { SetupGuideSidebarEntry } from './SetupGuideSidebarEntry'
 import { SidebarTaskNavButton } from './SidebarTaskNavButton'
+import { HideSidebarMenu } from './sidebar-nav-controls'
 import { translate } from '@/i18n/i18n'
 
 export { getSetupGuideSidebarEntryReady, shouldShowSetupGuideEntry } from './SetupGuideSidebarEntry'
@@ -34,17 +30,6 @@ export function shouldShowAutomationsButton(
   settings: Pick<GlobalSettings, 'showAutomationsButton'> | null | undefined
 ): boolean {
   return settings?.showAutomationsButton !== false
-}
-
-function HideSidebarMenu({ onHide }: { onHide: () => void }): React.JSX.Element {
-  return (
-    <ContextMenuContent>
-      <ContextMenuItem onSelect={onHide}>
-        <EyeOff className="size-3.5" />
-        {translate('auto.components.sidebar.SidebarNav.d599269755', 'Hide from sidebar')}
-      </ContextMenuItem>
-    </ContextMenuContent>
-  )
 }
 
 const SidebarNav = React.memo(function SidebarNav() {
