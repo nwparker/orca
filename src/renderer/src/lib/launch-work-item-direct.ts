@@ -5,22 +5,26 @@ import {
   buildAgentStartupPlan,
   planAgentCliArgsSuffix
 } from '@/lib/tui-agent-startup'
+import {
+  resolveTuiAgentLaunchArgs,
+  resolveTuiAgentLaunchEnv
+} from '../../../shared/tui-agent-launch-defaults'
 import { TUI_AGENT_CONFIG } from '../../../shared/tui-agent-config'
 import { isTuiAgentEnabled, pickTuiAgent } from '../../../shared/tui-agent-selection'
 import { activateAndRevealWorktree } from '@/lib/worktree-activation'
 import { getWorkspaceIntentName, getWorkspaceSeedName } from '@/lib/new-workspace'
 import { getLaunchableWorkItemDraftContent } from '@/lib/linked-work-item-context'
 import { isOrcaCliAvailableForLaunch } from '@/lib/orca-cli-launch-availability'
-import { agentLaunchCommandErrorMessage, gitLabIssueNumber, resolvePrHeadErrorMessage, unavailableAgentErrorMessage, workspaceActivationErrorMessage } from '@/lib/launch-work-item-direct-messages'
+import {
+  agentLaunchCommandErrorMessage,
+  gitLabIssueNumber,
+  resolvePrHeadErrorMessage,
+  unavailableAgentErrorMessage,
+  workspaceActivationErrorMessage
+} from '@/lib/launch-work-item-direct-messages'
 import { ensureHooksConfirmed } from '@/lib/ensure-hooks-confirmed'
 import { getConnectionId } from '@/lib/connection-context'
-import type {
-  GitPushTarget,
-  SetupDecision,
-  TuiAgent,
-  WorkspaceCreateTelemetrySource
-} from '../../../shared/types'
-import type { LaunchSource } from '../../../shared/telemetry-events'
+import type { GitPushTarget, SetupDecision, TuiAgent } from '../../../shared/types'
 import { getLinearIssueWorkspaceName } from '../../../shared/workspace-name'
 import {
   buildDirectWorkItemStartupOpts,
@@ -30,58 +34,11 @@ import {
   resolveDirectPrStartPoint,
   resolveDirectSetupDecision
 } from '@/lib/launch-work-item-direct-preflight'
+import type {
+  LaunchableWorkItem,
+  LaunchWorkItemDirectArgs
+} from '@/lib/launch-work-item-direct-types'
 import { resolveSourceControlLaunchPlatform } from '@/lib/source-control-launch-platform'
-
-export type LaunchableWorkItem = {
-  title: string
-  url: string
-  type: 'issue' | 'pr' | 'mr'
-  number: number | null
-  repoId?: string
-  /** Content to paste into the agent's input. Defaults to the URL when omitted. */
-  pasteContent?: string
-  /** Linear identifier (e.g. "ENG-123") when the work item originates from
-   *  Linear. Persisted to worktree meta as `linkedLinearIssue` so the sidebar
-   *  and other surfaces can surface the Linear link. Linear issues also pass
-   *  `type: 'issue'` / `number: null` to reuse the GitHub draft-paste flow,
-   *  so this field is the only signal that the worktree is Linear-linked. */
-  linearIdentifier?: string
-  linearWorkspaceId?: string
-  linearOrganizationUrlKey?: string
-}
-
-export type LaunchWorkItemDirectArgs = {
-  item: LaunchableWorkItem
-  repoId: string
-  /** Called when the flow cannot proceed without user input (setup policy is
-   *  `ask`, or the selected repo cannot resolve). Callers wire this to the
-   *  existing modal opener so the user still gets a path forward. */
-  openModalFallback: () => void
-  /** Optional base branch to start the worktree from. When omitted the
-   *  worktree inherits the repo's effective base ref. Used by the
-   *  smart workspace-name PR selection to branch from the PR's head so the first
-   *  commit lands on the correct base without the user touching the UI. */
-  baseBranch?: string
-  /** Telemetry surface that initiated this agent launch. Threaded into
-   *  the queued startup payload so `agent_started.launch_source` reflects
-   *  the actual entry point. */
-  launchSource: LaunchSource
-  /** Telemetry surface that initiated this launch. Threaded into
-   *  `createWorktree` so `workspace_created.source` reflects the actual
-   *  entry point (Tasks page row → `sidebar`, Create-from modal →
-   *  `command_palette`). Omitted callers default to `unknown`. */
-  telemetrySource?: WorkspaceCreateTelemetrySource
-  /** Explicit agent chosen by an action-time composer. When unavailable after
-   *  workspace creation, Orca must not fall back to a different agent. */
-  agentOverride?: TuiAgent
-  /** Optional CLI arguments appended to the selected agent command. */
-  agentArgs?: string | null
-  /** Controls whether pasted work-item content remains editable or starts the
-   *  agent immediately after the TUI is ready. */
-  promptDelivery?: 'draft' | 'submit-after-ready'
-  /** Shell platform for the host that will execute the startup command. */
-  launchPlatform?: NodeJS.Platform
-}
 
 async function getDirectDraftContent(
   item: LaunchableWorkItem,
@@ -303,6 +260,13 @@ export async function launchWorkItemDirect(args: LaunchWorkItemDirectArgs): Prom
     // Why: draft launches prefer a native prefill flag when the CLI exposes one;
     // submit-after-ready launches must avoid native drafts so Orca can send the
     // generated prompt as the first turn after the TUI is ready.
+    const effectiveAgentArgs =
+      effectiveAgent && agentArgs === undefined
+        ? resolveTuiAgentLaunchArgs(effectiveAgent, settings?.agentDefaultArgs)
+        : agentArgs
+    const effectiveAgentEnv = effectiveAgent
+      ? resolveTuiAgentLaunchEnv(effectiveAgent, settings?.agentDefaultEnv)
+      : null
     const draftLaunchPlan =
       promptDelivery === 'submit-after-ready' || effectiveAgent === null
         ? null
@@ -311,7 +275,8 @@ export async function launchWorkItemDirect(args: LaunchWorkItemDirectArgs): Prom
             draft: draftContent,
             cmdOverrides: settings?.agentCmdOverrides ?? {},
             platform: launchPlatform,
-            agentArgs
+            agentArgs: effectiveAgentArgs,
+            agentEnv: effectiveAgentEnv
           })
     if (draftLaunchPlan) {
       startupPlan = {
@@ -328,7 +293,8 @@ export async function launchWorkItemDirect(args: LaunchWorkItemDirectArgs): Prom
         prompt: '',
         cmdOverrides: settings?.agentCmdOverrides ?? {},
         platform: launchPlatform,
-        agentArgs,
+        agentArgs: effectiveAgentArgs,
+        agentEnv: effectiveAgentEnv,
         allowEmptyPromptLaunch: true
       })
       startupPlanFailed = startupPlan === null

@@ -3935,7 +3935,7 @@
           "92033495ff": "自动",
           "9b175d0f5e": "打开新工作区时预先选择的 Agent。",
           "385212c7a1": "默认 Agent",
-          "f9f127d664": "覆盖用于启动此 Agent 的二进制路径或名称。",
+          "f9f127d664": "Override the binary path or name, and edit the default launch arguments or environment for this agent.",
           "f95b5c79b8": "安装",
           "fe4d630c94": "文档",
           "8dc0192e48": "已禁用",
@@ -3954,7 +3954,11 @@
           "959b67385b": "设置默认值",
           "24e032fa34": "默认",
           "5f986a9b92": "设置为默认值",
-          "d7625cf8b2": "默认 Agent"
+          "d7625cf8b2": "默认 Agent",
+          "cfb3f35775": "Arguments",
+          "6f99bf5dd0": "No default arguments",
+          "8fbe1f37c1": "Environment",
+          "2d133152fa": "No default environment"
         },
         "AppIconSelector": {
           "d5a112dc9b": "下一个图标",

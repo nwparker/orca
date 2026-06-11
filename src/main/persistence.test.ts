@@ -2615,6 +2615,47 @@ describe('Store', () => {
     expect(updated.disabledTuiAgents).toEqual(['gemini', 'opencode'])
   })
 
+  it('migrates yolo default args onto untouched agent launch settings', async () => {
+    writeFileSync(
+      join(testState.dir, 'orca-data.json'),
+      JSON.stringify({
+        settings: {
+          agentCmdOverrides: {}
+        }
+      })
+    )
+    const store = await createStore()
+
+    expect(store.getSettings().agentDefaultArgs).toMatchObject({
+      claude: '--dangerously-skip-permissions',
+      codex: '--dangerously-bypass-approvals-and-sandbox',
+      cursor: '--yolo'
+    })
+    expect(store.getSettings().agentDefaultEnv).toMatchObject({
+      goose: { GOOSE_MODE: 'auto' }
+    })
+    expect(store.getSettings().agentYoloDefaultsMigrated).toBe(true)
+  })
+
+  it('does not add yolo defaults for legacy agents with command overrides', async () => {
+    writeFileSync(
+      join(testState.dir, 'orca-data.json'),
+      JSON.stringify({
+        settings: {
+          agentCmdOverrides: {
+            codex: 'codex --profile work',
+            goose: 'goose'
+          }
+        }
+      })
+    )
+    const store = await createStore()
+
+    expect(store.getSettings().agentDefaultArgs?.codex).toBe('')
+    expect(store.getSettings().agentDefaultEnv?.goose).toEqual({})
+    expect(store.getSettings().agentDefaultArgs?.claude).toBe('--dangerously-skip-permissions')
+  })
+
   it('normalizes app icon on load and update', async () => {
     writeFileSync(
       join(testState.dir, 'orca-data.json'),

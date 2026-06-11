@@ -4,6 +4,10 @@ import {
   type FeatureInteractionId
 } from '../../../../shared/feature-interactions'
 import { isFeatureTipId } from '../../../../shared/feature-tips'
+import {
+  normalizeTuiAgentArgsRecord,
+  normalizeTuiAgentEnvRecord
+} from '../../../../shared/tui-agent-launch-defaults'
 import { isTuiAgent } from '../../../../shared/tui-agent-config'
 import { isTaskProvider } from '../../../../shared/task-providers'
 import { normalizeDisabledTuiAgents } from '../../../../shared/tui-agent-selection'
@@ -113,6 +117,14 @@ const SettingsUpdate = z
     disabledTuiAgents: z
       .unknown()
       .transform((value) => normalizeDisabledTuiAgents(value))
+      .optional(),
+    agentDefaultArgs: z
+      .unknown()
+      .transform((value) => normalizeTuiAgentArgsRecord(value))
+      .optional(),
+    agentDefaultEnv: z
+      .unknown()
+      .transform((value) => normalizeTuiAgentEnvRecord(value))
       .optional(),
     defaultTaskSource: TaskProviderParam.optional(),
     visibleTaskProviders: z.array(TaskProviderParam).optional(),

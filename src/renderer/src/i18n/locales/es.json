@@ -3950,7 +3950,7 @@
           "92033495ff": "Auto",
           "9b175d0f5e": "Agente preseleccionado al abrir un nuevo espacio de trabajo.",
           "385212c7a1": "Agente predeterminado",
-          "f9f127d664": "Anule la ruta binaria o el nombre utilizado para iniciar este agente.",
+          "f9f127d664": "Override the binary path or name, and edit the default launch arguments or environment for this agent.",
           "f95b5c79b8": "Instalar",
           "fe4d630c94": "Documentos",
           "8dc0192e48": "Desactivado",
@@ -3969,7 +3969,11 @@
           "959b67385b": "Establecer predeterminado",
           "24e032fa34": "Por defecto",
           "5f986a9b92": "Establecer como predeterminado",
-          "d7625cf8b2": "Agente predeterminado"
+          "d7625cf8b2": "Agente predeterminado",
+          "cfb3f35775": "Arguments",
+          "6f99bf5dd0": "No default arguments",
+          "8fbe1f37c1": "Environment",
+          "2d133152fa": "No default environment"
         },
         "AppIconSelector": {
           "d5a112dc9b": "Icono siguiente",

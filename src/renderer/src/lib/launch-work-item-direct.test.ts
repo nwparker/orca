@@ -337,12 +337,16 @@ describe('launchWorkItemDirect', () => {
       agent: 'cursor',
       draft: 'https://github.com/acme/repo/issues/77',
       cmdOverrides: {},
+      agentArgs: '--yolo',
+      agentEnv: {},
       platform: 'linux'
     })
     expect(buildAgentStartupPlan).toHaveBeenCalledWith({
       agent: 'cursor',
       prompt: '',
       cmdOverrides: {},
+      agentArgs: '--yolo',
+      agentEnv: {},
       platform: 'linux',
       allowEmptyPromptLaunch: true
     })

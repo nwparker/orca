@@ -2259,6 +2259,12 @@ export type GlobalSettings = {
   geminiCliOAuthEnabled: boolean
   /** Per-agent CLI command overrides. A missing key means use the catalog default binary name. */
   agentCmdOverrides: Partial<Record<TuiAgent, string>>
+  /** Per-agent default CLI arguments appended after the binary/path and before prompts. */
+  agentDefaultArgs?: Partial<Record<TuiAgent, string>>
+  /** Per-agent launch environment defaults used when yolo mode is exposed as env. */
+  agentDefaultEnv?: Partial<Record<TuiAgent, Record<string, string>>>
+  /** One-shot guard for adding yolo-mode default args to untouched agent launch profiles. */
+  agentYoloDefaultsMigrated?: boolean
   /** Why: disabling must persist so startup does not reinstall global agent
    *  hook entries right after the user removes them from Settings or CLI. */
   agentStatusHooksEnabled: boolean
