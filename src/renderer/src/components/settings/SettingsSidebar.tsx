@@ -93,10 +93,10 @@ function SettingsSetupGuideNavRow({
         })
       }
       className={cn(
-        'flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left outline-none transition-colors focus-visible:ring-[3px] focus-visible:ring-worktree-sidebar-ring/50',
+        'flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left outline-none transition-colors duration-150 motion-reduce:transition-none focus-visible:ring-[3px] focus-visible:ring-worktree-sidebar-ring/50',
         setupActive
           ? 'bg-worktree-sidebar-accent font-medium text-worktree-sidebar-accent-foreground'
-          : 'text-worktree-sidebar-foreground/60 hover:bg-worktree-sidebar-foreground/8 hover:text-worktree-sidebar-foreground'
+          : 'text-worktree-sidebar-foreground/60 hover:bg-worktree-sidebar-accent hover:text-worktree-sidebar-accent-foreground'
       )}
     >
       <SetupGuideProgressRing
@@ -140,10 +140,10 @@ export function SettingsSidebar({
   const searchShortcutHint = useShortcutLabel('settings.search')
   const navItemClassName = (isActive: boolean): string =>
     cn(
-      'flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-[13px] outline-none transition-colors focus-visible:ring-[3px] focus-visible:ring-worktree-sidebar-ring/50',
+      'flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-[13px] outline-none transition-colors duration-150 motion-reduce:transition-none focus-visible:ring-[3px] focus-visible:ring-worktree-sidebar-ring/50',
       isActive
         ? 'bg-worktree-sidebar-accent font-medium text-worktree-sidebar-accent-foreground'
-        : 'text-worktree-sidebar-foreground/60 hover:bg-worktree-sidebar-foreground/8 hover:text-worktree-sidebar-foreground'
+        : 'text-worktree-sidebar-foreground/60 hover:bg-worktree-sidebar-accent hover:text-worktree-sidebar-accent-foreground'
     )
   const installStatusLabel = (status: SettingsNavInstallStatus): string => {
     switch (status) {
