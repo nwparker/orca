@@ -43,7 +43,7 @@ export function SettingsSwitch({
     >
       <span
         className={cn(
-          'pointer-events-none block size-3.5 rounded-full bg-background shadow-sm transition-transform',
+          'pointer-events-none block size-3.5 rounded-full bg-background shadow-xs ring-1 ring-border/30 transition-transform',
           checked ? 'translate-x-4' : 'translate-x-0.5'
         )}
       />
