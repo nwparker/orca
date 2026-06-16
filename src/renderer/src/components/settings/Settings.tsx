@@ -981,13 +981,13 @@ function Settings(): React.JSX.Element {
         >
           <div
             className={cn(
-              'mx-auto flex w-full flex-col gap-10 px-8 pt-10',
+              'mx-auto flex w-full flex-col gap-12 px-10 pt-12',
               isFocusedShortcutsPane ? 'h-full pb-6' : 'pb-24',
               isFocusedSetupGuidePane ? 'max-w-6xl' : 'max-w-4xl'
             )}
           >
             {visibleNavSections.length === 0 ? (
-              <div className="flex min-h-[24rem] items-center justify-center rounded-2xl border border-dashed border-border/60 bg-card/30 text-sm text-muted-foreground">
+              <div className="flex min-h-[24rem] items-center justify-center rounded-2xl border border-dashed border-border/50 bg-muted/20 text-sm text-muted-foreground">
                 {translate(
                   'auto.components.settings.Settings.3c88ec55d6',
                   'No settings found for "'
