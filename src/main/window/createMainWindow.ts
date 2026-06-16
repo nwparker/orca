@@ -43,6 +43,33 @@ function forceRepaint(window: BrowserWindow): void {
   }, 32)
 }
 
+function installMacosVisibilityRepaint(window: BrowserWindow): void {
+  let delayedRepaintTimer: ReturnType<typeof setTimeout> | null = null
+  const repaintAfterVisibilityTransition = (): void => {
+    forceRepaint(window)
+    if (delayedRepaintTimer) {
+      clearTimeout(delayedRepaintTimer)
+    }
+    // Why: macOS can finish restoring webview compositor layers after Electron's
+    // show/restore event, so a second paint catches late black-surface recovery.
+    delayedRepaintTimer = setTimeout(() => {
+      delayedRepaintTimer = null
+      forceRepaint(window)
+    }, 250)
+  }
+  const clearDelayedRepaint = (): void => {
+    if (delayedRepaintTimer) {
+      clearTimeout(delayedRepaintTimer)
+      delayedRepaintTimer = null
+    }
+  }
+
+  window.on('restore', repaintAfterVisibilityTransition)
+  window.on('show', repaintAfterVisibilityTransition)
+  window.on('focus', repaintAfterVisibilityTransition)
+  window.on('closed', clearDelayedRepaint)
+}
+
 function nativeZoomCommandMatchesKeybindings(
   direction: 'in' | 'out',
   platform: NodeJS.Platform,
@@ -276,16 +303,10 @@ export function createMainWindow(
   if (process.platform === 'darwin') {
     // Why: persistent browser webviews use separate compositor layers, and on
     // recent macOS releases those layers can fail to repaint after occlusion or
-    // restore. Disabling main-window throttling and forcing a repaint on
-    // visibility transitions hardens Orca against black-surface failures during
-    // browser-tab restore and tab switching.
-    mainWindow.webContents.setBackgroundThrottling(false)
-    mainWindow.on('restore', () => {
-      forceRepaint(mainWindow)
-    })
-    mainWindow.on('show', () => {
-      forceRepaint(mainWindow)
-    })
+    // restore. Keep normal background throttling for idle CPU, and target the
+    // black-surface workaround to the visibility transitions that need repaint.
+    mainWindow.webContents.setBackgroundThrottling(true)
+    installMacosVisibilityRepaint(mainWindow)
   }
 
   mainWindow.webContents.on('dom-ready', () => {
