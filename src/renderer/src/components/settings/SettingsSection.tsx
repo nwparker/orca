@@ -64,12 +64,12 @@ export function SettingsSection({
 
   return (
     <section id={id} data-settings-section={id} className={cn('scroll-mt-8 space-y-6', className)}>
-      <div className="flex flex-wrap items-start justify-between gap-4 border-b border-border/60 pb-5">
+      <div className="flex flex-wrap items-start justify-between gap-4 border-b border-border/50 pb-6">
         <div className="min-w-0 space-y-2">
-          <h2 className="flex flex-wrap items-center gap-2 text-2xl font-semibold leading-tight text-foreground">
+          <h2 className="flex flex-wrap items-center gap-2 text-2xl font-semibold tracking-tight leading-tight text-foreground">
             {title}
             {badge ? (
-              <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.05em] text-muted-foreground">
+              <span className="rounded-full border border-border/50 bg-secondary px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.05em] text-secondary-foreground">
                 {badge}
               </span>
             ) : null}
