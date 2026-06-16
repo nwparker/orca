@@ -142,7 +142,7 @@ export function SettingsSegmentedControl<T extends string | number>({
       role="radiogroup"
       aria-label={ariaLabel}
       className={cn(
-        'inline-flex items-center rounded-md border border-border bg-background/50 p-0.5',
+        'inline-flex items-center rounded-md border border-border bg-background/50 p-0.5 shadow-xs',
         equalWidth && 'w-full'
       )}
     >
@@ -166,7 +166,7 @@ export function SettingsSegmentedControl<T extends string | number>({
               size === 'sm' ? 'px-2.5 py-0.5 text-xs' : 'px-3 py-1 text-sm',
               equalWidth && 'flex-1',
               active
-                ? 'bg-accent font-medium text-accent-foreground'
+                ? 'bg-background font-medium text-foreground shadow-xs'
                 : opt.disabled
                   ? 'cursor-not-allowed text-muted-foreground/50'
                   : 'text-muted-foreground hover:text-foreground'
