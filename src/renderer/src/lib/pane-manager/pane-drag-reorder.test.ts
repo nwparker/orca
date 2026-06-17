@@ -26,8 +26,10 @@ class FakeClassList {
     this.values.add(value)
   }
 
-  remove(value: string): void {
-    this.values.delete(value)
+  remove(...values: string[]): void {
+    for (const value of values) {
+      this.values.delete(value)
+    }
   }
 
   contains(value: string): boolean {
@@ -45,7 +47,8 @@ class FakeElement {
 
   constructor(
     classNames: readonly string[] = [],
-    private readonly rect = { left: 0, top: 0, right: 0, bottom: 0, width: 0, height: 0 }
+    private readonly rect = { left: 0, top: 0, right: 0, bottom: 0, width: 0, height: 0 },
+    private readonly children: FakeElement[] = []
   ) {
     this.classList = new FakeClassList(classNames)
   }
@@ -84,6 +87,20 @@ class FakeElement {
 
   getBoundingClientRect(): DOMRect {
     return this.rect as DOMRect
+  }
+
+  closest(selector: string): FakeElement | null {
+    if (selector.includes('[data-pane-drop-new-tab-target="true"]')) {
+      return this.dataset.paneDropNewTabTarget === 'true' ? this : null
+    }
+    if (selector.includes('.terminal-tab-strip')) {
+      return this.classList.contains('terminal-tab-strip') ? this : null
+    }
+    return null
+  }
+
+  querySelectorAll(): FakeElement[] {
+    return this.children
   }
 
   remove(): void {
@@ -143,6 +160,7 @@ describe('attachPaneDrag', () => {
     appendedElements = []
     vi.stubGlobal('document', {
       createElement: () => new FakeElement(['pane-drop-overlay']),
+      querySelectorAll: () => [],
       body: {
         appendChild: (element: FakeElement) => {
           appendedElements.push(element)
@@ -206,7 +224,7 @@ describe('attachPaneDrag', () => {
 
     expect(root.classList.contains('is-pane-dragging')).toBe(true)
     expect(sourceContainer.classList.contains('is-drag-source')).toBe(true)
-    expect(state.currentDropTarget).toEqual({ paneId: targetPane.id, zone: 'top' })
+    expect(state.currentDropTarget).toEqual({ type: 'pane', paneId: targetPane.id, zone: 'top' })
     expect(appendedElements).toHaveLength(1)
     expect(onDragActiveChange).toHaveBeenCalledWith(true)
 
@@ -221,6 +239,181 @@ describe('attachPaneDrag', () => {
     expect(onDragActiveChange).toHaveBeenLastCalledWith(false)
     expect(detachPaneFromTree).not.toHaveBeenCalled()
     expect(insertPaneNextTo).not.toHaveBeenCalled()
+  })
+
+  it('drops a pane as a new tab when released over empty terminal surface', () => {
+    const handle = new FakeElement()
+    const root = new FakeElement(['pane-manager-root'], {
+      left: 0,
+      top: 0,
+      right: 240,
+      bottom: 180,
+      width: 240,
+      height: 180
+    })
+    const sourceContainer = new FakeElement(['pane'], {
+      left: 0,
+      top: 0,
+      right: 100,
+      bottom: 180,
+      width: 100,
+      height: 180
+    })
+    const targetContainer = new FakeElement(['pane'], {
+      left: 100,
+      top: 0,
+      right: 200,
+      bottom: 180,
+      width: 100,
+      height: 180
+    })
+    const sourcePane = createPane(1, sourceContainer)
+    const targetPane = createPane(2, targetContainer)
+    const panes = new Map<number, ManagedPaneInternal>([
+      [sourcePane.id, sourcePane],
+      [targetPane.id, targetPane]
+    ])
+    const onPaneDropAsNewTab = vi.fn(() => true)
+    const state = createDragReorderState()
+
+    attachPaneDrag(handle as unknown as HTMLElement, sourcePane.id, state, {
+      getPanes: () => panes,
+      getRoot: () => root as unknown as HTMLElement,
+      getStyleOptions: () => ({}),
+      isDestroyed: () => false,
+      safeFit: vi.fn(),
+      applyPaneOpacity: vi.fn(),
+      applyDividerStyles: vi.fn(),
+      refitPanesUnder: vi.fn(),
+      onPaneDropAsNewTab
+    })
+
+    handle.dispatchPointer('pointerdown', pointerEvent({ clientX: 10, clientY: 10 }))
+    handle.dispatchPointer('pointermove', pointerEvent({ clientX: 220, clientY: 80 }))
+
+    expect(state.currentDropTarget).toEqual({ type: 'new-tab' })
+    expect(appendedElements[0].style.height).toBe('28px')
+
+    handle.dispatchPointer('pointerup', pointerEvent({ pointerId: 1 }))
+
+    expect(onPaneDropAsNewTab).toHaveBeenCalledWith(sourcePane, undefined)
+    expect(detachPaneFromTree).not.toHaveBeenCalled()
+    expect(insertPaneNextTo).not.toHaveBeenCalled()
+    expect(state.currentDropTarget).toBeNull()
+  })
+
+  it('drops a pane as a new tab when released over the tab bar', () => {
+    const handle = new FakeElement()
+    const root = new FakeElement(['pane-manager-root'], {
+      left: 0,
+      top: 40,
+      right: 240,
+      bottom: 180,
+      width: 240,
+      height: 140
+    })
+    const firstTab = new FakeElement([], {
+      left: 0,
+      top: 0,
+      right: 80,
+      bottom: 32,
+      width: 80,
+      height: 32
+    })
+    firstTab.dataset.unifiedTabId = 'tab-1'
+    const secondTab = new FakeElement([], {
+      left: 80,
+      top: 0,
+      right: 160,
+      bottom: 32,
+      width: 80,
+      height: 32
+    })
+    secondTab.dataset.unifiedTabId = 'tab-2'
+    const tabBar = new FakeElement(
+      ['terminal-tab-strip'],
+      {
+        left: 0,
+        top: 0,
+        right: 240,
+        bottom: 32,
+        width: 240,
+        height: 32
+      },
+      [firstTab, secondTab]
+    )
+    tabBar.dataset.paneDropNewTabTarget = 'true'
+    tabBar.dataset.paneDropNewTabGroupId = 'group-1'
+    const sourceContainer = new FakeElement(['pane'], {
+      left: 0,
+      top: 40,
+      right: 100,
+      bottom: 180,
+      width: 100,
+      height: 140
+    })
+    const targetContainer = new FakeElement(['pane'], {
+      left: 100,
+      top: 40,
+      right: 200,
+      bottom: 180,
+      width: 100,
+      height: 140
+    })
+    const sourcePane = createPane(1, sourceContainer)
+    const targetPane = createPane(2, targetContainer)
+    const panes = new Map<number, ManagedPaneInternal>([
+      [sourcePane.id, sourcePane],
+      [targetPane.id, targetPane]
+    ])
+    const onPaneDropAsNewTab = vi.fn(() => true)
+    const state = createDragReorderState()
+    vi.stubGlobal('document', {
+      createElement: () => new FakeElement(['pane-drop-overlay']),
+      elementFromPoint: () => tabBar,
+      querySelectorAll: () => [firstTab, secondTab],
+      body: {
+        appendChild: (element: FakeElement) => {
+          appendedElements.push(element)
+        }
+      }
+    })
+
+    attachPaneDrag(handle as unknown as HTMLElement, sourcePane.id, state, {
+      getPanes: () => panes,
+      getRoot: () => root as unknown as HTMLElement,
+      getStyleOptions: () => ({}),
+      isDestroyed: () => false,
+      safeFit: vi.fn(),
+      applyPaneOpacity: vi.fn(),
+      applyDividerStyles: vi.fn(),
+      refitPanesUnder: vi.fn(),
+      onPaneDropAsNewTab
+    })
+
+    handle.dispatchPointer('pointerdown', pointerEvent({ clientX: 10, clientY: 50 }))
+    handle.dispatchPointer('pointermove', pointerEvent({ clientX: 100, clientY: 16 }))
+
+    expect(state.currentDropTarget).toEqual({
+      type: 'new-tab',
+      placement: { groupId: 'group-1', targetUnifiedTabId: 'tab-2', side: 'left' }
+    })
+    expect(appendedElements[0].style.display).toBe('none')
+    expect(firstTab.classList.contains('pane-tab-drop-after')).toBe(true)
+    expect(secondTab.classList.contains('pane-tab-drop-before')).toBe(true)
+
+    handle.dispatchPointer('pointerup', pointerEvent({ pointerId: 1 }))
+
+    expect(onPaneDropAsNewTab).toHaveBeenCalledWith(sourcePane, {
+      groupId: 'group-1',
+      targetUnifiedTabId: 'tab-2',
+      side: 'left'
+    })
+    expect(firstTab.classList.contains('pane-tab-drop-after')).toBe(false)
+    expect(secondTab.classList.contains('pane-tab-drop-before')).toBe(false)
+    expect(detachPaneFromTree).not.toHaveBeenCalled()
+    expect(insertPaneNextTo).not.toHaveBeenCalled()
+    expect(state.currentDropTarget).toBeNull()
   })
 
   it('returns cleanup that removes handle listeners and cancels active drag capture', () => {

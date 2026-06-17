@@ -925,6 +925,8 @@ function TabBarInner({
       // this explicit surface marker instead of treating the whole app as an
       // editor drop zone.
       data-native-file-drop-target="editor"
+      data-pane-drop-new-tab-target="true"
+      data-pane-drop-new-tab-group-id={resolvedGroupId}
     >
       {tabStripOverflowState.hasOverflow ? (
         <Tooltip>

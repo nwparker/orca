@@ -156,6 +156,7 @@ function openSplitPane(
 
 type CloseManagedPaneArgs = {
   paneId: number
+  closeReason?: 'close' | 'transfer'
   activePaneId: number | null
   panes: Map<number, ManagedPaneInternal>
   root: HTMLElement
@@ -180,7 +181,11 @@ export function closeManagedPane(args: CloseManagedPaneArgs): void {
     safeFit(p)
   }
   updateMultiPaneState(args.getDragCallbacks())
-  args.managerOptions.onPaneClosed?.(args.paneId, { paneId: args.paneId, leafId: closedLeafId })
+  args.managerOptions.onPaneClosed?.(args.paneId, {
+    paneId: args.paneId,
+    leafId: closedLeafId,
+    closeReason: args.closeReason ?? 'close'
+  })
   args.managerOptions.onLayoutChanged?.()
 }
 

@@ -1,6 +1,11 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { ManagedPane } from '@/lib/pane-manager/pane-manager'
-import { isPaneReplaying, replayIntoTerminal, type ReplayingPanesRef } from './replay-guard'
+import {
+  isPaneReplaying,
+  replayIntoTerminal,
+  replayIntoTerminalAsync,
+  type ReplayingPanesRef
+} from './replay-guard'
 
 function makeRef(): ReplayingPanesRef {
   return { current: new Map() } as ReplayingPanesRef
@@ -134,6 +139,45 @@ describe('replay-guard', () => {
     replayIntoTerminal(pane, ref, 'x')
     terminal.flush()
     expect(ref.current.has(1)).toBe(false)
+  })
+
+  it('safety-releases the replay guard when xterm never reports parse completion', () => {
+    vi.useFakeTimers()
+    try {
+      const ref = makeRef()
+      const { pane, terminal } = makeFakePane(1)
+      terminal.write = (data: string) => {
+        terminal.lastData.push(data)
+      }
+
+      replayIntoTerminal(pane, ref, '\x1b[?2026hheld frame')
+      expect(isPaneReplaying(ref, 1)).toBe(true)
+
+      vi.advanceTimersByTime(1000)
+
+      expect(isPaneReplaying(ref, 1)).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('resolves async replay on safety release', async () => {
+    vi.useFakeTimers()
+    try {
+      const ref = makeRef()
+      const { pane, terminal } = makeFakePane(1)
+      terminal.write = (data: string) => {
+        terminal.lastData.push(data)
+      }
+
+      const replay = replayIntoTerminalAsync(pane, ref, '\x1b[?2026hheld frame')
+      vi.advanceTimersByTime(1000)
+
+      await expect(replay).resolves.toBeUndefined()
+      expect(isPaneReplaying(ref, 1)).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('schedules a follow-up repaint for replayed cursor restores', () => {

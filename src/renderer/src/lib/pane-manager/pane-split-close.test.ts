@@ -11,13 +11,14 @@ const scheduleSplitScrollRestore = vi.hoisted(() => vi.fn())
 const updateMultiPaneState = vi.hoisted(() => vi.fn())
 const applyPaneOpacity = vi.hoisted(() => vi.fn())
 const applyDividerStyles = vi.hoisted(() => vi.fn())
+const safeFit = vi.hoisted(() => vi.fn())
 
 vi.mock('./pane-tree-ops', () => ({
   captureScrollState,
   findPaneChildren: vi.fn(),
   promoteSibling: vi.fn(),
   removeDividers: vi.fn(),
-  safeFit: vi.fn(),
+  safeFit,
   wrapInSplit
 }))
 
@@ -44,7 +45,7 @@ vi.mock('./pane-divider', () => ({
   applyPaneOpacity
 }))
 
-import { splitManagedPane } from './pane-split-close'
+import { closeManagedPane, splitManagedPane } from './pane-split-close'
 
 const TEST_LEAF_ID = '11111111-1111-4111-8111-111111111111' as TerminalLeafId
 
@@ -191,5 +192,36 @@ describe('splitManagedPane', () => {
       expect.any(Function),
       expect.any(Function)
     )
+  })
+})
+
+describe('closeManagedPane', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('reports transfer closes without treating them as ordinary pane closes', () => {
+    const pane = createPane(1, null)
+    const panes = new Map<number, ManagedPaneInternal>([[pane.id, pane]])
+    const onPaneClosed = vi.fn()
+
+    closeManagedPane({
+      paneId: pane.id,
+      closeReason: 'transfer',
+      activePaneId: pane.id,
+      panes,
+      root: new MockElement(['root']) as unknown as HTMLElement,
+      styleOptions: {},
+      managerOptions: { onPaneClosed },
+      getDragCallbacks: () => ({}) as never,
+      releasePaneIdentity: vi.fn(),
+      setActivePaneId: vi.fn()
+    })
+
+    expect(onPaneClosed).toHaveBeenCalledWith(pane.id, {
+      paneId: pane.id,
+      leafId: pane.leafId,
+      closeReason: 'transfer'
+    })
   })
 })

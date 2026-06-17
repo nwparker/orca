@@ -1,5 +1,11 @@
-import type { DropZone, ManagedPane, ManagedPaneInternal } from './pane-manager-types'
+import type {
+  DropZone,
+  ManagedPane,
+  ManagedPaneInternal,
+  PaneDropAsNewTabPlacement
+} from './pane-manager-types'
 import type { PaneStyleOptions } from './pane-manager-types'
+import { clearPaneTabDropTargetIndicators, updatePaneDragDropTarget } from './pane-drag-drop-target'
 import { detachPaneFromTree, insertPaneNextTo } from './pane-tree-ops'
 
 // ---------------------------------------------------------------------------
@@ -9,7 +15,10 @@ import { detachPaneFromTree, insertPaneNextTo } from './pane-tree-ops'
 export type DragReorderState = {
   dragSourcePaneId: number | null
   dropOverlay: HTMLElement | null
-  currentDropTarget: { paneId: number; zone: DropZone } | null
+  currentDropTarget:
+    | { type: 'pane'; paneId: number; zone: DropZone }
+    | { type: 'new-tab'; placement?: PaneDropAsNewTabPlacement }
+    | null
   cleanupActiveDrag: ((commitDrop: boolean) => void) | null
 }
 
@@ -25,6 +34,7 @@ export type DragReorderCallbacks = {
   requestPaneReparentFrame?: (callback: FrameRequestCallback) => void
   onLayoutChanged?: () => void
   onDragActiveChange?: (active: boolean) => void
+  onPaneDropAsNewTab?: (pane: ManagedPane, placement?: PaneDropAsNewTabPlacement) => boolean
 }
 
 export function createDragReorderState(): DragReorderState {
@@ -94,6 +104,13 @@ export function attachPaneDrag(
 
       try {
         if (commitDrop && state.currentDropTarget && state.dragSourcePaneId !== null) {
+          if (state.currentDropTarget.type === 'new-tab') {
+            const sourcePane = callbacks.getPanes().get(state.dragSourcePaneId)
+            if (sourcePane) {
+              callbacks.onPaneDropAsNewTab?.(sourcePane, state.currentDropTarget.placement)
+            }
+            return
+          }
           handlePaneDrop(
             state.dragSourcePaneId,
             state.currentDropTarget.paneId,
@@ -134,7 +151,7 @@ export function attachPaneDrag(
         showDropOverlay(state)
       }
       if (dragging) {
-        updateDropTarget(ev.clientX, ev.clientY, state, callbacks)
+        updatePaneDragDropTarget(ev.clientX, ev.clientY, state, callbacks)
       }
     }
 
@@ -234,6 +251,7 @@ export function showDropOverlay(state: DragReorderState): void {
 }
 
 export function hideDropOverlay(state: DragReorderState): void {
+  clearPaneTabDropTargetIndicators()
   if (state.dropOverlay) {
     state.dropOverlay.remove()
     state.dropOverlay = null
@@ -246,98 +264,5 @@ export function updateMultiPaneState(callbacks: DragReorderCallbacks): void {
     callbacks.getRoot().classList.add('has-multiple-panes')
   } else {
     callbacks.getRoot().classList.remove('has-multiple-panes')
-  }
-}
-
-/** Determine which pane and zone the cursor is over, and position the overlay. */
-function updateDropTarget(
-  clientX: number,
-  clientY: number,
-  state: DragReorderState,
-  callbacks: DragReorderCallbacks
-): void {
-  const overlay = state.dropOverlay
-  if (!overlay) {
-    return
-  }
-
-  // Find which pane the cursor is over (excluding the source)
-  let targetPane: ManagedPaneInternal | null = null
-  for (const pane of callbacks.getPanes().values()) {
-    if (pane.id === state.dragSourcePaneId) {
-      continue
-    }
-    const rect = pane.container.getBoundingClientRect()
-    if (
-      clientX >= rect.left &&
-      clientX <= rect.right &&
-      clientY >= rect.top &&
-      clientY <= rect.bottom
-    ) {
-      targetPane = pane
-      break
-    }
-  }
-
-  if (!targetPane) {
-    overlay.style.display = 'none'
-    state.currentDropTarget = null
-    return
-  }
-
-  const rect = targetPane.container.getBoundingClientRect()
-  const relX = (clientX - rect.left) / rect.width
-  const relY = (clientY - rect.top) / rect.height
-
-  // Determine zone: which edge is the cursor closest to?
-  const distTop = relY
-  const distBottom = 1 - relY
-  const distLeft = relX
-  const distRight = 1 - relX
-  const minDist = Math.min(distTop, distBottom, distLeft, distRight)
-
-  let zone: DropZone
-  if (minDist === distTop) {
-    zone = 'top'
-  } else if (minDist === distBottom) {
-    zone = 'bottom'
-  } else if (minDist === distLeft) {
-    zone = 'left'
-  } else {
-    zone = 'right'
-  }
-
-  state.currentDropTarget = { paneId: targetPane.id, zone }
-
-  // Position overlay to cover the target half
-  overlay.style.display = ''
-  const scrollX = window.scrollX
-  const scrollY = window.scrollY
-
-  switch (zone) {
-    case 'top':
-      overlay.style.left = `${rect.left + scrollX}px`
-      overlay.style.top = `${rect.top + scrollY}px`
-      overlay.style.width = `${rect.width}px`
-      overlay.style.height = `${rect.height / 2}px`
-      break
-    case 'bottom':
-      overlay.style.left = `${rect.left + scrollX}px`
-      overlay.style.top = `${rect.top + scrollY + rect.height / 2}px`
-      overlay.style.width = `${rect.width}px`
-      overlay.style.height = `${rect.height / 2}px`
-      break
-    case 'left':
-      overlay.style.left = `${rect.left + scrollX}px`
-      overlay.style.top = `${rect.top + scrollY}px`
-      overlay.style.width = `${rect.width / 2}px`
-      overlay.style.height = `${rect.height}px`
-      break
-    case 'right':
-      overlay.style.left = `${rect.left + scrollX + rect.width / 2}px`
-      overlay.style.top = `${rect.top + scrollY}px`
-      overlay.style.width = `${rect.width / 2}px`
-      overlay.style.height = `${rect.height}px`
-      break
   }
 }

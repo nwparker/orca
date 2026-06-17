@@ -99,6 +99,7 @@ type StoreState = {
 }
 
 type ConnectCallbacks = {
+  onConnect?: () => void
   onData?: (data: string, meta?: { seq?: number; rawLength?: number }) => void
   onReplayData?: (data: string) => void
   onError?: (msg: string) => void
@@ -114,6 +115,7 @@ type MockTransport = {
   sendInput: ReturnType<typeof vi.fn>
   sendInputAccepted?: ReturnType<typeof vi.fn>
   resize: ReturnType<typeof vi.fn>
+  isConnected: ReturnType<typeof vi.fn>
   getPtyId: ReturnType<typeof vi.fn>
   serializeBuffer?: ReturnType<typeof vi.fn>
 }
@@ -232,19 +234,31 @@ vi.mock('./pty-dispatcher', async (importOriginal) => {
 
 function createMockTransport(initialPtyId: string | null = null): MockTransport {
   let ptyId = initialPtyId
+  let connected = true
   const transport = {
-    attach: vi.fn(({ existingPtyId }: { existingPtyId: string }) => {
-      ptyId = existingPtyId
-    }),
-    connect: vi.fn().mockImplementation(async (opts: { sessionId?: string }) => {
-      if (opts.sessionId) {
-        ptyId = opts.sessionId
-        return { id: opts.sessionId }
+    attach: vi.fn(
+      ({ existingPtyId, callbacks }: { existingPtyId: string; callbacks?: ConnectCallbacks }) => {
+        ptyId = existingPtyId
+        connected = true
+        callbacks?.onConnect?.()
       }
-      return ptyId
-    }),
+    ),
+    connect: vi
+      .fn()
+      .mockImplementation(async (opts: { sessionId?: string; callbacks?: ConnectCallbacks }) => {
+        if (opts.sessionId) {
+          ptyId = opts.sessionId
+          connected = true
+          opts.callbacks?.onConnect?.()
+          return { id: opts.sessionId }
+        }
+        connected = ptyId !== null
+        opts.callbacks?.onConnect?.()
+        return ptyId
+      }),
     sendInput: vi.fn(() => true),
     resize: vi.fn(() => true),
+    isConnected: vi.fn(() => connected),
     getPtyId: vi.fn(() => ptyId),
     serializeBuffer: undefined
   } as MockTransport
@@ -1954,6 +1968,48 @@ describe('connectPanePty', () => {
     expect(transport.sendInput).toHaveBeenCalledWith('a')
   })
 
+  it('allows keydown-correlated xterm input while pane replay guard is active', async () => {
+    const { connectPanePty } = await import('./pty-connection')
+
+    const transport = createMockTransport('pty-live')
+    transportFactoryQueue.push(transport)
+    mockStoreState = {
+      ...mockStoreState,
+      tabsByWorktree: { 'wt-1': [{ id: 'tab-1', ptyId: null }] }
+    }
+
+    const terminalTarget = createKeyboardEventTarget()
+    const pane = createPane(1)
+    pane.terminal.element = terminalTarget.target as never
+    let onDataHandler: ((data: string) => void) | null = null
+    pane.terminal.onData = vi.fn(((handler: (data: string) => void) => {
+      onDataHandler = handler
+      return { dispose: vi.fn() }
+    }) as typeof pane.terminal.onData)
+    const manager = createManager(1)
+    const replayingPanesRef = { current: new Map<number, number>([[1, 1]]) }
+    const deps = createDeps({ replayingPanesRef })
+
+    connectPanePty(pane as never, manager as never, deps as never)
+
+    expect(onDataHandler).toBeDefined()
+    if (!onDataHandler) {
+      throw new Error('expected onData handler to be registered')
+    }
+    const sendTerminalInput = onDataHandler as (data: string) => void
+
+    sendTerminalInput('\x1b[?1;2c')
+    expect(transport.sendInput).not.toHaveBeenCalled()
+
+    terminalTarget.dispatch(keyEvent({ key: 'a' }))
+    sendTerminalInput('a')
+    expect(transport.sendInput).toHaveBeenCalledTimes(1)
+    expect(transport.sendInput).toHaveBeenLastCalledWith('a')
+
+    sendTerminalInput('\x1b[?1;2c')
+    expect(transport.sendInput).toHaveBeenCalledTimes(1)
+  })
+
   it('does not enumerate every worktree tab for ordinary input without Codex restart notices', async () => {
     const { connectPanePty } = await import('./pty-connection')
 
@@ -2700,6 +2756,212 @@ describe('connectPanePty', () => {
     )
     const { hasPtySerializer } = await import('./pty-buffer-serializer')
     expect(hasPtySerializer(eagerPtyId)).toBe(true)
+  })
+
+  it('adopts a transferred live pane PTY via attach instead of reattaching without an eager buffer', async () => {
+    const transferredPtyId = 'wt-1@@transfer-pty'
+    const { connectPanePty } = await import('./pty-connection')
+    const { markPtyForTransferAttach, clearPtyTransferAttachMarks } =
+      await import('./terminal-pty-transfer-adoption')
+    const transport = createMockTransport()
+    transportFactoryQueue.push(transport)
+    mockStoreState = {
+      ...mockStoreState,
+      tabsByWorktree: { 'wt-1': [{ id: 'tab-1', ptyId: transferredPtyId }] },
+      ptyIdsByTabId: { 'tab-1': [transferredPtyId] },
+      terminalLayoutsByTabId: {
+        'tab-1': {
+          root: { type: 'leaf', leafId: LEAF_1 },
+          activeLeafId: LEAF_1,
+          expandedLeafId: null,
+          ptyIdsByLeafId: { [LEAF_1]: transferredPtyId }
+        }
+      }
+    } as StoreState
+    const deps = createDeps({
+      restoredLeafId: LEAF_1,
+      restoredPtyIdByLeafId: { [LEAF_1]: transferredPtyId }
+    })
+
+    const pane = createPane(1)
+    markPtyForTransferAttach(transferredPtyId)
+    connectPanePty(pane as never, createManager(1) as never, deps as never)
+    await flushAsyncTicks()
+    clearPtyTransferAttachMarks()
+
+    expect(transport.attach).toHaveBeenCalledWith(
+      expect.objectContaining({ existingPtyId: transferredPtyId })
+    )
+    expect(transport.connect).not.toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: transferredPtyId })
+    )
+    expect(pane.container.dataset.ptyId).toBe(transferredPtyId)
+    expect(deps.syncPanePtyLayoutBinding).toHaveBeenCalledWith(1, transferredPtyId)
+  })
+
+  it('keeps transferred PTYs on attach across a dev remount', async () => {
+    const transferredPtyId = 'wt-1@@transfer-pty'
+    const { connectPanePty } = await import('./pty-connection')
+    const { markPtyForTransferAttach, clearPtyTransferAttachMarks } =
+      await import('./terminal-pty-transfer-adoption')
+    const firstTransport = createMockTransport()
+    const secondTransport = createMockTransport()
+    transportFactoryQueue.push(firstTransport, secondTransport)
+    mockStoreState = {
+      ...mockStoreState,
+      tabsByWorktree: { 'wt-1': [{ id: 'tab-1', ptyId: transferredPtyId }] },
+      ptyIdsByTabId: { 'tab-1': [transferredPtyId] },
+      terminalLayoutsByTabId: {
+        'tab-1': {
+          root: { type: 'leaf', leafId: LEAF_1 },
+          activeLeafId: LEAF_1,
+          expandedLeafId: null,
+          ptyIdsByLeafId: { [LEAF_1]: transferredPtyId }
+        }
+      }
+    } as StoreState
+    const paneTransportsRef = { current: new Map() }
+    const restoredDeps = {
+      paneTransportsRef,
+      restoredLeafId: LEAF_1,
+      restoredPtyIdByLeafId: { [LEAF_1]: transferredPtyId }
+    }
+
+    markPtyForTransferAttach(transferredPtyId)
+    const firstBinding = connectPanePty(
+      createPane(1) as never,
+      createManager(1) as never,
+      createDeps(restoredDeps) as never
+    )
+    await flushAsyncTicks()
+    firstBinding.dispose()
+    paneTransportsRef.current.clear()
+
+    connectPanePty(
+      createPane(1) as never,
+      createManager(1) as never,
+      createDeps(restoredDeps) as never
+    )
+    await flushAsyncTicks()
+    clearPtyTransferAttachMarks()
+
+    expect(firstTransport.attach).toHaveBeenCalledWith(
+      expect.objectContaining({ existingPtyId: transferredPtyId })
+    )
+    expect(secondTransport.attach).toHaveBeenCalledWith(
+      expect.objectContaining({ existingPtyId: transferredPtyId })
+    )
+    expect(secondTransport.connect).not.toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: transferredPtyId })
+    )
+  })
+
+  it('clears the transfer attach marker when transferred PTY attach throws', async () => {
+    const transferredPtyId = 'wt-1@@transfer-pty'
+    const { connectPanePty } = await import('./pty-connection')
+    const { markPtyForTransferAttach, shouldAttachTransferredPty, clearPtyTransferAttachMarks } =
+      await import('./terminal-pty-transfer-adoption')
+    const transport = createMockTransport()
+    transport.attach.mockImplementation(() => {
+      throw new Error('attach failed')
+    })
+    transportFactoryQueue.push(transport)
+    mockStoreState = {
+      ...mockStoreState,
+      tabsByWorktree: { 'wt-1': [{ id: 'tab-1', ptyId: transferredPtyId }] },
+      ptyIdsByTabId: { 'tab-1': [transferredPtyId] },
+      terminalLayoutsByTabId: {
+        'tab-1': {
+          root: { type: 'leaf', leafId: LEAF_1 },
+          activeLeafId: LEAF_1,
+          expandedLeafId: null,
+          ptyIdsByLeafId: { [LEAF_1]: transferredPtyId }
+        }
+      }
+    } as StoreState
+    const deps = createDeps({
+      restoredLeafId: LEAF_1,
+      restoredPtyIdByLeafId: { [LEAF_1]: transferredPtyId }
+    })
+
+    try {
+      markPtyForTransferAttach(transferredPtyId)
+      connectPanePty(createPane(1) as never, createManager(1) as never, deps as never)
+      await flushAsyncTicks()
+
+      expect(shouldAttachTransferredPty(transferredPtyId)).toBe(false)
+      expect(deps.clearTabPtyId).toHaveBeenCalledWith('tab-1', transferredPtyId)
+      expect(transport.connect).toHaveBeenCalled()
+    } finally {
+      clearPtyTransferAttachMarks()
+    }
+  })
+
+  it('queues immediate terminal input until a transferred PTY attach connects', async () => {
+    const transferredPtyId = 'wt-1@@transfer-pty'
+    const { connectPanePty } = await import('./pty-connection')
+    const { markPtyForTransferAttach, clearPtyTransferAttachMarks } =
+      await import('./terminal-pty-transfer-adoption')
+    const transport = createMockTransport()
+    let connected = false
+    let currentPtyId: string | null = null
+    let attachCallbacks: ConnectCallbacks | undefined
+    transport.isConnected.mockImplementation(() => connected)
+    transport.getPtyId.mockImplementation(() => currentPtyId)
+    transport.attach.mockImplementation(
+      (opts: { existingPtyId: string; callbacks?: ConnectCallbacks }) => {
+        currentPtyId = opts.existingPtyId
+        attachCallbacks = opts.callbacks
+      }
+    )
+    transportFactoryQueue.push(transport)
+    mockStoreState = {
+      ...mockStoreState,
+      tabsByWorktree: { 'wt-1': [{ id: 'tab-1', ptyId: transferredPtyId }] },
+      ptyIdsByTabId: { 'tab-1': [transferredPtyId] },
+      terminalLayoutsByTabId: {
+        'tab-1': {
+          root: { type: 'leaf', leafId: LEAF_1 },
+          activeLeafId: LEAF_1,
+          expandedLeafId: null,
+          ptyIdsByLeafId: { [LEAF_1]: transferredPtyId }
+        }
+      }
+    } as StoreState
+    const pane = createPane(1)
+    const terminalInputRef: { current?: (data: string) => void } = {}
+    ;(
+      pane.terminal as unknown as {
+        onData: (handler: (data: string) => void) => { dispose: () => void }
+      }
+    ).onData = vi.fn((handler: (data: string) => void) => {
+      terminalInputRef.current = handler
+      return { dispose: vi.fn() }
+    })
+
+    markPtyForTransferAttach(transferredPtyId)
+    connectPanePty(
+      pane as never,
+      createManager(1) as never,
+      createDeps({
+        restoredLeafId: LEAF_1,
+        restoredPtyIdByLeafId: { [LEAF_1]: transferredPtyId }
+      }) as never
+    )
+    await flushAsyncTicks()
+    clearPtyTransferAttachMarks()
+
+    const terminalInput = terminalInputRef.current
+    if (!terminalInput) {
+      throw new Error('terminal input handler was not registered')
+    }
+    terminalInput('p')
+    expect(transport.sendInput).not.toHaveBeenCalled()
+
+    connected = true
+    attachCallbacks?.onConnect?.()
+
+    expect(transport.sendInput).toHaveBeenCalledWith('p')
   })
 
   it('does not adopt another tab live eager PTY from a stale restored leaf binding', async () => {

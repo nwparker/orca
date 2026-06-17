@@ -42,16 +42,19 @@ export const EMPTY_LAYOUT: TerminalLayoutSnapshot = {
 //   1000/1002/1003/1006 — mouse reporting variants
 //   1004                — focus event reporting (the actual bug source)
 //   2004                — bracketed paste
+//   2026                — synchronized output (otherwise an open replay frame
+//                         can hold xterm write completion and suppress input)
 //   <99u/=0u            — Kitty keyboard flags pushed by TUIs such as Codex
 export const RESET_TERMINAL_CURSOR_STYLE = '\x1b[0 q'
 export const RESET_KITTY_KEYBOARD_PROTOCOL = '\x1b[<99u\x1b[=0u'
+export const CLEAR_TERMINAL_FOR_LIVE_TRANSFER = '\x1b[2J\x1b[3J\x1b[H'
 
-export const POST_REPLAY_MODE_RESET = `${RESET_TERMINAL_CURSOR_STYLE}${RESET_KITTY_KEYBOARD_PROTOCOL}\x1b[?25h\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1004l\x1b[?1006l\x1b[?2004l`
+export const POST_REPLAY_MODE_RESET = `${RESET_TERMINAL_CURSOR_STYLE}${RESET_KITTY_KEYBOARD_PROTOCOL}\x1b[?25h\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1004l\x1b[?1006l\x1b[?2004l\x1b[?2026l`
 
 // Why: hidden-output recovery replays a snapshot of the same live renderer
-// session. Keep cursor/focus cleanup, but preserve Kitty keyboard flags that
-// the still-running foreground TUI may rely on.
-export const POST_REPLAY_LIVE_SNAPSHOT_RESET = `${RESET_TERMINAL_CURSOR_STYLE}\x1b[?25h\x1b[?1004l`
+// session. Keep cursor/focus/synchronized-output cleanup, but preserve Kitty
+// keyboard flags that the still-running foreground TUI may rely on.
+export const POST_REPLAY_LIVE_SNAPSHOT_RESET = `${RESET_TERMINAL_CURSOR_STYLE}\x1b[?25h\x1b[?1004l\x1b[?2026l`
 
 // Why: daemon snapshot restore reattaches to a live session, so we avoid the
 // full POST_REPLAY_MODE_RESET bundle there — a still-running TUI may still
@@ -71,9 +74,12 @@ export const POST_REPLAY_LIVE_SNAPSHOT_RESET = `${RESET_TERMINAL_CURSOR_STYLE}\x
 //   1004 — focus event reporting: preserving `?1004h` makes restored shells
 //          ring BEL on pane focus/blur (shells like zsh treat `\e[I`/`\e[O`
 //          as unbound key input).
+//   2026 — synchronized output: if replay ends while this renderer-side hold
+//          is active, xterm can defer write completion and keep input
+//          replay-suppressed until the live app eventually emits `?2026l`.
 //   <99u/=0u — Kitty keyboard mode is renderer-side xterm state; stale copies
 //              can make the next Ctrl+C encode as CSI-u after reattach.
-export const POST_REPLAY_REATTACH_RESET = `${RESET_TERMINAL_CURSOR_STYLE}${RESET_KITTY_KEYBOARD_PROTOCOL}\x1b[?25h\x1b[?1004l`
+export const POST_REPLAY_REATTACH_RESET = `${RESET_TERMINAL_CURSOR_STYLE}${RESET_KITTY_KEYBOARD_PROTOCOL}\x1b[?25h\x1b[?1004l\x1b[?2026l`
 
 // Cross-platform monospace fallback chain ensures the terminal always has a
 // usable font regardless of OS.  macOS-only fonts like SF Mono and Menlo are
@@ -195,21 +201,26 @@ export function serializeTerminalLayout(
 }
 
 /**
- * Write saved scrollback buffers into the restored panes so the user sees
- * their previous terminal output after an app restart.  If a buffer was
- * captured while the alternate screen was active (e.g. an agent TUI was
- * running at shutdown), we exit alt-screen first so the user sees a usable
- * normal-mode terminal.
+ * Write saved buffers into restored panes so the user sees prior terminal
+ * output after restart, or the live screen while moving a PTY between tabs.
+ * Cold restart strips an unterminated alternate screen because no TUI is
+ * attached; live transfer preserves it because the foreground process remains
+ * alive.
  */
 export function restoreScrollbackBuffers(
   manager: PaneManager,
   savedBuffers: Record<string, string> | undefined,
   restoredPaneByLeafId: Map<string, number>,
-  replayingPanesRef: ReplayingPanesRef
+  replayingPanesRef: ReplayingPanesRef,
+  options?: { replayMode?: TerminalLayoutSnapshot['bufferReplayMode'] }
 ): void {
   if (!savedBuffers) {
     return
   }
+  const isLiveTransferReplay = options?.replayMode === 'live-transfer'
+  const postReplayReset = isLiveTransferReplay
+    ? POST_REPLAY_LIVE_SNAPSHOT_RESET
+    : POST_REPLAY_MODE_RESET
   const ALT_SCREEN_ON = '\x1b[?1049h'
   const ALT_SCREEN_OFF = '\x1b[?1049l'
   for (const [oldLeafId, buffer] of Object.entries(savedBuffers)) {
@@ -223,26 +234,38 @@ export function restoreScrollbackBuffers(
     }
     try {
       let buf = buffer
-      // If buffer ends in alt-screen mode (agent TUI was running at
-      // shutdown), exit alt-screen so the user sees a usable terminal.
-      const lastOn = buf.lastIndexOf(ALT_SCREEN_ON)
-      const lastOff = buf.lastIndexOf(ALT_SCREEN_OFF)
-      if (lastOn > lastOff) {
-        buf = buf.slice(0, lastOn)
+      if (!isLiveTransferReplay) {
+        // If buffer ends in alt-screen mode (agent TUI was running at
+        // shutdown), exit alt-screen so the user sees a usable terminal.
+        const lastOn = buf.lastIndexOf(ALT_SCREEN_ON)
+        const lastOff = buf.lastIndexOf(ALT_SCREEN_OFF)
+        if (lastOn > lastOff) {
+          buf = buf.slice(0, lastOn)
+        }
+      } else {
+        // Why: live transfer reset disables focus reporting anyway. Replaying
+        // the enable byte first makes xterm emit a synthetic focus-in sequence
+        // to the still-running foreground process during the move.
+        buf = buf.replaceAll('\x1b[?1004h', '')
       }
       if (buf.length > 0) {
         // Why replayIntoTerminal: the serialized buffer can contain query
         // sequences from the prior session (DA1, DECRQM, OSC 10/11, focus,
         // CPR). Writing those through xterm.write would trigger auto-replies
         // that land in the new shell's stdin. See replay-guard.ts.
-        replayIntoTerminal(pane, replayingPanesRef, buf)
-        // Ensure cursor is on a new line so the new shell prompt
-        // doesn't trigger zsh's PROMPT_EOL_MARK (%) indicator.
-        replayIntoTerminal(pane, replayingPanesRef, '\r\n')
-        // Clear any mode bits the serialized buffer replayed into xterm.
-        // The shell underneath is fresh and has no TUI consuming these modes.
-        // See POST_REPLAY_MODE_RESET comment.
-        replayIntoTerminal(pane, replayingPanesRef, POST_REPLAY_MODE_RESET)
+        //
+        // Keep the post-replay reset in the same xterm write as the serialized
+        // bytes. If the buffer leaves DEC synchronized output open, xterm can
+        // hold that write's completion until `?2026l`; queuing the reset as a
+        // later write would never release the replay guard.
+        //
+        // Live transfers repaint a still-running PTY after its attach/resize
+        // redraw. Clear first and avoid the cold-shell CRLF so prompt cursor
+        // placement comes from the snapshot, not a resize race.
+        const replayBuffer = isLiveTransferReplay
+          ? `${CLEAR_TERMINAL_FOR_LIVE_TRANSFER}${buf}${postReplayReset}`
+          : `${buf}\r\n${postReplayReset}`
+        replayIntoTerminal(pane, replayingPanesRef, replayBuffer)
       }
     } catch {
       // If restore fails, continue with blank terminal.

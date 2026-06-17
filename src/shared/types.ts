@@ -924,6 +924,8 @@ export type TerminalLayoutSnapshot = {
   root: TerminalPaneLayoutNode | null
   activeLeafId: string | null
   expandedLeafId: string | null
+  /** Transient renderer-only marker for buffers captured while moving a live PTY. */
+  bufferReplayMode?: 'live-transfer'
   /** Live PTY IDs per leaf for in-session remounts such as tab-group moves.
    *  Not used for app restart because PTYs are transient processes. */
   ptyIdsByLeafId?: Record<string, string>

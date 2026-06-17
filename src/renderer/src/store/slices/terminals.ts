@@ -379,6 +379,7 @@ export type TerminalSlice = {
        *  bar can show the provider icon before the agent's first hook event. */
       launchAgent?: TuiAgent
       quickCommandLabel?: string | null
+      initialLayout?: TerminalLayoutSnapshot
     }
   ) => TerminalTab
   openNewTerminalTabInActiveWorkspace: (groupId: string) => Promise<void>
@@ -826,7 +827,7 @@ export const createTerminalSlice: StateCreator<AppState, [], [], TerminalSlice> 
         },
         terminalLayoutsByTabId: {
           ...orphanCleanupPatch.terminalLayoutsByTabId,
-          [tab.id]: emptyLayoutSnapshot()
+          [tab.id]: options?.initialLayout ?? emptyLayoutSnapshot()
         }
       }
     })

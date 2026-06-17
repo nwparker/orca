@@ -201,6 +201,7 @@ export default function SortableTab({
       ref={setNodeRef}
       data-testid="sortable-tab"
       data-tab-id={tab.id}
+      data-unified-tab-id={dragData.unifiedTabId}
       data-tab-title={tabTitle}
       data-pinned={isPinned ? 'true' : 'false'}
       // Why: expose the active/inactive flag as a DOM attribute so E2E specs

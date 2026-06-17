@@ -40,7 +40,11 @@ import {
   serializeTerminalLayout,
   EMPTY_LAYOUT,
   collectLeafIdsInOrder,
-  collectLeafIdsInReplayCreationOrder
+  collectLeafIdsInReplayCreationOrder,
+  restoreScrollbackBuffers,
+  CLEAR_TERMINAL_FOR_LIVE_TRANSFER,
+  POST_REPLAY_LIVE_SNAPSHOT_RESET,
+  POST_REPLAY_MODE_RESET
 } from './layout-serialization'
 
 // ---------------------------------------------------------------------------
@@ -60,6 +64,84 @@ const LEAF_1 = '11111111-1111-4111-8111-111111111111'
 const LEAF_2 = '22222222-2222-4222-8222-222222222222'
 const LEAF_3 = '33333333-3333-4333-8333-333333333333'
 const LEAF_4 = '44444444-4444-4444-8444-444444444444'
+
+describe('restoreScrollbackBuffers', () => {
+  function createRestoreHarness() {
+    const writes: string[] = []
+    const terminal = {
+      rows: 24,
+      buffer: { active: { baseY: 0, viewportY: 0 } },
+      _core: { refresh() {} },
+      write(data: string, callback?: () => void) {
+        writes.push(data)
+        if (!data.includes('\x1b[?2026h') || data.includes('\x1b[?2026l')) {
+          callback?.()
+        }
+      }
+    }
+    const pane = { id: 1, terminal }
+    const manager = {
+      getPanes: () => [pane]
+    }
+    const replayingPanesRef = { current: new Map<number, number>() }
+    return { writes, manager, replayingPanesRef }
+  }
+
+  it('closes synchronized output in the same replay write as the saved buffer', () => {
+    const { writes, manager, replayingPanesRef } = createRestoreHarness()
+
+    restoreScrollbackBuffers(
+      manager as never,
+      { [LEAF_1]: `prompt\r\n\x1b[?2026hpartial frame` },
+      new Map([[LEAF_1, 1]]),
+      replayingPanesRef as never
+    )
+
+    expect(writes).toHaveLength(1)
+    expect(writes[0]).toContain('\x1b[?2026h')
+    expect(writes[0]).toContain('\x1b[?2026l')
+    expect(replayingPanesRef.current.size).toBe(0)
+  })
+
+  it('uses cold replay cleanup and strips unterminated alternate screen by default', () => {
+    const { writes, manager, replayingPanesRef } = createRestoreHarness()
+
+    restoreScrollbackBuffers(
+      manager as never,
+      { [LEAF_1]: `normal scrollback\x1b[?1049halternate screen` },
+      new Map([[LEAF_1, 1]]),
+      replayingPanesRef as never
+    )
+
+    expect(writes).toHaveLength(1)
+    expect(writes[0]).toContain('normal scrollback')
+    expect(writes[0]).not.toContain('alternate screen')
+    expect(writes[0]).toContain(POST_REPLAY_MODE_RESET)
+  })
+
+  it('preserves live transfer alternate screen bytes and uses live replay cleanup', () => {
+    const { writes, manager, replayingPanesRef } = createRestoreHarness()
+
+    restoreScrollbackBuffers(
+      manager as never,
+      { [LEAF_1]: `normal scrollback\x1b[?1049halternate screen\x1b[?1004h` },
+      new Map([[LEAF_1, 1]]),
+      replayingPanesRef as never,
+      { replayMode: 'live-transfer' }
+    )
+
+    expect(writes).toHaveLength(1)
+    expect(writes[0]).toContain('normal scrollback')
+    expect(writes[0]).toContain('\x1b[?1049halternate screen')
+    expect(writes[0]).not.toContain('\x1b[?1004h')
+    expect(writes[0]).toBe(
+      `${CLEAR_TERMINAL_FOR_LIVE_TRANSFER}normal scrollback\x1b[?1049halternate screen${POST_REPLAY_LIVE_SNAPSHOT_RESET}`
+    )
+    expect(writes[0]).not.toContain(`\r\n${POST_REPLAY_LIVE_SNAPSHOT_RESET}`)
+    expect(writes[0]).toContain(POST_REPLAY_LIVE_SNAPSHOT_RESET)
+    expect(writes[0]).not.toContain(POST_REPLAY_MODE_RESET)
+  })
+})
 
 // ---------------------------------------------------------------------------
 // buildFontFamily

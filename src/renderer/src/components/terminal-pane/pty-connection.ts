@@ -77,6 +77,10 @@ import {
 import { createCommandCodeOutputStatusDetector } from './command-code-output-status'
 import type { PtyDataMeta } from './pty-dispatcher'
 import { getEagerPtyBufferHandle } from './pty-dispatcher'
+import {
+  clearPtyTransferAttachMark,
+  shouldAttachTransferredPty
+} from './terminal-pty-transfer-adoption'
 import { createTerminalGitHubPRLinkDetector } from '@/lib/terminal-github-pr-link-detector'
 import {
   CONPTY_DA1_RESPONSE,
@@ -1042,6 +1046,67 @@ export function connectPanePty(
       }
     })
   }
+  let pendingUserKeyboardInputCount = 0
+  let clearPendingUserKeyboardInputTimer: ReturnType<typeof setTimeout> | null = null
+  const clearPendingUserKeyboardInput = (): void => {
+    pendingUserKeyboardInputCount = 0
+    if (clearPendingUserKeyboardInputTimer !== null) {
+      clearTimeout(clearPendingUserKeyboardInputTimer)
+      clearPendingUserKeyboardInputTimer = null
+    }
+  }
+  const markPendingUserKeyboardInput = (): void => {
+    pendingUserKeyboardInputCount += 1
+    if (clearPendingUserKeyboardInputTimer !== null) {
+      clearTimeout(clearPendingUserKeyboardInputTimer)
+    }
+    clearPendingUserKeyboardInputTimer = setTimeout(() => {
+      clearPendingUserKeyboardInput()
+    }, 1000)
+  }
+  const consumePendingUserKeyboardInput = (): boolean => {
+    if (pendingUserKeyboardInputCount <= 0) {
+      return false
+    }
+    pendingUserKeyboardInputCount -= 1
+    if (pendingUserKeyboardInputCount === 0 && clearPendingUserKeyboardInputTimer !== null) {
+      clearTimeout(clearPendingUserKeyboardInputTimer)
+      clearPendingUserKeyboardInputTimer = null
+    }
+    return true
+  }
+  const pendingTerminalInputBeforeConnect: string[] = []
+  const queueTerminalInputBeforeConnect = (data: string): void => {
+    pendingTerminalInputBeforeConnect.push(data)
+  }
+  const flushTerminalInputBeforeConnect = (): void => {
+    if (!transport.isConnected()) {
+      return
+    }
+    const queued = pendingTerminalInputBeforeConnect.splice(0)
+    for (const data of queued) {
+      const currentPtyId = transport.getPtyId()
+      if (
+        isCodexPaneStale({
+          tabId: deps.tabId,
+          worktreeId: deps.worktreeId,
+          panePtyId: currentPtyId
+        })
+      ) {
+        continue
+      }
+      if (currentPtyId && isPtyLocked(currentPtyId)) {
+        continue
+      }
+      if (!transport.sendInput(data)) {
+        pendingTerminalInputBeforeConnect.unshift(data)
+        break
+      }
+      markAcceptedTerminalInputSent()
+      observeAcceptedTerminalInput(data)
+      observeSentTerminalInputIntent(data)
+    }
+  }
   const flushPendingInterruptInference = (): boolean | Promise<boolean> => {
     const pendingWrite = pendingTerminalInputWrite
     if (!pendingWrite) {
@@ -1080,6 +1145,7 @@ export function connectPanePty(
   const onTerminalKeyDown = (event: KeyboardEvent): void => {
     if (isPlainEscapeKeyEvent(event)) {
       setPendingTerminalInputIntent('plain-escape')
+      markPendingUserKeyboardInput()
       // Why: plain Escape produces real terminal input (\x1b), so it is a
       // genuine "user is here" signal and must still dismiss attention before
       // the early return for interrupt-intent inference.
@@ -1115,6 +1181,7 @@ export function connectPanePty(
     ) {
       return
     }
+    markPendingUserKeyboardInput()
     deps.clearTerminalTabUnread(deps.tabId)
     deps.clearTerminalPaneUnread(cacheKey)
     deps.clearWorktreeUnread(deps.worktreeId)
@@ -1166,6 +1233,7 @@ export function connectPanePty(
 
   const onExit = (ptyId: string): void => {
     agentCompletionCoordinator.dispose()
+    clearPtyTransferAttachMark(ptyId)
     clearPanePtyFitBinding()
     deps.syncPanePtyLayoutBinding(pane.id, null)
     deps.clearRuntimePaneTitle(deps.tabId, pane.id)
@@ -1720,9 +1788,11 @@ export function connectPanePty(
     // into xterm for scrollback/cold-restore/snapshot, those queries would
     // otherwise pipe replies into the freshly spawned shell as stray input
     // ("?1;2c", "2026;2$y", OSC color fragments, ...). The replay sites
-    // engage the guard via replayIntoTerminal; here we drop everything
-    // xterm emits while the guard is active. See replay-guard.ts.
-    if (isPaneReplaying(deps.replayingPanesRef, pane.id)) {
+    // engage the guard via replayIntoTerminal; here we drop replay-emitted
+    // auto-replies while still allowing bytes correlated with a focused
+    // terminal keydown. Without that exception, the first post-transfer
+    // keystrokes can be swallowed while restored scrollback is still parsing.
+    if (isPaneReplaying(deps.replayingPanesRef, pane.id) && !consumePendingUserKeyboardInput()) {
       return
     }
     const currentPtyId = transport.getPtyId()
@@ -1747,6 +1817,13 @@ export function connectPanePty(
     // explicit Take back action owns restoring desktop input and dimensions.
     if (currentPtyId && isPtyLocked(currentPtyId)) {
       clearPendingTerminalInputIntent()
+      return
+    }
+    if (!transport.isConnected()) {
+      // Why: pane extraction focuses the destination xterm before the
+      // frame-deferred PTY attach can complete. Preserve those first bytes
+      // instead of dropping the user's immediate post-drop input.
+      queueTerminalInputBeforeConnect(data)
       return
     }
     const intent = pendingTerminalInputIntent
@@ -2078,6 +2155,7 @@ export function connectPanePty(
         cols,
         rows,
         callbacks: {
+          onConnect: flushTerminalInputBeforeConnect,
           onData: dataCallback,
           onReplayData: replayDataCallback,
           onError: reportError
@@ -3323,6 +3401,7 @@ export function connectPanePty(
               rows,
               sessionId: pendingSessionId,
               callbacks: {
+                onConnect: flushTerminalInputBeforeConnect,
                 onData: dataCallback,
                 onReplayData: replayDataCallback,
                 onError: (message) => {
@@ -3451,6 +3530,10 @@ export function connectPanePty(
       currentTabLivePtyIds.includes(candidateReattachSessionId)
         ? candidateReattachSessionId
         : null
+    const transferredLivePtyId =
+      candidateReattachSessionId && shouldAttachTransferredPty(candidateReattachSessionId)
+        ? candidateReattachSessionId
+        : null
     // Why: daemon session IDs encode `${worktreeId}@@${uuid}`. After a daemon
     // crash + cold restore, corrupted or stale session-to-tab mappings can
     // cause a tab in workspace A to hold a ptyId from workspace B. Restoring
@@ -3460,6 +3543,7 @@ export function connectPanePty(
       candidateReattachSessionId &&
       !isRemoteRuntimePtyId(candidateReattachSessionId) &&
       !candidateHasEagerBuffer &&
+      !transferredLivePtyId &&
       isSessionOwnedByWorktree(candidateReattachSessionId, deps.worktreeId)
         ? candidateReattachSessionId
         : null
@@ -3491,6 +3575,7 @@ export function connectPanePty(
         rows,
         sessionId: deferredReattachSessionId,
         callbacks: {
+          onConnect: flushTerminalInputBeforeConnect,
           onData: dataCallback,
           onReplayData: replayDataCallback,
           onError: (message) => {
@@ -3552,14 +3637,20 @@ export function connectPanePty(
           prepareColdRestoreAgentResumeCommand()
           startFreshSpawn()
         })
-    } else if (detachedRemoteLeafPtyId || detachedLivePtyId || eagerLivePtyId) {
+    } else if (
+      detachedRemoteLeafPtyId ||
+      detachedLivePtyId ||
+      eagerLivePtyId ||
+      transferredLivePtyId
+    ) {
       // Why: mirrored web terminal layouts mount one pane per host leaf.
       // Later leaves already have a pane transport, but must still attach to
       // their exact remote PTY instead of spawning replacement host tabs.
       // eagerLivePtyId covers a still-live background PTY (e.g. an automation
       // agent) whose restored id may not equal the tab ptyId yet still has a
       // live eager buffer to adopt.
-      const attachPtyId = detachedRemoteLeafPtyId ?? detachedLivePtyId ?? eagerLivePtyId!
+      const attachPtyId =
+        detachedRemoteLeafPtyId ?? detachedLivePtyId ?? eagerLivePtyId ?? transferredLivePtyId!
       recordPtyConnectDiagnostic(`pane=${pane.id} -> ATTACH detached=${attachPtyId}`)
       allowInitialIdleCacheSeed = false
       // Why: surface synchronous attach failures (e.g., the PTY died between
@@ -3579,11 +3670,13 @@ export function connectPanePty(
           cols,
           rows,
           callbacks: {
+            onConnect: flushTerminalInputBeforeConnect,
             onData: dataCallback,
             onReplayData: replayDataCallback,
             onError: reportError
           }
         })
+        setPanePtyFitBinding(attachPtyId)
         deps.syncPanePtyLayoutBinding(pane.id, attachPtyId)
         deps.updateTabPtyId(deps.tabId, attachPtyId)
         agentCompletionCoordinator.startProcessTracking()
@@ -3591,6 +3684,9 @@ export function connectPanePty(
           registerPaneSerializerFor(attachPtyId)
         }
       } catch (err) {
+        if (attachPtyId === transferredLivePtyId) {
+          clearPtyTransferAttachMark(attachPtyId)
+        }
         reportError(err instanceof Error ? err.message : String(err))
         deps.clearTabPtyId(deps.tabId, attachPtyId)
         startFreshSpawn()
@@ -3634,6 +3730,7 @@ export function connectPanePty(
               cols,
               rows,
               callbacks: {
+                onConnect: flushTerminalInputBeforeConnect,
                 onData: dataCallback,
                 onReplayData: replayDataCallback,
                 onError: reportError
@@ -3664,6 +3761,7 @@ export function connectPanePty(
         terminalKeyTarget.removeEventListener('keydown', onTerminalKeyDown, { capture: true })
       }
       clearPendingTerminalInputIntent()
+      clearPendingUserKeyboardInput()
       pendingTerminalInputWrite = null
       interruptInference.dispose()
       clearTitleOnlyInterruptTimer()

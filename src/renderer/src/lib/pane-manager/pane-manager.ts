@@ -140,9 +140,10 @@ export class PaneManager {
     })
   }
 
-  closePane(paneId: number): void {
+  closePane(paneId: number, opts?: { preservePty?: boolean }): void {
     closeManagedPane({
       paneId,
+      closeReason: opts?.preservePty ? 'transfer' : 'close',
       activePaneId: this.activePaneId,
       panes: this.panes,
       root: this.root,
@@ -378,7 +379,8 @@ export class PaneManager {
         this.requestPaneReparentFrame(callback)
       },
       onLayoutChanged: this.options.onLayoutChanged,
-      onDragActiveChange: this.options.onPaneDragActiveChange
+      onDragActiveChange: this.options.onPaneDragActiveChange,
+      onPaneDropAsNewTab: this.options.onPaneDropAsNewTab
     }
   }
 

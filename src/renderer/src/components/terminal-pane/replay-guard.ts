@@ -18,17 +18,50 @@ import { writeForegroundTerminalChunk } from '@/lib/pane-manager/pane-terminal-f
 // writes, and decrements in xterm's write-completion callback. The onData
 // handler in pty-connection.ts drops data while the counter is non-zero.
 //
-// The guard window is bounded by xterm's own parse completion, not a
-// wall-clock timer, so only replies generated while parsing the replayed
-// bytes are suppressed. User keystrokes typed after the replay completes
-// are unaffected. In practice replay finishes within milliseconds — before
-// the user could meaningfully type — so the few-ms window where real input
-// would also be dropped is acceptable relative to correctness.
+// The guard window is normally bounded by xterm's own parse completion, so
+// only replies generated while parsing the replayed bytes are suppressed.
+// Some renderer state (notably restored synchronized output) can strand an
+// xterm write callback indefinitely, so a short safety release prevents real
+// user input from being black-holed forever.
 
 export type ReplayingPanesRef = React.RefObject<Map<number, number>>
 
+const REPLAY_GUARD_SAFETY_RELEASE_MS = 1000
+
 export function isPaneReplaying(ref: ReplayingPanesRef, paneId: number): boolean {
   return (ref.current.get(paneId) ?? 0) > 0
+}
+
+function releaseReplayGuard(map: Map<number, number>, paneId: number): void {
+  const remaining = (map.get(paneId) ?? 1) - 1
+  if (remaining <= 0) {
+    map.delete(paneId)
+  } else {
+    map.set(paneId, remaining)
+  }
+}
+
+function makeReplayGuardRelease(
+  map: Map<number, number>,
+  paneId: number,
+  onRelease?: () => void
+): () => void {
+  let released = false
+  let timer: ReturnType<typeof setTimeout> | null = null
+  const release = (): void => {
+    if (released) {
+      return
+    }
+    released = true
+    if (timer !== null) {
+      clearTimeout(timer)
+      timer = null
+    }
+    releaseReplayGuard(map, paneId)
+    onRelease?.()
+  }
+  timer = setTimeout(release, REPLAY_GUARD_SAFETY_RELEASE_MS)
+  return release
 }
 
 /** Writes `data` into the pane's terminal with the replay guard engaged,
@@ -45,20 +78,13 @@ export function replayIntoTerminal(
   }
   const map = replayingPanesRef.current
   map.set(pane.id, (map.get(pane.id) ?? 0) + 1)
-  const onParsed = (): void => {
-    const remaining = (map.get(pane.id) ?? 1) - 1
-    if (remaining <= 0) {
-      map.delete(pane.id)
-    } else {
-      map.set(pane.id, remaining)
-    }
-  }
+  const release = makeReplayGuardRelease(map, pane.id)
   // Why: hidden/snapshot replay bypasses the live foreground write path, but
   // WebGL/canvas renderers still need a post-parse repaint to drop stale cells.
   writeForegroundTerminalChunk(pane.terminal, data, {
     forceViewportRefresh: true,
     followupViewportRefresh: true,
-    onParsed
+    onParsed: release
   })
 }
 
@@ -73,18 +99,11 @@ export function replayIntoTerminalAsync(
   const map = replayingPanesRef.current
   map.set(pane.id, (map.get(pane.id) ?? 0) + 1)
   return new Promise((resolve) => {
+    const release = makeReplayGuardRelease(map, pane.id, resolve)
     writeForegroundTerminalChunk(pane.terminal, data, {
       forceViewportRefresh: true,
       followupViewportRefresh: true,
-      onParsed: () => {
-        const remaining = (map.get(pane.id) ?? 1) - 1
-        if (remaining <= 0) {
-          map.delete(pane.id)
-        } else {
-          map.set(pane.id, remaining)
-        }
-        resolve()
-      }
+      onParsed: release
     })
   })
 }

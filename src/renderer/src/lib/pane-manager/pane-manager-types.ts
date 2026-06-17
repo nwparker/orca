@@ -27,6 +27,13 @@ export type PaneSpawnHints = {
 export type ClosedPaneInfo = {
   paneId: number
   leafId: TerminalLeafId
+  closeReason?: 'close' | 'transfer'
+}
+
+export type PaneDropAsNewTabPlacement = {
+  groupId: string
+  targetUnifiedTabId?: string
+  side?: 'left' | 'right'
 }
 
 export type PaneManagerOptions = {
@@ -37,6 +44,7 @@ export type PaneManagerOptions = {
   /** Why: Electron webviews can steal pointer streams from renderer-owned
    *  pane drags unless callers temporarily put them in pointer passthrough. */
   onPaneDragActiveChange?: (active: boolean) => void
+  onPaneDropAsNewTab?: (pane: ManagedPane, placement?: PaneDropAsNewTabPlacement) => boolean
   terminalOptions?: (paneId: number) => Partial<ITerminalOptions>
   onLinkClick?: (event: MouseEvent | undefined, url: string) => void
   initialRenderingSuspended?: boolean

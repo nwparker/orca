@@ -67,6 +67,14 @@ describe('terminal replay state reset', () => {
     expect(POST_REPLAY_LIVE_SNAPSHOT_RESET).not.toContain(RESET_KITTY_KEYBOARD_PROTOCOL)
   })
 
+  it('ends stale synchronized output in replay reset bundles', () => {
+    const synchronizedOutputEnd = '\x1b[?2026l'
+
+    expect(POST_REPLAY_MODE_RESET).toContain(synchronizedOutputEnd)
+    expect(POST_REPLAY_REATTACH_RESET).toContain(synchronizedOutputEnd)
+    expect(POST_REPLAY_LIVE_SNAPSHOT_RESET).toContain(synchronizedOutputEnd)
+  })
+
   it('clears stale DECSCUSR cursor overrides after live reattach replay', async () => {
     const term = new Terminal({
       cols: 80,

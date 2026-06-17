@@ -5,6 +5,7 @@ import type { CSSProperties } from 'react'
 import type { IDisposable } from '@xterm/xterm'
 import { X } from 'lucide-react'
 import { useAppStore } from '../../store'
+import type { AppState } from '../../store/types'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useLinkRoutingPreferenceDialog } from '@/components/link-routing-preference-dialog'
@@ -77,12 +78,17 @@ import { closeWebRuntimeTerminal } from '@/runtime/web-runtime-session'
 import { isPrimarySelectionEnabled, readPrimarySelectionText } from '@/lib/primary-selection'
 import { WORKSPACE_FILE_PATH_MIME } from '@/lib/workspace-file-drag'
 import { isTerminalSessionStateSaveFailure } from '../../../../shared/terminal-session-state-save-failure'
+import { markPtyForTransferAttach } from './terminal-pty-transfer-adoption'
 import {
   isSyntheticSinglePaneTitle,
   sanitizeTerminalLayoutPaneTitles
 } from '@/lib/terminal-pane-title-sanitization'
 import { planTerminalLiveLayoutInsertions } from './terminal-live-layout-reconciliation'
-import type { TerminalQuickCommand, TerminalQuickCommandScope } from '../../../../shared/types'
+import type {
+  TerminalLayoutSnapshot,
+  TerminalQuickCommand,
+  TerminalQuickCommandScope
+} from '../../../../shared/types'
 import { FLOATING_TERMINAL_WORKTREE_ID } from '../../../../shared/constants'
 import { getRepoIdFromWorktreeId } from '../../../../shared/worktree-id'
 import {
@@ -98,6 +104,8 @@ import { keybindingMatchesAction } from '../../../../shared/keybindings'
 import { pasteTerminalClipboard } from './terminal-clipboard-paste'
 import { scheduleImagePasteWebglAtlasRecovery } from './terminal-webgl-paste-recovery'
 import { restoreTerminalFitToDesktop, restoreTerminalFitsToDesktop } from './terminal-fit-restore'
+import { flushTerminalOutput } from '@/lib/pane-manager/pane-terminal-output-scheduler'
+import type { PaneDropAsNewTabPlacement } from '@/lib/pane-manager/pane-manager-types'
 
 // Why: registry lives in a leaf module so the store slice can import it
 // without re-entering the `slice → TerminalPane → store → slice` cycle
@@ -162,6 +170,107 @@ function formatClipboardImagePasteError(error: unknown): string {
 
 function isXtermHelperTextarea(target: EventTarget | null): target is HTMLElement {
   return target instanceof HTMLElement && target.classList.contains('xterm-helper-textarea')
+}
+
+function buildTransferredPaneLayout(args: {
+  pane: ManagedPane
+  ptyId: string | null
+  existingLayout: TerminalLayoutSnapshot | undefined
+  title: string | undefined
+}): TerminalLayoutSnapshot {
+  const { pane, ptyId, existingLayout, title } = args
+  const layout: TerminalLayoutSnapshot = {
+    root: { type: 'leaf', leafId: pane.leafId },
+    activeLeafId: pane.leafId,
+    expandedLeafId: null
+  }
+  try {
+    flushTerminalOutput(pane.terminal)
+    const buffer = pane.serializeAddon.serialize({
+      scrollback: pane.terminal.options.scrollback ?? 10_000
+    })
+    if (buffer) {
+      layout.buffersByLeafId = { [pane.leafId]: buffer }
+    }
+  } catch {
+    const existingBuffer = existingLayout?.buffersByLeafId?.[pane.leafId]
+    if (existingBuffer) {
+      layout.buffersByLeafId = { [pane.leafId]: existingBuffer }
+    }
+  }
+  const scrollbackRef = existingLayout?.scrollbackRefsByLeafId?.[pane.leafId]
+  if (scrollbackRef) {
+    layout.scrollbackRefsByLeafId = { [pane.leafId]: scrollbackRef }
+  }
+  if (ptyId) {
+    layout.ptyIdsByLeafId = { [pane.leafId]: ptyId }
+    // Why: pane-to-tab moves keep the PTY alive; replaying its current xterm
+    // buffer must preserve live TUI modes instead of applying cold-shell cleanup.
+    if (layout.buffersByLeafId) {
+      layout.bufferReplayMode = 'live-transfer'
+    }
+  }
+  const paneTitle = title ?? existingLayout?.titlesByLeafId?.[pane.leafId]
+  if (paneTitle) {
+    layout.titlesByLeafId = { [pane.leafId]: paneTitle }
+  }
+  return layout
+}
+
+function moveTransferredPaneKeyState(
+  oldPaneKey: string,
+  newPaneKey: string,
+  newTabId: string
+): void {
+  useAppStore.setState((state): Partial<AppState> => {
+    const patch: Partial<AppState> = {}
+    const liveStatus = state.agentStatusByPaneKey[oldPaneKey]
+    if (liveStatus) {
+      const next = { ...state.agentStatusByPaneKey }
+      delete next[oldPaneKey]
+      next[newPaneKey] = { ...liveStatus, paneKey: newPaneKey, tabId: newTabId }
+      patch.agentStatusByPaneKey = next
+      patch.agentStatusEpoch = state.agentStatusEpoch + 1
+    }
+    const orchestration = state.runtimeAgentOrchestrationByPaneKey[oldPaneKey]
+    if (orchestration) {
+      const next = { ...state.runtimeAgentOrchestrationByPaneKey }
+      delete next[oldPaneKey]
+      next[newPaneKey] = orchestration
+      patch.runtimeAgentOrchestrationByPaneKey = next
+    }
+    if (oldPaneKey in state.cacheTimerByKey) {
+      const next = { ...state.cacheTimerByKey }
+      next[newPaneKey] = next[oldPaneKey]
+      delete next[oldPaneKey]
+      patch.cacheTimerByKey = next
+    }
+    if (oldPaneKey in state.unreadTerminalPanes) {
+      const next = { ...state.unreadTerminalPanes }
+      delete next[oldPaneKey]
+      next[newPaneKey] = true
+      patch.unreadTerminalPanes = next
+    }
+    if (oldPaneKey in state.unreadAgentCompletionPanes) {
+      const next = { ...state.unreadAgentCompletionPanes }
+      delete next[oldPaneKey]
+      next[newPaneKey] = true
+      patch.unreadAgentCompletionPanes = next
+    }
+    if (oldPaneKey in state.lastTerminalInputAtByPaneKey) {
+      const next = { ...state.lastTerminalInputAtByPaneKey }
+      next[newPaneKey] = next[oldPaneKey]
+      delete next[oldPaneKey]
+      patch.lastTerminalInputAtByPaneKey = next
+    }
+    if (oldPaneKey in state.acknowledgedAgentsByPaneKey) {
+      const next = { ...state.acknowledgedAgentsByPaneKey }
+      next[newPaneKey] = next[oldPaneKey]
+      delete next[oldPaneKey]
+      patch.acknowledgedAgentsByPaneKey = next
+    }
+    return patch
+  })
 }
 
 export default function TerminalPane({
@@ -617,6 +726,11 @@ export default function TerminalPane({
     })
     if (Object.keys(mergedBuffers).length > 0) {
       layout.buffersByLeafId = mergedBuffers
+      if (existing?.bufferReplayMode === 'live-transfer') {
+        // Why: early layout syncs can run before the live-transfer cleanup
+        // frame; keep the marker paired with its one-shot buffer across remounts.
+        layout.bufferReplayMode = 'live-transfer'
+      }
     }
     const mergedScrollbackRefs = mergeCapturedLeafState({
       prior: existing?.scrollbackRefsByLeafId,
@@ -857,6 +971,77 @@ export default function TerminalPane({
     state.showRightSidebarSearch({ query: selectedText })
   }, [])
 
+  const handlePaneDropAsNewTab = useCallback(
+    (pane: ManagedPane, placement?: PaneDropAsNewTabPlacement): boolean => {
+      const manager = managerRef.current
+      if (!manager || manager.getPanes().length <= 1) {
+        return false
+      }
+      const transport = paneTransportsRef.current.get(pane.id)
+      const ptyId = transport?.getPtyId() ?? null
+      const existingLayout = useAppStore.getState().terminalLayoutsByTabId[tabId]
+      const paneTitle = paneTitlesRef.current[pane.id]
+      const initialLayout = buildTransferredPaneLayout({
+        pane,
+        ptyId,
+        existingLayout,
+        title: paneTitle
+      })
+      const oldPaneKey = makePaneKey(tabId, pane.leafId)
+      const store = useAppStore.getState()
+      // Why: PaneManager owns this callback for the mount lifetime, so the
+      // fallback group must come from live store state instead of a render capture.
+      const fallbackGroupId =
+        getCachedTerminalGroupIdForWorktree(store.unifiedTabsByWorktree, worktreeId, tabId) ??
+        store.activeGroupIdByWorktree[worktreeId] ??
+        null
+      const targetGroupId = placement?.groupId ?? fallbackGroupId ?? undefined
+      const panePtyBinding = panePtyBindingsRef.current.get(pane.id)
+      // Why: the destination tab may mount immediately. Release the source
+      // renderer's xterm/PTY handlers first so the remount is the sole owner.
+      panePtyBinding?.dispose()
+      panePtyBindingsRef.current.delete(pane.id)
+      transport?.detach?.()
+      paneTransportsRef.current.delete(pane.id)
+      if (ptyId) {
+        // Why: the moved PTY is still live in this renderer session. The new
+        // tab must attach to it rather than daemon-reattach a saved session id.
+        markPtyForTransferAttach(ptyId)
+      }
+      const newTab = store.createTab(worktreeId, targetGroupId, undefined, {
+        initialPtyId: ptyId ?? undefined,
+        initialLayout,
+        recordInteraction: true
+      })
+      const latestStore = useAppStore.getState()
+      const targetGroup = targetGroupId
+        ? latestStore.groupsByWorktree[worktreeId]?.find((group) => group.id === targetGroupId)
+        : null
+      if (targetGroup && placement?.targetUnifiedTabId) {
+        const withoutNewTab = targetGroup.tabOrder.filter((id) => id !== newTab.id)
+        const targetIndex = withoutNewTab.indexOf(placement.targetUnifiedTabId)
+        if (targetIndex !== -1) {
+          const insertIndex = targetIndex + (placement.side === 'right' ? 1 : 0)
+          withoutNewTab.splice(insertIndex, 0, newTab.id)
+          latestStore.reorderUnifiedTabs(targetGroup.id, withoutNewTab, {
+            recordInteraction: false
+          })
+        }
+      }
+      const newPaneKey = makePaneKey(newTab.id, pane.leafId)
+      moveTransferredPaneKeyState(oldPaneKey, newPaneKey, newTab.id)
+      if (ptyId) {
+        clearTabPtyId(tabId, ptyId)
+      }
+      removedTitleLeafIdsRef.current.delete(pane.leafId)
+      clearedScrollbackLeafIdsRef.current.delete(pane.leafId)
+      store.setActiveTabType('terminal')
+      manager.closePane(pane.id, { preservePty: true })
+      return true
+    },
+    [clearTabPtyId, tabId, worktreeId]
+  )
+
   const handleConfirmClose = useCallback(
     (dontAskAgain: boolean) => {
       if (pendingCloseConfirmation === null) {
@@ -930,7 +1115,8 @@ export default function TerminalPane({
     setPaneTitles,
     paneTitlesRef,
     setRenamingPaneId,
-    setPaneCount
+    setPaneCount,
+    onPaneDropAsNewTab: handlePaneDropAsNewTab
   })
 
   useEffect(() => {

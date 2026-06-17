@@ -2,7 +2,8 @@
 import { useEffect, useRef } from 'react'
 import type { IDisposable, Terminal } from '@xterm/xterm'
 import type { ParsedAgentStatusPayload } from '../../../../shared/agent-status-types'
-import { PaneManager } from '@/lib/pane-manager/pane-manager'
+import { PaneManager, type ManagedPane } from '@/lib/pane-manager/pane-manager'
+import type { PaneDropAsNewTabPlacement } from '@/lib/pane-manager/pane-manager-types'
 import { consumePendingWebRuntimeSplitMirrorTelemetry } from '@/runtime/web-runtime-session'
 import { resolveTerminalCursorInactiveStyle } from '@/lib/pane-manager/pane-terminal-options'
 import { buildWindowsPtyCompatibilityOptions } from '@/lib/pane-manager/windows-pty-compatibility'
@@ -203,6 +204,7 @@ type UseTerminalPaneLifecycleDeps = {
   // imperative managerRef.getPanes().length is not reactive, so without this
   // dispatcher structural changes wouldn't trigger dependent effects.
   setPaneCount: React.Dispatch<React.SetStateAction<number>>
+  onPaneDropAsNewTab?: (pane: ManagedPane, placement?: PaneDropAsNewTabPlacement) => boolean
 }
 
 export function suppressIntentionalPaneCloseExit(
@@ -375,7 +377,8 @@ export function useTerminalPaneLifecycle({
   setPaneTitles,
   paneTitlesRef,
   setRenamingPaneId,
-  setPaneCount
+  setPaneCount,
+  onPaneDropAsNewTab
 }: UseTerminalPaneLifecycleDeps): void {
   const systemPrefersDarkRef = useRef(systemPrefersDark)
   systemPrefersDarkRef.current = systemPrefersDark
@@ -909,27 +912,35 @@ export function useTerminalPaneLifecycle({
         // cleared and a same-frame live→gone transition cannot re-snapshot
         // it via the retention sync. This is pane-keyed state, so it must
         // clear even if the PTY transport was already removed.
+        const isTransferClose = closedPane?.closeReason === 'transfer'
         const leafId = closedPane?.leafId
-        if (leafId) {
+        if (leafId && !isTransferClose) {
           const paneKey = makePaneKey(tabId, leafId)
           useAppStore.getState().setCacheTimerStartedAt(paneKey, null)
           clearTerminalPaneUnread(paneKey)
           useAppStore.getState().dropAgentStatus(paneKey)
         }
         if (transport) {
-          const ptyId = suppressIntentionalPaneCloseExit(
-            transport,
-            useAppStore.getState().suppressPtyExit
-          )
-          if (ptyId) {
-            // Why: user/CLI pane closes intentionally tear down this PTY after
-            // PaneManager has already promoted the sibling. Suppress that exit
-            // so the last-surviving pane is not mistaken for an exited tab.
-            syncPanePtyLayoutBinding(paneId, null)
-            clearTabPtyId(tabId, ptyId)
+          if (isTransferClose) {
+            // Why: extracting a pane into a tab remounts the same PTY under a
+            // new pane key; detach renderer listeners without killing it.
+            transport.detach?.()
+            paneTransportsRef.current.delete(paneId)
+          } else {
+            const ptyId = suppressIntentionalPaneCloseExit(
+              transport,
+              useAppStore.getState().suppressPtyExit
+            )
+            if (ptyId) {
+              // Why: user/CLI pane closes intentionally tear down this PTY after
+              // PaneManager has already promoted the sibling. Suppress that exit
+              // so the last-surviving pane is not mistaken for an exited tab.
+              syncPanePtyLayoutBinding(paneId, null)
+              clearTabPtyId(tabId, ptyId)
+            }
+            transport.destroy?.()
+            paneTransportsRef.current.delete(paneId)
           }
-          transport.destroy?.()
-          paneTransportsRef.current.delete(paneId)
         }
         clearRuntimePaneTitle(tabId, paneId)
         paneFontSizesRef.current.delete(paneId)
@@ -1005,6 +1016,7 @@ export function useTerminalPaneLifecycle({
         releaseWebviewDragPassthrough?.()
         releaseWebviewDragPassthrough = null
       },
+      onPaneDropAsNewTab,
       terminalOptions: () => {
         const currentSettings = settingsRef.current
         const terminalFontWeights = resolveTerminalFontWeights(currentSettings?.terminalFontWeight)
@@ -1082,18 +1094,89 @@ export function useTerminalPaneLifecycle({
       window.__paneManagers = window.__paneManagers ?? new Map()
       window.__paneManagers.set(tabId, manager)
     }
+    let liveTransferRestoreFrame: number | null = null
+    let liveTransferBufferCleanupFrame: number | null = null
+    let liveTransferRestoreTimer: ReturnType<typeof setTimeout> | null = null
+    const cancelLiveTransferBufferCleanup = (): void => {
+      if (liveTransferRestoreFrame !== null) {
+        cancelAnimationFrame(liveTransferRestoreFrame)
+        liveTransferRestoreFrame = null
+      }
+      if (liveTransferRestoreTimer !== null) {
+        clearTimeout(liveTransferRestoreTimer)
+        liveTransferRestoreTimer = null
+      }
+      if (liveTransferBufferCleanupFrame !== null) {
+        cancelAnimationFrame(liveTransferBufferCleanupFrame)
+        liveTransferBufferCleanupFrame = null
+      }
+    }
     const restoredPaneByLeafId = replayTerminalLayout(manager, initialLayoutRef.current, isActive)
 
     const restoredBuffers = initialLayoutRef.current.buffersByLeafId
-    restoreScrollbackBuffers(manager, restoredBuffers, restoredPaneByLeafId, replayingPanesRef)
-    if (restoredBuffers && initialLayoutRef.current.scrollbackRefsByLeafId) {
+    const bufferReplayMode = initialLayoutRef.current.bufferReplayMode
+    const restoreBuffers = (): void => {
+      restoreScrollbackBuffers(manager, restoredBuffers, restoredPaneByLeafId, replayingPanesRef, {
+        replayMode: bufferReplayMode
+      })
+    }
+    const removeRestoredBuffersFromInitialLayout = (): void => {
       const layoutWithoutRestoredBuffers = { ...initialLayoutRef.current }
       delete layoutWithoutRestoredBuffers.buffersByLeafId
+      delete layoutWithoutRestoredBuffers.bufferReplayMode
       initialLayoutRef.current = layoutWithoutRestoredBuffers
-      if (initialLayoutHadBuffers) {
+    }
+    const scheduleLiveTransferBufferCleanup = (buffers: Record<string, string>): void => {
+      const restoredBufferEntries = Object.entries(buffers)
+      // Why: React dev remounts this pane immediately. Keep the one-shot
+      // live snapshot in Zustand until the mount survives a frame, otherwise
+      // the remount loses the only copy and paints a blank terminal.
+      liveTransferBufferCleanupFrame = requestAnimationFrame(() => {
+        liveTransferBufferCleanupFrame = null
+        const currentLayout = useAppStore.getState().terminalLayoutsByTabId[tabId]
+        if (currentLayout?.bufferReplayMode !== 'live-transfer') {
+          return
+        }
+        const stillSameBuffers = restoredBufferEntries.every(
+          ([leafId, buffer]) => currentLayout.buffersByLeafId?.[leafId] === buffer
+        )
+        if (!stillSameBuffers) {
+          return
+        }
+        const nextLayout = { ...currentLayout }
+        delete nextLayout.buffersByLeafId
+        delete nextLayout.bufferReplayMode
+        useAppStore.getState().setTabLayout(tabId, nextLayout)
+      })
+    }
+    if (restoredBuffers && bufferReplayMode === 'live-transfer') {
+      // Why: a just-created xterm can be opened but still lose an immediate
+      // alternate-screen replay during the first mount/fit/attach churn. Defer
+      // live transfer paint until the next frame after initial fit; cold
+      // restart remains synchronous below.
+      liveTransferRestoreFrame = requestAnimationFrame(() => {
+        liveTransferRestoreFrame = requestAnimationFrame(() => {
+          liveTransferRestoreFrame = null
+          // Why: attach() resizes the live PTY and shells can repaint the
+          // prompt shortly after. Paint the transfer snapshot after that
+          // resize redraw so prompt cursor math does not leak from the old pane.
+          liveTransferRestoreTimer = setTimeout(() => {
+            liveTransferRestoreTimer = null
+            restoreBuffers()
+            removeRestoredBuffersFromInitialLayout()
+            scheduleLiveTransferBufferCleanup(restoredBuffers)
+          }, 80)
+        })
+      })
+    } else {
+      restoreBuffers()
+      if (restoredBuffers && initialLayoutRef.current.scrollbackRefsByLeafId) {
+        removeRestoredBuffersFromInitialLayout()
         // Why: raw replay bytes belong only to this mount. Drop legacy hydrated
         // copies from Zustand so normal session writes stay ref-only.
-        useAppStore.getState().setTabLayout(tabId, layoutWithoutRestoredBuffers)
+        if (initialLayoutHadBuffers) {
+          useAppStore.getState().setTabLayout(tabId, initialLayoutRef.current)
+        }
       }
     }
 
@@ -1348,6 +1431,7 @@ export function useTerminalPaneLifecycle({
       for (const panePtyBinding of panePtyBindings.values()) {
         panePtyBinding.dispose()
       }
+      cancelLiveTransferBufferCleanup()
       panePtyBindings.clear()
       paneTransports.clear()
       manager.destroy()
