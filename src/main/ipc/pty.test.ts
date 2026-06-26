@@ -4811,7 +4811,7 @@ describe('registerPtyHandlers', () => {
     const env = spawnCall[2].env as Record<string, string>
     expect(spawnCall[0]).toBe('wsl.exe')
     expect(env.ORCA_TERMINAL_HANDLE).toBe('term_wsl')
-    expect(env.WSLENV).toBe('ORCA_TERMINAL_HANDLE/u')
+    expect(env.WSLENV).toBe('ORCA_TERMINAL_HANDLE/u:POWERLEVEL9K_DISABLE_CONFIGURATION_WIZARD')
   })
 
   describe('Windows UTF-8 code page', () => {
