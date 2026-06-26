@@ -131,7 +131,7 @@ export class SshPtyProvider implements IPtyProvider {
       cols: opts.cols,
       rows: opts.rows,
       cwd: opts.cwd,
-      env: this.withRemoteCliBridgeEnv(opts.env),
+      env: this.withRemoteCliBridgeEnv(opts.env, opts.envToDelete),
       // Why: the relay's plugin-overlay env augmenter needs to know which
       // Pi-compatible agent is being launched (`pi` vs `omp`) so it mirrors
       // the right `~/.<kind>/agent` source dir on the remote disk. The
@@ -150,9 +150,15 @@ export class SshPtyProvider implements IPtyProvider {
     }
   }
 
-  private withRemoteCliBridgeEnv(env: Record<string, string> | undefined): Record<string, string> {
+  private withRemoteCliBridgeEnv(
+    env: Record<string, string> | undefined,
+    envToDelete?: readonly string[]
+  ): Record<string, string> {
     const merged = { ...env }
-    seedPowerlevel10kWizardEnv(merged)
+    for (const key of envToDelete ?? []) {
+      delete merged[key]
+    }
+    seedPowerlevel10kWizardEnv(merged, { envToDelete })
     if (!this.remoteCliBridgeEnv) {
       return merged
     }

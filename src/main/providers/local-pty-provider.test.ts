@@ -61,6 +61,7 @@ vi.mock('../wsl', () => ({
 }))
 
 import { LocalPtyProvider } from './local-pty-provider'
+import { POWERLEVEL10K_WIZARD_DISABLE_ENV } from '../pty/powerlevel10k-wizard-env'
 
 describe('LocalPtyProvider', () => {
   let provider: LocalPtyProvider
@@ -546,6 +547,22 @@ describe('LocalPtyProvider', () => {
       expect(spawnCall[2].env.WSLENV).toBe(
         'ORCA_TERMINAL_HANDLE/u:POWERLEVEL9K_DISABLE_CONFIGURATION_WIZARD'
       )
+    })
+
+    it('does not mark deleted Powerlevel10k wizard env for WSL import', async () => {
+      Object.defineProperty(process, 'platform', { configurable: true, value: 'win32' })
+
+      await provider.spawn({
+        cols: 80,
+        rows: 24,
+        cwd: '\\\\wsl.localhost\\Ubuntu\\home\\jin\\repo',
+        envToDelete: [POWERLEVEL10K_WIZARD_DISABLE_ENV]
+      })
+
+      const spawnCall = spawnMock.mock.calls.at(-1)!
+      expect(spawnCall[0]).toBe('wsl.exe')
+      expect(spawnCall[2].env[POWERLEVEL10K_WIZARD_DISABLE_ENV]).toBeUndefined()
+      expect(spawnCall[2].env.WSLENV ?? '').not.toContain(POWERLEVEL10K_WIZARD_DISABLE_ENV)
     })
 
     it('does not inherit parent Orca pane identity when caller omits pane env', async () => {

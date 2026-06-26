@@ -538,7 +538,11 @@ export class LocalPtyProvider implements IPtyProvider {
       }
     }
     seedPowerlevel10kWizardEnv(finalEnv, { envToDelete: args.envToDelete })
-    if (process.platform === 'win32' && pathWin32.basename(shellPath).toLowerCase() === 'wsl.exe') {
+    if (
+      finalEnv[POWERLEVEL10K_WIZARD_DISABLE_ENV] !== undefined &&
+      process.platform === 'win32' &&
+      pathWin32.basename(shellPath).toLowerCase() === 'wsl.exe'
+    ) {
       addWslEnvKeys(finalEnv, [POWERLEVEL10K_WIZARD_DISABLE_ENV])
     }
     if (!wslInfo && process.platform !== 'win32') {

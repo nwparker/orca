@@ -610,7 +610,11 @@ export function createPtySubprocess(opts: PtySubprocessOptions): SubprocessHandl
     shellArgs = shellLaunch?.args ?? ['-l']
   }
   seedPowerlevel10kWizardEnv(env, { envToDelete: opts.envToDelete })
-  if (process.platform === 'win32' && pathWin32.basename(shellPath).toLowerCase() === 'wsl.exe') {
+  if (
+    env[POWERLEVEL10K_WIZARD_DISABLE_ENV] !== undefined &&
+    process.platform === 'win32' &&
+    pathWin32.basename(shellPath).toLowerCase() === 'wsl.exe'
+  ) {
     addWslEnvKeys(env, [POWERLEVEL10K_WIZARD_DISABLE_ENV])
   }
   promoteAgentTeamsShimPath(env, opts.env?.PATH)

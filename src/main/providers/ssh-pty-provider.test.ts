@@ -84,6 +84,24 @@ describe('SshPtyProvider', () => {
       })
     })
 
+    it('honors requests to delete the remote Powerlevel10k wizard env value', async () => {
+      mux.request.mockResolvedValue({ id: 'pty-2' })
+
+      await provider.spawn({
+        cols: 120,
+        rows: 40,
+        env: { [POWERLEVEL10K_WIZARD_DISABLE_ENV]: 'already-set' },
+        envToDelete: [POWERLEVEL10K_WIZARD_DISABLE_ENV]
+      })
+
+      expect(mux.request).toHaveBeenCalledWith('pty.spawn', {
+        cols: 120,
+        rows: 40,
+        cwd: undefined,
+        env: {}
+      })
+    })
+
     it('injects the relay-backed Orca CLI bridge into remote PTY env', async () => {
       mux.request.mockResolvedValue({ id: 'pty-bridge' })
       provider = new SshPtyProvider('conn-1', mux as never, {

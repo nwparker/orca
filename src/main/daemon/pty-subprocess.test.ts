@@ -1866,6 +1866,33 @@ describe('createPtySubprocess', () => {
     )
   })
 
+  it('does not mark deleted Powerlevel10k wizard env for daemon WSL import', () => {
+    const proc = mockPtyProcess()
+    spawnMock.mockReturnValue(proc)
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform')
+
+    Object.defineProperty(process, 'platform', { value: 'win32' })
+
+    try {
+      createPtySubprocess({
+        sessionId: 'test',
+        cols: 80,
+        rows: 24,
+        cwd: '\\\\wsl.localhost\\Ubuntu\\home\\jin\\repo',
+        envToDelete: [POWERLEVEL10K_WIZARD_DISABLE_ENV]
+      })
+    } finally {
+      if (platform) {
+        Object.defineProperty(process, 'platform', platform)
+      }
+    }
+
+    const spawnCall = spawnMock.mock.calls.at(-1)!
+    expect(spawnCall[0]).toBe('wsl.exe')
+    expect(spawnCall[2].env[POWERLEVEL10K_WIZARD_DISABLE_ENV]).toBeUndefined()
+    expect(spawnCall[2].env.WSLENV ?? '').not.toContain(POWERLEVEL10K_WIZARD_DISABLE_ENV)
+  })
+
   it('keeps daemon WSL split panes in their distro when cwd is already POSIX', () => {
     const proc = mockPtyProcess()
     spawnMock.mockReturnValue(proc)
