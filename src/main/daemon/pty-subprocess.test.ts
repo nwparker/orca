@@ -55,6 +55,7 @@ const ORCA_SHELL_WRAPPER_ENV = [
 ] as const
 const POWERSHELL_OSC133_COMMAND_ARGS = ['-NoLogo', '-NoExit', '-EncodedCommand', expect.any(String)]
 const ZSH_SHELL_READY_DIR = /shell-ready[\\/]zsh/
+const POWERLEVEL10K_WIZARD_DISABLE_ENV = 'POWERLEVEL9K_DISABLE_CONFIGURATION_WIZARD'
 const itOnMacHost = process.platform === 'darwin' ? it : it.skip
 
 function mockPtyProcess(pid = 12345) {
@@ -82,6 +83,7 @@ function mockPtyProcess(pid = 12345) {
 describe('createPtySubprocess', () => {
   const savedWrapperEnv: Partial<Record<(typeof ORCA_SHELL_WRAPPER_ENV)[number], string>> = {}
   let previousUserDataPath: string | undefined
+  let previousPowerlevelWizardDisable: string | undefined
   let userDataPath: string
 
   beforeEach(() => {
@@ -94,8 +96,10 @@ describe('createPtySubprocess', () => {
     validateWorkingDirectoryMock.mockClear()
     isPwshAvailableMock.mockReturnValue(false)
     previousUserDataPath = process.env.ORCA_USER_DATA_PATH
+    previousPowerlevelWizardDisable = process.env[POWERLEVEL10K_WIZARD_DISABLE_ENV]
     userDataPath = mkdtempSync(join(tmpdir(), 'daemon-pty-subprocess-test-'))
     process.env.ORCA_USER_DATA_PATH = userDataPath
+    delete process.env[POWERLEVEL10K_WIZARD_DISABLE_ENV]
     for (const key of ORCA_SHELL_WRAPPER_ENV) {
       savedWrapperEnv[key] = process.env[key]
       delete process.env[key]
@@ -107,6 +111,11 @@ describe('createPtySubprocess', () => {
       delete process.env.ORCA_USER_DATA_PATH
     } else {
       process.env.ORCA_USER_DATA_PATH = previousUserDataPath
+    }
+    if (previousPowerlevelWizardDisable === undefined) {
+      delete process.env[POWERLEVEL10K_WIZARD_DISABLE_ENV]
+    } else {
+      process.env[POWERLEVEL10K_WIZARD_DISABLE_ENV] = previousPowerlevelWizardDisable
     }
     rmSync(userDataPath, { recursive: true, force: true })
     for (const key of ORCA_SHELL_WRAPPER_ENV) {
@@ -148,6 +157,29 @@ describe('createPtySubprocess', () => {
         name: 'xterm-256color'
       })
     )
+  })
+
+  it('suppresses the first-run Powerlevel10k wizard for daemon terminals', () => {
+    const proc = mockPtyProcess()
+    spawnMock.mockReturnValue(proc)
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform')
+    Object.defineProperty(process, 'platform', { value: 'linux' })
+
+    try {
+      createPtySubprocess({
+        sessionId: 'test',
+        cols: 80,
+        rows: 24,
+        env: { SHELL: '/bin/bash' }
+      })
+    } finally {
+      if (platform) {
+        Object.defineProperty(process, 'platform', platform)
+      }
+    }
+
+    const spawnCall = spawnMock.mock.calls.at(-1)!
+    expect(spawnCall[2].env[POWERLEVEL10K_WIZARD_DISABLE_ENV]).toBe('true')
   })
 
   itOnMacHost('repairs a deleted macOS daemon cwd before spawning node-pty', () => {
@@ -1828,7 +1860,7 @@ describe('createPtySubprocess', () => {
       expect.objectContaining({
         env: expect.objectContaining({
           ORCA_TERMINAL_HANDLE: 'term_wsl',
-          WSLENV: 'FOO/u:ORCA_TERMINAL_HANDLE/u'
+          WSLENV: 'FOO/u:ORCA_TERMINAL_HANDLE/u:POWERLEVEL9K_DISABLE_CONFIGURATION_WIZARD'
         })
       })
     )

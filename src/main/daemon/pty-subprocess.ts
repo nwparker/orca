@@ -25,6 +25,10 @@ import { parseWslPath } from '../wsl'
 import { addWslEnvKeys } from '../wsl-env'
 import { getWslContextFromSessionId } from './wsl-session-context'
 import { addOrcaWslInteropEnv } from '../pty/wsl-orca-env'
+import {
+  POWERLEVEL10K_WIZARD_DISABLE_ENV,
+  seedPowerlevel10kWizardEnv
+} from '../pty/powerlevel10k-wizard-env'
 import { isWindowsGitBashShellPath, resolveWindowsGitBashShellPath } from '../git-bash'
 import { WINDOWS_GIT_BASH_SHELL } from '../../shared/windows-terminal-shell'
 import { resolveAgentForegroundProcess } from '../providers/agent-foreground-process'
@@ -604,6 +608,10 @@ export function createPtySubprocess(opts: PtySubprocessOptions): SubprocessHandl
       Object.assign(env, shellLaunch.env)
     }
     shellArgs = shellLaunch?.args ?? ['-l']
+  }
+  seedPowerlevel10kWizardEnv(env, { envToDelete: opts.envToDelete })
+  if (process.platform === 'win32' && pathWin32.basename(shellPath).toLowerCase() === 'wsl.exe') {
+    addWslEnvKeys(env, [POWERLEVEL10K_WIZARD_DISABLE_ENV])
   }
   promoteAgentTeamsShimPath(env, opts.env?.PATH)
 
