@@ -479,7 +479,10 @@ function spawnDaemonPtyWithWindowsFallback(args: {
       cols: args.cols,
       rows: args.rows,
       cwd,
-      env: args.env
+      env: args.env,
+      // Why: bundled ConPTY has the modern wrap-marker behavior xterm expects;
+      // legacy system ConPTY can corrupt full-width TUI rows in scrollback.
+      ...(process.platform === 'win32' ? { useConptyDll: true } : {})
     })
 
   try {
