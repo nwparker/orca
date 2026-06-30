@@ -170,7 +170,7 @@ export default function TerminalContextMenu({
         />
       </DropdownMenuTrigger>
       <DropdownMenuContent
-        className="w-52"
+        className="w-60"
         sideOffset={0}
         align="start"
         onCloseAutoFocus={(e) => {
@@ -293,7 +293,7 @@ export default function TerminalContextMenu({
           </DropdownMenuItem>
         ) : null}
         <DropdownMenuSeparator />
-        <DropdownMenuItem onSelect={onSplitRight}>
+        <DropdownMenuItem className="whitespace-nowrap" onSelect={onSplitRight}>
           <PanelRightClose />
           {translate(
             'auto.components.terminal.pane.TerminalContextMenu.20e565d865',
@@ -301,7 +301,7 @@ export default function TerminalContextMenu({
           )}
           <DropdownMenuShortcut>{shortcuts.splitRight}</DropdownMenuShortcut>
         </DropdownMenuItem>
-        <DropdownMenuItem onSelect={onSplitDown}>
+        <DropdownMenuItem className="whitespace-nowrap" onSelect={onSplitDown}>
           <PanelBottomClose />
           {translate(
             'auto.components.terminal.pane.TerminalContextMenu.98bccf4fa2',
