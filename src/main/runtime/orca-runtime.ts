@@ -659,7 +659,7 @@ import { closeLocalWatcherForWorktreePath } from '../ipc/filesystem-watcher'
 import { HeadlessEmulator } from '../daemon/headless-emulator'
 import { killAllProcessesForWorktree } from './worktree-teardown'
 import { MOBILE_SUBSCRIBE_SCROLLBACK_ROWS } from './scrollback-limits'
-import type { IFilesystemProvider, IPtyProvider } from '../providers/types'
+import type { IFilesystemProvider, IPtyProvider, PtyProcessInfo } from '../providers/types'
 import { getSshFilesystemProvider } from '../providers/ssh-filesystem-dispatch'
 import {
   assertFolderWorkspacePathUsable,
@@ -1034,7 +1034,7 @@ type RuntimePtyController = {
   hasChildProcesses?(ptyId: string): Promise<boolean>
   clearBuffer?(ptyId: string): Promise<void>
   resize?(ptyId: string, cols: number, rows: number): boolean
-  listProcesses?(): Promise<{ id: string; cwd: string; title: string }[]>
+  listProcesses?(): Promise<PtyProcessInfo[]>
   serializeBuffer?(
     ptyId: string,
     opts?: { scrollbackRows?: number; altScreenForcesZeroRows?: boolean }
@@ -5013,6 +5013,16 @@ export class OrcaRuntimeService {
     for (const leaf of this.getLeavesForPty(ptyId)) {
       this.adoptPreAllocatedHandle(leaf)
     }
+  }
+
+  private adoptControllerTerminalHandle(ptyId: string, handle: string | undefined): void {
+    const trimmed = handle?.trim()
+    if (!trimmed || !trimmed.startsWith('term_')) {
+      return
+    }
+    // Why: after an app/runtime restart, the live PTY child still has its
+    // original ORCA_TERMINAL_HANDLE, but the runtime's in-memory map is gone.
+    this.registerPreAllocatedHandleForPty(ptyId, trimmed)
   }
 
   onPtySpawned(ptyId: string): void {
@@ -17612,6 +17622,7 @@ export class OrcaRuntimeService {
     const sessions = sessionsResult.value
     const livePtyIds = new Set(sessions.map((session) => session.id))
     for (const session of sessions) {
+      this.adoptControllerTerminalHandle(session.id, session.terminalHandle)
       const worktreeId =
         inferWorktreeIdFromPtyId(session.id) ??
         findResolvedWorktreeIdForPath(resolvedWorktrees, session.cwd)
