@@ -8916,6 +8916,125 @@ describe('connectPanePty', () => {
     expect(scheduleTerminalWebglAtlasRecovery).toHaveBeenCalledTimes(1)
   })
 
+  it('schedules WebGL atlas recovery for Vim-style foreground alternate-screen redraws', async () => {
+    const restoreNavigator = temporarilySetNavigatorUserAgent('Mozilla/5.0 (Macintosh)')
+    try {
+      const { connectPanePty } = await import('./pty-connection')
+      const transport = createMockTransport()
+      const capturedDataCallback: { current: ((data: string) => void) | null } = { current: null }
+      transport.connect.mockImplementation(
+        async ({ callbacks }: { callbacks: ConnectCallbacks }) => {
+          capturedDataCallback.current = callbacks.onData ?? null
+          return 'pty-id'
+        }
+      )
+      transportFactoryQueue.push(transport)
+
+      const pane = createPane(1)
+      ;(pane.terminal.buffer.active as { type: 'normal' | 'alternate' }).type = 'alternate'
+      const refresh = vi.fn()
+      let parseCallback: (() => void) | undefined
+      const terminal = pane.terminal as typeof pane.terminal & {
+        _core?: { refresh: typeof refresh }
+      }
+      terminal._core = { refresh }
+      terminal.write = vi.fn((_data: string, callback?: () => void) => {
+        parseCallback = callback
+      })
+
+      connectPanePty(pane as never, createManager(1) as never, createDeps() as never)
+      await flushAsyncTicks(6)
+
+      capturedDataCallback.current?.(
+        '\x1b[2J\x1b[H{"name":"eepo"}\r\n\x1b[2;1H{"name":"expo"}\x1b[K'
+      )
+
+      expect(scheduleTerminalWebglAtlasRecovery).not.toHaveBeenCalled()
+      parseCallback?.()
+      expect(refresh).toHaveBeenCalledWith(0, 39, true)
+      expect(scheduleTerminalWebglAtlasRecovery).toHaveBeenCalledTimes(1)
+    } finally {
+      restoreNavigator()
+    }
+  })
+
+  it('schedules WebGL atlas recovery when a foreground rewrite enters alternate screen', async () => {
+    const restoreNavigator = temporarilySetNavigatorUserAgent('Mozilla/5.0 (Macintosh)')
+    try {
+      const { connectPanePty } = await import('./pty-connection')
+      const transport = createMockTransport()
+      const capturedDataCallback: { current: ((data: string) => void) | null } = { current: null }
+      transport.connect.mockImplementation(
+        async ({ callbacks }: { callbacks: ConnectCallbacks }) => {
+          capturedDataCallback.current = callbacks.onData ?? null
+          return 'pty-id'
+        }
+      )
+      transportFactoryQueue.push(transport)
+
+      const pane = createPane(1)
+      const refresh = vi.fn()
+      let parseCallback: (() => void) | undefined
+      const terminal = pane.terminal as typeof pane.terminal & {
+        _core?: { refresh: typeof refresh }
+      }
+      terminal._core = { refresh }
+      terminal.write = vi.fn((_data: string, callback?: () => void) => {
+        parseCallback = callback
+      })
+
+      connectPanePty(pane as never, createManager(1) as never, createDeps() as never)
+      await flushAsyncTicks(6)
+
+      capturedDataCallback.current?.('\x1b[?1049h\x1b[2J\x1b[HVim package.json')
+
+      expect(scheduleTerminalWebglAtlasRecovery).not.toHaveBeenCalled()
+      parseCallback?.()
+      expect(refresh).toHaveBeenCalledWith(0, 39, true)
+      expect(scheduleTerminalWebglAtlasRecovery).toHaveBeenCalledTimes(1)
+    } finally {
+      restoreNavigator()
+    }
+  })
+
+  it('does not schedule WebGL atlas recovery for ordinary foreground shell rewrites', async () => {
+    const restoreNavigator = temporarilySetNavigatorUserAgent('Mozilla/5.0 (Macintosh)')
+    try {
+      const { connectPanePty } = await import('./pty-connection')
+      const transport = createMockTransport()
+      const capturedDataCallback: { current: ((data: string) => void) | null } = { current: null }
+      transport.connect.mockImplementation(
+        async ({ callbacks }: { callbacks: ConnectCallbacks }) => {
+          capturedDataCallback.current = callbacks.onData ?? null
+          return 'pty-id'
+        }
+      )
+      transportFactoryQueue.push(transport)
+
+      const pane = createPane(1)
+      const refresh = vi.fn()
+      let parseCallback: (() => void) | undefined
+      const terminal = pane.terminal as typeof pane.terminal & {
+        _core?: { refresh: typeof refresh }
+      }
+      terminal._core = { refresh }
+      terminal.write = vi.fn((_data: string, callback?: () => void) => {
+        parseCallback = callback
+      })
+
+      connectPanePty(pane as never, createManager(1) as never, createDeps() as never)
+      await flushAsyncTicks(6)
+
+      capturedDataCallback.current?.('\r\x1b[Korca % npm test')
+
+      parseCallback?.()
+      expect(refresh).toHaveBeenCalledWith(0, 39, true)
+      expect(scheduleTerminalWebglAtlasRecovery).not.toHaveBeenCalled()
+    } finally {
+      restoreNavigator()
+    }
+  })
+
   it('does not schedule WebGL atlas recovery for plain synchronized foreground frames', async () => {
     const restoreNavigator = temporarilySetNavigatorUserAgent('Mozilla/5.0 (Macintosh)')
     try {
