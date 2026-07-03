@@ -157,6 +157,13 @@ function resolvePtyShellOverride(shellOverride: string): string {
   return resolveWindowsGitBashShellPath(shellOverride) ?? shellOverride
 }
 
+type PtyProcessSummary = {
+  id: string
+  cwd: string
+  title: string
+  terminalHandle?: string
+}
+
 type SerializedPtyEntry = {
   id: string
   pid: number
@@ -541,6 +548,8 @@ export class PtyHandler {
     // for overlay resolution; runtime-owned PTYs opt into relay delivery
     // because no renderer TerminalPane exists to type the command.
     const paneKey = typeof env?.ORCA_PANE_KEY === 'string' ? env.ORCA_PANE_KEY : undefined
+    // Why: kept so a restarted runtime can re-adopt this live PTY under its
+    // originally-exported handle (reported via listProcesses, survives revive).
     const terminalHandle =
       typeof env?.ORCA_TERMINAL_HANDLE === 'string' ? env.ORCA_TERMINAL_HANDLE : undefined
     const command = typeof params.command === 'string' ? params.command : undefined
@@ -824,10 +833,8 @@ export class PtyHandler {
     return await getForegroundProcessName(managed.pty.pid, managed.pty.process || null)
   }
 
-  private async listProcesses(): Promise<
-    { id: string; cwd: string; title: string; terminalHandle?: string }[]
-  > {
-    const results: { id: string; cwd: string; title: string; terminalHandle?: string }[] = []
+  private async listProcesses(): Promise<PtyProcessSummary[]> {
+    const results: PtyProcessSummary[] = []
     for (const [id, managed] of this.ptys) {
       const title =
         (await getForegroundProcessName(managed.pty.pid, managed.pty.process || null)) || 'shell'

@@ -5020,9 +5020,39 @@ export class OrcaRuntimeService {
     if (!trimmed || !trimmed.startsWith('term_')) {
       return
     }
+    if (this.isTerminalHandleAdoptionBlocked(ptyId, trimmed)) {
+      return
+    }
     // Why: after an app/runtime restart, the live PTY child still has its
     // original ORCA_TERMINAL_HANDLE, but the runtime's in-memory map is gone.
     this.registerPreAllocatedHandleForPty(ptyId, trimmed)
+  }
+
+  // Why: adoption is best-effort restart recovery and must be first-wins.
+  // Re-keying a pty that already has a handle this session would strand
+  // waiters registered under the old handle, and provider-reported values
+  // are not trusted to be collision-free — a handle bound to a different
+  // pty must never be stolen by a later report.
+  private isTerminalHandleAdoptionBlocked(ptyId: string, handle: string): boolean {
+    if (this.handleByPtyId.get(ptyId) ?? this.findHandleForPtyRecord(ptyId)) {
+      return true
+    }
+    for (const leaf of this.getLeavesForPty(ptyId)) {
+      const issued = this.handleByLeafKey.get(this.getLeafKey(leaf.tabId, leaf.leafId))
+      if (issued && issued !== handle) {
+        return true
+      }
+    }
+    const existingRecord = this.handles.get(handle)
+    if (existingRecord && existingRecord.ptyId !== ptyId) {
+      return true
+    }
+    for (const [otherPtyId, otherHandle] of this.handleByPtyId) {
+      if (otherHandle === handle && otherPtyId !== ptyId) {
+        return true
+      }
+    }
+    return false
   }
 
   onPtySpawned(ptyId: string): void {
