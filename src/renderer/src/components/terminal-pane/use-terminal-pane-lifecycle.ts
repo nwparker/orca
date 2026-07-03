@@ -1017,7 +1017,7 @@ export function useTerminalPaneLifecycle({
         pane.terminal.options.linkHandler = {
           allowNonHttpProtocols: true,
           activate: (event, text) => {
-            handleOscLink(text, event as MouseEvent | undefined, {
+            const handled = handleOscLink(text, event as MouseEvent | undefined, {
               ...linkDeps,
               startupCwd: getPaneLinkCwd(pane.id),
               runtimeEnvironmentId: linkDeps.getRuntimeEnvironmentIdForPane?.(pane.id) ?? null,
@@ -1031,7 +1031,9 @@ export function useTerminalPaneLifecycle({
             // moving the mouse extends a selection until the next click/Esc.
             // clearSelection() explicitly detaches those listeners (see
             // SelectionService._removeMouseDownListeners).
-            pane.terminal.clearSelection()
+            if (handled) {
+              pane.terminal.clearSelection()
+            }
           },
           // Show bottom-left tooltip on hover for OSC 8 hyperlinks (e.g.
           // GitHub owner/repo#issue references emitted by CLI tools) — same
@@ -1344,7 +1346,7 @@ export function useTerminalPaneLifecycle({
           return
         }
         const activePane = managerRef.current?.getActivePane()
-        void handleOscLink(url, event, {
+        const handled = handleOscLink(url, event, {
           ...linkDeps,
           startupCwd: activePane ? getPaneLinkCwd(activePane.id) : startupCwd,
           runtimeEnvironmentId: activePane
@@ -1359,7 +1361,9 @@ export function useTerminalPaneLifecycle({
         // phantom selection until the next click/Esc. Explicitly clearing the
         // selection also detaches those listeners (see
         // SelectionService._removeMouseDownListeners).
-        managerRef.current?.getActivePane()?.terminal.clearSelection()
+        if (handled) {
+          managerRef.current?.getActivePane()?.terminal.clearSelection()
+        }
       },
       formatLinkTooltip: (url, openLinkHint) => formatTerminalUrlTooltip(url, openLinkHint),
       // Why: TerminalPane instances stay mounted for hidden visited worktrees

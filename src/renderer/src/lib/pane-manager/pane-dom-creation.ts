@@ -16,8 +16,8 @@ import { installGuardedLinkProviderRegistration } from './terminal-link-provider
 
 function getTerminalUrlOpenHint(): string {
   return navigator.userAgent.includes('Mac')
-    ? 'click to open or ⇧+click for system browser'
-    : 'click to open or Shift+click for system browser'
+    ? '⌘+click to open or ⇧⌘+click for system browser'
+    : 'Ctrl+click to open or Shift+Ctrl+click for system browser'
 }
 
 function defaultLinkTooltipText(uri: string, openLinkHint: string): string {
