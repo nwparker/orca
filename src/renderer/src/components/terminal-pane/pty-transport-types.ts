@@ -32,6 +32,7 @@ export type PtyConnectResult = {
   sessionExpired?: boolean
   coldRestore?: { scrollback: string; cwd: string }
   replay?: string
+  startupCwdFallback?: { kind: 'worktree'; cwd: string }
 }
 
 type PtyCallbacks = {

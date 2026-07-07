@@ -140,12 +140,12 @@
         "ssh",
         "remote-runtime"
       ],
-      "coverageNotes": "Local macOS evidence covers the shared cwd policy, main pty:spawn local fallback and strict SSH/session rejection, renderer IPC flag routing, and remote-runtime omission. Daemon shares the same pre-provider main cwd decision but lacks a live daemon-provider run; WSL path identity and mobile/API strictness remain gaps.",
+      "coverageNotes": "Local macOS evidence covers the shared cwd policy, main pty:spawn local fallback and strict SSH/session rejection, renderer IPC flag routing, metadata handoff, visible terminal notice, and remote-runtime omission. Daemon shares the same pre-provider main cwd decision but lacks a live daemon-provider run; WSL path identity and mobile/API strictness remain gaps.",
       "motivatingLinks": [
         "https://github.com/stablyai/orca/issues/7239"
       ],
-      "invariant": "A fresh local renderer terminal spawn may recover from a stale startup cwd outside the selected worktree only by spawning in that worktree root; remote, SSH, reattach, runtime, mobile, and API callers must not silently weaken cwd containment.",
-      "oracle": "The shared resolver returns the selected worktree root only when the explicit fallback policy is set, otherwise it rejects outside cwd values. The renderer sends cwdFallback only for fresh local IPC spawns, main honors it only when connectionId and sessionId are absent, and remote-runtime transport options omit the fallback.",
+      "invariant": "A fresh local renderer terminal spawn may recover from a stale startup cwd outside the selected worktree only by spawning in that worktree root and printing a generic in-terminal notice; remote, SSH, reattach, runtime, mobile, and API callers must not silently weaken cwd containment.",
+      "oracle": "The shared resolver returns the selected worktree root only when the explicit fallback policy is set, otherwise it rejects outside cwd values. The renderer sends cwdFallback only for fresh local IPC spawns, main honors it only when connectionId and sessionId are absent, main returns fallback metadata only after an actual fallback, IPC transport preserves that metadata, the connection layer writes a generic terminal notice without the rejected cwd, and remote-runtime transport options omit the fallback.",
       "commands": [
         "pnpm exec vitest run --config config/vitest.config.ts src/shared/terminal-startup-cwd.test.ts",
         "pnpm exec vitest run --config config/vitest.config.ts src/main/ipc/pty.test.ts",
@@ -163,6 +163,7 @@
           "file": "src/shared/terminal-startup-cwd.test.ts",
           "assertions": [
             "outside requested cwd values still throw by default",
+            "the explicit fallback callback fires only when an outside cwd is recovered",
             "explicit fallback returns the worktree root for stale absolute, non-ASCII, folder workspace, and canonical symlink-escape cwd values",
             "valid nested cwd values are preserved when fallback is enabled"
           ]
@@ -171,6 +172,7 @@
           "file": "src/main/ipc/pty.test.ts",
           "assertions": [
             "local renderer pty:spawn with cwdFallback worktree spawns in the selected worktree root",
+            "local fallback spawn responses include worktree fallback metadata",
             "outside cwd values without the fallback flag still reject",
             "connectionId and sessionId keep the cwd guard strict even when the fallback flag is present"
           ]
@@ -179,6 +181,7 @@
           "file": "src/renderer/src/components/terminal-pane/pty-transport.test.ts",
           "assertions": [
             "IPC transport sends cwdFallback only for local fresh spawns",
+            "IPC transport returns startup cwd fallback metadata to the connection layer",
             "SSH-tagged and session reattach spawns omit cwdFallback"
           ]
         },
@@ -186,6 +189,7 @@
           "file": "src/renderer/src/components/terminal-pane/pty-connection.test.ts",
           "assertions": [
             "fresh local IPC worktree spawns are marked with cwdFallback worktree",
+            "local startup cwd fallback metadata prints a generic in-terminal notice",
             "remote-runtime worktree spawns are not marked with cwdFallback"
           ]
         }
@@ -207,7 +211,7 @@
           "command": "pnpm exec vitest run --config config/vitest.config.ts src/main/ipc/pty.test.ts",
           "result": "passed",
           "durationSeconds": 0.9,
-          "summary": "1 test file passed, 221 tests passed; covers main pty:spawn fallback and strict no-flag, SSH, and reattach rejection."
+          "summary": "1 test file passed, 221 tests passed; covers main pty:spawn fallback metadata and strict no-flag, SSH, and reattach rejection."
         },
         {
           "date": "2026-07-07",
@@ -216,7 +220,7 @@
           "command": "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/components/terminal-pane/pty-transport.test.ts",
           "result": "passed",
           "durationSeconds": 0.4,
-          "summary": "1 test file passed, 56 tests passed; covers IPC transport cwdFallback forwarding only for local fresh spawns."
+          "summary": "1 test file passed, 57 tests passed; covers IPC transport cwdFallback forwarding only for local fresh spawns and fallback metadata handoff."
         },
         {
           "date": "2026-07-07",
@@ -224,8 +228,8 @@
           "platform": "macos",
           "command": "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/components/terminal-pane/pty-connection.test.ts",
           "result": "passed",
-          "durationSeconds": 6.1,
-          "summary": "1 test file passed, 334 tests passed; covers local IPC marking and remote-runtime omission."
+          "durationSeconds": 6.3,
+          "summary": "1 test file passed, 335 tests passed; covers local IPC marking, the generic terminal fallback notice, and remote-runtime omission."
         }
       ],
       "runtimeBudget": {
@@ -242,7 +246,7 @@
       },
       "performanceBudget": {
         "required": true,
-        "evidence": "The runtime change adds only constant-time option checks and a single existing cwd resolution on spawn; it adds no polling, provider listing, hidden-pane work, startup awaits, subprocesses, or render-loop work."
+        "evidence": "The runtime change adds only constant-time option checks, a single existing cwd resolution on spawn, and one bounded foreground terminal write only when fallback actually occurs; it adds no polling, provider listing, hidden-pane work, startup awaits, subprocesses, or render-loop work."
       },
       "promotionCriteria": [
         "Attach CI evidence for all declared test files.",

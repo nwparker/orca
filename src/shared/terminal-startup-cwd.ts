@@ -5,6 +5,7 @@ import { splitWorktreeIdForFilesystem } from './worktree-id'
 
 export type TerminalStartupCwdOptions = {
   outsideWorktreeCwd?: 'throw' | 'fallback-to-worktree'
+  onOutsideWorktreeCwdFallback?: () => void
   // Why: the string containment check can't see symlinks; only local callers
   // can canonicalize — SSH worktree paths live on the remote host.
   canonicalizePath?: (path: string) => string | null
@@ -22,6 +23,7 @@ export function resolveTerminalStartupCwd(
   const resolvedCwd = resolveRuntimePath(worktreePath, trimmedCwd)
   if (!isPathInsideOrEqual(worktreePath, resolvedCwd)) {
     if (options?.outsideWorktreeCwd === 'fallback-to-worktree') {
+      options.onOutsideWorktreeCwdFallback?.()
       return worktreePath
     }
     // Why: remote/session clients can request terminal cwd; never let that
@@ -38,6 +40,7 @@ export function resolveTerminalStartupCwd(
       !isPathInsideOrEqual(canonicalWorktreePath, canonicalCwd)
     ) {
       if (options.outsideWorktreeCwd === 'fallback-to-worktree') {
+        options.onOutsideWorktreeCwdFallback?.()
         return worktreePath
       }
       // Why: a symlink escaping the worktree can be legitimate (e.g. a pnpm
@@ -54,6 +57,7 @@ export function resolveTerminalStartupCwdForWorkspace(args: {
   requestedCwd?: string | null
   resolveFolderWorkspacePath?: (folderWorkspaceId: string) => string | null | undefined
   outsideWorktreeCwd?: TerminalStartupCwdOptions['outsideWorktreeCwd']
+  onOutsideWorktreeCwdFallback?: TerminalStartupCwdOptions['onOutsideWorktreeCwdFallback']
   canonicalizePath?: (path: string) => string | null
 }): string | undefined {
   if (!args.requestedCwd || args.requestedCwd.trim().length === 0) {
@@ -77,6 +81,7 @@ export function resolveTerminalStartupCwdForWorkspace(args: {
   }
   return resolveTerminalStartupCwd(workspacePath, args.requestedCwd, {
     outsideWorktreeCwd: args.outsideWorktreeCwd,
+    onOutsideWorktreeCwdFallback: args.onOutsideWorktreeCwdFallback,
     canonicalizePath: args.canonicalizePath
   })
 }

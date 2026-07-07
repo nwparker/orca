@@ -2047,12 +2047,14 @@ export function registerPtyHandlers(
     worktreeId: string | undefined,
     cwd: string | undefined,
     connectionId?: string | null,
-    outsideWorktreeCwd?: 'throw' | 'fallback-to-worktree'
+    outsideWorktreeCwd?: 'throw' | 'fallback-to-worktree',
+    onOutsideWorktreeCwdFallback?: () => void
   ): string | undefined =>
     resolveTerminalStartupCwdForWorkspace({
       workspaceId: worktreeId,
       requestedCwd: cwd,
       outsideWorktreeCwd,
+      onOutsideWorktreeCwdFallback,
       resolveFolderWorkspacePath: (folderWorkspaceId) =>
         store?.getFolderWorkspace(folderWorkspaceId)?.folderPath,
       // Why: realpath only makes sense on the local filesystem; SSH worktree
@@ -2684,11 +2686,15 @@ export function registerPtyHandlers(
         !args.connectionId && !args.sessionId && args.cwdFallback === 'worktree'
           ? 'fallback-to-worktree'
           : undefined
+      let didFallbackToWorktreeCwd = false
       const cwd = resolveGuardedPtySpawnCwd(
         args.worktreeId,
         args.cwd,
         args.connectionId,
-        outsideWorktreeCwd
+        outsideWorktreeCwd,
+        () => {
+          didFallbackToWorktreeCwd = true
+        }
       )
       spawnTiming.mark('preflight')
       const provider = getProvider(args.connectionId)
@@ -3337,6 +3343,9 @@ export function registerPtyHandlers(
           ...result,
           ...(!result.isReattach && effectiveLaunchConfig
             ? { launchConfig: effectiveLaunchConfig }
+            : {}),
+          ...(didFallbackToWorktreeCwd && cwd
+            ? { startupCwdFallback: { kind: 'worktree' as const, cwd } }
             : {})
         }
         return resolvePaneSpawnReservation(reservationPaneKey, paneSpawnReservation, response)

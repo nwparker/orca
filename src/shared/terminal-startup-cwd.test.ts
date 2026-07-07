@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { FLOATING_TERMINAL_WORKTREE_ID } from './constants'
 import {
   resolveTerminalStartupCwd,
@@ -30,11 +30,14 @@ describe('resolveTerminalStartupCwd', () => {
   })
 
   it('falls back to the worktree root for an outside cwd when requested', () => {
+    const onOutsideWorktreeCwdFallback = vi.fn()
     expect(
       resolveTerminalStartupCwd('/repo/app', '/var/tmp/orca-stale', {
-        outsideWorktreeCwd: 'fallback-to-worktree'
+        outsideWorktreeCwd: 'fallback-to-worktree',
+        onOutsideWorktreeCwdFallback
       })
     ).toBe('/repo/app')
+    expect(onOutsideWorktreeCwdFallback).toHaveBeenCalledTimes(1)
   })
 
   it('falls back to a non-ASCII worktree root for an outside cwd when requested', () => {
@@ -49,11 +52,14 @@ describe('resolveTerminalStartupCwd', () => {
   })
 
   it('keeps nested cwd resolution unchanged with fallback enabled', () => {
+    const onOutsideWorktreeCwdFallback = vi.fn()
     expect(
       resolveTerminalStartupCwd('/repo/app', '/repo/app/packages/web', {
-        outsideWorktreeCwd: 'fallback-to-worktree'
+        outsideWorktreeCwd: 'fallback-to-worktree',
+        onOutsideWorktreeCwdFallback
       })
     ).toBe('/repo/app/packages/web')
+    expect(onOutsideWorktreeCwdFallback).not.toHaveBeenCalled()
   })
 
   it('trims whitespace-padded requested cwds before resolving', () => {

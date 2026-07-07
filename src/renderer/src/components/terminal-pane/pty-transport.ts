@@ -678,10 +678,13 @@ export function createIpcPtyTransport(opts: IpcPtyTransportOptions = {}): PtyTra
             replay: spawnResult.replay
           } satisfies PtyConnectResult
         }
-        if (spawnResult.launchConfig) {
+        if (spawnResult.launchConfig || spawnResult.startupCwdFallback) {
           return {
             id: spawnResult.id,
-            launchConfig: spawnResult.launchConfig
+            ...(spawnResult.launchConfig ? { launchConfig: spawnResult.launchConfig } : {}),
+            ...(spawnResult.startupCwdFallback
+              ? { startupCwdFallback: spawnResult.startupCwdFallback }
+              : {})
           } satisfies PtyConnectResult
         }
         return spawnResult.id

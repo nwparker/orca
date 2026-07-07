@@ -196,6 +196,23 @@ describe('createIpcPtyTransport', () => {
     transport.disconnect()
   })
 
+  it('returns startup cwd fallback metadata to the connection layer', async () => {
+    const { createIpcPtyTransport } = await import('./pty-transport')
+    const spawn = window.api.pty.spawn as unknown as ReturnType<typeof vi.fn>
+    spawn.mockResolvedValueOnce({
+      id: 'pty-1',
+      startupCwdFallback: { kind: 'worktree', cwd: '/repo/app' }
+    })
+
+    const transport = createIpcPtyTransport({ cwdFallback: 'worktree' })
+
+    await expect(transport.connect({ url: '', callbacks: {} })).resolves.toEqual({
+      id: 'pty-1',
+      startupCwdFallback: { kind: 'worktree', cwd: '/repo/app' }
+    })
+    transport.disconnect()
+  })
+
   it('defers title side effects until after terminal data is delivered', async () => {
     const { createIpcPtyTransport } = await import('./pty-transport')
     const onTitleChange = vi.fn()

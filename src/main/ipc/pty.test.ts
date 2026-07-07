@@ -6168,16 +6168,17 @@ describe('registerPtyHandlers', () => {
     registerPtyHandlers(mainWindow as never)
     const worktreePath = '/Users/motoki/orca/workspaces/nakamuramotoki/Fableと議論'
 
-    await handlers.get('pty:spawn')!(mainWindowIpcEvent, {
+    const result = (await handlers.get('pty:spawn')!(mainWindowIpcEvent, {
       cols: 80,
       rows: 24,
       cwd: '/var/tmp/orca-stale',
       cwdFallback: 'worktree',
       worktreeId: `repo-1::${worktreePath}`
-    })
+    })) as { startupCwdFallback?: { kind: string; cwd: string } }
 
     const [, , options] = spawnMock.mock.calls.at(-1) as [string, string[], { cwd: string }]
     expect(options.cwd).toBe(worktreePath)
+    expect(result.startupCwdFallback).toEqual({ kind: 'worktree', cwd: worktreePath })
   })
 
   it('rejects stale renderer cwd values without the fallback flag', async () => {
