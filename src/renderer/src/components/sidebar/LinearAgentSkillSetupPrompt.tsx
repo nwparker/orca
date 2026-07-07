@@ -98,8 +98,13 @@ export function LinearAgentSkillSetupPrompt({
   const cliRefreshGenerationRef = useRef(0)
   currentSetupCheckIdentityRef.current = setupCheckIdentity
   const skillDiscoveryTarget = useMemo(
-    () => getLinearPromptSkillDiscoveryTarget(agentRuntime, projectRuntime),
-    [agentRuntime, projectRuntime]
+    () =>
+      getLinearPromptSkillDiscoveryTarget(
+        agentRuntime,
+        projectRuntime,
+        settings?.activeRuntimeEnvironmentId
+      ),
+    [agentRuntime, projectRuntime, settings?.activeRuntimeEnvironmentId]
   )
   const localDismissStorageKey = getLocalDismissStorageKey(agentRuntime)
   const [localDismissed, setLocalDismissed] = useState(() =>

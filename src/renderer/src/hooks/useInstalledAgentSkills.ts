@@ -7,6 +7,13 @@ import type {
 } from '../../../shared/skills'
 import { ORCHESTRATION_SKILL_NAME } from '@/lib/agent-feature-install-commands'
 import { markOrchestrationSetupComplete } from '@/lib/orchestration-setup-state'
+import { peekInstalledAgentSkillDiscoveryCache } from './installed-agent-skill-discovery-cache'
+import {
+  discoverInstalledAgentSkills,
+  getSkillDiscoveryTargetKey,
+  invalidateInstalledAgentSkillDiscovery,
+  resetInstalledAgentSkillDiscoveryForTests
+} from './installed-agent-skill-discovery'
 import { useMountedRef } from './useMountedRef'
 
 const INSTALLED_AGENT_SKILLS_CHANGED_EVENT = 'orca:installed-agent-skills-changed'
@@ -31,10 +38,6 @@ export type InstalledAgentSkillState = {
   skills: readonly DiscoveredSkill[]
   refresh: () => Promise<boolean>
 }
-
-let cachedDiscoveryByTarget = new Map<string, SkillDiscoveryResult>()
-let pendingDiscoveryByTarget = new Map<string, Promise<SkillDiscoveryResult>>()
-let pendingDiscoverySatisfiesForcedRefreshByTarget = new Map<string, boolean>()
 
 function normalizeSkillName(value: string): string {
   return value.trim().toLowerCase()
@@ -77,111 +80,17 @@ export function hasInstalledAgentSkillNamed(
 }
 
 export function notifyInstalledAgentSkillsChanged(): void {
-  cachedDiscoveryByTarget.clear()
+  invalidateInstalledAgentSkillDiscovery()
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent(INSTALLED_AGENT_SKILLS_CHANGED_EVENT))
   }
-}
-
-function normalizeSkillDiscoveryTarget(
-  target: SkillDiscoveryTarget | undefined
-): SkillDiscoveryTarget | undefined {
-  const projectRuntime = target?.projectRuntime
-  if (projectRuntime) {
-    if (projectRuntime.status === 'repair-required') {
-      return { projectRuntime }
-    }
-    if (projectRuntime.runtime.kind === 'wsl') {
-      return {
-        runtime: 'wsl',
-        wslDistro: projectRuntime.runtime.distro,
-        projectRuntime
-      }
-    }
-    return {
-      runtime: 'host',
-      projectRuntime
-    }
-  }
-
-  if (target?.runtime !== 'wsl') {
-    return undefined
-  }
-  return { runtime: 'wsl', wslDistro: target.wslDistro?.trim() || null }
-}
-
-function getSkillDiscoveryTargetKey(target: SkillDiscoveryTarget | undefined): string {
-  if (target?.projectRuntime) {
-    return target.projectRuntime.status === 'resolved'
-      ? target.projectRuntime.runtime.cacheKey
-      : target.projectRuntime.repair.cacheKey
-  }
-  const normalizedTarget = normalizeSkillDiscoveryTarget(target)
-  return normalizedTarget?.runtime === 'wsl' ? `wsl:${normalizedTarget.wslDistro ?? ''}` : 'host'
-}
-
-function startInstalledAgentSkillDiscovery(
-  force: boolean,
-  target: SkillDiscoveryTarget | undefined
-): Promise<SkillDiscoveryResult> {
-  const key = getSkillDiscoveryTargetKey(target)
-  const normalizedTarget = normalizeSkillDiscoveryTarget(target)
-  const discovery = window.api.skills
-    .discover(normalizedTarget)
-    .then((result) => {
-      cachedDiscoveryByTarget.set(key, result)
-      return result
-    })
-    .finally(() => {
-      if (pendingDiscoveryByTarget.get(key) === discovery) {
-        pendingDiscoveryByTarget.delete(key)
-        pendingDiscoverySatisfiesForcedRefreshByTarget.delete(key)
-      }
-    })
-  pendingDiscoveryByTarget.set(key, discovery)
-  pendingDiscoverySatisfiesForcedRefreshByTarget.set(key, force)
-  return discovery
-}
-
-async function discoverInstalledAgentSkills(
-  force: boolean,
-  target?: SkillDiscoveryTarget
-): Promise<SkillDiscoveryResult> {
-  const key = getSkillDiscoveryTargetKey(target)
-  const cachedDiscovery = cachedDiscoveryByTarget.get(key)
-  if (!force && cachedDiscovery) {
-    return cachedDiscovery
-  }
-
-  const inFlightDiscovery = pendingDiscoveryByTarget.get(key)
-  if (inFlightDiscovery) {
-    if (!force || pendingDiscoverySatisfiesForcedRefreshByTarget.get(key)) {
-      return inFlightDiscovery
-    }
-    try {
-      await inFlightDiscovery
-    } catch {
-      // Why: an explicit re-check should still read current disk state even if
-      // the older background scan failed.
-    }
-    const nextPendingDiscovery = pendingDiscoveryByTarget.get(key)
-    if (nextPendingDiscovery && nextPendingDiscovery !== inFlightDiscovery) {
-      return nextPendingDiscovery
-    }
-  }
-
-  return startInstalledAgentSkillDiscovery(force, target)
 }
 
 export const _installedAgentSkillDiscoveryInternalsForTests = {
   discoverInstalledAgentSkills,
   getSkillDiscoveryTargetKey,
   isOrchestrationSkillName,
-  reset(): void {
-    cachedDiscoveryByTarget = new Map()
-    pendingDiscoveryByTarget = new Map()
-    pendingDiscoverySatisfiesForcedRefreshByTarget = new Map()
-  }
+  reset: resetInstalledAgentSkillDiscoveryForTests
 }
 
 export function useInstalledAgentSkill(
@@ -199,7 +108,7 @@ export function useInstalledAgentSkillNames(
   const skillNamesKey = skillNames.map(normalizeSkillName).join('\n')
   const candidateSkillNames = useMemo(() => skillNamesKey.split('\n'), [skillNamesKey])
   const discoveryTargetKey = getSkillDiscoveryTargetKey(discoveryTarget)
-  const cachedDiscovery = cachedDiscoveryByTarget.get(discoveryTargetKey) ?? null
+  const cachedDiscovery = peekInstalledAgentSkillDiscoveryCache(discoveryTargetKey)
   const [result, setResult] = useState<SkillDiscoveryResult | null>(cachedDiscovery)
   const [loading, setLoading] = useState(enabled && !cachedDiscovery)
   const [error, setError] = useState<string | null>(null)
@@ -217,7 +126,7 @@ export function useInstalledAgentSkillNames(
     stateResetInputRef.current.discoveryTargetKey !== discoveryTargetKey ||
     stateResetInputRef.current.enabled !== enabled
   ) {
-    const nextCachedDiscovery = cachedDiscoveryByTarget.get(discoveryTargetKey) ?? null
+    const nextCachedDiscovery = peekInstalledAgentSkillDiscoveryCache(discoveryTargetKey)
     const nextLoading = enabled && !nextCachedDiscovery
     stateResetInputRef.current = { discoveryTargetKey, enabled }
     resultForRender = nextCachedDiscovery

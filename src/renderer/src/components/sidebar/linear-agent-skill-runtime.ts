@@ -118,12 +118,24 @@ export function getLinearPromptSetupCheckIdentity(args: {
 
 export function getLinearPromptSkillDiscoveryTarget(
   runtime: LocalAgentRuntime,
-  projectRuntime?: ProjectExecutionRuntimeResolution
+  projectRuntime?: ProjectExecutionRuntimeResolution,
+  executionHostId?: string | null
 ): SkillDiscoveryTarget | undefined {
+  const normalizedHostId = executionHostId?.trim() || null
   if (projectRuntime) {
-    return { projectRuntime }
+    return {
+      projectRuntime,
+      ...(normalizedHostId ? { executionHostId: normalizedHostId } : {})
+    }
   }
-  return runtime.runtime === 'wsl' ? { runtime: 'wsl', wslDistro: runtime.wslDistro } : undefined
+  if (runtime.runtime === 'wsl') {
+    return {
+      runtime: 'wsl',
+      wslDistro: runtime.wslDistro,
+      ...(normalizedHostId ? { executionHostId: normalizedHostId } : {})
+    }
+  }
+  return normalizedHostId ? { executionHostId: normalizedHostId } : undefined
 }
 
 export function getLocalDismissStorageKey(runtime: LocalAgentRuntime): string {

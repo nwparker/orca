@@ -87,8 +87,9 @@ export function CliSection({
     [settings, wslAvailable, wslCapabilitiesLoading, wslSupportedPlatform]
   )
   const cliSkillDiscoveryTarget = useMemo(
-    () => getSkillDiscoveryTargetForRuntime(agentRuntime),
-    [agentRuntime]
+    () =>
+      getSkillDiscoveryTargetForRuntime(agentRuntime, settings.activeRuntimeEnvironmentId),
+    [agentRuntime, settings.activeRuntimeEnvironmentId]
   )
   const {
     installed: cliSkillDetected,

@@ -73,6 +73,12 @@ describe('CliSkillRuntimeSetup runtime helpers', () => {
         label: 'WSL Ubuntu'
       })
     ).toEqual({ runtime: 'wsl', wslDistro: 'Ubuntu' })
+    expect(
+      getSkillDiscoveryTargetForRuntime(
+        { runtime: 'host', label: 'Remote host' },
+        'ssh:build-host'
+      )
+    ).toEqual({ executionHostId: 'ssh:build-host' })
   })
 
   it('uses the global project runtime default instead of stale WSL agent location', () => {

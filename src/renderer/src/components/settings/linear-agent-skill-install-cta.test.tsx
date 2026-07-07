@@ -169,6 +169,10 @@ describe('LinearAgentSkillInstallCta', () => {
     expect(rendered.textContent).toContain(
       'This installs host setup; remote agent environments may need separate setup.'
     )
+    expect(mocks.useInstalledAgentSkillNames).toHaveBeenCalledWith(
+      expect.any(Array),
+      expect.objectContaining({ discoveryTarget: { executionHostId: 'runtime-1' } })
+    )
   })
 
   it('re-checks the skill scan on demand', async () => {

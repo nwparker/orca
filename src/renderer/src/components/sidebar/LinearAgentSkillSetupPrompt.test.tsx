@@ -296,7 +296,7 @@ describe('LinearAgentSkillSetupPrompt', () => {
     expect(mocks.useInstalledAgentSkillNames).toHaveBeenCalledWith(
       LINEAR_AGENT_SKILL_NAMES,
       expect.objectContaining({
-        discoveryTarget: undefined,
+        discoveryTarget: { executionHostId: 'runtime-1' },
         enabled: true,
         sourceKinds: ['home']
       })

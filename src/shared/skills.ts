@@ -36,6 +36,8 @@ export type SkillDiscoveryResult = {
 }
 
 export type SkillDiscoveryTarget = {
+  /** Renderer cache scope for the local or remote runtime that owns discovery. */
+  executionHostId?: string | null
   runtime?: 'host' | 'wsl'
   wslDistro?: string | null
   /** Workspace path whose local .agents/.claude skill roots should be scanned. */
