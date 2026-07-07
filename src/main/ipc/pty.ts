@@ -2046,11 +2046,13 @@ export function registerPtyHandlers(
   const resolveGuardedPtySpawnCwd = (
     worktreeId: string | undefined,
     cwd: string | undefined,
-    connectionId?: string | null
+    connectionId?: string | null,
+    outsideWorktreeCwd?: 'throw' | 'fallback-to-worktree'
   ): string | undefined =>
     resolveTerminalStartupCwdForWorkspace({
       workspaceId: worktreeId,
       requestedCwd: cwd,
+      outsideWorktreeCwd,
       resolveFolderWorkspacePath: (folderWorkspaceId) =>
         store?.getFolderWorkspace(folderWorkspaceId)?.folderPath,
       // Why: realpath only makes sense on the local filesystem; SSH worktree
@@ -2637,6 +2639,7 @@ export function registerPtyHandlers(
         env?: Record<string, string>
         envToDelete?: string[]
         command?: string
+        cwdFallback?: 'worktree'
         commandDelivery?: 'renderer' | 'provider'
         launchConfig?: SleepingAgentLaunchConfig
         launchAgent?: TuiAgent
@@ -2677,7 +2680,16 @@ export function registerPtyHandlers(
         await startupPromise
       }
       await assertFolderWorkspacePtyPathUsable(args.worktreeId)
-      const cwd = resolveGuardedPtySpawnCwd(args.worktreeId, args.cwd, args.connectionId)
+      const outsideWorktreeCwd =
+        !args.connectionId && !args.sessionId && args.cwdFallback === 'worktree'
+          ? 'fallback-to-worktree'
+          : undefined
+      const cwd = resolveGuardedPtySpawnCwd(
+        args.worktreeId,
+        args.cwd,
+        args.connectionId,
+        outsideWorktreeCwd
+      )
       spawnTiming.mark('preflight')
       const provider = getProvider(args.connectionId)
       const isClaudeLaunch = !args.connectionId && isClaudeLaunchCommand(args.command)

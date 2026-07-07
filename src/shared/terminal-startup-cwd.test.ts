@@ -29,6 +29,33 @@ describe('resolveTerminalStartupCwd', () => {
     )
   })
 
+  it('falls back to the worktree root for an outside cwd when requested', () => {
+    expect(
+      resolveTerminalStartupCwd('/repo/app', '/var/tmp/orca-stale', {
+        outsideWorktreeCwd: 'fallback-to-worktree'
+      })
+    ).toBe('/repo/app')
+  })
+
+  it('falls back to a non-ASCII worktree root for an outside cwd when requested', () => {
+    // Why: issue #7239 reproduced in a Japanese-named worktree; fallback must
+    // preserve the selected worktree path verbatim.
+    const worktreePath = '/Users/motoki/orca/workspaces/nakamuramotoki/Fableと議論'
+    expect(
+      resolveTerminalStartupCwd(worktreePath, '/var/tmp/orca-stale', {
+        outsideWorktreeCwd: 'fallback-to-worktree'
+      })
+    ).toBe(worktreePath)
+  })
+
+  it('keeps nested cwd resolution unchanged with fallback enabled', () => {
+    expect(
+      resolveTerminalStartupCwd('/repo/app', '/repo/app/packages/web', {
+        outsideWorktreeCwd: 'fallback-to-worktree'
+      })
+    ).toBe('/repo/app/packages/web')
+  })
+
   it('trims whitespace-padded requested cwds before resolving', () => {
     expect(resolveTerminalStartupCwd('/repo/app', ' packages/web ')).toBe('/repo/app/packages/web')
   })
@@ -39,6 +66,17 @@ describe('resolveTerminalStartupCwd', () => {
     expect(
       resolveTerminalStartupCwd('/repo/app', 'link', { canonicalizePath: canonicalize })
     ).toBeUndefined()
+  })
+
+  it('falls back to the worktree root when a symlink escapes and fallback is requested', () => {
+    const canonicalize = (path: string): string | null =>
+      path === '/repo/app/link' ? '/outside/target' : path
+    expect(
+      resolveTerminalStartupCwd('/repo/app', 'link', {
+        canonicalizePath: canonicalize,
+        outsideWorktreeCwd: 'fallback-to-worktree'
+      })
+    ).toBe('/repo/app')
   })
 
   it('accepts cwds under a symlinked worktree root', () => {
@@ -76,6 +114,16 @@ describe('resolveTerminalStartupCwd', () => {
         requestedCwd: '/repo/app-other'
       })
     ).toThrow('Terminal cwd must be inside the selected worktree.')
+  })
+
+  it('falls back to the raw worktree root for stale renderer cwd values', () => {
+    expect(
+      resolveTerminalStartupCwdForWorkspace({
+        workspaceId: 'repo-1::/repo/app',
+        requestedCwd: '/var/tmp/orca-stale',
+        outsideWorktreeCwd: 'fallback-to-worktree'
+      })
+    ).toBe('/repo/app')
   })
 
   it('passes floating terminal cwds through untouched', () => {
@@ -119,5 +167,16 @@ describe('resolveTerminalStartupCwd', () => {
         resolveFolderWorkspacePath: (id) => (id === 'folder-1' ? '/repo/app' : null)
       })
     ).toThrow('Terminal cwd must be inside the selected worktree.')
+  })
+
+  it('falls back to a resolved folder workspace root for stale cwd values', () => {
+    expect(
+      resolveTerminalStartupCwdForWorkspace({
+        workspaceId: folderWorkspaceKey('folder-1'),
+        requestedCwd: '../other',
+        resolveFolderWorkspacePath: (id) => (id === 'folder-1' ? '/repo/app' : null),
+        outsideWorktreeCwd: 'fallback-to-worktree'
+      })
+    ).toBe('/repo/app')
   })
 })

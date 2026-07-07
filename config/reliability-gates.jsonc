@@ -106,6 +106,157 @@
       "demotionRule": "Demote or quarantine if the gate flakes once without a product bug or harness bug filed to the owner."
     },
     {
+      "id": "terminal-session.startup-cwd-containment",
+      "title": "Fresh local terminal creation cannot be bricked by stale startup cwd",
+      "maturity": "experimental",
+      "protection": "partial",
+      "owner": "terminal-runtime",
+      "layer": "shared-main-renderer-contract",
+      "surfaces": [
+        "terminal lifecycle",
+        "tab creation",
+        "PTY spawn",
+        "startup cwd persistence",
+        "SSH and remote-runtime routing"
+      ],
+      "platforms": [
+        "macos",
+        "linux",
+        "windows"
+      ],
+      "providers": [
+        "local",
+        "daemon",
+        "ssh",
+        "wsl",
+        "remote-runtime",
+        "mobile"
+      ],
+      "coveredPlatforms": [
+        "macos"
+      ],
+      "coveredProviders": [
+        "local",
+        "ssh",
+        "remote-runtime"
+      ],
+      "coverageNotes": "Local macOS evidence covers the shared cwd policy, main pty:spawn local fallback and strict SSH/session rejection, renderer IPC flag routing, and remote-runtime omission. Daemon shares the same pre-provider main cwd decision but lacks a live daemon-provider run; WSL path identity and mobile/API strictness remain gaps.",
+      "motivatingLinks": [
+        "https://github.com/stablyai/orca/issues/7239"
+      ],
+      "invariant": "A fresh local renderer terminal spawn may recover from a stale startup cwd outside the selected worktree only by spawning in that worktree root; remote, SSH, reattach, runtime, mobile, and API callers must not silently weaken cwd containment.",
+      "oracle": "The shared resolver returns the selected worktree root only when the explicit fallback policy is set, otherwise it rejects outside cwd values. The renderer sends cwdFallback only for fresh local IPC spawns, main honors it only when connectionId and sessionId are absent, and remote-runtime transport options omit the fallback.",
+      "commands": [
+        "pnpm exec vitest run --config config/vitest.config.ts src/shared/terminal-startup-cwd.test.ts",
+        "pnpm exec vitest run --config config/vitest.config.ts src/main/ipc/pty.test.ts",
+        "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/components/terminal-pane/pty-transport.test.ts",
+        "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/components/terminal-pane/pty-connection.test.ts"
+      ],
+      "testFiles": [
+        "src/shared/terminal-startup-cwd.test.ts",
+        "src/main/ipc/pty.test.ts",
+        "src/renderer/src/components/terminal-pane/pty-transport.test.ts",
+        "src/renderer/src/components/terminal-pane/pty-connection.test.ts"
+      ],
+      "assertionRefs": [
+        {
+          "file": "src/shared/terminal-startup-cwd.test.ts",
+          "assertions": [
+            "outside requested cwd values still throw by default",
+            "explicit fallback returns the worktree root for stale absolute, non-ASCII, folder workspace, and canonical symlink-escape cwd values",
+            "valid nested cwd values are preserved when fallback is enabled"
+          ]
+        },
+        {
+          "file": "src/main/ipc/pty.test.ts",
+          "assertions": [
+            "local renderer pty:spawn with cwdFallback worktree spawns in the selected worktree root",
+            "outside cwd values without the fallback flag still reject",
+            "connectionId and sessionId keep the cwd guard strict even when the fallback flag is present"
+          ]
+        },
+        {
+          "file": "src/renderer/src/components/terminal-pane/pty-transport.test.ts",
+          "assertions": [
+            "IPC transport sends cwdFallback only for local fresh spawns",
+            "SSH-tagged and session reattach spawns omit cwdFallback"
+          ]
+        },
+        {
+          "file": "src/renderer/src/components/terminal-pane/pty-connection.test.ts",
+          "assertions": [
+            "fresh local IPC worktree spawns are marked with cwdFallback worktree",
+            "remote-runtime worktree spawns are not marked with cwdFallback"
+          ]
+        }
+      ],
+      "evidenceRuns": [
+        {
+          "date": "2026-07-07",
+          "runner": "local",
+          "platform": "macos",
+          "command": "pnpm exec vitest run --config config/vitest.config.ts src/shared/terminal-startup-cwd.test.ts",
+          "result": "passed",
+          "durationSeconds": 0.2,
+          "summary": "1 test file passed, 19 tests passed; red repro failed before the fallback policy was implemented."
+        },
+        {
+          "date": "2026-07-07",
+          "runner": "local",
+          "platform": "macos",
+          "command": "pnpm exec vitest run --config config/vitest.config.ts src/main/ipc/pty.test.ts",
+          "result": "passed",
+          "durationSeconds": 0.9,
+          "summary": "1 test file passed, 221 tests passed; covers main pty:spawn fallback and strict no-flag, SSH, and reattach rejection."
+        },
+        {
+          "date": "2026-07-07",
+          "runner": "local",
+          "platform": "macos",
+          "command": "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/components/terminal-pane/pty-transport.test.ts",
+          "result": "passed",
+          "durationSeconds": 0.4,
+          "summary": "1 test file passed, 56 tests passed; covers IPC transport cwdFallback forwarding only for local fresh spawns."
+        },
+        {
+          "date": "2026-07-07",
+          "runner": "local",
+          "platform": "macos",
+          "command": "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/components/terminal-pane/pty-connection.test.ts",
+          "result": "passed",
+          "durationSeconds": 6.1,
+          "summary": "1 test file passed, 334 tests passed; covers local IPC marking and remote-runtime omission."
+        }
+      ],
+      "runtimeBudget": {
+        "p95Seconds": 30,
+        "scope": "focused unit and IPC contract tests"
+      },
+      "flakeHistory": {
+        "status": "unknown",
+        "evidence": "New experimental gate added with local deterministic evidence only; needs CI soak before promotion."
+      },
+      "redGreenEvidence": {
+        "status": "partial",
+        "evidence": "The new shared and main IPC fallback tests failed with 'Terminal cwd must be inside the selected worktree.' before the fix and pass after it. Full live Electron reproduction from a production persisted session is not captured."
+      },
+      "performanceBudget": {
+        "required": true,
+        "evidence": "The runtime change adds only constant-time option checks and a single existing cwd resolution on spawn; it adds no polling, provider listing, hidden-pane work, startup awaits, subprocesses, or render-loop work."
+      },
+      "promotionCriteria": [
+        "Attach CI evidence for all declared test files.",
+        "Add a live Electron regression that opens a local terminal from a persisted stale startupCwd state and proves visible shell input/output in the worktree root.",
+        "Add WSL/mobile/API provider-contract coverage or explicitly narrow their risk scope."
+      ],
+      "knownGaps": [
+        "No live Electron fixture seeds the exact production persisted tab state from issue #7239.",
+        "Daemon coverage is via shared pre-provider main cwd routing, not a live daemon provider spawn.",
+        "WSL path identity, mobile/API strictness, Linux, and Windows are not directly exercised by this gate."
+      ],
+      "demotionRule": "Demote or quarantine if the gate flakes without a product bug or if a remote/session/API caller can silently fall back instead of rejecting an outside cwd."
+    },
+    {
       "id": "agent-session.provider-ownership",
       "title": "Provider sessions are resumed once per workspace ownership claim",
       "maturity": "experimental",

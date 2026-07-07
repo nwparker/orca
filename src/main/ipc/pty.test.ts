@@ -6164,6 +6164,71 @@ describe('registerPtyHandlers', () => {
     expect(options.cwd).toBe('/tmp/floating-notes')
   })
 
+  it('falls back to the worktree root for stale local renderer cwd values', async () => {
+    registerPtyHandlers(mainWindow as never)
+    const worktreePath = '/Users/motoki/orca/workspaces/nakamuramotoki/Fableと議論'
+
+    await handlers.get('pty:spawn')!(mainWindowIpcEvent, {
+      cols: 80,
+      rows: 24,
+      cwd: '/var/tmp/orca-stale',
+      cwdFallback: 'worktree',
+      worktreeId: `repo-1::${worktreePath}`
+    })
+
+    const [, , options] = spawnMock.mock.calls.at(-1) as [string, string[], { cwd: string }]
+    expect(options.cwd).toBe(worktreePath)
+  })
+
+  it('rejects stale renderer cwd values without the fallback flag', async () => {
+    registerPtyHandlers(mainWindow as never)
+
+    await expect(
+      handlers.get('pty:spawn')!(mainWindowIpcEvent, {
+        cols: 80,
+        rows: 24,
+        cwd: '/var/tmp/orca-stale',
+        worktreeId: 'repo-1::/repo/app'
+      })
+    ).rejects.toThrow('Terminal cwd must be inside the selected worktree.')
+
+    expect(spawnMock).not.toHaveBeenCalled()
+  })
+
+  it('keeps renderer PTY cwd strict when a connectionId is present', async () => {
+    registerPtyHandlers(mainWindow as never)
+
+    await expect(
+      handlers.get('pty:spawn')!(mainWindowIpcEvent, {
+        cols: 80,
+        rows: 24,
+        cwd: '/var/tmp/orca-stale',
+        cwdFallback: 'worktree',
+        connectionId: 'ssh-1',
+        worktreeId: 'repo-1::/repo/app'
+      })
+    ).rejects.toThrow('Terminal cwd must be inside the selected worktree.')
+
+    expect(spawnMock).not.toHaveBeenCalled()
+  })
+
+  it('keeps renderer PTY cwd strict when a sessionId is present', async () => {
+    registerPtyHandlers(mainWindow as never)
+
+    await expect(
+      handlers.get('pty:spawn')!(mainWindowIpcEvent, {
+        cols: 80,
+        rows: 24,
+        cwd: '/var/tmp/orca-stale',
+        cwdFallback: 'worktree',
+        sessionId: 'session-1',
+        worktreeId: 'repo-1::/repo/app'
+      })
+    ).rejects.toThrow('Terminal cwd must be inside the selected worktree.')
+
+    expect(spawnMock).not.toHaveBeenCalled()
+  })
+
   it('rejects missing WSL worktree cwd instead of validating only the fallback Windows cwd', async () => {
     const originalPlatform = process.platform
     const originalUserProfile = process.env.USERPROFILE

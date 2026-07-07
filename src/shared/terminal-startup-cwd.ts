@@ -4,6 +4,7 @@ import { parseWorkspaceKey } from './workspace-scope'
 import { splitWorktreeIdForFilesystem } from './worktree-id'
 
 export type TerminalStartupCwdOptions = {
+  outsideWorktreeCwd?: 'throw' | 'fallback-to-worktree'
   // Why: the string containment check can't see symlinks; only local callers
   // can canonicalize — SSH worktree paths live on the remote host.
   canonicalizePath?: (path: string) => string | null
@@ -20,6 +21,9 @@ export function resolveTerminalStartupCwd(
   }
   const resolvedCwd = resolveRuntimePath(worktreePath, trimmedCwd)
   if (!isPathInsideOrEqual(worktreePath, resolvedCwd)) {
+    if (options?.outsideWorktreeCwd === 'fallback-to-worktree') {
+      return worktreePath
+    }
     // Why: remote/session clients can request terminal cwd; never let that
     // become a shell outside the selected workspace.
     throw new Error('Terminal cwd must be inside the selected worktree.')
@@ -33,6 +37,9 @@ export function resolveTerminalStartupCwd(
       canonicalCwd &&
       !isPathInsideOrEqual(canonicalWorktreePath, canonicalCwd)
     ) {
+      if (options.outsideWorktreeCwd === 'fallback-to-worktree') {
+        return worktreePath
+      }
       // Why: a symlink escaping the worktree can be legitimate (e.g. a pnpm
       // store link), so fall back to the default cwd instead of failing the
       // spawn — but never grant the requested out-of-worktree shell.
@@ -46,6 +53,7 @@ export function resolveTerminalStartupCwdForWorkspace(args: {
   workspaceId?: string
   requestedCwd?: string | null
   resolveFolderWorkspacePath?: (folderWorkspaceId: string) => string | null | undefined
+  outsideWorktreeCwd?: TerminalStartupCwdOptions['outsideWorktreeCwd']
   canonicalizePath?: (path: string) => string | null
 }): string | undefined {
   if (!args.requestedCwd || args.requestedCwd.trim().length === 0) {
@@ -68,6 +76,7 @@ export function resolveTerminalStartupCwdForWorkspace(args: {
     return undefined
   }
   return resolveTerminalStartupCwd(workspacePath, args.requestedCwd, {
+    outsideWorktreeCwd: args.outsideWorktreeCwd,
     canonicalizePath: args.canonicalizePath
   })
 }
