@@ -4,7 +4,8 @@ import { callRuntimeRpc } from '@/runtime/runtime-rpc-client'
 import { openMobileEmulatorTab } from './open-mobile-emulator-tab'
 import {
   consumePrelaunchedSimulatorSession,
-  isManualSimulatorLaunchPending
+  isManualSimulatorLaunchPending,
+  resetSimulatorLaunchCoordinationForTests
 } from './simulator-launch-coordination'
 import { cancelPendingSimulatorPaneShutdown } from './simulator-pane-shutdown-scheduler'
 import { ensureSimulatorTab, getSimulatorTabForWorktree } from './ensure-simulator-tab'
@@ -62,7 +63,7 @@ describe('openMobileEmulatorTab', () => {
     vi.mocked(getSimulatorTabForWorktree).mockReset()
     vi.mocked(getSimulatorTabForWorktree).mockReturnValue(null)
     vi.mocked(toast.error).mockReset()
-    consumePrelaunchedSimulatorSession('wt-1')
+    resetSimulatorLaunchCoordinationForTests()
   })
 
   afterEach(() => {
