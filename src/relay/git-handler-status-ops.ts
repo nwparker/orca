@@ -20,6 +20,13 @@ import {
   type GitLineStats
 } from '../shared/git-uncommitted-line-stats'
 import { DEFAULT_GIT_STATUS_LIMIT } from '../shared/git-status-limit'
+import {
+  encodeGitCheckIgnorePaths,
+  GIT_CHECK_IGNORE_STDIN_ARGS,
+  GIT_CHECK_IGNORE_TIMEOUT_MS,
+  getGitCheckIgnoreMaxBufferBytes,
+  parseGitCheckIgnoreOutput
+} from '../shared/git-check-ignore-stdin'
 
 export async function resolveGitDir(worktreePath: string): Promise<string> {
   const dotGitPath = path.join(worktreePath, '.git')
@@ -250,10 +257,6 @@ function shouldProbeEffectiveUpstreamStatus(
   return parsed?.remoteName === 'origin' && parsed.branchName !== branchName
 }
 
-function parseCheckIgnoreOutput(stdout: string): string[] {
-  return stdout.split(/\r?\n/).filter(Boolean)
-}
-
 export async function checkIgnoredPathsOp(
   git: GitExec,
   params: Record<string, unknown>
@@ -265,17 +268,19 @@ export async function checkIgnoredPathsOp(
   if (paths.length === 0) {
     return []
   }
+  const stdin = encodeGitCheckIgnorePaths(paths)
 
   try {
-    const { stdout } = await git(
-      ['-c', 'core.quotePath=false', 'check-ignore', '--', ...paths],
-      worktreePath
-    )
-    return parseCheckIgnoreOutput(stdout)
+    const { stdout } = await git([...GIT_CHECK_IGNORE_STDIN_ARGS], worktreePath, {
+      stdin,
+      maxBuffer: getGitCheckIgnoreMaxBufferBytes(stdin),
+      timeout: GIT_CHECK_IGNORE_TIMEOUT_MS
+    })
+    return parseGitCheckIgnoreOutput(stdout)
   } catch (error) {
     const gitError = error as Error & { code?: number | string; stdout?: string }
     if (gitError.code === 1) {
-      return parseCheckIgnoreOutput(gitError.stdout ?? '')
+      return parseGitCheckIgnoreOutput(gitError.stdout ?? '')
     }
     throw error
   }

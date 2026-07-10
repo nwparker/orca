@@ -304,6 +304,7 @@ export class GitHandler {
       signal?: AbortSignal
       nonInteractive?: boolean
       stdin?: string
+      timeout?: number
     }
   ): Promise<{ stdout: string; stderr: string }> {
     const env = buildRelayGitEnv()
@@ -321,6 +322,7 @@ export class GitHandler {
       env,
       encoding: 'utf-8',
       maxBuffer: opts?.maxBuffer ?? MAX_GIT_BUFFER,
+      timeout: opts?.timeout,
       signal: opts?.signal
     } satisfies ExecFileOptions
     if (opts?.stdin !== undefined) {

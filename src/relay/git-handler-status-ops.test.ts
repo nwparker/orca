@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import * as path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { GitExec } from './git-handler-ops'
-import { getStatusOp } from './git-handler-status-ops'
+import { checkIgnoredPathsOp, getStatusOp } from './git-handler-status-ops'
 import { clearNoEffectiveUpstreamStatusCache } from './git-status-upstream-negative-cache'
 
 const LARGE_STATUS_ENTRY_COUNT = 150_000
@@ -243,5 +243,32 @@ describe('getStatusOp', () => {
     expect(
       git.mock.calls.filter(([args]) => args[0] === 'rev-parse' && args.includes('HEAD@{u}'))
     ).toHaveLength(2)
+  })
+
+  it('checks thousands of ignored paths through one NUL-delimited stdin call', async () => {
+    const paths = Array.from({ length: 5_000 }, (_, index) => `src/generated-${index}.ts`)
+    paths[321] = 'src/file\nwith-newline.ts'
+    const git = vi.fn<GitExec>().mockResolvedValue({
+      stdout: `${paths[321]}\0${paths.at(-1)}\0`,
+      stderr: ''
+    })
+
+    await expect(checkIgnoredPathsOp(git, { worktreePath: tmpDir, paths })).resolves.toEqual([
+      paths[321],
+      paths.at(-1)
+    ])
+
+    expect(git).toHaveBeenCalledTimes(1)
+    expect(git).toHaveBeenCalledWith(
+      ['-c', 'core.quotePath=false', 'check-ignore', '--stdin', '-z'],
+      tmpDir,
+      { stdin: `${paths.join('\0')}\0`, maxBuffer: 10 * 1024 * 1024, timeout: 15_000 }
+    )
+  })
+
+  it('does not launch relay git for an empty ignored-path request', async () => {
+    const git = vi.fn<GitExec>()
+    await expect(checkIgnoredPathsOp(git, { worktreePath: tmpDir, paths: [] })).resolves.toEqual([])
+    expect(git).not.toHaveBeenCalled()
   })
 })
