@@ -105,6 +105,31 @@ describe('ServeSimStateWatcher', () => {
     watcher.stop()
   })
 
+  it('detects a serve-sim payload split across ordinary PTY chunks', () => {
+    const watcher = createIsolatedWatcher()
+    const events: ServeSimStateDetectedEvent[] = []
+    const payload = JSON.stringify({
+      device: TEST_UDID,
+      streamUrl: 'http://127.0.0.1:3100/stream.mjpeg',
+      wsUrl: 'ws://127.0.0.1:3100/ws',
+      pid: 12345
+    })
+    const firstSplit = payload.indexOf('streamUrl')
+    const secondSplit = payload.indexOf('wsUrl')
+
+    watcher.bindPty('pty-1', 'worktree-1')
+    watcher.onDetected((event) => events.push(event))
+    watcher.ingestPtyOutput('pty-1', 'ordinary terminal output\n')
+    watcher.ingestPtyOutput('pty-1', payload.slice(0, firstSplit))
+    watcher.ingestPtyOutput('pty-1', payload.slice(firstSplit, secondSplit))
+    expect(events).toHaveLength(0)
+    watcher.ingestPtyOutput('pty-1', payload.slice(secondSplit))
+
+    expect(events).toHaveLength(1)
+    expect(events[0]?.info.helperPid).toBe(12345)
+    watcher.stop()
+  })
+
   it('prunes worktree-scoped dedupe keys on forget so a re-bound worktree re-emits', () => {
     const watcher = createIsolatedWatcher()
     const events: ServeSimStateDetectedEvent[] = []
