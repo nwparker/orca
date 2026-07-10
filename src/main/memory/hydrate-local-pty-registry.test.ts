@@ -32,9 +32,9 @@ vi.mock('../daemon/daemon-init', () => ({
   getDaemonProvider: () => getDaemonProviderMock()
 }))
 
-// Why: the hydrator builds its worktreeId → connectionId map by calling
-// listRepoWorktrees(repo) for every repo in the store. The git I/O is
-// out of scope for this unit; mock returns whatever the test wants.
+// Why: the hydrator builds its worktreeId → connectionId map through
+// listRepoWorktrees(repo). The git I/O is out of scope for this unit; the mock
+// also lets count tests prove repos without live sessions launch no Git work.
 const listRepoWorktreesMock = vi.fn()
 vi.mock('../repo-worktrees', () => ({
   listRepoWorktrees: (repo: unknown) => listRepoWorktreesMock(repo)
@@ -127,6 +127,7 @@ describe('hydrateLocalPtyRegistryAtBoot', () => {
     await hydrate(makeStore([{ id: 'repo-a' }]))
 
     expect(provider.listSessions).toHaveBeenCalledTimes(1)
+    expect(listRepoWorktreesMock).not.toHaveBeenCalled()
   })
 
   it('catches provider.listSessions rejection and does not throw', async () => {
@@ -145,6 +146,7 @@ describe('hydrateLocalPtyRegistryAtBoot', () => {
     warnSpy.mockRestore()
 
     expect(listRegisteredPtys()).toHaveLength(0)
+    expect(listRepoWorktreesMock).not.toHaveBeenCalled()
   })
 
   it('does not clobber a pre-existing registry pid with a null pid from listSessions', async () => {
@@ -180,6 +182,7 @@ describe('hydrateLocalPtyRegistryAtBoot', () => {
     expect(entry).toBeDefined()
     expect(entry!.pid).toBe(12345)
     expect(entry!.paneKey).toBe('tab-1:1')
+    expect(listRepoWorktreesMock).not.toHaveBeenCalled()
   })
 
   it('skips SSH repos before enumerating worktrees', async () => {
@@ -221,6 +224,60 @@ describe('hydrateLocalPtyRegistryAtBoot', () => {
     expect(entry).toBeDefined()
     expect(entry!.pid).toBe(4242)
     expect(entry!.worktreeId).toBe('repo-a::/local/Triton')
+  })
+
+  it('does not register a daemon session whose worktree was removed', async () => {
+    const { hydrate, listRegisteredPtys } = await loadFresh()
+    const provider = makeProvider([
+      {
+        sessionId: 'repo-a::/local/removed@@deadbeef',
+        pid: 4242,
+        cwd: '/local/removed'
+      } as unknown as SessionInfo
+    ])
+    getDaemonProviderMock.mockReturnValue(provider)
+    listRepoWorktreesMock.mockResolvedValue([
+      { path: '/local/current', head: '', branch: '', isBare: false, isMainWorktree: true }
+    ])
+
+    await hydrate(makeStore([{ id: 'repo-a', connectionId: null }]))
+
+    expect(listRepoWorktreesMock).toHaveBeenCalledTimes(1)
+    expect(listRegisteredPtys()).toHaveLength(0)
+  })
+
+  it('enumerates worktrees only for repos referenced by live daemon sessions', async () => {
+    const { hydrate, listRegisteredPtys } = await loadFresh()
+    const repos = Array.from({ length: 100 }, (_, index) => ({ id: `repo-${index}` }))
+    const activeRepoIds = ['repo-17', 'repo-83']
+    const provider = makeProvider(
+      activeRepoIds.map(
+        (repoId, index) =>
+          ({
+            sessionId: `${repoId}::/local/${repoId}@@0000000${index}`,
+            pid: 4000 + index,
+            cwd: `/local/${repoId}`
+          }) as unknown as SessionInfo
+      )
+    )
+    getDaemonProviderMock.mockReturnValue(provider)
+    listRepoWorktreesMock.mockImplementation(async (repo: Repo) => [
+      {
+        path: `/local/${repo.id}`,
+        head: '',
+        branch: '',
+        isBare: false,
+        isMainWorktree: true
+      }
+    ])
+
+    await hydrate(makeStore(repos))
+
+    expect(listRepoWorktreesMock).toHaveBeenCalledTimes(activeRepoIds.length)
+    expect(listRepoWorktreesMock.mock.calls.map(([repo]) => (repo as Repo).id)).toEqual(
+      activeRepoIds
+    )
+    expect(listRegisteredPtys()).toHaveLength(activeRepoIds.length)
   })
 
   it('hydrates large daemon session lists', async () => {
