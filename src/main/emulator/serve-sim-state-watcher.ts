@@ -100,7 +100,12 @@ export class ServeSimStateWatcher {
   }
 
   bindPty(ptyId: string, worktreeId: string): void {
+    if (this.ptyToWorktree.get(ptyId) === worktreeId) {
+      return
+    }
     this.ptyToWorktree.set(ptyId, worktreeId)
+    // Why: a first binding or actual re-home may reveal an existing external
+    // helper; repeated per-chunk bindings must never rescan files synchronously.
     this.scanExistingStateFiles()
   }
 

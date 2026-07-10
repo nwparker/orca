@@ -1,7 +1,7 @@
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ServeSimStateWatcher, type ServeSimStateDetectedEvent } from './serve-sim-state-watcher'
 
 const TEST_UDID = '11111111-2222-3333-4444-555555555555'
@@ -39,6 +39,22 @@ describe('ServeSimStateWatcher', () => {
     await Promise.all(
       cleanupPaths.splice(0).map((path) => rm(path, { recursive: true, force: true }))
     )
+  })
+
+  it('does not rescan state files for an unchanged PTY binding', () => {
+    const watcher = createIsolatedWatcher()
+    const scanExistingStateFiles = vi.spyOn(
+      watcher as unknown as { scanExistingStateFiles: () => void },
+      'scanExistingStateFiles'
+    )
+
+    watcher.bindPty('pty-1', 'worktree-1')
+    watcher.bindPty('pty-1', 'worktree-1')
+    expect(scanExistingStateFiles).toHaveBeenCalledTimes(1)
+
+    watcher.bindPty('pty-1', 'worktree-2')
+    expect(scanExistingStateFiles).toHaveBeenCalledTimes(2)
+    watcher.stop()
   })
 
   it('attaches to the serve-sim state directory when it appears after startup', async () => {
