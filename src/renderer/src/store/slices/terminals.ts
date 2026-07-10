@@ -83,6 +83,7 @@ import {
   removeSleepingRecordsReplacedByManualWorktreeSleep,
   type AgentStatusWorktreeShutdownReason
 } from './agent-status'
+import { indexTerminalSessionTabsById } from './terminal-session-tab-index'
 
 function getNextTerminalOrdinal(tabs: TerminalTab[]): number {
   const usedOrdinals = new Set<number>()
@@ -2971,11 +2972,8 @@ export const createTerminalSlice: StateCreator<AppState, [], [], TerminalSlice> 
           .filter(([, tabs]) => tabs.length > 0)
       )
 
-      const validTabIds = new Set(
-        Object.values(tabsByWorktree)
-          .flat()
-          .map((tab) => tab.id)
-      )
+      const tabsById = indexTerminalSessionTabsById(tabsByWorktree)
+      const validTabIds = new Set(tabsById.keys())
       const sleepingAgentSessionsByPaneKey = Object.fromEntries(
         Object.entries(session.sleepingAgentSessionsByPaneKey ?? {}).filter(([, record]) =>
           validWorktreeIds.has(record.worktreeId)
@@ -3193,9 +3191,7 @@ export const createTerminalSlice: StateCreator<AppState, [], [], TerminalSlice> 
         worktreeNavHistory: activeWorktreeId ? [activeWorktreeId] : [],
         worktreeNavHistoryIndex: activeWorktreeId ? 0 : -1,
         ptyIdsByTabId: Object.fromEntries(
-          Object.values(tabsByWorktree)
-            .flat()
-            .map((tab) => [tab.id, []] as const)
+          Array.from(tabsById.keys(), (tabId) => [tabId, [] as string[]] as const)
         ),
         // Why: with the daemon backend, ptyIds are daemon session IDs that
         // survive app restart. Preserve ptyIdsByLeafId so that
@@ -3208,9 +3204,7 @@ export const createTerminalSlice: StateCreator<AppState, [], [], TerminalSlice> 
               // Why: old sessions can contain renderer-local pane:1-style leaf
               // ids. Normalize during hydration before runtime/mobile surfaces read them.
               const normalized = normalizeTerminalLayoutSnapshot(layout).snapshot
-              const tab = Object.values(tabsByWorktree)
-                .flat()
-                .find((entry) => entry.id === tabId)
+              const tab = tabsById.get(tabId)
               const sanitized = tab ? sanitizeTerminalLayoutPaneTitles(normalized, tab) : normalized
               const activeLeafId = sanitized.root
                 ? resolvePtyBoundActiveLeafId({
