@@ -10619,6 +10619,12 @@ describe('OrcaRuntimeService', () => {
     expect(appendRecentPtyOutput(undefined, data)).toBe(data.slice(-outputLimit))
   })
 
+  it('reuses retained PTY path candidates when a chunk contains no paths', () => {
+    const retained = appendRecentPtyPathCandidates(undefined, '/tmp/result.json\n')
+
+    expect(appendRecentPtyPathCandidates(retained, 'ordinary terminal output')).toBe(retained)
+  })
+
   it('keeps mobile-visible artifact paths in bounded PTY path candidates', () => {
     const artifactPath = '/tmp/result-visible-in-mobile-scrollback.json'
     const prefix = 'x'.repeat(8 * 1024)

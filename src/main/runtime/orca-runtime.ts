@@ -23316,8 +23316,14 @@ export function appendRecentPtyPathCandidates(
   previous: string[] | undefined,
   data: string
 ): string[] {
+  const extracted = extractTerminalOutputPathCandidates(data)
+  // Why: this runs for every raw PTY chunk; ordinary output must not clone and
+  // remeasure the full retained path list when there is nothing to append.
+  if (extracted.length === 0) {
+    return previous ?? []
+  }
   const next = previous ? previous.slice() : []
-  for (const candidate of extractTerminalOutputPathCandidates(data)) {
+  for (const candidate of extracted) {
     if (Buffer.byteLength(candidate, 'utf8') > RECENT_PTY_PATH_CANDIDATE_MAX_BYTES) {
       continue
     }
