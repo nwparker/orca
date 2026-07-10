@@ -3,9 +3,13 @@ import { describe, expect, it } from 'vitest'
 
 // The in-WebView JS lives in terminal-webview-html.ts; the RN wrapper in
 // TerminalWebView.tsx. Concatenate both so assertions resolve regardless of file.
+const pendingMessagesSource = readFileSync(
+  new URL('./terminal-webview-pending-messages.ts', import.meta.url),
+  'utf8'
+)
 const source =
   readFileSync(new URL('./TerminalWebView.tsx', import.meta.url), 'utf8') +
-  readFileSync(new URL('./terminal-webview-pending-messages.ts', import.meta.url), 'utf8') +
+  pendingMessagesSource +
   readFileSync(new URL('./terminal-webview-url-tap.ts', import.meta.url), 'utf8') +
   readFileSync(new URL('./terminal-webview-tap-dispatch-injected.ts', import.meta.url), 'utf8') +
   readFileSync(new URL('./terminal-webview-html.ts', import.meta.url), 'utf8')
@@ -124,7 +128,8 @@ describe('TerminalWebView scroll routing', () => {
     expect(source).toContain('let pendingWriteCount = 0')
     expect(source).toContain('const queue = (msg: TerminalWebViewCommand)')
     expect(source).toContain('pendingWriteCount > MAX_PENDING_WEB_WRITE_MESSAGES')
-    expect(source).toContain("candidate.type === 'write'")
+    expect(pendingMessagesSource).not.toContain('pending.findIndex(')
+    expect(pendingMessagesSource).not.toContain('pending.splice(')
     expect(source).toContain('pendingMessages.queue(msg)')
     expect(source).toContain('pendingMessages.clear()')
   })
