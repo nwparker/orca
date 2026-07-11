@@ -1755,12 +1755,14 @@ export type PreloadApi = {
       args: GitLabRepoSelectorArgs & {
         number: number
         updates: GitLabIssueUpdate
+        projectRef?: GitLabProjectRef | null
       }
     ) => Promise<{ ok: true } | { ok: false; error: string }>
     addIssueComment: (
       args: GitLabRepoSelectorArgs & {
         number: number
         body: string
+        projectRef?: GitLabProjectRef | null
       }
     ) => Promise<GitLabCommentResult>
     listLabels: (args: GitLabRepoSelectorArgs) => Promise<string[]>
@@ -1772,28 +1774,33 @@ export type PreloadApi = {
       args: GitLabRepoSelectorArgs & {
         iid: number
         type: 'issue' | 'mr'
+        projectRef?: GitLabProjectRef | null
       }
     ) => Promise<GitLabWorkItemDetails | null>
     closeMR: (
       args: GitLabRepoSelectorArgs & {
         iid: number
+        projectRef?: GitLabProjectRef | null
       }
     ) => Promise<{ ok: true } | { ok: false; error: string }>
     reopenMR: (
       args: GitLabRepoSelectorArgs & {
         iid: number
+        projectRef?: GitLabProjectRef | null
       }
     ) => Promise<{ ok: true } | { ok: false; error: string }>
     mergeMR: (
       args: GitLabRepoSelectorArgs & {
         iid: number
         method?: 'merge' | 'squash' | 'rebase'
+        projectRef?: GitLabProjectRef | null
       }
     ) => Promise<{ ok: true } | { ok: false; error: string }>
     updateMR: (
       args: GitLabRepoSelectorArgs & {
         iid: number
         updates: GitLabMRUpdate
+        projectRef?: GitLabProjectRef | null
       }
     ) => Promise<{ ok: true } | { ok: false; error: string }>
     updateMRReviewers: (
@@ -1807,6 +1814,7 @@ export type PreloadApi = {
       args: GitLabRepoSelectorArgs & {
         iid: number
         body: string
+        projectRef?: GitLabProjectRef | null
       }
     ) => Promise<GitLabCommentResult>
     addMRInlineComment: (
@@ -1821,6 +1829,7 @@ export type PreloadApi = {
         iid: number
         discussionId: string
         resolved: boolean
+        projectRef?: GitLabProjectRef | null
       }
     ) => Promise<GitLabDiscussionResolveResult>
     jobTrace: (

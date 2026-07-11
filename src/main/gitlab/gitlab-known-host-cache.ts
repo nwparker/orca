@@ -120,9 +120,7 @@ export function rememberGlabKnownHost(host: string, connectionId?: string | null
   )
 }
 
-export async function getGlabKnownHosts(
-  connectionId?: string | null
-): Promise<readonly string[]> {
+export async function getGlabKnownHosts(connectionId?: string | null): Promise<readonly string[]> {
   const key = connectionCacheKey(connectionId)
   const sshProviderRegistrationId = connectionId
     ? getSshGitProviderRegistrationId(connectionId)

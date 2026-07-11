@@ -154,7 +154,9 @@ describe('gitlab project ref resolution', () => {
     sshExecMock.mockResolvedValueOnce({ stdout: 'git@gitlab.com:remote/orca.git\n', stderr: '' })
     registerSshGitProvider('conn-1', { exec: sshExecMock } as never)
 
-    await expect(getProjectRefForRemote('/repo', 'origin', undefined, 'conn-1')).resolves.toEqual({
+    await expect(
+      getProjectRefForRemote('/repo', 'origin', undefined, 'conn-1')
+    ).resolves.toMatchObject({
       host: 'gitlab.com',
       path: 'remote/orca'
     })
@@ -170,14 +172,18 @@ describe('gitlab project ref resolution', () => {
     const provider = { exec: sshExecMock } as never
     registerSshGitProvider('conn-1', provider)
 
-    await expect(getProjectRefForRemote('/repo', 'origin', undefined, 'conn-1')).resolves.toEqual({
+    await expect(
+      getProjectRefForRemote('/repo', 'origin', undefined, 'conn-1')
+    ).resolves.toMatchObject({
       host: 'gitlab.com',
       path: 'old/orca'
     })
     unregisterSshGitProvider('conn-1')
     registerSshGitProvider('conn-1', provider)
 
-    await expect(getProjectRefForRemote('/repo', 'origin', undefined, 'conn-1')).resolves.toEqual({
+    await expect(
+      getProjectRefForRemote('/repo', 'origin', undefined, 'conn-1')
+    ).resolves.toMatchObject({
       host: 'gitlab.com',
       path: 'new/orca'
     })
@@ -200,14 +206,18 @@ describe('gitlab project ref resolution', () => {
 
     unregisterSshGitProvider('conn-1')
     registerSshGitProvider('conn-1', provider)
-    await expect(getProjectRefForRemote('/repo', 'origin', undefined, 'conn-1')).resolves.toEqual({
+    await expect(
+      getProjectRefForRemote('/repo', 'origin', undefined, 'conn-1')
+    ).resolves.toMatchObject({
       host: 'gitlab.com',
       path: 'new/orca'
     })
     resolveOldProbe({ stdout: 'git@gitlab.com:old/orca.git\n', stderr: '' })
     await expect(oldProbe).resolves.toBeNull()
 
-    await expect(getProjectRefForRemote('/repo', 'origin', undefined, 'conn-1')).resolves.toEqual({
+    await expect(
+      getProjectRefForRemote('/repo', 'origin', undefined, 'conn-1')
+    ).resolves.toMatchObject({
       host: 'gitlab.com',
       path: 'new/orca'
     })
@@ -236,7 +246,9 @@ describe('gitlab project ref resolution', () => {
     })
     registerSshGitProvider('conn-1', { exec: sshExecMock } as never)
 
-    await expect(getProjectRefForRemote('/repo', 'origin', undefined, 'conn-1')).resolves.toEqual({
+    await expect(
+      getProjectRefForRemote('/repo', 'origin', undefined, 'conn-1')
+    ).resolves.toMatchObject({
       host: 'gitlab.com',
       path: 'remote/orca'
     })
@@ -249,7 +261,9 @@ describe('gitlab project ref resolution', () => {
     registerSshGitProvider('conn-1', { exec: sshExecMock } as never)
 
     await expect(getProjectRefForRemote('/repo', 'origin', undefined, 'conn-1')).resolves.toBeNull()
-    await expect(getProjectRefForRemote('/repo', 'origin', undefined, 'conn-1')).resolves.toEqual({
+    await expect(
+      getProjectRefForRemote('/repo', 'origin', undefined, 'conn-1')
+    ).resolves.toMatchObject({
       host: 'gitlab.com',
       path: 'remote/orca'
     })

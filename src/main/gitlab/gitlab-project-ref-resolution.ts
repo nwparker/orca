@@ -1,9 +1,6 @@
 import { gitExecFileAsync, glabExecFileAsync } from '../git/runner'
 import type { IssueSourcePreference } from '../../shared/types'
-import {
-  getSshGitProvider,
-  getSshGitProviderRegistrationId
-} from '../providers/ssh-git-dispatch'
+import { getSshGitProvider, getSshGitProviderRegistrationId } from '../providers/ssh-git-dispatch'
 import { clearProjectRefInFlight, runProjectRefProbeOnce } from './project-ref-inflight'
 import {
   areGlabKnownHostsCurrentForConnection,
@@ -17,6 +14,10 @@ import {
   parseRemoteProjectRefCandidate,
   type ProjectRef
 } from './project-ref-parser'
+import {
+  assertProjectRefCurrentForConnection,
+  rememberProjectRefLifecycle
+} from './gitlab-project-ref-lifecycle'
 
 export { DEFAULT_GITLAB_HOSTS, parseGitLabProjectRef }
 export {
@@ -122,22 +123,26 @@ async function resolveProjectRefForRemote(
     }
     const result = parseGitLabProjectRef(stdout, knownHosts)
     if (result) {
+      rememberProjectRefLifecycle(result, connectionId, sshProviderRegistrationId)
       rememberProjectRefCacheEntry(cacheKey, result)
       return result
     }
     const remoteCandidate = parseRemoteProjectRefCandidate(stdout)
     if (
       remoteCandidate &&
+      (!connectionId ||
+        getSshGitProviderRegistrationId(connectionId) === sshProviderRegistrationId) &&
       (await isGlabConfiguredForRemoteHost(
         repoPath,
         remoteCandidate,
         connectionId,
+        sshProviderRegistrationId,
         localGitOptions
       )) &&
-      (!connectionId ||
-        getSshGitProviderRegistrationId(connectionId) === sshProviderRegistrationId)
+      (!connectionId || getSshGitProviderRegistrationId(connectionId) === sshProviderRegistrationId)
     ) {
       rememberGlabKnownHost(remoteCandidate.host, connectionId)
+      rememberProjectRefLifecycle(remoteCandidate, connectionId, sshProviderRegistrationId)
       rememberProjectRefCacheEntry(cacheKey, remoteCandidate)
       return remoteCandidate
     }
@@ -243,9 +248,12 @@ export function glabRepoExecOptions(
 }
 
 export function glabHostnameArgs(
-  projectRef: Pick<ProjectRef, 'host'> | null | undefined,
+  projectRef: ProjectRef | null | undefined,
   connectionId?: string | null
 ): string[] {
+  if (projectRef) {
+    assertProjectRefCurrentForConnection(projectRef, connectionId)
+  }
   return connectionId && projectRef?.host ? ['--hostname', projectRef.host] : []
 }
 
@@ -253,8 +261,12 @@ async function isGlabConfiguredForRemoteHost(
   repoPath: string,
   projectRef: Pick<ProjectRef, 'host'>,
   connectionId?: string | null,
+  sshProviderRegistrationId?: number,
   localGitOptions: LocalGitExecOptions = {}
 ): Promise<boolean> {
+  if (connectionId && getSshGitProviderRegistrationId(connectionId) !== sshProviderRegistrationId) {
+    return false
+  }
   try {
     const result = await glabExecFileAsync(
       ['auth', 'status', '--hostname', projectRef.host],
