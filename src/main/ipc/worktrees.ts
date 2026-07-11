@@ -118,7 +118,10 @@ import {
 } from '../worktree-removal-safety'
 import { isWindowsAbsolutePathLike } from '../../shared/cross-platform-path'
 import { DEFAULT_WORKSPACE_STATUS_ID } from '../../shared/workspace-statuses'
-import { FOLDER_WORKSPACE_INSTANCE_SEPARATOR } from '../../shared/worktree-id'
+import {
+  FOLDER_WORKSPACE_INSTANCE_SEPARATOR,
+  getRepoIdFromWorktreeId
+} from '../../shared/worktree-id'
 import { prefetchWorktreeCreateBase } from '../worktree-create-base-prefetch'
 import {
   getLocalProjectGitExecOptions,
@@ -1953,7 +1956,9 @@ export function registerWorktreeHandlers(
         // Why: paired remote clients have no optimistic copy of the rename and
         // no longer poll for titles, so push the remote-only invalidation.
         // Gated on displayName to keep isUnread-per-click updates event-free.
-        runtime.notifyWorktreesChangedForRemoteClients(parseWorktreeId(args.worktreeId).repoId)
+        // getRepoIdFromWorktreeId matches the mobile client's event filter and
+        // never throws after the meta write already succeeded.
+        runtime.notifyWorktreesChangedForRemoteClients(getRepoIdFromWorktreeId(args.worktreeId))
       }
       return meta
     }
