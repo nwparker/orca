@@ -482,7 +482,8 @@ describe('registerWorktreeHandlers', () => {
         handle: 'term-setup',
         tabId: 'tab-startup',
         paneRuntimeId: -1
-      })
+      }),
+      notifyWorktreesChangedForRemoteClients: vi.fn()
     }
     registerWorktreeHandlers(mainWindow as never, store as never, runtimeStub as never)
   })
@@ -730,6 +731,24 @@ describe('registerWorktreeHandlers', () => {
       isPinned: true
     })
     expect(result).toMatchObject({ comment: 'keep me', isPinned: true })
+  })
+
+  it('pushes a remote-client invalidation for renames but not read-state updates', () => {
+    store.setWorktreeMeta.mockImplementation((_worktreeId, meta) => meta)
+
+    handlers['worktrees:updateMeta'](null, {
+      worktreeId: 'repo-1::/workspace/feature-wt',
+      updates: { isUnread: false }
+    })
+    // Why: per-click isUnread writes must stay event-free (PR #209), while a
+    // rename must reach paired remote clients that no longer poll for titles.
+    expect(runtimeStub.notifyWorktreesChangedForRemoteClients).not.toHaveBeenCalled()
+
+    handlers['worktrees:updateMeta'](null, {
+      worktreeId: 'repo-1::/workspace/feature-wt',
+      updates: { displayName: 'Renamed workspace' }
+    })
+    expect(runtimeStub.notifyWorktreesChangedForRemoteClients).toHaveBeenCalledWith('repo-1')
   })
 
   it('does not trust renderer-authored automation provenance during local create', async () => {

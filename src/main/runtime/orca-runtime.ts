@@ -2828,6 +2828,14 @@ export class OrcaRuntimeService {
     this.emitClientEvent({ type: 'sshStateChanged', targetId, state })
   }
 
+  // Why: renderer-initiated meta updates intentionally skip the renderer
+  // notifier (the renderer already applied them optimistically), but remote
+  // clients hold no optimistic copy and need the invalidation event.
+  notifyWorktreesChangedForRemoteClients(repoId: string): void {
+    this.invalidateResolvedWorktreeCache()
+    this.emitClientEvent({ type: 'worktreesChanged', repoId })
+  }
+
   private notifyActivateWorktree(
     repoId: string,
     worktreeId: string,

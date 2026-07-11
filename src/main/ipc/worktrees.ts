@@ -1949,6 +1949,12 @@ export function registerWorktreeHandlers(
       // sortEpoch and reorders the sidebar — the exact bug PR #209 tried
       // to fix (clicking a card would clear isUnread → updateMeta →
       // worktrees:changed → fetchWorktrees → sortEpoch++ → re-sort).
+      if (args.updates.displayName !== undefined) {
+        // Why: paired remote clients have no optimistic copy of the rename and
+        // no longer poll for titles, so push the remote-only invalidation.
+        // Gated on displayName to keep isUnread-per-click updates event-free.
+        runtime.notifyWorktreesChangedForRemoteClients(parseWorktreeId(args.worktreeId).repoId)
+      }
       return meta
     }
   )
