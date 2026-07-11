@@ -87,10 +87,12 @@ import {
 import { cleanupEphemeralVmRuntimesForDeleted } from '@/lib/ephemeral-vm-runtime-cleanup'
 import { folderWorkspaceKey, parseWorkspaceKey } from '../../../../shared/workspace-scope'
 import { formatFolderWorkspaceCreateError } from '../../lib/folder-workspace-path-status'
+import {
+  createSafeAutoForkSyncAttemptKeys,
+  getSafeAutoForkSyncAttemptRegistry
+} from './safe-auto-fork-sync-attempts'
 
 const ERROR_TOAST_DURATION = 60_000
-const SAFE_AUTO_FORK_SYNC_COOLDOWN_MS = 10 * 60 * 1000
-const safeAutoForkSyncAttempts = new Map<string, { attemptedAt: number; promise?: Promise<void> }>()
 
 export type RepoUpdate = Partial<
   Pick<
@@ -204,6 +206,18 @@ function sanitizeRepoUpdate(updates: RepoUpdate): RepoUpdate {
 }
 
 const updateRepoChainsByStore = new WeakMap<() => AppState, Map<string, Promise<boolean>>>()
+const repoCatalogRemovalGenerationByStore = new WeakMap<object, number>()
+
+function getRepoCatalogRemovalGeneration(storeOwner: object): number {
+  return repoCatalogRemovalGenerationByStore.get(storeOwner) ?? 0
+}
+
+function invalidateCatalogsStartedBeforeRemoval(storeOwner: object): void {
+  repoCatalogRemovalGenerationByStore.set(
+    storeOwner,
+    getRepoCatalogRemovalGeneration(storeOwner) + 1
+  )
+}
 
 function getRepoUpdateChains(get: () => AppState): Map<string, Promise<boolean>> {
   let chains = updateRepoChainsByStore.get(get)
@@ -266,8 +280,40 @@ function getProjectUpdateRuntimeTarget(
     : { kind: 'local' }
 }
 
-function getSafeAutoForkSyncKey(repo: Repo): string {
-  return `${getRepoExecutionHostId(repo)}:${repo.id}:${repo.path}`
+function getSafeAutoForkSyncKeys(repo: Repo, profileId: string | null) {
+  return createSafeAutoForkSyncAttemptKeys({
+    profileId,
+    executionHostId: getRepoExecutionHostId(repo),
+    connectionId: repo.connectionId ?? null,
+    repoId: repo.id,
+    repoPath: repo.path,
+    remoteCanonicalKey: repo.gitRemoteIdentity?.canonicalKey ?? null,
+    upstreamOwner: repo.upstream?.owner ?? '',
+    upstreamRepo: repo.upstream?.repo ?? ''
+  })
+}
+
+function getLiveSafeAutoForkSyncCooldownKeys(state: AppState): string[] {
+  return state.repos
+    .filter((repo) => repo.kind !== 'folder' && repo.forkSyncMode === 'safe-auto' && repo.upstream)
+    .map((repo) => getSafeAutoForkSyncKeys(repo, state.activeOrcaProfileId).cooldownKey)
+}
+
+function retireRemovedSafeAutoForkSyncLifecycles(
+  get: () => AppState,
+  previousRepos: readonly Repo[],
+  currentRepos: readonly Repo[]
+): void {
+  const currentOperationKeys = new Set(
+    currentRepos.map((repo) => getSafeAutoForkSyncKeys(repo, null).operationKey)
+  )
+  const attempts = getSafeAutoForkSyncAttemptRegistry(get)
+  for (const repo of previousRepos) {
+    const operationKey = getSafeAutoForkSyncKeys(repo, null).operationKey
+    if (!currentOperationKeys.has(operationKey)) {
+      attempts.retire(operationKey)
+    }
+  }
 }
 
 function formatProjectPresenceProfileNames(profileNames: readonly string[]): string {
@@ -316,22 +362,20 @@ async function warnIfProjectKnownInAnotherProfile(
 }
 
 function scheduleSafeAutoForkSync(get: () => AppState, repos: readonly Repo[]): void {
+  const attempts = getSafeAutoForkSyncAttemptRegistry(get)
+  const now = Date.now()
+  attempts.prune(now, getLiveSafeAutoForkSyncCooldownKeys(get()))
   for (const repo of repos) {
     if (repo.kind === 'folder' || repo.forkSyncMode !== 'safe-auto' || !repo.upstream) {
       continue
     }
-    const key = getSafeAutoForkSyncKey(repo)
-    const existingAttempt = safeAutoForkSyncAttempts.get(key)
-    const now = Date.now()
-    if (
-      existingAttempt?.promise ||
-      (existingAttempt && now - existingAttempt.attemptedAt < SAFE_AUTO_FORK_SYNC_COOLDOWN_MS)
-    ) {
+    const keys = getSafeAutoForkSyncKeys(repo, get().activeOrcaProfileId)
+    if (!attempts.canStart(keys.operationKey, keys.cooldownKey, now)) {
       continue
     }
     const promise = syncRuntimeGitForkDefaultBranch(
       {
-        settings: settingsForRepoOwner(get(), repo.id),
+        settings: settingsForRepoOwner(get(), repo.id, getRepoExecutionHostId(repo)),
         worktreeId: repo.id,
         worktreePath: repo.path,
         connectionId: repo.connectionId ?? undefined
@@ -346,12 +390,25 @@ function scheduleSafeAutoForkSync(get: () => AppState, repos: readonly Repo[]): 
         console.info('Safe fork auto-sync skipped', error)
       })
       .finally(() => {
-        const current = safeAutoForkSyncAttempts.get(key)
-        if (current?.promise === promise) {
-          safeAutoForkSyncAttempts.set(key, { attemptedAt: now })
+        const completion = attempts.complete(keys.operationKey, promise)
+        if (completion !== 'retry') {
+          return
+        }
+        const profileId = get().activeOrcaProfileId
+        const replacement = get().repos.find(
+          (candidate) =>
+            candidate.kind !== 'folder' &&
+            candidate.forkSyncMode === 'safe-auto' &&
+            candidate.upstream &&
+            getSafeAutoForkSyncKeys(candidate, profileId).operationKey === keys.operationKey
+        )
+        if (replacement) {
+          // Why: removal can finish while the old git operation is still in flight.
+          // Wait for that owner to settle before retrying a same-path replacement.
+          scheduleSafeAutoForkSync(get, [replacement])
         }
       })
-    safeAutoForkSyncAttempts.set(key, { attemptedAt: now, promise })
+    attempts.start(keys.operationKey, keys.cooldownKey, now, promise)
   }
 }
 
@@ -1548,12 +1605,19 @@ export const createRepoSlice: StateCreator<AppState, [], [], RepoSlice> = (set, 
     })
     try {
       const target = getActiveRuntimeTarget(get().settings)
+      const removalGeneration = getRepoCatalogRemovalGeneration(get)
       const catalog = await fetchRepoCatalogForTarget(target)
       // A newer fetchRepos superseded us while we awaited — drop this stale result.
       if (get().reposFetchGeneration !== generation) {
         return
       }
+      // Why: a catalog captured before a successful removal must not resurrect
+      // that repo or schedule its retired safe-auto lifecycle.
+      if (getRepoCatalogRemovalGeneration(get) !== removalGeneration) {
+        return
+      }
       let finalizedHostRepos: Repo[] = []
+      const previousRepos = get().repos
       set((s) => {
         // Why: after re-adoption re-points a repo onto a re-added SSH target, the
         // per-host merge leaves the stale row on the old (removed) target id — a
@@ -1597,6 +1661,7 @@ export const createRepoSlice: StateCreator<AppState, [], [], RepoSlice> = (set, 
           )
         }
       })
+      retireRemovedSafeAutoForkSyncLifecycles(get, previousRepos, get().repos)
       scheduleSafeAutoForkSync(get, finalizedHostRepos)
     } catch (err) {
       console.error('Failed to fetch repos:', err)
@@ -1606,8 +1671,13 @@ export const createRepoSlice: StateCreator<AppState, [], [], RepoSlice> = (set, 
   fetchRuntimeEnvironmentRepos: async (environmentId) => {
     try {
       const target = { kind: 'environment' as const, environmentId }
+      const removalGeneration = getRepoCatalogRemovalGeneration(get)
       const catalog = await fetchRepoCatalogForTarget(target)
+      if (getRepoCatalogRemovalGeneration(get) !== removalGeneration) {
+        return []
+      }
       let finalizedHostRepos: Repo[] = []
+      const previousRepos = get().repos
       set((s) => {
         const result = mergeFetchedRepoCatalog(catalog, s.repos)
         const reconciliation = reconcileSupersededSshRepos(result.repos, s)
@@ -1646,6 +1716,7 @@ export const createRepoSlice: StateCreator<AppState, [], [], RepoSlice> = (set, 
           )
         }
       })
+      retireRemovedSafeAutoForkSyncLifecycles(get, previousRepos, get().repos)
       scheduleSafeAutoForkSync(get, finalizedHostRepos)
       return finalizedHostRepos
     } catch (err) {
@@ -1674,6 +1745,7 @@ export const createRepoSlice: StateCreator<AppState, [], [], RepoSlice> = (set, 
         return
       }
       let hostRepos: Repo[] = []
+      const previousRepos = get().repos
       set((s) => {
         const result = mergeFetchedRepoCatalog(catalog, s.repos)
         const reconciliation = reconcileSupersededSshRepos(result.repos, s)
@@ -1707,6 +1779,7 @@ export const createRepoSlice: StateCreator<AppState, [], [], RepoSlice> = (set, 
           setupScriptPromptDismissedRepoIds: s.setupScriptPromptDismissedRepoIds
         }
       })
+      retireRemovedSafeAutoForkSyncLifecycles(get, previousRepos, get().repos)
       // Why: preserve the safe-auto fork sync that fetchRepos /
       // fetchRuntimeEnvironmentRepos schedule after merging each host, so
       // cold-start (which now routes through here) keeps updating safe-auto forks.
@@ -1727,10 +1800,23 @@ export const createRepoSlice: StateCreator<AppState, [], [], RepoSlice> = (set, 
       })
     }
 
-    // Local first so local repos are present even if a remote fetch stalls.
     let failed = false
+    const fetchAndApplyCatalog = async (
+      target: ReturnType<typeof getActiveRuntimeTarget>
+    ): Promise<void> => {
+      const removalGeneration = getRepoCatalogRemovalGeneration(get)
+      const catalog = await fetchRepoCatalogForTarget(target)
+      if (getRepoCatalogRemovalGeneration(get) !== removalGeneration) {
+        // A fresh all-host load will refill this host without replaying deleted state.
+        failed = true
+        return
+      }
+      applyCatalog(catalog)
+    }
+
+    // Local first so local repos are present even if a remote fetch stalls.
     try {
-      applyCatalog(await fetchRepoCatalogForTarget({ kind: 'local' }))
+      await fetchAndApplyCatalog({ kind: 'local' })
     } catch (err) {
       failed = true
       console.error('Failed to fetch local repos for all-host load:', err)
@@ -1748,12 +1834,10 @@ export const createRepoSlice: StateCreator<AppState, [], [], RepoSlice> = (set, 
     await Promise.all(
       environments.map(async (environment) => {
         try {
-          applyCatalog(
-            await fetchRepoCatalogForTarget({
-              kind: 'environment',
-              environmentId: environment.id
-            })
-          )
+          await fetchAndApplyCatalog({
+            kind: 'environment',
+            environmentId: environment.id
+          })
         } catch (err) {
           failed = true
           console.warn(`Skipped repos for runtime environment ${environment.id}:`, err)
@@ -2595,6 +2679,9 @@ export const createRepoSlice: StateCreator<AppState, [], [], RepoSlice> = (set, 
             ).result
       const repo = result.repo ? repoWithFetchedOwner(result.repo, target) : undefined
       const repoHostId = repo ? getRepoExecutionHostId(repo) : null
+      if (repo) {
+        invalidateCatalogsStartedBeforeRemoval(get)
+      }
       set((s) => {
         const projectHostSetups = s.projectHostSetups.filter(
           (setup) => setup.id !== result.setup.id
@@ -2616,6 +2703,11 @@ export const createRepoSlice: StateCreator<AppState, [], [], RepoSlice> = (set, 
           ...omitSparsePresetsForRepos(s, removedRepoIds)
         }
       })
+      if (repo) {
+        getSafeAutoForkSyncAttemptRegistry(get).retire(
+          getSafeAutoForkSyncKeys(repo, null).operationKey
+        )
+      }
       return { ...result, repo }
     } catch (err) {
       console.error('Failed to delete project host setup:', err)
@@ -2754,6 +2846,7 @@ export const createRepoSlice: StateCreator<AppState, [], [], RepoSlice> = (set, 
         return
       }
       const ownerHostId = getRepoExecutionHostId(ownerRepo)
+      const safeAutoForkSyncKeys = getSafeAutoForkSyncKeys(ownerRepo, get().activeOrcaProfileId)
       // Why: an SSH-mode per-workspace-env's workspace is the repo's main worktree, so deleting it
       // routes here (project removal) rather than through removeWorktree. Tear down the backing
       // ephemeral runtime (Docker/VM + hidden SSH target) first so it doesn't leak when the project
@@ -2782,6 +2875,11 @@ export const createRepoSlice: StateCreator<AppState, [], [], RepoSlice> = (set, 
           ? window.api.repos.removeForHost({ repoId: projectId, hostId: ownerHostId })
           : window.api.repos.remove({ repoId: projectId })
         : callRuntimeRpc(target, 'repo.rm', { repo: projectId }, { timeoutMs: 15_000 }))
+
+      // Why: backend deletion is authoritative even if later UI/cache cleanup fails.
+      // Retired owners only retry after a new lifecycle explicitly queues behind them.
+      invalidateCatalogsStartedBeforeRemoval(get)
+      getSafeAutoForkSyncAttemptRegistry(get).retire(safeAutoForkSyncKeys.operationKey)
 
       get().clearOrcaHookTrustForRepo(projectId)
       const repoPath = get().repos.find((repo) =>
