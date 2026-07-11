@@ -74,11 +74,11 @@ export async function hydrateLocalPtyRegistryAtBoot(store: Pick<Store, 'getRepos
     // Why: ask the daemon which repos matter before launching Git worktree
     // enumeration. Most configured repos have no preserved session at boot,
     // so scanning all of them creates pure background subprocess churn.
-    const sessionInfos = await collectSessionInfos(provider)
-    const alreadyRegistered = new Set(listRegisteredPtys().map((p) => p.ptyId))
+    const initialSessionInfos = await collectSessionInfos(provider)
+    const initiallyRegistered = new Set(listRegisteredPtys().map((p) => p.ptyId))
     const referencedRepoIds = new Set<string>()
-    for (const info of sessionInfos) {
-      if (alreadyRegistered.has(info.sessionId)) {
+    for (const info of initialSessionInfos) {
+      if (initiallyRegistered.has(info.sessionId)) {
         continue
       }
       const { worktreeId } = parsePtySessionId(info.sessionId)
@@ -87,12 +87,14 @@ export async function hydrateLocalPtyRegistryAtBoot(store: Pick<Store, 'getRepos
         referencedRepoIds.add(parsedWorktreeId.repoId)
       }
     }
+    if (referencedRepoIds.size === 0) {
+      return
+    }
 
-    // Why: build a worktree-id → connectionId map so we can SSH-gate each
-    // session before registering. Live git enumeration still verifies that a
-    // referenced worktree exists instead of resurrecting removed worktrees.
+    // Why: live git enumeration verifies that a referenced local worktree
+    // still exists instead of resurrecting removed worktrees.
     const repos = store.getRepos()
-    const repoConnectionIdByWorktreeId = new Map<string, string | null>()
+    const liveLocalWorktreeIds = new Set<string>()
 
     for (const repo of repos) {
       if (!referencedRepoIds.has(repo.id)) {
@@ -106,11 +108,15 @@ export async function hydrateLocalPtyRegistryAtBoot(store: Pick<Store, 'getRepos
       }
       const worktrees = await listRepoWorktrees(repo)
       for (const wt of worktrees) {
-        const worktreeId = `${repo.id}::${wt.path}`
-        repoConnectionIdByWorktreeId.set(worktreeId, connectionId)
+        liveLocalWorktreeIds.add(`${repo.id}::${wt.path}`)
       }
     }
 
+    // Why: Git enumeration can take seconds. Re-read daemon and registry state
+    // so sessions that exited or were authoritatively registered meanwhile do
+    // not get resurrected or overwritten from the stale selection snapshot.
+    const sessionInfos = await collectSessionInfos(provider)
+    const alreadyRegistered = new Set(listRegisteredPtys().map((p) => p.ptyId))
     for (const info of sessionInfos) {
       // Why: pid-write ordering — `pty:spawn` is the authoritative
       // writer for in-session sessions; if that fired before this loop
@@ -128,10 +134,7 @@ export async function hydrateLocalPtyRegistryAtBoot(store: Pick<Store, 'getRepos
       // `src/main/ipc/pty.ts`. If the repo isn't in the store, skip the
       // session: we can't prove it's local, and the renderer-side union
       // still surfaces the session at the cost of a missing pid sample.
-      if (!repoConnectionIdByWorktreeId.has(worktreeId)) {
-        continue
-      }
-      if (repoConnectionIdByWorktreeId.get(worktreeId)) {
+      if (!liveLocalWorktreeIds.has(worktreeId)) {
         continue
       }
       registerPty({

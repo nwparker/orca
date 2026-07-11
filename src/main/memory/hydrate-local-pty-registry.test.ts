@@ -79,6 +79,17 @@ function makeLocalSessions(repoId: string, worktreePath: string, count: number):
   return sessions
 }
 
+function createDeferred<T>(): {
+  promise: Promise<T>
+  resolve: (value: T) => void
+} {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((resolver) => {
+    resolve = resolver
+  })
+  return { promise, resolve }
+}
+
 // Why: the module under test memoizes `hasHydrated` at module scope so it
 // only runs the git/RPC pass once per process. The pty-registry module
 // also stashes state in a module-level Map, so we have to load BOTH
@@ -183,6 +194,68 @@ describe('hydrateLocalPtyRegistryAtBoot', () => {
     expect(entry!.pid).toBe(12345)
     expect(entry!.paneKey).toBe('tab-1:1')
     expect(listRepoWorktreesMock).not.toHaveBeenCalled()
+  })
+
+  it('does not clobber a pty:spawn registration that arrives during worktree enumeration', async () => {
+    const { hydrate, listRegisteredPtys, registerPty } = await loadFresh()
+    const ptyId = 'repo-a::/local/Triton@@deadbeef'
+    const provider = makeProvider([
+      { sessionId: ptyId, pid: null, cwd: '/local/Triton' } as unknown as SessionInfo
+    ])
+    getDaemonProviderMock.mockReturnValue(provider)
+    const worktrees =
+      createDeferred<
+        { path: string; head: string; branch: string; isBare: boolean; isMainWorktree: boolean }[]
+      >()
+    listRepoWorktreesMock.mockReturnValue(worktrees.promise)
+
+    const hydration = hydrate(makeStore([{ id: 'repo-a', connectionId: null }]))
+    await vi.waitFor(() => expect(listRepoWorktreesMock).toHaveBeenCalledTimes(1))
+    registerPty({
+      ptyId,
+      worktreeId: 'repo-a::/local/Triton',
+      sessionId: ptyId,
+      paneKey: 'tab-1:1',
+      pid: 12345
+    })
+    worktrees.resolve([
+      { path: '/local/Triton', head: '', branch: '', isBare: false, isMainWorktree: true }
+    ])
+    await hydration
+
+    expect(listRegisteredPtys()).toEqual([
+      expect.objectContaining({ ptyId, pid: 12345, paneKey: 'tab-1:1' })
+    ])
+  })
+
+  it('does not resurrect a daemon session that exits during worktree enumeration', async () => {
+    const { hydrate, listRegisteredPtys, unregisterPty } = await loadFresh()
+    const ptyId = 'repo-a::/local/Triton@@deadbeef'
+    const provider = {
+      listSessions: vi
+        .fn()
+        .mockResolvedValueOnce([
+          { sessionId: ptyId, pid: 4242, cwd: '/local/Triton' } as unknown as SessionInfo
+        ])
+        .mockResolvedValueOnce([])
+    }
+    getDaemonProviderMock.mockReturnValue(provider)
+    const worktrees =
+      createDeferred<
+        { path: string; head: string; branch: string; isBare: boolean; isMainWorktree: boolean }[]
+      >()
+    listRepoWorktreesMock.mockReturnValue(worktrees.promise)
+
+    const hydration = hydrate(makeStore([{ id: 'repo-a', connectionId: null }]))
+    await vi.waitFor(() => expect(listRepoWorktreesMock).toHaveBeenCalledTimes(1))
+    unregisterPty(ptyId)
+    worktrees.resolve([
+      { path: '/local/Triton', head: '', branch: '', isBare: false, isMainWorktree: true }
+    ])
+    await hydration
+
+    expect(provider.listSessions).toHaveBeenCalledTimes(2)
+    expect(listRegisteredPtys()).toHaveLength(0)
   })
 
   it('skips SSH repos before enumerating worktrees', async () => {
