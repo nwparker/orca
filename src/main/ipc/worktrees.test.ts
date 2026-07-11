@@ -275,6 +275,7 @@ describe('registerWorktreeHandlers', () => {
     resolveManagedMrBase: ReturnType<typeof vi.fn>
     createTerminal: ReturnType<typeof vi.fn>
     splitTerminal: ReturnType<typeof vi.fn>
+    notifyWorktreesChangedForRemoteClients: ReturnType<typeof vi.fn>
   }
 
   beforeEach(() => {
