@@ -501,6 +501,11 @@ function invalidateDetectedWorktreeScanCache(repoId: string): void {
 registerWorktreeChangeInvalidator(invalidateDetectedWorktreeScanCache)
 
 export function __resetDetectedWorktreeScanCacheForTests(): void {
+  // Why: scans still pending across a test reset must not repopulate the
+  // cache afterward and leak state into the next test.
+  for (const scan of detectedWorktreeScanInFlight.values()) {
+    scan.invalidated = true
+  }
   detectedWorktreeScanCache.clear()
   detectedWorktreeScanInFlight.clear()
 }
