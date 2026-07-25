@@ -3,6 +3,11 @@ import nacl from 'tweetnacl'
 
 const HOST_PROOF_TRANSCRIPT_DOMAIN = 'orca-relay-host-proof/v1'
 const HOST_CHALLENGE_PLAINTEXT_DOMAIN = 'orca-relay-host-challenge/v1'
+// Why: host-proof windows are only ~10s; a few seconds of local wall-clock
+// skew (common after sleep / NTP lag) made issuedAt appear "in the future"
+// and every handshake failed closed with no UI reason (#10401).
+export const RELAY_HOST_PROOF_CLOCK_SKEW_MS = 30_000
+const MAX_HOST_PROOF_CHALLENGE_WINDOW_MS = 10_000
 const textEncoder = new TextEncoder()
 const textDecoder = new TextDecoder()
 
@@ -102,9 +107,11 @@ function validateTranscript(
     context.previousGeneration === undefined ? new Uint8Array() : uint64(context.previousGeneration)
   return (
     issuedAt !== null &&
-    issuedAt <= now &&
-    now <= challenge.expiresAt &&
-    challenge.expiresAt - issuedAt <= 10_000 &&
+    // Why: allow the challenge to be "issued in the near future" or "just expired"
+    // on a skewed local clock without widening the server challenge window itself.
+    issuedAt - RELAY_HOST_PROOF_CLOCK_SKEW_MS <= now &&
+    now <= challenge.expiresAt + RELAY_HOST_PROOF_CLOCK_SKEW_MS &&
+    challenge.expiresAt - issuedAt <= MAX_HOST_PROOF_CHALLENGE_WINDOW_MS &&
     expiresAt === challenge.expiresAt &&
     equal(fields.get('protocol'), textEncoder.encode(HOST_PROOF_TRANSCRIPT_DOMAIN)) &&
     equal(fields.get('version'), new Uint8Array([1])) &&
