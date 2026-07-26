@@ -1030,6 +1030,61 @@ describe('shared agent-hook-listener', () => {
     }
   })
 
+  it('reads a prompt behind one oversized line without quadratic carry copying', () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), 'orca-command-code-huge-line-'))
+    const transcriptPath = join(tmpDir, 'transcript.jsonl')
+    const originalConcat = Buffer.concat
+    let concatenatedBytes = 0
+    try {
+      // A single tool result spanning many 64 KiB read blocks. Re-joining the
+      // accumulated carry per block copies O(line^2) bytes; the chunk list defers
+      // to one join, so total copied bytes stay proportional to the line.
+      const lineBytes = 2 * 1024 * 1024
+      const hugeLine = JSON.stringify({
+        role: 'assistant',
+        content: [{ type: 'text', text: 'x'.repeat(lineBytes) }]
+      })
+      const promptLine = JSON.stringify({
+        role: 'user',
+        content: [{ type: 'text', text: 'prompt behind a huge tool result' }]
+      })
+      writeFileSync(transcriptPath, `${promptLine}\n${hugeLine}\n`)
+
+      Buffer.concat = ((list: readonly Uint8Array[], totalLength?: number) => {
+        const joined = originalConcat(list as Uint8Array[], totalLength)
+        concatenatedBytes += joined.length
+        return joined
+      }) as typeof Buffer.concat
+
+      const tool = normalizeHookPayload(
+        state,
+        'command-code',
+        {
+          paneKey: PANE_KEY,
+          tabId: 'tab-1',
+          worktreeId: 'wt',
+          env: 'production',
+          version: '1',
+          payload: {
+            hook_event_name: 'PreToolUse',
+            transcript_path: transcriptPath,
+            tool_name: 'shell_command',
+            tool_input: { command: 'pwd' }
+          }
+        },
+        'production'
+      )
+
+      expect(tool?.payload.prompt).toBe('prompt behind a huge tool result')
+      // Linear copies once (~lineBytes). The quadratic form copied ~16x that at
+      // this size and grows with the square, so 4x separates them decisively.
+      expect(concatenatedBytes).toBeLessThan(lineBytes * 4)
+    } finally {
+      Buffer.concat = originalConcat
+      rmSync(tmpDir, { recursive: true, force: true })
+    }
+  })
+
   it('resolves the last Command Code prompt, not an earlier one', () => {
     const tmpDir = mkdtempSync(join(tmpdir(), 'orca-command-code-last-prompt-'))
     const transcriptPath = join(tmpDir, 'transcript.jsonl')

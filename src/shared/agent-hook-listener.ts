@@ -836,6 +836,7 @@ function extractToolResponseText(toolResponse: unknown): string | undefined {
 
 const TRANSCRIPT_CHUNK_BYTES = 64 * 1024
 const TRANSCRIPT_MAX_SCAN_BYTES = 4 * 1024 * 1024
+const EMPTY_TRANSCRIPT_REGION = Buffer.alloc(0)
 const AMP_THREAD_ID_MAX_LENGTH = 256
 const AMP_MAX_SCOPED_THREAD_CACHE_KEYS = 32
 const GROK_SESSION_CWD_MAX_LENGTH = 4096
@@ -985,7 +986,7 @@ function findLastCommandCodePromptInRegion(
   return undefined
 }
 
-function readLastCommandCodeUserPromptEntryFromTranscript(
+export function readLastCommandCodeUserPromptEntryFromTranscript(
   transcriptPath: unknown
 ): { text: string; interactionKey: string } | undefined {
   if (typeof transcriptPath !== 'string' || transcriptPath.length === 0) {
@@ -1002,15 +1003,18 @@ function readLastCommandCodeUserPromptEntryFromTranscript(
       // Why scan backward: the answer is the LAST user line, so walking up from
       // EOF returns on the first hit instead of parsing every line of a
       // multi-megabyte transcript on every hook event.
-      let carryBytes: Buffer = Buffer.alloc(0)
+      // Why a chunk list: carry holds a partial line, and re-concatenating it per
+      // block made one oversized line (a big tool result) cost O(line^2).
+      let carryChunks: Buffer[] = []
       let bytesRead = 0
-      while (bytesRead < size && bytesRead < TRANSCRIPT_MAX_SCAN_BYTES) {
+      let scanEnd = size
+      while (scanEnd > 0 && bytesRead < TRANSCRIPT_MAX_SCAN_BYTES) {
         const chunkSize = Math.min(
-          size - bytesRead,
+          scanEnd,
           TRANSCRIPT_CHUNK_BYTES,
           TRANSCRIPT_MAX_SCAN_BYTES - bytesRead
         )
-        const position = size - bytesRead - chunkSize
+        const position = scanEnd - chunkSize
         const buffer = Buffer.alloc(chunkSize)
         let filled = 0
         while (filled < chunkSize) {
@@ -1020,30 +1024,36 @@ function readLastCommandCodeUserPromptEntryFromTranscript(
           }
           filled += n
         }
-        if (filled === 0) {
+        // Why bail on a short read: the file shrank under us, so the bytes above
+        // this block no longer line up and any stitched offset would be wrong.
+        if (filled < chunkSize) {
           break
         }
         bytesRead += filled
-        const combined = Buffer.concat([buffer.subarray(0, filled), carryBytes])
-        const combinedPosition = size - bytesRead
+        scanEnd = position
+        // Why search only the new block: carry is always the run before a newline,
+        // so it holds none of its own.
+        const firstNewline = buffer.indexOf(0x0a)
         // Why only at a true file start: a scan that stops on the size cap must
         // discard its leading partial line, exactly as the capped read did.
-        const atStart = bytesRead >= size
-        const firstNewline = combined.indexOf(0x0a)
+        const atStart = position === 0
         let completeRegion: Buffer
         let regionPosition: number
         if (atStart) {
-          completeRegion = combined
-          regionPosition = combinedPosition
-          carryBytes = Buffer.alloc(0)
+          completeRegion =
+            carryChunks.length === 0 ? buffer : Buffer.concat([buffer, ...carryChunks])
+          regionPosition = position
+          carryChunks = []
         } else if (firstNewline === -1) {
-          completeRegion = Buffer.alloc(0)
-          regionPosition = combinedPosition
-          carryBytes = combined
+          completeRegion = EMPTY_TRANSCRIPT_REGION
+          regionPosition = position
+          carryChunks.unshift(buffer)
         } else {
-          completeRegion = combined.subarray(firstNewline + 1)
-          regionPosition = combinedPosition + firstNewline + 1
-          carryBytes = combined.subarray(0, firstNewline)
+          const afterNewline = buffer.subarray(firstNewline + 1)
+          completeRegion =
+            carryChunks.length === 0 ? afterNewline : Buffer.concat([afterNewline, ...carryChunks])
+          regionPosition = position + firstNewline + 1
+          carryChunks = [buffer.subarray(0, firstNewline)]
         }
         if (completeRegion.length > 0) {
           const found = findLastCommandCodePromptInRegion(completeRegion)

@@ -51,6 +51,7 @@ function readMirroredConstant(name) {
 
 const TRANSCRIPT_CHUNK_BYTES = readMirroredConstant('TRANSCRIPT_CHUNK_BYTES')
 const TRANSCRIPT_MAX_SCAN_BYTES = readMirroredConstant('TRANSCRIPT_MAX_SCAN_BYTES')
+const EMPTY_REGION = Buffer.alloc(0)
 const ITERATIONS = Number.parseInt(process.env.ORCA_CC_SCAN_BENCH_ITERATIONS ?? '150', 10)
 const WARMUP = Number.parseInt(process.env.ORCA_CC_SCAN_BENCH_WARMUP ?? '20', 10)
 
@@ -145,7 +146,8 @@ function findLastPromptInRegion(region) {
   return undefined
 }
 
-// Post-fix: walk backward from EOF, return on the first user line.
+// Post-fix: walk backward from EOF, return on the first user line. The carry is
+// a chunk list, not a re-joined buffer, so one oversized line stays linear.
 function readBackward(path) {
   const size = statSync(path).size
   if (size <= 0) {
@@ -153,15 +155,16 @@ function readBackward(path) {
   }
   const fd = openSync(path, 'r')
   try {
-    let carryBytes = Buffer.alloc(0)
+    let carryChunks = []
     let bytesRead = 0
-    while (bytesRead < size && bytesRead < TRANSCRIPT_MAX_SCAN_BYTES) {
+    let scanEnd = size
+    while (scanEnd > 0 && bytesRead < TRANSCRIPT_MAX_SCAN_BYTES) {
       const chunkSize = Math.min(
-        size - bytesRead,
+        scanEnd,
         TRANSCRIPT_CHUNK_BYTES,
         TRANSCRIPT_MAX_SCAN_BYTES - bytesRead
       )
-      const position = size - bytesRead - chunkSize
+      const position = scanEnd - chunkSize
       const buffer = Buffer.alloc(chunkSize)
       let filled = 0
       while (filled < chunkSize) {
@@ -171,23 +174,25 @@ function readBackward(path) {
         }
         filled += n
       }
-      if (filled === 0) {
+      if (filled < chunkSize) {
         break
       }
       bytesRead += filled
-      const combined = Buffer.concat([buffer.subarray(0, filled), carryBytes])
-      const atStart = bytesRead >= size
-      const firstNewline = combined.indexOf(0x0a)
+      scanEnd = position
+      const firstNewline = buffer.indexOf(0x0a)
+      const atStart = position === 0
       let completeRegion
       if (atStart) {
-        completeRegion = combined
-        carryBytes = Buffer.alloc(0)
+        completeRegion = carryChunks.length === 0 ? buffer : Buffer.concat([buffer, ...carryChunks])
+        carryChunks = []
       } else if (firstNewline === -1) {
-        completeRegion = Buffer.alloc(0)
-        carryBytes = combined
+        completeRegion = EMPTY_REGION
+        carryChunks.unshift(buffer)
       } else {
-        completeRegion = combined.subarray(firstNewline + 1)
-        carryBytes = combined.subarray(0, firstNewline)
+        const afterNewline = buffer.subarray(firstNewline + 1)
+        completeRegion =
+          carryChunks.length === 0 ? afterNewline : Buffer.concat([afterNewline, ...carryChunks])
+        carryChunks = [buffer.subarray(0, firstNewline)]
       }
       if (completeRegion.length > 0) {
         const found = findLastPromptInRegion(completeRegion)
@@ -228,6 +233,48 @@ function writeTranscript(path, priorTurns) {
       })
     )
   }
+  writeFileSync(path, `${lines.join('\n')}\n`)
+}
+
+// A turn already in progress: `trailingBytes` of tool output sits between the
+// prompt and EOF, which is what the backward scan has to read past.
+function writeTranscriptWithTrailing(path, priorTurns, trailingBytes) {
+  const lines = []
+  for (let index = 0; index < priorTurns; index += 1) {
+    lines.push(
+      JSON.stringify({ role: 'user', content: [{ type: 'text', text: `older turn ${index}` }] })
+    )
+    lines.push(
+      JSON.stringify({
+        role: 'assistant',
+        content: [{ type: 'text', text: `${'assistant output '.repeat(30)}${index}` }]
+      })
+    )
+  }
+  lines.push(
+    JSON.stringify({ role: 'user', content: [{ type: 'text', text: 'the current prompt' }] })
+  )
+  let written = 0
+  let index = 0
+  while (written < trailingBytes) {
+    const line = JSON.stringify({
+      role: 'assistant',
+      content: [{ type: 'text', text: `${'current turn output '.repeat(30)}${index}` }]
+    })
+    lines.push(line)
+    written += line.length + 1
+    index += 1
+  }
+  writeFileSync(path, `${lines.join('\n')}\n`)
+}
+
+// One tool result larger than many read blocks — the shape with no newline for
+// the backward scan to stop on.
+function writeTranscriptWithHugeLine(path, lineBytes) {
+  const lines = [
+    JSON.stringify({ role: 'user', content: [{ type: 'text', text: 'the current prompt' }] }),
+    JSON.stringify({ role: 'assistant', content: [{ type: 'text', text: 'x'.repeat(lineBytes) }] })
+  ]
   writeFileSync(path, `${lines.join('\n')}\n`)
 }
 
@@ -281,6 +328,46 @@ try {
   }
   console.log(
     '\nThe old cost grows with the transcript; the new cost is flat because the\ncurrent turn’s prompt sits near EOF and the scan stops at the first hit.'
+  )
+
+  // Worst cases, reported even where the ratio is below 1x. The new cost scales
+  // with bytes-AFTER the prompt, so a long turn (many tool calls since the ask)
+  // and a single oversized tool result are where the win decays or inverts.
+  const worst = []
+  for (const trailingKb of [32, 256, 1024, 3072]) {
+    const path = join(dir, `trailing-${trailingKb}.jsonl`)
+    writeTranscriptWithTrailing(path, 1500, trailingKb * 1024)
+    if (readForward(path) !== readBackward(path)) {
+      throw new Error(`prompt mismatch at trailing ${trailingKb} KB`)
+    }
+    worst.push({
+      label: `${(trailingKb / 1024).toFixed(2)} MB after prompt`,
+      beforeMs: measure(readForward, path),
+      afterMs: measure(readBackward, path)
+    })
+  }
+  const hugePath = join(dir, 'huge-line.jsonl')
+  writeTranscriptWithHugeLine(hugePath, 3 * 1024 * 1024)
+  if (readForward(hugePath) !== readBackward(hugePath)) {
+    throw new Error('prompt mismatch on the oversized-line fixture')
+  }
+  worst.push({
+    label: '3 MB single line',
+    beforeMs: measure(readForward, hugePath),
+    afterMs: measure(readBackward, hugePath)
+  })
+
+  console.log('\nWorst cases (win decays as a turn progresses; <1x means slower):')
+  console.log(
+    `${pad('case', 22)} ${pad('before ms', 11)} ${pad('after ms', 10)} ${pad('ratio', 9)}`
+  )
+  for (const row of worst) {
+    console.log(
+      `${pad(row.label, 22)} ${pad(row.beforeMs.toFixed(3), 11)} ${pad(row.afterMs.toFixed(3), 10)} ${pad(`${(row.beforeMs / row.afterMs).toFixed(2)}x`, 9)}`
+    )
+  }
+  console.log(
+    '\nThe single-line row is the one shape that is slower: with no newline to stop\non, the scan reads the whole line in blocks and joins once, where the old code\nissued one flat read. Cost stays linear in the line (the carry is a chunk list,\nnot a re-joined buffer), and a transcript of ordinary JSONL lines never hits it.'
   )
 } finally {
   rmSync(dir, { recursive: true, force: true })
