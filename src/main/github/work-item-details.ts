@@ -532,7 +532,8 @@ async function getPRFiles(
   prNumber: number,
   ownerRepo: GitHubApiRepository | null,
   connectionId?: string | null,
-  localGitOptions: LocalGitExecOptions = {}
+  localGitOptions: LocalGitExecOptions = {},
+  changedFiles?: number
 ): Promise<GitHubPRFile[] | null> {
   if (!ownerRepo) {
     return null
@@ -541,27 +542,56 @@ async function getPRFiles(
     ...ghRepoExecOptions(githubRepoContext(repoPath, connectionId, localGitOptions)),
     ...githubHostExecOptions(ownerRepo)
   }
+  const readPage = async (page: number): Promise<RESTPRFile[] | null> => {
+    if (repositoryRateLimitGuard(ownerRepo, 'core', ghOptions).blocked) {
+      return null
+    }
+    const pageSuffix = page === 1 ? '' : `&page=${page}`
+    noteRepositoryRateLimitSpend(ownerRepo, 'core', 1, ghOptions)
+    const { stdout } = await ghExecFileAsync(
+      [
+        'api',
+        '--cache',
+        '60s',
+        `repos/${ownerRepo.owner}/${ownerRepo.repo}/pulls/${prNumber}/files?per_page=100${pageSuffix}`
+      ],
+      ghOptions
+    )
+    return JSON.parse(stdout) as RESTPRFile[]
+  }
+
   try {
     const data: RESTPRFile[] = []
-    for (let page = 1; data.length < MAX_PR_FILES; page += 1) {
-      if (repositoryRateLimitGuard(ownerRepo, 'core', ghOptions).blocked) {
+    // Why use the known count: each page is a separate `gh api` spawn plus a
+    // network round trip, so probing serially both serializes them and burns one
+    // extra request whenever the file count lands on an exact page boundary.
+    const knownPageCount =
+      typeof changedFiles === 'number' && Number.isFinite(changedFiles) && changedFiles > 0
+        ? Math.ceil(Math.min(changedFiles, MAX_PR_FILES) / 100)
+        : null
+    if (knownPageCount !== null) {
+      const pages = await Promise.all(
+        Array.from({ length: knownPageCount }, (_value, index) => readPage(index + 1))
+      )
+      // Why bail on null: a rate-limit block mid-fan-out must fail the whole read
+      // rather than return a silently truncated file list.
+      if (pages.some((page) => page === null)) {
         return null
       }
-      const pageSuffix = page === 1 ? '' : `&page=${page}`
-      noteRepositoryRateLimitSpend(ownerRepo, 'core', 1, ghOptions)
-      const { stdout } = await ghExecFileAsync(
-        [
-          'api',
-          '--cache',
-          '60s',
-          `repos/${ownerRepo.owner}/${ownerRepo.repo}/pulls/${prNumber}/files?per_page=100${pageSuffix}`
-        ],
-        ghOptions
-      )
-      const pageData = JSON.parse(stdout) as RESTPRFile[]
-      data.push(...pageData.slice(0, MAX_PR_FILES - data.length))
-      if (pageData.length < 100) {
-        break
+      for (const page of pages) {
+        data.push(...page!.slice(0, MAX_PR_FILES - data.length))
+      }
+    } else {
+      // Fallback for items without a resolved count (REST-fallback shapes).
+      for (let page = 1; data.length < MAX_PR_FILES; page += 1) {
+        const pageData = await readPage(page)
+        if (pageData === null) {
+          return null
+        }
+        data.push(...pageData.slice(0, MAX_PR_FILES - data.length))
+        if (pageData.length < 100) {
+          break
+        }
       }
     }
     return data.map((file) => ({
@@ -1132,7 +1162,14 @@ export async function getWorkItemDetails(
         getPRMetadata(repoPath, item.number, resolvedRepository, connectionId, localGitOptions)
       ),
       withWorkItemDetailsPermit(() =>
-        getPRFiles(repoPath, item.number, resolvedRepository, connectionId, localGitOptions)
+        getPRFiles(
+          repoPath,
+          item.number,
+          resolvedRepository,
+          connectionId,
+          localGitOptions,
+          item.changedFiles
+        )
       ),
       withWorkItemDetailsPermit(() =>
         getPRFileViewedStates(
