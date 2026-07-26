@@ -64,9 +64,62 @@ for (const [name, value] of [
   }
 }
 
+// Mirror of parseAgentHookJson: the real reader scans a line's structure before
+// parsing it, on BOTH sides of this comparison. Omitting it made the pre-fix
+// column ~9x too fast and invented a regression that does not exist.
+const HOOK_STRUCTURAL_TOKENS = 128 * 1024
+const HOOK_NESTING_DEPTH = 64
+
+function assertJsonStructure(content) {
+  let structuralTokens = 0
+  let depth = 0
+  let inString = false
+  let escaped = false
+  for (let index = 0; index < content.length; index += 1) {
+    const character = content[index]
+    if (inString) {
+      if (escaped) {
+        escaped = false
+      } else if (character === '\\') {
+        escaped = true
+      } else if (character === '"') {
+        inString = false
+      }
+      continue
+    }
+    if (character === '"') {
+      inString = true
+      continue
+    }
+    if (
+      character !== '{' &&
+      character !== '}' &&
+      character !== '[' &&
+      character !== ']' &&
+      character !== ',' &&
+      character !== ':'
+    ) {
+      continue
+    }
+    structuralTokens += 1
+    if (structuralTokens > HOOK_STRUCTURAL_TOKENS) {
+      throw new Error('structuralTokens')
+    }
+    if (character === '{' || character === '[') {
+      depth += 1
+      if (depth > HOOK_NESTING_DEPTH) {
+        throw new Error('nestingDepth')
+      }
+    } else if (character === '}' || character === ']') {
+      depth = Math.max(0, depth - 1)
+    }
+  }
+}
+
 function extractUserPrompt(line) {
   let entry
   try {
+    assertJsonStructure(line)
     entry = JSON.parse(line)
   } catch {
     return undefined
@@ -367,7 +420,7 @@ try {
     )
   }
   console.log(
-    '\nThe single-line row is the one shape that is slower: with no newline to stop\non, the scan reads the whole line in blocks and joins once, where the old code\nissued one flat read. Cost stays linear in the line (the carry is a chunk list,\nnot a re-joined buffer), and a transcript of ordinary JSONL lines never hits it.'
+    '\nThe win shrinks toward parity as output accumulates after the prompt, since\nthe backward scan has to read past all of it. The single-line row is the floor:\nno newline to stop on, so the scan reads the line in blocks and joins once where\nthe old code issued one flat read. Both sides pay the same per-line structure\nscan, and the carry is a chunk list, so cost stays linear either way.'
   )
 } finally {
   rmSync(dir, { recursive: true, force: true })
