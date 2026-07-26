@@ -1085,6 +1085,89 @@ describe('shared agent-hook-listener', () => {
     }
   })
 
+  it('reads a Command Code prompt line that spans several read blocks', () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), 'orca-command-code-long-line-'))
+    const transcriptPath = join(tmpDir, 'transcript.jsonl')
+    try {
+      // A prompt longer than one 64 KiB block: the scan sees consecutive blocks
+      // with no newline at all and must stitch them before parsing.
+      const promptText = `pasted prompt ${'W'.repeat(150 * 1024)}`
+      writeFileSync(
+        transcriptPath,
+        `${JSON.stringify({ role: 'assistant', content: [{ type: 'text', text: 'earlier' }] })}\n${JSON.stringify(
+          { role: 'user', content: [{ type: 'text', text: promptText }] }
+        )}\n${JSON.stringify({ role: 'assistant', content: [{ type: 'text', text: 'tail' }] })}\n`
+      )
+
+      const tool = normalizeHookPayload(
+        state,
+        'command-code',
+        {
+          paneKey: PANE_KEY,
+          tabId: 'tab-1',
+          worktreeId: 'wt',
+          env: 'production',
+          version: '1',
+          payload: {
+            hook_event_name: 'PreToolUse',
+            transcript_path: transcriptPath,
+            tool_name: 'shell_command',
+            tool_input: { command: 'pwd' }
+          }
+        },
+        'production'
+      )
+
+      expect(tool?.payload.prompt.startsWith('pasted prompt WWW')).toBe(true)
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true })
+    }
+  })
+
+  it('ignores a Command Code prompt older than the transcript scan cap', () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), 'orca-command-code-over-cap-'))
+    const transcriptPath = join(tmpDir, 'transcript.jsonl')
+    try {
+      // The only user line sits beyond the 4 MB cap, so the bounded scan must not
+      // reach it — dropping the cap would restore the unbounded read this avoids.
+      const filler = JSON.stringify({
+        role: 'assistant',
+        content: [{ type: 'text', text: 'f'.repeat(64 * 1024) }]
+      })
+      const lines = [
+        JSON.stringify({ role: 'user', content: [{ type: 'text', text: 'ancient prompt' }] })
+      ]
+      for (let index = 0; index < 80; index += 1) {
+        lines.push(filler)
+      }
+      writeFileSync(transcriptPath, `${lines.join('\n')}\n`)
+      expect(statSync(transcriptPath).size).toBeGreaterThan(4 * 1024 * 1024)
+
+      const tool = normalizeHookPayload(
+        state,
+        'command-code',
+        {
+          paneKey: PANE_KEY,
+          tabId: 'tab-1',
+          worktreeId: 'wt',
+          env: 'production',
+          version: '1',
+          payload: {
+            hook_event_name: 'PreToolUse',
+            transcript_path: transcriptPath,
+            tool_name: 'shell_command',
+            tool_input: { command: 'pwd' }
+          }
+        },
+        'production'
+      )
+
+      expect(tool?.payload.prompt ?? '').toBe('')
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true })
+    }
+  })
+
   it('resolves the last Command Code prompt, not an earlier one', () => {
     const tmpDir = mkdtempSync(join(tmpdir(), 'orca-command-code-last-prompt-'))
     const transcriptPath = join(tmpDir, 'transcript.jsonl')
