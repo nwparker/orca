@@ -4,7 +4,6 @@ import { isAbsolute, join } from 'node:path'
 import os from 'node:os'
 import { app, BrowserWindow, dialog, ipcMain, nativeTheme, type Tray } from 'electron'
 import { electronApp, is } from '@electron-toolkit/utils'
-import * as QRCode from 'qrcode'
 import {
   Store,
   initDataPath,
@@ -1559,6 +1558,9 @@ function getBundledWebClientRoot(): string | undefined {
 }
 
 async function renderTerminalPairingQr(pairingUrl: string): Promise<string | null> {
+  // Why dynamic: qrcode is only reachable from mobile pairing, so launch should
+  // not parse it for the majority who never pair a device.
+  const QRCode = await import('qrcode')
   try {
     return await QRCode.toString(pairingUrl, { type: 'terminal', small: true })
   } catch {
