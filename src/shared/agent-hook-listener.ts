@@ -1337,11 +1337,14 @@ function readLastTextFromTranscriptOnce(
     }
     const fd = openSync(transcriptPath, 'r')
     try {
-      let carryBytes: Buffer = Buffer.alloc(0)
+      // Why a chunk list: carry holds a partial line, and re-joining it per block
+      // made one oversized line (a big tool result or pasted prompt) cost O(line^2).
+      let carryChunks: Buffer[] = []
       let bytesRead = 0
-      while (bytesRead < size && bytesRead < TRANSCRIPT_MAX_SCAN_BYTES) {
-        const chunkSize = Math.min(size - bytesRead, TRANSCRIPT_CHUNK_BYTES)
-        const position = size - bytesRead - chunkSize
+      let scanEnd = size
+      while (scanEnd > 0 && bytesRead < TRANSCRIPT_MAX_SCAN_BYTES) {
+        const chunkSize = Math.min(scanEnd, TRANSCRIPT_CHUNK_BYTES)
+        const position = scanEnd - chunkSize
         const buffer = Buffer.alloc(chunkSize)
         let filled = 0
         while (filled < chunkSize) {
@@ -1351,25 +1354,30 @@ function readLastTextFromTranscriptOnce(
           }
           filled += n
         }
-        const n = filled
-        bytesRead += n
-        if (n === 0) {
+        // Why bail on a short read: the file shrank under us, so the bytes above
+        // this block no longer line up with what the earlier ones assumed.
+        if (filled < chunkSize) {
           break
         }
-        const combined = Buffer.concat([buffer.subarray(0, n), carryBytes])
-        const atStart = bytesRead >= size
-        const firstNewline = combined.indexOf(0x0a)
+        bytesRead += filled
+        scanEnd = position
+        // Why search only the new block: carry is always the run before a newline,
+        // so it holds none of its own.
+        const firstNewline = buffer.indexOf(0x0a)
+        const atStart = position === 0
         let completeRegion: Buffer
-        let nextCarry: Buffer
         if (atStart) {
-          completeRegion = combined
-          nextCarry = Buffer.alloc(0)
+          completeRegion =
+            carryChunks.length === 0 ? buffer : Buffer.concat([buffer, ...carryChunks])
+          carryChunks = []
         } else if (firstNewline === -1) {
-          completeRegion = Buffer.alloc(0)
-          nextCarry = combined
+          completeRegion = EMPTY_TRANSCRIPT_REGION
+          carryChunks.unshift(buffer)
         } else {
-          nextCarry = combined.subarray(0, firstNewline)
-          completeRegion = combined.subarray(firstNewline + 1)
+          const afterNewline = buffer.subarray(firstNewline + 1)
+          completeRegion =
+            carryChunks.length === 0 ? afterNewline : Buffer.concat([afterNewline, ...carryChunks])
+          carryChunks = [buffer.subarray(0, firstNewline)]
         }
         if (completeRegion.length > 0) {
           const extracted = findLastExtractedTranscriptLineText(
@@ -1380,7 +1388,6 @@ function readLastTextFromTranscriptOnce(
             return extracted
           }
         }
-        carryBytes = nextCarry
       }
       return undefined
     } finally {

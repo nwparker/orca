@@ -971,6 +971,56 @@ describe('shared agent-hook-listener', () => {
     }
   })
 
+  it('reads the last assistant message behind an oversized line without quadratic copying', () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), 'orca-assistant-huge-line-'))
+    const transcriptPath = join(tmpDir, 'transcript.jsonl')
+    const originalConcat = Buffer.concat
+    let concatenatedBytes = 0
+    try {
+      // The shared backward reader (readLastTextFromTranscriptOnce) stitches a
+      // line spanning many read blocks. Re-joining the carry per block copies
+      // O(line^2); the chunk list defers to one join.
+      const lineBytes = 2 * 1024 * 1024
+      writeFileSync(
+        transcriptPath,
+        `${JSON.stringify({
+          role: 'assistant',
+          content: [{ type: 'text', text: 'answer behind a huge line' }]
+        })}\n${JSON.stringify({
+          role: 'user',
+          content: [{ type: 'text', text: 'x'.repeat(lineBytes) }]
+        })}\n`
+      )
+
+      Buffer.concat = ((list: readonly Uint8Array[], totalLength?: number) => {
+        const joined = originalConcat(list as Uint8Array[], totalLength)
+        concatenatedBytes += joined.length
+        return joined
+      }) as typeof Buffer.concat
+
+      const done = normalizeHookPayload(
+        state,
+        'claude',
+        {
+          paneKey: PANE_KEY,
+          tabId: 'tab-1',
+          worktreeId: 'wt',
+          env: 'production',
+          version: '1',
+          payload: { hook_event_name: 'Stop', transcript_path: transcriptPath }
+        },
+        'production'
+      )
+
+      expect(done?.payload.lastAssistantMessage).toBe('answer behind a huge line')
+      // Linear copies once (~lineBytes); the quadratic form copied many times that.
+      expect(concatenatedBytes).toBeLessThan(lineBytes * 4)
+    } finally {
+      Buffer.concat = originalConcat
+      rmSync(tmpDir, { recursive: true, force: true })
+    }
+  })
+
   // Why these three: the prompt read scans backward from EOF and stops at the
   // first user line, so the cases that can break are a prompt spanning a chunk
   // boundary, a later prompt that must win over an earlier one, and the byte
