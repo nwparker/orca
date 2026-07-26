@@ -20,7 +20,6 @@ import { isAbsolute, join } from 'node:path'
 import {
   AGENT_MODEL_MAX_LENGTH,
   normalizeAgentStatusPayload,
-  parseAgentStatusPayload,
   type AgentStatusState,
   type AgentSubagentSnapshot,
   type ParsedAgentStatusPayload
@@ -2684,20 +2683,18 @@ function normalizeDevinEvent(
   const interrupted =
     eventName === 'Stop' && hookPayload['is_interrupt'] === true ? true : undefined
 
-  return parseAgentStatusPayload(
-    JSON.stringify({
-      state: stateName,
-      prompt: resolvePrompt(state, paneKey, promptText, {
-        resetOnNewTurn: isNewTurnEvent('devin', eventName)
-      }),
-      agentType: 'devin',
-      toolName: snapshot.toolName,
-      toolInput: snapshot.toolInput,
-      interactivePrompt: snapshot.interactivePrompt,
-      lastAssistantMessage: snapshot.lastAssistantMessage,
-      interrupted
-    })
-  )
+  return normalizeAgentStatusPayload({
+    state: stateName,
+    prompt: resolvePrompt(state, paneKey, promptText, {
+      resetOnNewTurn: isNewTurnEvent('devin', eventName)
+    }),
+    agentType: 'devin',
+    toolName: snapshot.toolName,
+    toolInput: snapshot.toolInput,
+    interactivePrompt: snapshot.interactivePrompt,
+    lastAssistantMessage: snapshot.lastAssistantMessage,
+    interrupted
+  })
 }
 
 // Why: Kimi's auto-allowed AskUserQuestion emits PreToolUse (not PermissionRequest) while awaiting an answer; treat as waiting so the UI shows the attention icon, not a spinner.
@@ -2744,19 +2741,17 @@ function normalizeKimiEvent(
   const interrupted =
     eventName === 'Stop' && hookPayload['is_interrupt'] === true ? true : undefined
 
-  return parseAgentStatusPayload(
-    JSON.stringify({
-      state: stateName,
-      prompt: resolvePrompt(state, paneKey, promptText, {
-        resetOnNewTurn: isNewTurnEvent('kimi', eventName)
-      }),
-      agentType: 'kimi',
-      toolName: snapshot.toolName,
-      toolInput: snapshot.toolInput,
-      lastAssistantMessage: snapshot.lastAssistantMessage,
-      interrupted
-    })
-  )
+  return normalizeAgentStatusPayload({
+    state: stateName,
+    prompt: resolvePrompt(state, paneKey, promptText, {
+      resetOnNewTurn: isNewTurnEvent('kimi', eventName)
+    }),
+    agentType: 'kimi',
+    toolName: snapshot.toolName,
+    toolInput: snapshot.toolInput,
+    lastAssistantMessage: snapshot.lastAssistantMessage,
+    interrupted
+  })
 }
 
 function normalizeGeminiEvent(
@@ -2789,19 +2784,17 @@ function normalizeGeminiEvent(
     { resetOnNewTurn: isNewTurnEvent('gemini', eventName) }
   )
 
-  return parseAgentStatusPayload(
-    JSON.stringify({
-      state: stateName,
-      prompt: resolvePrompt(state, paneKey, promptText, {
-        resetOnNewTurn: isNewTurnEvent('gemini', eventName)
-      }),
-      agentType: 'gemini',
-      toolName: snapshot.toolName,
-      toolInput: snapshot.toolInput,
-      interactivePrompt: snapshot.interactivePrompt,
-      lastAssistantMessage: snapshot.lastAssistantMessage
-    })
-  )
+  return normalizeAgentStatusPayload({
+    state: stateName,
+    prompt: resolvePrompt(state, paneKey, promptText, {
+      resetOnNewTurn: isNewTurnEvent('gemini', eventName)
+    }),
+    agentType: 'gemini',
+    toolName: snapshot.toolName,
+    toolInput: snapshot.toolInput,
+    interactivePrompt: snapshot.interactivePrompt,
+    lastAssistantMessage: snapshot.lastAssistantMessage
+  })
 }
 
 function isAntigravityFeedbackTool(toolName: string | undefined): boolean {
@@ -2863,19 +2856,17 @@ function normalizeAntigravityEvent(
     { resetOnNewTurn: resetsTurn }
   )
 
-  const payload = parseAgentStatusPayload(
-    JSON.stringify({
-      state: stateName,
-      prompt: resolvePrompt(state, paneKey, effectivePrompt, {
-        resetOnNewTurn: resetsTurn
-      }),
-      agentType: 'antigravity',
-      toolName: snapshot.toolName,
-      toolInput: snapshot.toolInput,
-      interactivePrompt: snapshot.interactivePrompt,
-      lastAssistantMessage: snapshot.lastAssistantMessage
-    })
-  )
+  const payload = normalizeAgentStatusPayload({
+    state: stateName,
+    prompt: resolvePrompt(state, paneKey, effectivePrompt, {
+      resetOnNewTurn: resetsTurn
+    }),
+    agentType: 'antigravity',
+    toolName: snapshot.toolName,
+    toolInput: snapshot.toolInput,
+    interactivePrompt: snapshot.interactivePrompt,
+    lastAssistantMessage: snapshot.lastAssistantMessage
+  })
   // Why: Antigravity can emit Stop with fullyIdle=false between tool steps; only a fully idle Stop is terminal, else the sidebar bounces done -> working and ignores later tool updates.
   if (eventName === 'Stop' && !stopStillBusy && transcriptPath) {
     state.antigravityCompletedTranscriptByPaneKey.set(paneKey, transcriptPath)
@@ -2941,21 +2932,19 @@ function normalizeAmpEvent(
     (eventName === 'agent.end' && !state.lastPromptByPaneKey.has(ampCacheKey))
   const ampPromptText = explicitPrompt ?? (canUseMessageAsPrompt ? promptText : '')
 
-  const normalized = parseAgentStatusPayload(
-    JSON.stringify({
-      state: stateName,
-      // Why: Amp tool/result events may use `message` for tool output; only lifecycle events may treat it as the turn prompt.
-      prompt: resolvePrompt(state, ampCacheKey, ampPromptText, {
-        resetOnNewTurn: isNewTurnEvent('amp', eventName)
-      }),
-      agentType: 'amp',
-      toolName: snapshot.toolName,
-      toolInput: snapshot.toolInput,
-      interactivePrompt: snapshot.interactivePrompt,
-      lastAssistantMessage: snapshot.lastAssistantMessage,
-      interrupted
-    })
-  )
+  const normalized = normalizeAgentStatusPayload({
+    state: stateName,
+    // Why: Amp tool/result events may use `message` for tool output; only lifecycle events may treat it as the turn prompt.
+    prompt: resolvePrompt(state, ampCacheKey, ampPromptText, {
+      resetOnNewTurn: isNewTurnEvent('amp', eventName)
+    }),
+    agentType: 'amp',
+    toolName: snapshot.toolName,
+    toolInput: snapshot.toolInput,
+    interactivePrompt: snapshot.interactivePrompt,
+    lastAssistantMessage: snapshot.lastAssistantMessage,
+    interrupted
+  })
   if (normalized && eventName === 'agent.end') {
     state.ampCompletedCacheKeys.add(ampCacheKey)
   }
@@ -3335,19 +3324,17 @@ function normalizeOpenCodeFamilyEvent(
     { resetOnNewTurn: isNewTurnEvent(source, eventName) }
   )
 
-  return parseAgentStatusPayload(
-    JSON.stringify({
-      state: stateName,
-      prompt: resolvePrompt(state, paneKey, promptText, {
-        resetOnNewTurn: isNewTurnEvent(source, eventName)
-      }),
-      agentType: source,
-      toolName: snapshot.toolName,
-      toolInput: snapshot.toolInput,
-      interactivePrompt: snapshot.interactivePrompt,
-      lastAssistantMessage: snapshot.lastAssistantMessage
-    })
-  )
+  return normalizeAgentStatusPayload({
+    state: stateName,
+    prompt: resolvePrompt(state, paneKey, promptText, {
+      resetOnNewTurn: isNewTurnEvent(source, eventName)
+    }),
+    agentType: source,
+    toolName: snapshot.toolName,
+    toolInput: snapshot.toolInput,
+    interactivePrompt: snapshot.interactivePrompt,
+    lastAssistantMessage: snapshot.lastAssistantMessage
+  })
 }
 
 function normalizeCursorEvent(
@@ -3395,20 +3382,18 @@ function normalizeCursorEvent(
       ? true
       : undefined
 
-  return parseAgentStatusPayload(
-    JSON.stringify({
-      state: stateName,
-      prompt: resolvePrompt(state, paneKey, promptText, {
-        resetOnNewTurn: isNewTurnEvent('cursor', eventName)
-      }),
-      agentType: 'cursor',
-      toolName: snapshot.toolName,
-      toolInput: snapshot.toolInput,
-      interactivePrompt: snapshot.interactivePrompt,
-      lastAssistantMessage: snapshot.lastAssistantMessage,
-      interrupted
-    })
-  )
+  return normalizeAgentStatusPayload({
+    state: stateName,
+    prompt: resolvePrompt(state, paneKey, promptText, {
+      resetOnNewTurn: isNewTurnEvent('cursor', eventName)
+    }),
+    agentType: 'cursor',
+    toolName: snapshot.toolName,
+    toolInput: snapshot.toolInput,
+    interactivePrompt: snapshot.interactivePrompt,
+    lastAssistantMessage: snapshot.lastAssistantMessage,
+    interrupted
+  })
 }
 
 // Why: Copilot PermissionRequest fires before allow/ask/deny (stays working); ask_user and notification prompts are the real blocked signals.
@@ -3458,19 +3443,17 @@ function normalizeCopilotEvent(
 
   const effectivePrompt = normalizedEventName === 'Notification' ? '' : promptText
 
-  return parseAgentStatusPayload(
-    JSON.stringify({
-      state: stateName,
-      prompt: resolvePrompt(state, paneKey, effectivePrompt, {
-        resetOnNewTurn: isNewTurnEvent('copilot', normalizedEventName)
-      }),
-      agentType: 'copilot',
-      toolName: snapshot.toolName,
-      toolInput: snapshot.toolInput,
-      interactivePrompt: snapshot.interactivePrompt,
-      lastAssistantMessage: snapshot.lastAssistantMessage
-    })
-  )
+  return normalizeAgentStatusPayload({
+    state: stateName,
+    prompt: resolvePrompt(state, paneKey, effectivePrompt, {
+      resetOnNewTurn: isNewTurnEvent('copilot', normalizedEventName)
+    }),
+    agentType: 'copilot',
+    toolName: snapshot.toolName,
+    toolInput: snapshot.toolInput,
+    interactivePrompt: snapshot.interactivePrompt,
+    lastAssistantMessage: snapshot.lastAssistantMessage
+  })
 }
 
 function normalizePiCompatibleEvent(
@@ -3517,19 +3500,17 @@ function normalizePiCompatibleEvent(
     { resetOnNewTurn: isNewTurnEvent(agentType, eventName) }
   )
 
-  return parseAgentStatusPayload(
-    JSON.stringify({
-      state: stateName,
-      prompt: resolvePrompt(state, paneKey, promptText, {
-        resetOnNewTurn: isNewTurnEvent(agentType, eventName)
-      }),
-      agentType,
-      toolName: snapshot.toolName,
-      toolInput: snapshot.toolInput,
-      interactivePrompt: snapshot.interactivePrompt,
-      lastAssistantMessage: snapshot.lastAssistantMessage
-    })
-  )
+  return normalizeAgentStatusPayload({
+    state: stateName,
+    prompt: resolvePrompt(state, paneKey, promptText, {
+      resetOnNewTurn: isNewTurnEvent(agentType, eventName)
+    }),
+    agentType,
+    toolName: snapshot.toolName,
+    toolInput: snapshot.toolInput,
+    interactivePrompt: snapshot.interactivePrompt,
+    lastAssistantMessage: snapshot.lastAssistantMessage
+  })
 }
 
 function normalizeDroidEvent(
@@ -3584,19 +3565,17 @@ function normalizeDroidEvent(
   // Why: Droid Notification.message is status text, not the prompt; '' keeps resolvePrompt's cached UserPromptSubmit value.
   const effectivePrompt = eventName === 'Notification' ? '' : promptText
 
-  return parseAgentStatusPayload(
-    JSON.stringify({
-      state: stateName,
-      prompt: resolvePrompt(state, paneKey, effectivePrompt, {
-        resetOnNewTurn: isNewTurnEvent('droid', eventName)
-      }),
-      agentType: 'droid',
-      toolName: snapshot.toolName,
-      toolInput: snapshot.toolInput,
-      interactivePrompt: snapshot.interactivePrompt,
-      lastAssistantMessage: snapshot.lastAssistantMessage
-    })
-  )
+  return normalizeAgentStatusPayload({
+    state: stateName,
+    prompt: resolvePrompt(state, paneKey, effectivePrompt, {
+      resetOnNewTurn: isNewTurnEvent('droid', eventName)
+    }),
+    agentType: 'droid',
+    toolName: snapshot.toolName,
+    toolInput: snapshot.toolInput,
+    interactivePrompt: snapshot.interactivePrompt,
+    lastAssistantMessage: snapshot.lastAssistantMessage
+  })
 }
 
 function normalizeCommandCodeEvent(
@@ -3623,19 +3602,17 @@ function normalizeCommandCodeEvent(
     { resetOnNewTurn: isNewTurnEvent('command-code', eventName) }
   )
 
-  return parseAgentStatusPayload(
-    JSON.stringify({
-      state: stateName,
-      prompt: resolvePrompt(state, paneKey, promptText, {
-        resetOnNewTurn: isNewTurnEvent('command-code', eventName)
-      }),
-      agentType: 'command-code',
-      toolName: snapshot.toolName,
-      toolInput: snapshot.toolInput,
-      interactivePrompt: snapshot.interactivePrompt,
-      lastAssistantMessage: snapshot.lastAssistantMessage
-    })
-  )
+  return normalizeAgentStatusPayload({
+    state: stateName,
+    prompt: resolvePrompt(state, paneKey, promptText, {
+      resetOnNewTurn: isNewTurnEvent('command-code', eventName)
+    }),
+    agentType: 'command-code',
+    toolName: snapshot.toolName,
+    toolInput: snapshot.toolInput,
+    interactivePrompt: snapshot.interactivePrompt,
+    lastAssistantMessage: snapshot.lastAssistantMessage
+  })
 }
 
 function normalizeGrokEvent(
@@ -3709,19 +3686,17 @@ function normalizeGrokEvent(
     ? ''
     : stripGrokUserQueryWrapper(promptText)
 
-  return parseAgentStatusPayload(
-    JSON.stringify({
-      state: stateName,
-      prompt: resolvePrompt(state, paneKey, effectivePrompt, {
-        resetOnNewTurn: isNewTurnEvent('grok', eventName)
-      }),
-      agentType: 'grok',
-      toolName: snapshot.toolName,
-      toolInput: snapshot.toolInput,
-      interactivePrompt: snapshot.interactivePrompt,
-      lastAssistantMessage: snapshot.lastAssistantMessage
-    })
-  )
+  return normalizeAgentStatusPayload({
+    state: stateName,
+    prompt: resolvePrompt(state, paneKey, effectivePrompt, {
+      resetOnNewTurn: isNewTurnEvent('grok', eventName)
+    }),
+    agentType: 'grok',
+    toolName: snapshot.toolName,
+    toolInput: snapshot.toolInput,
+    interactivePrompt: snapshot.interactivePrompt,
+    lastAssistantMessage: snapshot.lastAssistantMessage
+  })
 }
 
 function normalizeHermesEvent(
@@ -3758,19 +3733,17 @@ function normalizeHermesEvent(
     { resetOnNewTurn: isNewTurnEvent('hermes', eventName) }
   )
 
-  return parseAgentStatusPayload(
-    JSON.stringify({
-      state: stateName,
-      prompt: resolvePrompt(state, paneKey, promptText, {
-        resetOnNewTurn: isNewTurnEvent('hermes', eventName)
-      }),
-      agentType: 'hermes',
-      toolName: snapshot.toolName,
-      toolInput: snapshot.toolInput,
-      interactivePrompt: snapshot.interactivePrompt,
-      lastAssistantMessage: snapshot.lastAssistantMessage
-    })
-  )
+  return normalizeAgentStatusPayload({
+    state: stateName,
+    prompt: resolvePrompt(state, paneKey, promptText, {
+      resetOnNewTurn: isNewTurnEvent('hermes', eventName)
+    }),
+    agentType: 'hermes',
+    toolName: snapshot.toolName,
+    toolInput: snapshot.toolInput,
+    interactivePrompt: snapshot.interactivePrompt,
+    lastAssistantMessage: snapshot.lastAssistantMessage
+  })
 }
 
 function readStringField(record: Record<string, unknown>, key: string): string | undefined {
