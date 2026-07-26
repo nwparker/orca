@@ -960,6 +960,31 @@ function hashInteractionKeyPart(value: string): string {
   return createHash('sha256').update(value).digest('hex').slice(0, 12)
 }
 
+// Why byte offsets: the caller's interactionKey embeds the prompt's absolute
+// position, so the backward scan has to report the same offset the old
+// read-everything-then-take-the-last-match pass produced.
+function findLastCommandCodePromptInRegion(
+  region: Buffer
+): { prompt: string; byteOffset: number } | undefined {
+  let lineEnd = region.length
+  for (let index = region.length - 1; index >= -1; index--) {
+    if (index >= 0 && region[index] !== 0x0a) {
+      continue
+    }
+    const lineStart = index + 1
+    if (lineEnd > lineStart) {
+      const prompt = extractCommandCodeUserPromptFromLine(
+        region.subarray(lineStart, lineEnd).toString('utf8').trim()
+      )
+      if (prompt !== undefined) {
+        return { prompt, byteOffset: lineStart }
+      }
+    }
+    lineEnd = index
+  }
+  return undefined
+}
+
 function readLastCommandCodeUserPromptEntryFromTranscript(
   transcriptPath: unknown
 ): { text: string; interactionKey: string } | undefined {
@@ -972,69 +997,75 @@ function readLastCommandCodeUserPromptEntryFromTranscript(
     if (size <= 0) {
       return undefined
     }
-    const bytesToRead = Math.min(size, TRANSCRIPT_MAX_SCAN_BYTES)
-    const position = size - bytesToRead
     const fd = openSync(transcriptPath, 'r')
     try {
-      const buffer = Buffer.alloc(bytesToRead)
-      let filled = 0
-      while (filled < bytesToRead) {
-        const n = readSync(fd, buffer, filled, bytesToRead - filled, position + filled)
-        if (n === 0) {
+      // Why scan backward: the answer is the LAST user line, so walking up from
+      // EOF returns on the first hit instead of parsing every line of a
+      // multi-megabyte transcript on every hook event.
+      let carryBytes: Buffer = Buffer.alloc(0)
+      let bytesRead = 0
+      while (bytesRead < size && bytesRead < TRANSCRIPT_MAX_SCAN_BYTES) {
+        const chunkSize = Math.min(
+          size - bytesRead,
+          TRANSCRIPT_CHUNK_BYTES,
+          TRANSCRIPT_MAX_SCAN_BYTES - bytesRead
+        )
+        const position = size - bytesRead - chunkSize
+        const buffer = Buffer.alloc(chunkSize)
+        let filled = 0
+        while (filled < chunkSize) {
+          const n = readSync(fd, buffer, filled, chunkSize - filled, position + filled)
+          if (n === 0) {
+            break
+          }
+          filled += n
+        }
+        if (filled === 0) {
           break
         }
-        filled += n
-      }
-      let text = buffer.subarray(0, filled).toString('utf8')
-      let textBasePosition = position
-      if (position > 0) {
-        const firstNewline = text.indexOf('\n')
-        textBasePosition += firstNewline + 1
-        text = firstNewline === -1 ? '' : text.slice(firstNewline + 1)
-      }
-      let lastPrompt: string | undefined
-      let lastPromptOffset = 0
-      for (const { line, byteOffset } of iterateTranscriptLinesWithByteOffsets(text)) {
-        const prompt = extractCommandCodeUserPromptFromLine(line.trim())
-        if (prompt !== undefined) {
-          lastPrompt = prompt
-          lastPromptOffset = textBasePosition + byteOffset
+        bytesRead += filled
+        const combined = Buffer.concat([buffer.subarray(0, filled), carryBytes])
+        const combinedPosition = size - bytesRead
+        // Why only at a true file start: a scan that stops on the size cap must
+        // discard its leading partial line, exactly as the capped read did.
+        const atStart = bytesRead >= size
+        const firstNewline = combined.indexOf(0x0a)
+        let completeRegion: Buffer
+        let regionPosition: number
+        if (atStart) {
+          completeRegion = combined
+          regionPosition = combinedPosition
+          carryBytes = Buffer.alloc(0)
+        } else if (firstNewline === -1) {
+          completeRegion = Buffer.alloc(0)
+          regionPosition = combinedPosition
+          carryBytes = combined
+        } else {
+          completeRegion = combined.subarray(firstNewline + 1)
+          regionPosition = combinedPosition + firstNewline + 1
+          carryBytes = combined.subarray(0, firstNewline)
+        }
+        if (completeRegion.length > 0) {
+          const found = findLastCommandCodePromptInRegion(completeRegion)
+          if (found) {
+            return {
+              text: found.prompt,
+              interactionKey: [
+                'command-code-transcript',
+                hashInteractionKeyPart(transcriptPath),
+                String(regionPosition + found.byteOffset),
+                hashInteractionKeyPart(found.prompt)
+              ].join('-')
+            }
+          }
         }
       }
-      return lastPrompt
-        ? {
-            text: lastPrompt,
-            interactionKey: [
-              'command-code-transcript',
-              hashInteractionKeyPart(transcriptPath),
-              String(lastPromptOffset),
-              hashInteractionKeyPart(lastPrompt)
-            ].join('-')
-          }
-        : undefined
+      return undefined
     } finally {
       closeSync(fd)
     }
   } catch {
     return undefined
-  }
-}
-
-function* iterateTranscriptLinesWithByteOffsets(
-  text: string
-): Generator<{ line: string; byteOffset: number }> {
-  let lineStart = 0
-  let byteOffset = 0
-
-  for (let index = 0; index <= text.length; index++) {
-    if (index < text.length && text.charCodeAt(index) !== 10) {
-      continue
-    }
-
-    const line = text.slice(lineStart, index)
-    yield { line, byteOffset }
-    byteOffset += Buffer.byteLength(line, 'utf8') + (index < text.length ? 1 : 0)
-    lineStart = index + 1
   }
 }
 

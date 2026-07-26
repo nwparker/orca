@@ -971,6 +971,154 @@ describe('shared agent-hook-listener', () => {
     }
   })
 
+  // Why these three: the prompt read scans backward from EOF and stops at the
+  // first user line, so the cases that can break are a prompt spanning a chunk
+  // boundary, a later prompt that must win over an earlier one, and the byte
+  // offset in interactionKey, which the old forward pass computed absolutely.
+  it('reads a Command Code prompt that straddles the backward-scan chunk boundary', () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), 'orca-command-code-chunk-straddle-'))
+    const transcriptPath = join(tmpDir, 'transcript.jsonl')
+    try {
+      const promptLine = JSON.stringify({
+        role: 'user',
+        content: [{ type: 'text', text: 'straddling prompt' }]
+      })
+      // Place the prompt so it spans the 64 KiB read boundary counted back from
+      // EOF: the scan must stitch the two reads together to see the whole line.
+      const chunkBytes = 64 * 1024
+      const bytesAfterPrompt = chunkBytes - Math.floor(Buffer.byteLength(promptLine) / 2)
+      const tail = Array.from({ length: 271 }, (_value, index) =>
+        JSON.stringify({
+          role: 'assistant',
+          content: [{ type: 'text', text: `${'t'.repeat(180)}${index}` }]
+        })
+      )
+      let tailText = `${tail.join('\n')}\n`
+      const padBytes = bytesAfterPrompt - Buffer.byteLength(tailText)
+      expect(padBytes).toBeGreaterThan(0)
+      tailText = `${'x'.repeat(padBytes - 1)}\n${tailText}`
+      expect(Buffer.byteLength(tailText)).toBe(bytesAfterPrompt)
+      const head = Array.from({ length: 200 }, (_value, index) =>
+        JSON.stringify({
+          role: 'assistant',
+          content: [{ type: 'text', text: `${'h'.repeat(180)}${index}` }]
+        })
+      )
+      writeFileSync(transcriptPath, `${head.join('\n')}\n${promptLine}\n${tailText}`)
+
+      const tool = normalizeHookPayload(
+        state,
+        'command-code',
+        {
+          paneKey: PANE_KEY,
+          tabId: 'tab-1',
+          worktreeId: 'wt',
+          env: 'production',
+          version: '1',
+          payload: {
+            hook_event_name: 'PreToolUse',
+            transcript_path: transcriptPath,
+            tool_name: 'shell_command',
+            tool_input: { command: 'pwd' }
+          }
+        },
+        'production'
+      )
+      expect(tool?.payload.prompt).toBe('straddling prompt')
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true })
+    }
+  })
+
+  it('resolves the last Command Code prompt, not an earlier one', () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), 'orca-command-code-last-prompt-'))
+    const transcriptPath = join(tmpDir, 'transcript.jsonl')
+    try {
+      writeFileSync(
+        transcriptPath,
+        `${[
+          JSON.stringify({ role: 'user', content: [{ type: 'text', text: 'first ask' }] }),
+          JSON.stringify({ role: 'assistant', content: [{ type: 'text', text: 'first answer' }] }),
+          JSON.stringify({ role: 'user', content: [{ type: 'text', text: 'second ask' }] }),
+          JSON.stringify({ role: 'assistant', content: [{ type: 'text', text: 'second answer' }] })
+        ].join('\n')}\n`
+      )
+
+      const tool = normalizeHookPayload(
+        state,
+        'command-code',
+        {
+          paneKey: PANE_KEY,
+          tabId: 'tab-1',
+          worktreeId: 'wt',
+          env: 'production',
+          version: '1',
+          payload: {
+            hook_event_name: 'PreToolUse',
+            transcript_path: transcriptPath,
+            tool_name: 'shell_command',
+            tool_input: { command: 'pwd' }
+          }
+        },
+        'production'
+      )
+      expect(tool?.payload.prompt).toBe('second ask')
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true })
+    }
+  })
+
+  it('keys the Command Code interaction by the absolute prompt line offset', () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), 'orca-command-code-offset-'))
+    const transcriptPath = join(tmpDir, 'transcript.jsonl')
+    try {
+      const prompt = JSON.stringify({
+        role: 'user',
+        content: [{ type: 'text', text: 'same text' }]
+      })
+      const answer = JSON.stringify({ role: 'assistant', content: [{ type: 'text', text: 'a' }] })
+      // Why past one chunk: the offset is absolute over the whole file, so the
+      // prompt must sit beyond a single backward-scan read for a chunk-relative
+      // offset to be distinguishable from the correct one.
+      const filler = Array.from({ length: 900 }, (_value, index) =>
+        JSON.stringify({
+          role: 'assistant',
+          content: [{ type: 'text', text: `${'f'.repeat(200)}${index}` }]
+        })
+      )
+      const head = `${filler.join('\n')}\n`
+      writeFileSync(transcriptPath, `${head}${prompt}\n${answer}\n`)
+      const promptOffset = Buffer.byteLength(head)
+      expect(promptOffset).toBeGreaterThan(64 * 1024)
+
+      const key = normalizeHookPayload(
+        createHookListenerState(),
+        'command-code',
+        {
+          paneKey: PANE_KEY,
+          tabId: 'tab-1',
+          worktreeId: 'wt',
+          env: 'production',
+          version: '1',
+          payload: {
+            hook_event_name: 'PreToolUse',
+            transcript_path: transcriptPath,
+            tool_name: 'shell_command',
+            tool_input: { command: 'pwd' }
+          }
+        },
+        'production'
+      )?.promptInteractionKey
+
+      // The offset segment must be the prompt line's real position in the file;
+      // a chunk-relative value would make two turns collide across reads.
+      // Key shape: command-code-transcript-<pathHash>-<offset>-<textHash>.
+      expect(key?.split('-')[4]).toBe(String(promptOffset))
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true })
+    }
+  })
+
   it('trims surrounding whitespace from extracted prompt text', () => {
     const event = normalizeHookPayload(
       state,
