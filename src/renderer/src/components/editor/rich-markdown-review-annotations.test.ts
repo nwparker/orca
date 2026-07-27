@@ -91,27 +91,31 @@ describe('rich markdown annotation block reuse', () => {
     )
   }
 
-  it('serializes the document once regardless of comment count', () => {
-    const single = makeEditor(12)
-    getRichMarkdownAnnotationHighlightRanges(single.editor, makeComments(1), 0)
-    const oneComment = single.serializeCalls()
+  // One block build over NODE_COUNT nodes: each node serialized alone, plus each
+  // adjacent pair. Pinned absolutely so "both arms build twice" can't pass as equal.
+  const NODE_COUNT = 12
+  const ONE_BUILD_SERIALIZE_CALLS = NODE_COUNT + (NODE_COUNT - 1)
 
-    const many = makeEditor(12)
+  it('serializes the document once regardless of comment count', () => {
+    const single = makeEditor(NODE_COUNT)
+    getRichMarkdownAnnotationHighlightRanges(single.editor, makeComments(1), 0)
+
+    const many = makeEditor(NODE_COUNT)
     getRichMarkdownAnnotationHighlightRanges(many.editor, makeComments(8), 0)
 
-    expect(oneComment).toBeGreaterThan(0)
-    expect(many.serializeCalls()).toBe(oneComment)
+    expect(single.serializeCalls()).toBe(ONE_BUILD_SERIALIZE_CALLS)
+    expect(many.serializeCalls()).toBe(ONE_BUILD_SERIALIZE_CALLS)
   })
 
   it('serializes the document once when locating the comment at a position', () => {
-    const single = makeEditor(12)
+    const single = makeEditor(NODE_COUNT)
     getRichMarkdownCommentAtPos(single.editor, makeComments(1), 0, 5)
-    const oneComment = single.serializeCalls()
 
-    const many = makeEditor(12)
+    const many = makeEditor(NODE_COUNT)
     getRichMarkdownCommentAtPos(many.editor, makeComments(8), 0, 5)
 
-    expect(many.serializeCalls()).toBe(oneComment)
+    expect(single.serializeCalls()).toBe(ONE_BUILD_SERIALIZE_CALLS)
+    expect(many.serializeCalls()).toBe(ONE_BUILD_SERIALIZE_CALLS)
   })
 
   it('does no work at all with no comments', () => {

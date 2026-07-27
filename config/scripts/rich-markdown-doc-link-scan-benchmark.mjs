@@ -1,20 +1,13 @@
 #!/usr/bin/env node
-// Benchmark: the doc-link text-node walk that runs on every editor transaction.
+// Benchmark: the doc-link text-node walk, run per keystroke and per caret move by
+// the two ProseMirror plugins in rich-markdown-doc-link.ts.
 //
-// Two ProseMirror plugins in rich-markdown-doc-link.ts walk every text node and
-// run `matchAll(/\[\[([^[\]\r\n]+)\]\]/g)` on each: the auto-convert plugin's
-// appendTransaction (once per keystroke) and the inline-preview decoration
-// rebuild (once per keystroke AND once per caret move).
-//
-// A doc link needs a literal `[[`, so a native substring check skips both the
-// regex iterator and the parent code-context check for every text node that
-// cannot match — which is nearly all of them in ordinary prose.
-//
-// Fixture is real repo markdown in on-disk order, split into paragraph-sized
-// text nodes. Both arms are compared for identical match counts before timing,
-// so a gate that skipped a real match could not be reported as a win.
+// Fixture is real repo markdown in on-disk order. Both arms are compared for
+// identical match counts before timing, so a gate that skipped a real match
+// could not be reported as a win.
 import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { performance } from 'node:perf_hooks'
 import { fileURLToPath } from 'node:url'
 
@@ -66,7 +59,7 @@ function loadDocs() {
   for (const file of files) {
     try {
       // Paragraph-ish split approximates ProseMirror's text nodes.
-      const nodes = readFileSync(`${REPO_ROOT}/${file}`, 'utf8').split('\n').filter(Boolean)
+      const nodes = readFileSync(join(REPO_ROOT, file), 'utf8').split('\n').filter(Boolean)
       if (nodes.length > 0) {
         docs.push({ file, nodes })
       }
@@ -85,6 +78,10 @@ function median(samples) {
 // First-touch: one bracket per never-before-walked node array, so V8 cannot hoist
 // the call out of a timing loop.
 function measure(walk, docs) {
+  // Why assert: `index % 0` is NaN, so an empty corpus would silently read undefined.
+  if (docs.length === 0) {
+    throw new Error('measure() called with an empty corpus')
+  }
   const samples = []
   for (let index = 0; index < ITERATIONS; index += 1) {
     const doc = docs[index % docs.length]
@@ -122,6 +119,10 @@ for (const [label, set] of [
   ['docs over 3 KB', large],
   [`biggest (${biggest.file.split('/').pop()})`, [biggest]]
 ]) {
+  if (set.length === 0) {
+    console.log(`${pad(label, 26)} ${pad('no docs in this corpus — skipped', 33)}`)
+    continue
+  }
   const ungated = measure(walkUngated, set)
   const gated = measure(walkGated, set)
   console.log(
