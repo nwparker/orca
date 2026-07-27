@@ -191,6 +191,19 @@ describe('answerRelayHostChallenge clock skew (#10401)', () => {
     expect(answerRelayHostChallenge(ahead.challenge, ahead.context)).toBeNull()
   })
 
+  it('rejects a reversed challenge interval (issuedAt after expiresAt)', () => {
+    // Why: skew slack on both ends removed the implicit ordering guarantee,
+    // and a negative window width still satisfies the <= 10s width check.
+    const issuedAt = 1_700_000_000_000
+    const expiresAt = issuedAt - 5_000
+    const { challenge, context } = buildChallengeFixture({
+      issuedAt,
+      expiresAt,
+      localNow: issuedAt
+    })
+    expect(answerRelayHostChallenge(challenge, context)).toBeNull()
+  })
+
   it('still rejects an oversized server challenge window', () => {
     const issuedAt = 1_700_000_000_000
     const expiresAt = issuedAt + 10_001

@@ -111,6 +111,10 @@ function validateTranscript(
     // on a skewed local clock without widening the server challenge window itself.
     issuedAt - RELAY_HOST_PROOF_CLOCK_SKEW_MS <= now &&
     now <= challenge.expiresAt + RELAY_HOST_PROOF_CLOCK_SKEW_MS &&
+    // Why: the old issuedAt <= now <= expiresAt gate implied this ordering.
+    // Once both ends carry skew slack a reversed interval would pass the
+    // width check below, since a negative width is also <= the maximum.
+    issuedAt <= challenge.expiresAt &&
     challenge.expiresAt - issuedAt <= MAX_HOST_PROOF_CHALLENGE_WINDOW_MS &&
     expiresAt === challenge.expiresAt &&
     equal(fields.get('protocol'), textEncoder.encode(HOST_PROOF_TRANSCRIPT_DOMAIN)) &&
