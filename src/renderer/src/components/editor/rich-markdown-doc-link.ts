@@ -19,6 +19,18 @@ import { renderRichMarkdownDocLinkHtml } from './rich-markdown-doc-link-dom'
 // Why: `.matchAll()` at each call site creates a fresh iterator so the shared
 // `/g` regex never leaks `lastIndex` state across nested or concurrent scans.
 const DOC_LINK_PATTERN = /\[\[([^[\]\r\n]+)\]\]/g
+const DOC_LINK_OPEN = '[['
+
+// Why the substring gate: both plugins walk every text node per transaction (and
+// per caret move), and a link needs `[[`, so this skips matchAll for most nodes.
+const canHoldDocLink = (
+  node: { type: { name: string }; text?: string },
+  parent: unknown
+): node is { type: { name: string }; text: string } =>
+  node.type.name === 'text' &&
+  !!node.text &&
+  node.text.includes(DOC_LINK_OPEN) &&
+  !isDocLinkLiteralCodeTextNode(node as never, parent as never)
 
 const docLinkDissolveKey = new PluginKey('docLinkDissolve')
 const docLinkAutoConvertKey = new PluginKey('docLinkAutoConvert')
@@ -50,10 +62,7 @@ function buildPreviewDecorations(state: EditorState, storage: DocLinkStorage): D
   const index = getDocIndex(storage)
   const cursor = state.selection.from
   state.doc.descendants((node, pos, parent) => {
-    if (node.type.name !== 'text' || !node.text) {
-      return
-    }
-    if (isDocLinkLiteralCodeTextNode(node, parent)) {
+    if (!canHoldDocLink(node, parent)) {
       return
     }
     for (const match of node.text.matchAll(DOC_LINK_PATTERN)) {
@@ -279,10 +288,7 @@ export function createMarkdownDocLink(transport: RichMarkdownSourceTransport) {
             let modified = false
 
             newState.doc.descendants((node, pos, parent) => {
-              if (node.type.name !== 'text' || !node.text) {
-                return
-              }
-              if (isDocLinkLiteralCodeTextNode(node, parent)) {
+              if (!canHoldDocLink(node, parent)) {
                 return
               }
 
