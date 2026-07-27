@@ -43,8 +43,8 @@ for (const [name, value] of [
   }
 }
 
-function serializeEntry(paneKey, entry) {
-  return JSON.stringify({
+function toRow(paneKey, entry) {
+  return {
     paneKey,
     entryPaneKey: entry.paneKey,
     state: entry.state,
@@ -64,15 +64,20 @@ function serializeEntry(paneKey, entry) {
     interactivePrompt: entry.interactivePrompt ?? null,
     lastAssistantMessage: entry.lastAssistantMessage ?? null,
     interrupted: entry.interrupted ?? null
-  })
+  }
 }
 
-// Pre-fix: serialize the whole map every time.
+function serializeEntry(paneKey, entry) {
+  return JSON.stringify(toRow(paneKey, entry))
+}
+
+// Pre-fix: build plain rows and stringify the array once — no per-row roundtrip,
+// which the original never paid and which would inflate the reported speedup.
 function buildFull(map) {
   return JSON.stringify(
     Object.entries(map)
       .sort(([a], [b]) => a.localeCompare(b))
-      .map(([paneKey, entry]) => JSON.parse(serializeEntry(paneKey, entry)))
+      .map(([paneKey, entry]) => toRow(paneKey, entry))
   )
 }
 
@@ -169,6 +174,12 @@ for (const agents of [3, 8, 20, 40]) {
   const cachedBuilder = makeCachedBuilder()
   if (buildFull(map) !== cachedBuilder(map)) {
     throw new Error(`projection mismatch at ${agents} agents`)
+  }
+  // Why also after a ping: the cold call reuses nothing, so a stale-row bug would
+  // only surface once the cache is actually exercised.
+  const pinged = ping(map, 0)
+  if (buildFull(pinged) !== cachedBuilder(pinged)) {
+    throw new Error(`projection mismatch after a ping at ${agents} agents`)
   }
   const full = measure(buildFull, map)
   const cached = measure(makeCachedBuilder(), map)
