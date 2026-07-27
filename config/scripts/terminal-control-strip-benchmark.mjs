@@ -1,9 +1,21 @@
 #!/usr/bin/env node
-// First-touch benchmark for stripTerminalControl, called four times per live PTY chunk.
-// Every measured pair uses distinct, output-equivalent inputs and counterbalanced call order.
+// Mirrors the complete pre/post stripTerminalControl paths at their production size caps.
 import { performance } from 'node:perf_hooks'
 
-const ITERATIONS = Number(process.env.ORCA_STRIP_BENCH_ITERATIONS ?? '31')
+const ESC = String.fromCharCode(0x1b)
+const BEL = String.fromCharCode(0x07)
+const ANSI_ESCAPE_RE = new RegExp(
+  `${ESC}(?:[@-Z\\\\-_]|\\[[0-?]*[ -/]*[@-~]|\\][^${BEL}]*(?:${BEL}|${ESC}\\\\))`,
+  'g'
+)
+const INCOMPLETE_ANSI_ESCAPE_RE = new RegExp(
+  `${ESC}(?:\\[[0-?]*[ -/]*|\\][^${BEL}${ESC}]*|\\S?)?$`,
+  'g'
+)
+const HISTORY_LIMIT = 300
+const SCAN_LIMIT = 4096
+const SAMPLE_ID_LENGTH = 24
+const ITERATIONS = Number(process.env.ORCA_STRIP_BENCH_ITERATIONS ?? '501')
 let resultChecksum = 0
 let validatedPairs = 0
 
@@ -15,45 +27,80 @@ function isStrippedCode(code) {
   return (code <= 0x1f && code !== 0x0a && code !== 0x0d) || (code >= 0x7f && code <= 0x9f)
 }
 
-function stripPerChar(text) {
+function terminalControlMayAffectText(data) {
+  for (let index = 0; index < data.length; index += 1) {
+    const code = data.charCodeAt(index)
+    if (
+      code === 0x0d ||
+      code === 0x1b ||
+      (code <= 0x1f && code !== 0x0a) ||
+      (code >= 0x7f && code <= 0x9f)
+    ) {
+      return true
+    }
+  }
+  return false
+}
+
+function stripPerChar(data) {
+  if (!terminalControlMayAffectText(data)) {
+    return data
+  }
+  const withoutAnsi = data.replace(ANSI_ESCAPE_RE, '').replace(INCOMPLETE_ANSI_ESCAPE_RE, '')
   let output = ''
-  for (let index = 0; index < text.length; index += 1) {
-    if (isStrippedCode(text.charCodeAt(index))) {
+  for (let index = 0; index < withoutAnsi.length; index += 1) {
+    if (isStrippedCode(withoutAnsi.charCodeAt(index))) {
       continue
     }
-    output += text[index]
+    output += withoutAnsi[index]
   }
   return output
 }
 
-function stripSliceRuns(text) {
+function stripSliceRuns(data) {
+  if (!terminalControlMayAffectText(data)) {
+    return data
+  }
+  const withoutAnsi = data.replace(ANSI_ESCAPE_RE, '').replace(INCOMPLETE_ANSI_ESCAPE_RE, '')
   let output = ''
   let runStart = 0
-  for (let index = 0; index < text.length; index += 1) {
-    if (isStrippedCode(text.charCodeAt(index))) {
+  for (let index = 0; index < withoutAnsi.length; index += 1) {
+    if (isStrippedCode(withoutAnsi.charCodeAt(index))) {
       if (index > runStart) {
-        output += text.slice(runStart, index)
+        output += withoutAnsi.slice(runStart, index)
       }
       runStart = index + 1
     }
   }
-  return runStart === 0 ? text : output + text.slice(runStart)
+  return runStart === 0 ? withoutAnsi : output + withoutAnsi.slice(runStart)
 }
 
-function makeChunk(lines, controlEvery, strippedControl = '\x07') {
-  const line = '  ⏺ Running tests... 42 passed, 0 failed, 3 skipped  \n'
-  let text = ''
-  for (let index = 0; index < lines; index += 1) {
-    text += line
-    if (index % controlEvery === 0) {
-      text += strippedControl
+function fixedSampleId(sampleId) {
+  return `sample:${sampleId}`.padEnd(SAMPLE_ID_LENGTH, '_').slice(0, SAMPLE_ID_LENGTH)
+}
+
+function makeTuiFixture(length, sampleId, strippedControl) {
+  const lines = [
+    `${strippedControl}\x1b[35m✻ Thinking...\x1b[0m\r\n`,
+    '  ⏺ Running tests... 42 passed, 0 failed\r\n'
+  ]
+  let text = `${fixedSampleId(sampleId)}\r\n`
+  for (let lineIndex = 0; ; lineIndex += 1) {
+    const next = lines[lineIndex % lines.length]
+    if (text.length + next.length > length) {
+      break
     }
+    text += next
   }
-  return text
+  return text + 'x'.repeat(length - text.length)
 }
 
-function makeFixture(lines, controlEvery, sampleId, strippedControl) {
-  return `${makeChunk(lines, controlEvery, strippedControl)}${sampleId}`
+function makeDenseFixture(length, sampleId, strippedControl) {
+  const prefix = `\x1b[35m${fixedSampleId(sampleId)}`
+  const suffix = '\x1b[0m'
+  const bodyLength = length - prefix.length - suffix.length
+  const body = `x${strippedControl}`.repeat(Math.floor(bodyLength / 2))
+  return `${prefix}${body}${bodyLength % 2 === 0 ? '' : 'x'}${suffix}`
 }
 
 function median(samples) {
@@ -73,14 +120,16 @@ function consumeOutput(output) {
   resultChecksum ^= output.charCodeAt(Math.floor(output.length / 2))
 }
 
-function recordPair(lines, controlEvery, sampleId, perCharFirst, samples) {
-  const perCharFixture = makeFixture(lines, controlEvery, sampleId, perCharFirst ? '\x01' : '\x02')
-  const sliceRunsFixture = makeFixture(
-    lines,
-    controlEvery,
-    sampleId,
-    perCharFirst ? '\x02' : '\x01'
-  )
+function recordPair(fixture, sampleId, perCharFirst, samples) {
+  const perCharFixture = fixture.make(sampleId, perCharFirst ? '\x01' : '\x02')
+  const sliceRunsFixture = fixture.make(sampleId, perCharFirst ? '\x02' : '\x01')
+  if (
+    perCharFixture === sliceRunsFixture ||
+    perCharFixture.length !== fixture.length ||
+    sliceRunsFixture.length !== fixture.length
+  ) {
+    throw new Error(`invalid inputs for ${fixture.label}, sample ${sampleId}`)
+  }
   let perCharResult
   let sliceRunsResult
   if (perCharFirst) {
@@ -91,7 +140,7 @@ function recordPair(lines, controlEvery, sampleId, perCharFirst, samples) {
     perCharResult = measure(stripPerChar, perCharFixture)
   }
   if (perCharResult.output !== sliceRunsResult.output) {
-    throw new Error(`strip mismatch at ${lines} lines, sample ${sampleId}`)
+    throw new Error(`strip mismatch for ${fixture.label}, sample ${sampleId}`)
   }
   consumeOutput(perCharResult.output)
   consumeOutput(sliceRunsResult.output)
@@ -100,37 +149,54 @@ function recordPair(lines, controlEvery, sampleId, perCharFirst, samples) {
   samples.sliceRuns.push(sliceRunsResult.elapsed)
 }
 
+const denseBodyLength = SCAN_LIMIT - '\x1b[35m'.length - SAMPLE_ID_LENGTH - '\x1b[0m'.length
+const denseControlPercent = ((Math.floor(denseBodyLength / 2) / SCAN_LIMIT) * 100).toFixed(1)
+const fixtures = [
+  {
+    label: `${HISTORY_LIMIT} history TUI`,
+    length: HISTORY_LIMIT,
+    make: (sampleId, control) => makeTuiFixture(HISTORY_LIMIT, sampleId, control)
+  },
+  {
+    label: `${HISTORY_LIMIT + 1} boundary TUI`,
+    length: HISTORY_LIMIT + 1,
+    make: (sampleId, control) => makeTuiFixture(HISTORY_LIMIT + 1, sampleId, control)
+  },
+  {
+    label: `${SCAN_LIMIT} scan TUI`,
+    length: SCAN_LIMIT,
+    make: (sampleId, control) => makeTuiFixture(SCAN_LIMIT, sampleId, control)
+  },
+  {
+    label: `${SCAN_LIMIT} scan ${denseControlPercent}% C0`,
+    length: SCAN_LIMIT,
+    make: (sampleId, control) => makeDenseFixture(SCAN_LIMIT, sampleId, control)
+  }
+]
+
 const pad = (value, width) => String(value).padStart(width)
-console.log('stripTerminalControl, called 4x per PTY chunk. Lower is better.')
+console.log('Complete stripTerminalControl path. Lower is better.')
 console.log(
   `iterations=${ITERATIONS} (${ITERATIONS * 2} first-touch samples/implementation, counterbalanced median)`
 )
 console.log(
-  `${pad('fixture', 22)} ${pad('per-char', 11)} ${pad('slice runs', 12)} ${pad('speedup', 9)}`
+  `${pad('fixture', 25)} ${pad('per-char', 11)} ${pad('slice runs', 12)} ${pad('speedup', 9)}`
 )
 
-for (const [lines, controlEvery, label] of [
-  [100, 50, 'sparse control'],
-  [500, 50, 'sparse control'],
-  [500, 5, 'dense control'],
-  [2000, 50, 'sparse control']
-]) {
+for (const fixture of fixtures) {
   const samples = { perChar: [], sliceRuns: [] }
   for (let index = 0; index < ITERATIONS; index += 1) {
     const orders = index % 2 === 0 ? [true, false] : [false, true]
     for (const perCharFirst of orders) {
       const orderLabel = perCharFirst ? 'per-first' : 'slice-first'
-      recordPair(lines, controlEvery, `${index}:${orderLabel}`, perCharFirst, samples)
+      recordPair(fixture, `${index}:${orderLabel}`, perCharFirst, samples)
     }
   }
-  const sizeKb = (makeChunk(lines, controlEvery).length / 1024).toFixed(0)
   const perChar = median(samples.perChar)
   const sliceRuns = median(samples.sliceRuns)
   console.log(
-    `${pad(`${lines} lines ${label}`, 22)} ${pad(`${(perChar * 1000).toFixed(1)} us`, 11)} ${pad(`${(sliceRuns * 1000).toFixed(1)} us`, 12)} ${pad(`${(perChar / sliceRuns).toFixed(2)}x`, 9)} (${sizeKb} KiB)`
+    `${pad(fixture.label, 25)} ${pad(`${(perChar * 1000).toFixed(1)} us`, 11)} ${pad(`${(sliceRuns * 1000).toFixed(1)} us`, 12)} ${pad(`${(perChar / sliceRuns).toFixed(2)}x`, 9)}`
   )
 }
 console.log(`\nvalidated=${validatedPairs} measured pairs, result checksum=${resultChecksum >>> 0}`)
-console.log(
-  'The detector pays this cost four times per PTY write once a Command Code pane is live.'
-)
+console.log('Production calls are bounded to 4096, 4096, 300, and 301 code units.')
