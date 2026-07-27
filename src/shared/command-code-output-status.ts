@@ -126,9 +126,7 @@ function stripTerminalControl(data: string): string {
     return data
   }
   const withoutAnsi = data.replace(ANSI_ESCAPE_RE, '').replace(INCOMPLETE_ANSI_ESCAPE_RE, '')
-  // Why slice runs, not per-char append: this runs four times per PTY chunk, and
-  // control bytes are sparse, so copying the spans between them beats building
-  // the result one character at a time.
+  // Why slice runs: control bytes are sparse and this runs 4x per PTY chunk.
   let output = ''
   let runStart = 0
   for (let index = 0; index < withoutAnsi.length; index += 1) {

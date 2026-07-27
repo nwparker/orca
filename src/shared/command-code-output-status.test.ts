@@ -316,10 +316,7 @@ function maxStringContextLength(contexts: unknown[]): number {
   )
 }
 
-// Why these shapes: stripTerminalControl copies the runs between control bytes
-// rather than appending per character, so the cases that could break are control
-// bytes at the very start, at the very end, adjacent to each other, and a string
-// with none at all (which must pass through untouched).
+// Run-copying breaks at run boundaries, so these pin start/end/adjacent/none.
 describe('terminal control stripping', () => {
   function promptFrom(raw: string): string | null {
     let captured: string | null = null
