@@ -15,14 +15,14 @@ import { performance } from 'node:perf_hooks'
 import { fileURLToPath } from 'node:url'
 
 const REPO_ROOT = fileURLToPath(new URL('../..', import.meta.url))
-const ITERATIONS = Number.parseInt(process.env.ORCA_DIFF_BLOB_BENCH_ITERATIONS ?? '10', 10)
-const WARMUP = Number.parseInt(process.env.ORCA_DIFF_BLOB_BENCH_WARMUP ?? '3', 10)
+const ITERATIONS = Number(process.env.ORCA_DIFF_BLOB_BENCH_ITERATIONS ?? '10')
+const WARMUP = Number(process.env.ORCA_DIFF_BLOB_BENCH_WARMUP ?? '3')
 
 for (const [name, value] of [
   ['ORCA_DIFF_BLOB_BENCH_ITERATIONS', ITERATIONS],
   ['ORCA_DIFF_BLOB_BENCH_WARMUP', WARMUP]
 ]) {
-  if (!Number.isInteger(value) || value <= 0) {
+  if (!Number.isSafeInteger(value) || value <= 0) {
     throw new Error(`${name} must be a positive integer, received ${value}`)
   }
 }
@@ -51,15 +51,32 @@ async function readConcurrent(leftRef, rightRef, filePath) {
   return left.length + right.length
 }
 
-async function measure(fn, leftRef, rightRef, filePath) {
+// Why interleaved: running one strategy's whole batch before the other's lets
+// cache warming, CPU-frequency drift, and background load correlate with the
+// strategy being measured. Alternating per iteration and taking medians keeps
+// that drift common to both arms.
+async function measureInterleaved(leftRef, rightRef, filePath) {
   for (let index = 0; index < WARMUP; index += 1) {
-    await fn(leftRef, rightRef, filePath)
+    await readSequential(leftRef, rightRef, filePath)
+    await readConcurrent(leftRef, rightRef, filePath)
   }
-  const start = performance.now()
+  const sequentialSamples = []
+  const concurrentSamples = []
   for (let index = 0; index < ITERATIONS; index += 1) {
-    await fn(leftRef, rightRef, filePath)
+    // Alternate which arm goes first so neither systematically pays a cold cache.
+    const sequentialFirst = index % 2 === 0
+    for (const runSequential of sequentialFirst ? [true, false] : [false, true]) {
+      const start = performance.now()
+      await (runSequential ? readSequential : readConcurrent)(leftRef, rightRef, filePath)
+      ;(runSequential ? sequentialSamples : concurrentSamples).push(performance.now() - start)
+    }
   }
-  return (performance.now() - start) / ITERATIONS
+  const median = (samples) => {
+    const sorted = [...samples].sort((a, b) => a - b)
+    const middle = Math.floor(sorted.length / 2)
+    return sorted.length % 2 === 0 ? (sorted[middle - 1] + sorted[middle]) / 2 : sorted[middle]
+  }
+  return { sequential: median(sequentialSamples), concurrent: median(concurrentSamples) }
 }
 
 const head = (await git(['rev-parse', 'HEAD'])).trim()
@@ -89,7 +106,9 @@ if (files.length === 0) {
 
 const pad = (value, width) => String(value).padStart(width)
 console.log('One file diff = two git blob reads. Lower is better.')
-console.log(`iterations=${ITERATIONS} warmup=${WARMUP} head=${head.slice(0, 9)}`)
+console.log(
+  `iterations=${ITERATIONS} warmup=${WARMUP} (interleaved, medians) head=${head.slice(0, 9)}`
+)
 console.log(
   `${pad('file', 26)} ${pad('sequential', 12)} ${pad('concurrent', 12)} ${pad('speedup', 9)} ${pad('saved', 10)}`
 )
@@ -99,8 +118,7 @@ for (const filePath of files) {
   if (sequentialBytes !== concurrentBytes) {
     throw new Error(`byte mismatch for ${filePath}`)
   }
-  const sequential = await measure(readSequential, parent, head, filePath)
-  const concurrent = await measure(readConcurrent, parent, head, filePath)
+  const { sequential, concurrent } = await measureInterleaved(parent, head, filePath)
   console.log(
     `${pad(filePath.split('/').pop(), 26)} ${pad(`${sequential.toFixed(1)} ms`, 12)} ${pad(`${concurrent.toFixed(1)} ms`, 12)} ${pad(`${(sequential / concurrent).toFixed(2)}x`, 9)} ${pad(`${(sequential - concurrent).toFixed(1)} ms`, 10)}`
   )
