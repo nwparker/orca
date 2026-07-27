@@ -316,7 +316,6 @@ function maxStringContextLength(contexts: unknown[]): number {
   )
 }
 
-// Run-copying breaks at run boundaries, so these pin start/end/adjacent/none.
 describe('terminal control stripping', () => {
   function promptFrom(raw: string): string | null {
     let captured: string | null = null

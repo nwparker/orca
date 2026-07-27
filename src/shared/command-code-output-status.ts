@@ -126,7 +126,7 @@ function stripTerminalControl(data: string): string {
     return data
   }
   const withoutAnsi = data.replace(ANSI_ESCAPE_RE, '').replace(INCOMPLETE_ANSI_ESCAPE_RE, '')
-  // Why slice runs: control bytes are sparse and this runs 4x per PTY chunk.
+  // Four calls per PTY chunk favor copying sparse intact runs over per-character concatenation.
   let output = ''
   let runStart = 0
   for (let index = 0; index < withoutAnsi.length; index += 1) {
