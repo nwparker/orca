@@ -4,35 +4,32 @@ import { installTerminalLinkifierHoverResetOnMouseLeave } from './terminal-linki
 
 type FakeLinkifier = { _lastBufferCell?: unknown; _activeLine?: number }
 
-function createHarness(hasScreen = true): {
-  terminal: Terminal
-  linkifier: FakeLinkifier
-  dispatchMouseLeave: () => void
-} {
+function createHarness(hasScreen = true) {
   let mouseLeaveHandler: (() => void) | null = null
-  const screen = {
-    addEventListener: vi.fn((_event: string, handler: () => void) => {
-      mouseLeaveHandler = handler
-    }),
-    removeEventListener: vi.fn((_event: string, handler: () => void) => {
-      if (mouseLeaveHandler === handler) {
-        mouseLeaveHandler = null
-      }
-    })
-  }
+  const addEventListener = vi.fn((_event: string, handler: () => void) => {
+    mouseLeaveHandler = handler
+  })
+  const removeEventListener = vi.fn((_event: string, handler: () => void) => {
+    if (mouseLeaveHandler === handler) {
+      mouseLeaveHandler = null
+    }
+  })
+  const screen = { addEventListener, removeEventListener }
+  const querySelector = vi.fn(() => (hasScreen ? screen : null))
   const linkifier: FakeLinkifier = {
     _lastBufferCell: { x: 2, y: 3 },
     _activeLine: 3
   }
   const terminal = {
-    element: {
-      querySelector: vi.fn(() => (hasScreen ? screen : null))
-    },
+    element: { querySelector },
     _core: { linkifier }
   } as unknown as Terminal
   return {
     terminal,
     linkifier,
+    querySelector,
+    addEventListener,
+    removeEventListener,
     dispatchMouseLeave: () => mouseLeaveHandler?.()
   }
 }
@@ -42,6 +39,8 @@ describe('installTerminalLinkifierHoverResetOnMouseLeave', () => {
     const harness = createHarness()
     installTerminalLinkifierHoverResetOnMouseLeave(harness.terminal)
 
+    expect(harness.querySelector).toHaveBeenCalledWith('.xterm-screen')
+    expect(harness.addEventListener).toHaveBeenCalledWith('mouseleave', expect.any(Function))
     harness.dispatchMouseLeave()
 
     expect(harness.linkifier._lastBufferCell).toBeUndefined()
@@ -51,8 +50,13 @@ describe('installTerminalLinkifierHoverResetOnMouseLeave', () => {
   it('removes the listener on dispose', () => {
     const harness = createHarness()
     const disposable = installTerminalLinkifierHoverResetOnMouseLeave(harness.terminal)
+    const mouseLeaveHandler = harness.addEventListener.mock.calls.find(
+      ([eventName]) => eventName === 'mouseleave'
+    )?.[1]
+    expect(mouseLeaveHandler).toBeTypeOf('function')
 
     disposable.dispose()
+    expect(harness.removeEventListener).toHaveBeenCalledWith('mouseleave', mouseLeaveHandler)
     harness.dispatchMouseLeave()
 
     expect(harness.linkifier._lastBufferCell).toEqual({ x: 2, y: 3 })

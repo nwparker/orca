@@ -637,7 +637,10 @@ describe('openTerminal — addon and provider wiring', () => {
     const disposable = pane.linkifierMouseLeaveResetDisposable
     expect(disposable?.dispose).toBeTypeOf('function')
     expect(addEventListener).toHaveBeenCalledWith('mouseleave', expect.any(Function))
-    const mouseLeaveHandler = addEventListener.mock.calls[0][1]
+    const mouseLeaveHandler = addEventListener.mock.calls.find(
+      ([eventName]) => eventName === 'mouseleave'
+    )?.[1]
+    expect(mouseLeaveHandler).toBeTypeOf('function')
 
     disposePane(pane, new Map([[pane.id, pane]]))
     expect(removeEventListener).toHaveBeenCalledWith('mouseleave', mouseLeaveHandler)
