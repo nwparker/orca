@@ -625,14 +625,22 @@ describe('openTerminal — addon and provider wiring', () => {
 
   it('installs the mouseleave linkifier hover reset and disposes it', () => {
     const { pane } = createOpenTerminalHarness()
+    const addEventListener = vi.fn()
+    const removeEventListener = vi.fn()
+    const screen = {
+      addEventListener,
+      removeEventListener
+    } as unknown as HTMLElement
+    vi.mocked(pane.terminal.element!.querySelector).mockReturnValueOnce(screen)
 
     openTerminal(pane)
     const disposable = pane.linkifierMouseLeaveResetDisposable
     expect(disposable?.dispose).toBeTypeOf('function')
+    expect(addEventListener).toHaveBeenCalledWith('mouseleave', expect.any(Function))
+    const mouseLeaveHandler = addEventListener.mock.calls[0][1]
 
-    const disposeSpy = vi.spyOn(disposable!, 'dispose')
     disposePane(pane, new Map([[pane.id, pane]]))
-    expect(disposeSpy).toHaveBeenCalledTimes(1)
+    expect(removeEventListener).toHaveBeenCalledWith('mouseleave', mouseLeaveHandler)
     expect(pane.linkifierMouseLeaveResetDisposable).toBeNull()
   })
 
