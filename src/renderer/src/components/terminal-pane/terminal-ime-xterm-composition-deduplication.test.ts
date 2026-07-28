@@ -37,6 +37,22 @@ function dispatchKeypress(textarea: HTMLTextAreaElement, text: string): void {
   textarea.dispatchEvent(keypress)
 }
 
+function dispatchKeydown(
+  textarea: HTMLTextAreaElement,
+  key: string,
+  code: string,
+  keyCode: number,
+  isComposing: boolean,
+  timeStamp?: number
+): void {
+  const keydown = new KeyboardEvent('keydown', { key, code, isComposing, bubbles: true })
+  Object.defineProperty(keydown, 'keyCode', { value: keyCode })
+  if (timeStamp !== undefined) {
+    Object.defineProperty(keydown, 'timeStamp', { value: timeStamp })
+  }
+  textarea.dispatchEvent(keydown)
+}
+
 describe('xterm IME composition de-duplication', () => {
   beforeEach(() => {
     vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
@@ -157,6 +173,59 @@ describe('xterm IME composition de-duplication', () => {
     await nextEventLoop()
 
     expect(emitted.join('')).toBe('한a')
+    terminal.dispose()
+  })
+
+  it('commits Korean composition to its terminal when compositionend is followed by blur', async () => {
+    const { emitted, terminal, textarea } = openTerminal()
+    startComposition(textarea, '한')
+    await nextEventLoop()
+
+    textarea.dispatchEvent(new CompositionEvent('compositionend', { data: '한', bubbles: true }))
+    textarea.dispatchEvent(new FocusEvent('blur'))
+    await nextEventLoop()
+
+    expect(emitted.join('')).toBe('한')
+    terminal.dispose()
+  })
+
+  it('commits to the composing terminal when focus switches to another terminal', async () => {
+    const original = openTerminal()
+    const unrelated = openTerminal()
+    startComposition(original.textarea, '한')
+    await nextEventLoop()
+
+    original.textarea.dispatchEvent(
+      new CompositionEvent('compositionend', { data: '한', bubbles: true })
+    )
+    original.textarea.dispatchEvent(new FocusEvent('blur'))
+    unrelated.textarea.focus()
+    await nextEventLoop()
+
+    expect(original.emitted.join('')).toBe('한')
+    expect(unrelated.emitted).toEqual([])
+    original.terminal.dispose()
+    unrelated.terminal.dispose()
+  })
+
+  it('finalizes source-switch cancellation before a later Korean composition', async () => {
+    const { emitted, terminal, textarea } = openTerminal()
+    startComposition(textarea, '한')
+    await nextEventLoop()
+
+    dispatchKeydown(textarea, 'Escape', 'Escape', 229, true, 100)
+    textarea.dispatchEvent(new CompositionEvent('compositionend', { data: '한', bubbles: true }))
+    dispatchKeydown(textarea, 'Escape', 'Escape', 27, false, 100)
+    await nextEventLoop()
+    expect(emitted).toEqual([])
+
+    textarea.value = ''
+    startComposition(textarea, '한')
+    await nextEventLoop()
+    textarea.dispatchEvent(new CompositionEvent('compositionend', { data: '한', bubbles: true }))
+    await nextEventLoop()
+
+    expect(emitted.join('')).toBe('한')
     terminal.dispose()
   })
 })
