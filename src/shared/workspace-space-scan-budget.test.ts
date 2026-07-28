@@ -44,7 +44,7 @@ describe('workspace space scan budget', () => {
         () => undefined
       )
     ).rejects.toThrow('readdir exploded')
-    expect(budget).toMatchObject({ entries: 0, retainedBytes: 0 })
+    expect(budget).toMatchObject({ retainedBytes: 0 })
   })
 
   it('frees capacity for later directories once a listing is released', async () => {
@@ -64,7 +64,7 @@ describe('workspace space scan budget', () => {
       () => undefined
     )
     // Why: a cumulative counter would reject the identical second listing here.
-    releaseWorkspaceSpaceScanEntries(budget, first.entries.length, first.retainedBytes)
+    releaseWorkspaceSpaceScanEntries(budget, first.retainedBytes)
 
     await expect(
       collectWorkspaceSpaceDirectoryEntries(

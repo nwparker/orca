@@ -1,5 +1,21 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { DashboardSnapshot } from '../../shared/dashboard-snapshot'
+import type * as RepoIconModule from '../../shared/repo-icon'
+
+// Counts real sanitizer entries so the icon cache is proven by decode count
+// rather than by wall clock, which is unfalsifiable on a loaded CI box.
+const sanitizeRepoIconCalls = vi.hoisted(() => vi.fn())
+vi.mock('../../shared/repo-icon', async (importOriginal) => {
+  const actual = await importOriginal<typeof RepoIconModule>()
+  return {
+    ...actual,
+    sanitizeRepoIcon: (value: unknown) => {
+      sanitizeRepoIconCalls(value)
+      return actual.sanitizeRepoIcon(value)
+    }
+  }
+})
+
 import {
   admitDashboardSnapshot,
   isDashboardRevealAgentArgs,
@@ -43,6 +59,15 @@ const SNAPSHOT = {
     workspaceStatuses: [{ id: 'in-review', label: 'In review', color: 'emerald' }]
   }
 } satisfies DashboardSnapshot
+
+/** A real PNG header plus `bodyBytes` of filler, so sanitizing actually decodes. */
+function imageIconSrc(bodyBytes: number): string {
+  const header = Buffer.from([
+    137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 64, 0, 0, 0, 64, 8, 6, 0,
+    0, 0
+  ])
+  return `data:image/png;base64,${Buffer.concat([header, Buffer.alloc(bodyBytes, bodyBytes % 251)]).toString('base64')}`
+}
 
 describe('dashboard payload validation', () => {
   it('accepts a complete dashboard snapshot', () => {
@@ -170,23 +195,70 @@ describe('dashboard payload validation', () => {
       expect(admitted?.snapshot.cards).toHaveLength(1)
     })
 
+    it('drops a card that fails only the search-board fields', () => {
+      const good = SNAPSHOT.cards[0]
+      const badReview = { ...good, paneKey: 'p2', review: { number: 0, state: 'open' } }
+      const badSubagent = {
+        ...good,
+        paneKey: 'p3',
+        subagents: [{ id: '', name: 'x', dotState: 'idle' }]
+      }
+      const badBucket = { ...good, paneKey: 'p4', bucket: 'archived' }
+
+      const admitted = admitDashboardSnapshot({
+        ...SNAPSHOT,
+        cards: [good, badReview, badSubagent, badBucket]
+      })
+
+      expect(admitted?.droppedCardCount).toBe(3)
+      expect(admitted?.snapshot.cards.map((card) => card.paneKey)).toEqual(['tab-1:leaf-1'])
+    })
+
+    it('keeps a done-bucket card the search board produces', () => {
+      const admitted = admitDashboardSnapshot({
+        ...SNAPSHOT,
+        cards: [{ ...SNAPSHOT.cards[0], bucket: 'done', dotState: 'done' }]
+      })
+
+      expect(admitted?.droppedCardCount).toBe(0)
+    })
+
     it('still rejects a snapshot whose own shape is unusable', () => {
       expect(admitDashboardSnapshot({ ...SNAPSHOT, generatedAt: Number.NaN })).toBeNull()
       expect(admitDashboardSnapshot({ ...SNAPSHOT, cards: 'nope' })).toBeNull()
       expect(admitDashboardSnapshot({ ...SNAPSHOT, repoIconsByRepoId: [] })).toBeNull()
+      // Why: showIdle and filterOptions describe the frame, not one card, so a
+      // bad value there has no card to drop and must fail the whole snapshot.
+      expect(admitDashboardSnapshot({ ...SNAPSHOT, showIdle: 'yes' })).toBeNull()
+      expect(
+        admitDashboardSnapshot({
+          ...SNAPSHOT,
+          filterOptions: { ...SNAPSHOT.filterOptions, projects: [{ id: '', label: 'Invalid' }] }
+        })
+      ).toBeNull()
+    })
+
+    it('mirrors isDashboardSnapshot on every snapshot-level rejection', () => {
+      const cases: unknown[] = [
+        { ...SNAPSHOT, generatedAt: Number.NaN },
+        { ...SNAPSHOT, cards: 'nope' },
+        { ...SNAPSHOT, repoIconsByRepoId: [] },
+        { ...SNAPSHOT, showIdle: 'yes' },
+        { ...SNAPSHOT, filterOptions: { projects: [], workspaceStatuses: 'nope' } },
+        null,
+        []
+      ]
+      for (const value of cases) {
+        expect(isDashboardSnapshot(value)).toBe(false)
+        expect(admitDashboardSnapshot(value)).toBeNull()
+      }
     })
   })
 
   // Why: sanitizing an image icon decodes the whole payload to read a 24-byte
   // header, and the renderer republishes the same icons every 250 ms.
   it('validates a repeated image icon without re-decoding it every publish', () => {
-    const src = `data:image/png;base64,${Buffer.concat([
-      Buffer.from([
-        137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 64, 0, 0, 0, 64, 8,
-        6, 0, 0, 0
-      ]),
-      Buffer.alloc(256 * 1024, 7)
-    ]).toString('base64')}`
+    const src = imageIconSrc(256 * 1024)
     const snapshot = {
       ...SNAPSHOT,
       repoIconsByRepoId: Object.fromEntries(
@@ -196,17 +268,60 @@ describe('dashboard payload validation', () => {
         ])
       )
     }
+    sanitizeRepoIconCalls.mockClear()
 
-    expect(isDashboardSnapshot(snapshot)).toBe(true)
-    const start = performance.now()
-    for (let run = 0; run < 20; run += 1) {
+    for (let publish = 0; publish < 20; publish += 1) {
       expect(isDashboardSnapshot(snapshot)).toBe(true)
     }
-    const perPublishMs = (performance.now() - start) / 20
 
-    // Uncached this costs ~37 ms per publish; the cached path is well under 5 ms
-    // even on a loaded CI box.
-    expect(perPublishMs).toBeLessThan(5)
+    // 10 repos x 20 publishes = 200 icon checks against ONE decode.
+    expect(sanitizeRepoIconCalls).toHaveBeenCalledTimes(1)
+  })
+
+  it('re-decodes when the icon payload or its source actually changes', () => {
+    const first = { type: 'image', src: imageIconSrc(1_024), source: 'upload' }
+    const second = { type: 'image', src: imageIconSrc(2_048), source: 'upload' }
+    // Same bytes, different source: `source` picks which src pattern is legal,
+    // so it must not collide with the first entry's cached verdict.
+    const rebranded = { ...first, source: 'file' }
+    sanitizeRepoIconCalls.mockClear()
+
+    for (const icon of [first, first, second, second, rebranded, rebranded]) {
+      isDashboardSnapshot({ ...SNAPSHOT, repoIconsByRepoId: { 'repo-1': icon } })
+    }
+
+    expect(sanitizeRepoIconCalls).toHaveBeenCalledTimes(3)
+  })
+
+  it('caches a rejection too, so a bad icon cannot be re-decoded every publish', () => {
+    const icon = {
+      type: 'image',
+      src: `${imageIconSrc(1_024)}`.replace('png', 'gif'),
+      source: 'upload'
+    }
+    sanitizeRepoIconCalls.mockClear()
+
+    for (let publish = 0; publish < 5; publish += 1) {
+      expect(isDashboardSnapshot({ ...SNAPSHOT, repoIconsByRepoId: { 'repo-1': icon } })).toBe(
+        false
+      )
+    }
+
+    expect(sanitizeRepoIconCalls).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not let a cached image verdict answer for a non-image icon', () => {
+    const emoji = { type: 'emoji', emoji: '🦑' }
+    sanitizeRepoIconCalls.mockClear()
+
+    for (let publish = 0; publish < 3; publish += 1) {
+      expect(isDashboardSnapshot({ ...SNAPSHOT, repoIconsByRepoId: { 'repo-1': emoji } })).toBe(
+        true
+      )
+    }
+
+    // Cheap branches bypass the cache entirely rather than sharing its keyspace.
+    expect(sanitizeRepoIconCalls).toHaveBeenCalledTimes(3)
   })
 
   it('requires complete bounded reveal routing', () => {

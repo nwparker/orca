@@ -158,8 +158,6 @@ describe('scanWorkspaceSpaceEntryTree', () => {
     ])
   })
 
-  // Why: the cap bounds entries held at once. A deep walk retires each listing
-  // as it descends, so total tree size must not decide the outcome.
   it('scans a chain far longer than the cap because listings are released', async () => {
     const depth = 50
     const directories = new Map<string, readonly Entry[]>()
@@ -191,10 +189,8 @@ describe('scanWorkspaceSpaceEntryTree', () => {
     await expect(scan).rejects.toBeInstanceOf(WorkspaceSpaceScanCapacityError)
   })
 
-  // Why: docs/workspace-space-scan-resource-bounds.md promises "a live cap
-  // depends only on directory shape". A cap that N workers can each charge
-  // against makes the verdict scale with concurrency instead, so these layouts
-  // are the documented boundary: only a single over-cap directory may fail.
+  // Why: a cap N workers can each charge scales the verdict with concurrency,
+  // which docs/workspace-space-scan-resource-bounds.md forbids.
   describe('capacity depends on directory shape, not tree size or concurrency', () => {
     function buildWideTree(dirCount: number, filesPerDir: number) {
       const directories = new Map<string, readonly Entry[]>()
@@ -224,8 +220,6 @@ describe('scanWorkspaceSpaceEntryTree', () => {
       )
     }
 
-    // Every layout below sits under the 100,000 per-directory cap, so each must
-    // scan regardless of total entry count or worker count.
     it.each([
       { dirCount: 48, filesPerDir: 2_100, concurrency: 48 },
       { dirCount: 100, filesPerDir: 1_500, concurrency: 48 },
@@ -248,10 +242,8 @@ describe('scanWorkspaceSpaceEntryTree', () => {
     }, 30_000)
   })
 
-  // Why: the cases above pin maxRetainedBytes wide open, so they cannot see the
-  // byte cap. At the real 64 MiB default the same layouts must still scan, and
-  // must not start failing because the worktree sits under a longer path — the
-  // resource-bounds doc rules out exactly that path dependence.
+  // Why: the cases above pin maxRetainedBytes open, so only these see the byte
+  // cap — and its verdict must not depend on where the worktree is checked out.
   describe('capacity at the production default limits', () => {
     // A real worktree checkout path; the bug appeared above ~58 characters.
     const DEEP_ROOT = '/Users/octocat/projects/orca/.claude/worktrees/wf_d39acf3c-e7d-2'
