@@ -142,8 +142,10 @@ export function buildDashboardSnapshot(
     options.includeFilterOptions === false
       ? undefined
       : {
+          // Why: filterOptions is snapshot-level, so an over-long project label
+          // costs the WHOLE board, not one card. Bound it at the producer.
           projects: [...new Map(activeWorktrees.map(({ repo }) => [repo.id, repo])).values()].map(
-            (repo) => ({ id: repo.id, label: repo.displayName })
+            (repo) => ({ id: repo.id, label: boundedLabel(repo.displayName) })
           ),
           workspaceStatuses: (state.workspaceStatuses && state.workspaceStatuses.length > 0
             ? state.workspaceStatuses

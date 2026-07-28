@@ -179,6 +179,21 @@ describe('buildDashboardSnapshot', () => {
     expect(snapshot.cards[0].conversationName).toHaveLength(DASHBOARD_MAX_LABEL_LENGTH)
   })
 
+  // Why: filterOptions is snapshot-level, so an over-long project label is not
+  // recoverable by dropping a card — it invalidates the entire board.
+  it('truncates the project filter label the whole snapshot rides on', () => {
+    const snapshot = buildDashboardSnapshot(
+      baseState({
+        repos: [
+          { id: 'r1', path: '/r1', displayName: 'x'.repeat(5_000), badgeColor: '#000', addedAt: 0 }
+        ]
+      }),
+      NOW
+    )
+
+    expect(snapshot.filterOptions?.projects[0].label).toHaveLength(DASHBOARD_MAX_LABEL_LENGTH)
+  })
+
   it('withholds generated titles until the setting enables them', () => {
     const tabs = { w1: [{ ...tab(), generatedTitle: 'Fix the flaky pty test' }] }
     const off = buildDashboardSnapshot(
