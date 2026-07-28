@@ -275,7 +275,7 @@ describe('OpenCode plugin child attention', () => {
     expect(posts.at(-1)?.sessionID).toBe('root')
   })
 
-  it('fails attention open across cyclic ancestry without making child status authoritative', async () => {
+  it('lets only matching unknown Idle retire attention across cyclic ancestry', async () => {
     const list = vi.fn(async () => ({
       data: [
         { id: 'child-a', parentID: 'child-b' },
@@ -287,14 +287,18 @@ describe('OpenCode plugin child attention', () => {
     await hooks.event({
       event: attention('question.asked', 'cyclic-question', 'child-a')
     })
+    await hooks.event({ event: status('idle', 'child-b') })
+    expect(names()).toEqual(['AskUserQuestion'])
+
     await hooks.event({ event: status('idle', 'child-a') })
 
-    expect(names()).toEqual(['AskUserQuestion'])
+    expect(names()).toEqual(['AskUserQuestion', 'SessionIdle'])
     expect(posts[0]).toMatchObject({
       id: 'cyclic-question',
       sessionID: 'child-a'
     })
-    expect(list).toHaveBeenCalledTimes(4)
+    expect(posts.at(-1)?.sessionID).toBe('child-a')
+    expect(list).toHaveBeenCalledTimes(6)
   })
 
   it('matches a child reply after its ancestry lookup fails', async () => {
@@ -444,6 +448,32 @@ describe('OpenCode plugin child attention', () => {
     expect(posts.at(-1)).toMatchObject({
       hook_event_name: 'AskUserQuestion',
       sessionID: 'root-b'
+    })
+  })
+
+  it('keeps the oldest blocker waiting when 128 newer blockers resolve', async () => {
+    const hooks = await createHooks([])
+
+    // Why: live blocker ownership cannot be LRU-evicted; 129 crosses the prior 128-entry cap.
+    for (let index = 1; index <= 129; index += 1) {
+      await hooks.event({
+        event: attention('question.asked', `question-${String(index)}`, `session-${String(index)}`)
+      })
+    }
+    for (let index = 2; index <= 129; index += 1) {
+      await hooks.event({
+        event: resolution(
+          'question.replied',
+          `question-${String(index)}`,
+          `session-${String(index)}`
+        )
+      })
+    }
+
+    expect(posts.at(-1)).toMatchObject({
+      hook_event_name: 'AskUserQuestion',
+      id: 'question-1',
+      sessionID: 'session-1'
     })
   })
 

@@ -115,7 +115,7 @@ describe('OpenCode hook plugin source', () => {
     expect(source).toContain('messageID: pending.messageID,')
     expect(source).toContain('sessionID: pending.sessionID,')
     expect(source).toContain(
-      'await setStatus("busy", { sessionID: busyRoot.sessionID }, busyRoot.factoryID);'
+      'await setStatus("busy", { sessionID: busyOwner.sessionID }, busyOwner.factoryID);'
     )
     expect(source).toContain(
       'await setStatus("idle", { sessionID: preferredSessionID }, fallbackFactoryID);'
