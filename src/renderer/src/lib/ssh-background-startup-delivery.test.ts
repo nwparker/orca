@@ -66,4 +66,21 @@ describe('createSshBackgroundStartupDelivery shell-ready fallback', () => {
 
     expect(write).toHaveBeenCalledTimes(1)
   })
+
+  // The long budget exists to protect the bracketed paste from landing before
+  // readline arms it. 'fast' delivery waits for no marker and pastes nothing
+  // prompt-sensitive, so stretching it there is latency with nothing bought.
+  it('keeps the short deadline for fast delivery, which waits for no marker', () => {
+    const write = vi.fn()
+    const delivery = createSshBackgroundStartupDelivery({
+      command: 'codex "run the automation"',
+      waitForShellReady: false,
+      write
+    })
+
+    delivery.armFallback('pty-1')
+    vi.advanceTimersByTime(1_550)
+
+    expect(write).toHaveBeenCalledTimes(1)
+  })
 })

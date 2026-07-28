@@ -64,13 +64,18 @@ export function createSshBackgroundStartupDelivery(
     if (!pendingCommand || fallbackTimer !== null) {
       return
     }
+    // The long budget only buys time for the shell-ready marker; the fast path
+    // pastes nothing prompt-sensitive, so delaying it there is pure latency.
+    const waitingForSilentShell = options.waitForShellReady && !sawOutput
     fallbackTimer = setTimeout(
       () => {
         fallbackTimer = null
         startupShellReady = true
         schedule(ptyId)
       },
-      sawOutput ? SSH_SHELL_READY_STARTUP_FALLBACK_MS : SSH_SHELL_READY_NO_OUTPUT_FALLBACK_MS
+      waitingForSilentShell
+        ? SSH_SHELL_READY_NO_OUTPUT_FALLBACK_MS
+        : SSH_SHELL_READY_STARTUP_FALLBACK_MS
     )
   }
 
