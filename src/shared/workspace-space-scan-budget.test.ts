@@ -3,6 +3,7 @@ import {
   collectWorkspaceSpaceDirectoryEntries,
   createWorkspaceSpaceScanBudget,
   estimateWorkspaceSpaceEntryRetainedBytes,
+  estimateWorkspaceSpaceListingRetainedBytes,
   releaseWorkspaceSpaceScanEntries,
   WorkspaceSpaceScanCapacityError
 } from './workspace-space-scan-budget'
@@ -12,8 +13,8 @@ describe('workspace space scan budget', () => {
     const entries = [{ name: 'first' }, { name: 'second' }]
     const parentPath = '/workspace'
     const exactBytes = entries.reduce(
-      (total, entry) => total + estimateWorkspaceSpaceEntryRetainedBytes(parentPath, entry.name),
-      0
+      (total, entry) => total + estimateWorkspaceSpaceEntryRetainedBytes(entry.name),
+      estimateWorkspaceSpaceListingRetainedBytes(parentPath)
     )
 
     await expect(
@@ -50,8 +51,8 @@ describe('workspace space scan budget', () => {
     const parentPath = '/workspace'
     const entries = [{ name: 'first' }, { name: 'second' }]
     const exactBytes = entries.reduce(
-      (total, entry) => total + estimateWorkspaceSpaceEntryRetainedBytes(parentPath, entry.name),
-      0
+      (total, entry) => total + estimateWorkspaceSpaceEntryRetainedBytes(entry.name),
+      estimateWorkspaceSpaceListingRetainedBytes(parentPath)
     )
     const budget = createWorkspaceSpaceScanBudget({ maxRetainedBytes: exactBytes })
 

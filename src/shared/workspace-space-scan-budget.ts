@@ -56,21 +56,28 @@ export function createWorkspaceSpaceScanBudget(
   }
 }
 
-export function estimateWorkspaceSpaceEntryRetainedBytes(
-  parentPath: string,
-  entryName: string
-): number {
-  return (parentPath.length + entryName.length) * 2 + WORKSPACE_SPACE_ENTRY_OVERHEAD_BYTES
+export function estimateWorkspaceSpaceEntryRetainedBytes(entryName: string): number {
+  return entryName.length * 2 + WORKSPACE_SPACE_ENTRY_OVERHEAD_BYTES
+}
+
+/**
+ * Why: a listing's entries all share one parent-path string, so charging it per
+ * entry inflated the estimate by the checkout depth. That made the byte cap
+ * reject an intact worktree for living under a long path — the exact
+ * path-dependence the resource-bounds doc says a live cap must not have.
+ */
+export function estimateWorkspaceSpaceListingRetainedBytes(parentPath: string): number {
+  return parentPath.length * 2
 }
 
 export function retainWorkspaceSpaceScanEntry(
   budget: WorkspaceSpaceScanBudget,
-  parentPath: string,
   entryName: string,
-  listingEntryCount: number
+  listingEntryCount: number,
+  additionalBytes = 0
 ): void {
   const retainedBytes =
-    budget.retainedBytes + estimateWorkspaceSpaceEntryRetainedBytes(parentPath, entryName)
+    budget.retainedBytes + estimateWorkspaceSpaceEntryRetainedBytes(entryName) + additionalBytes
   if (
     listingEntryCount >= budget.limits.maxEntries ||
     retainedBytes > budget.limits.maxRetainedBytes
@@ -111,8 +118,12 @@ export async function collectWorkspaceSpaceDirectoryEntries<TEntry>(
     for await (const entry of directory) {
       checkCancelled()
       const name = entryName(entry)
-      retainWorkspaceSpaceScanEntry(budget, parentPath, name, entries.length)
-      retainedBytes += estimateWorkspaceSpaceEntryRetainedBytes(parentPath, name)
+      // The listing's shared parent path is charged once, with its first entry,
+      // so an empty listing holds no charge for the caller to release.
+      const listingBytes =
+        entries.length === 0 ? estimateWorkspaceSpaceListingRetainedBytes(parentPath) : 0
+      retainWorkspaceSpaceScanEntry(budget, name, entries.length, listingBytes)
+      retainedBytes += estimateWorkspaceSpaceEntryRetainedBytes(name) + listingBytes
       entries.push(entry)
     }
   } catch (error) {

@@ -96,8 +96,12 @@ listing at once, so its verdict scales with the configured concurrency: at 48 wo
 files (100,848 entries) was rejected while 100 × 1,500 (150,100 entries, 50% more) was admitted.
 Aggregate live retention stays bounded by the 64 MiB byte cap, which all concurrent listings share.
 
-The retained-byte estimate includes parent path and entry name UTF-16 storage plus conservative
-per-entry object overhead. These are admission limits, not post-allocation observations.
+The retained-byte estimate includes entry name UTF-16 storage plus conservative per-entry object
+overhead, and each listing's parent path once. The parent path is charged per listing rather than
+per entry because a listing's entries all share a single parent-path string; charging it per entry
+multiplied it by the directory's width, so the 64 MiB cap tracked checkout depth instead of live
+heap and rejected the layouts above once the worktree path passed ~58 characters. These are
+admission limits, not post-allocation observations.
 
 The budget measures what the traversal is holding **right now**, not what it has ever seen. A
 directory listing is charged when admitted and released once every one of its entries has been
@@ -106,9 +110,10 @@ distinction decides real workspaces: a cumulative counter charged an ordinary 76
 worktree 61.2 MiB of its 64 MiB cap — 4% headroom, and tipping over purely because a longer branch
 name lengthens every absolute path. The same worktree peaks between 4 MiB and 8 MiB of live state.
 
-Because the estimate scales with absolute path length, a cumulative cap would make success depend on
-where a user checks out their worktrees. A live cap depends only on directory shape, so it rejects
-genuinely pathological layouts (one directory holding six figures of entries) and nothing else.
+Neither cap may depend on where a user checks out their worktrees, so the estimate charges each
+absolute path once per listing rather than once per entry. A live cap depends only on directory
+shape, so it rejects genuinely pathological layouts (one directory holding six figures of entries)
+and nothing else.
 
 Top-level directory enumeration for the `du` path uses the same budget. A capacity error must not
 fall through into the portable walker, because that would repeat an already rejected traversal.

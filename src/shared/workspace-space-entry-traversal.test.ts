@@ -247,4 +247,73 @@ describe('scanWorkspaceSpaceEntryTree', () => {
       )
     }, 30_000)
   })
+
+  // Why: the cases above pin maxRetainedBytes wide open, so they cannot see the
+  // byte cap. At the real 64 MiB default the same layouts must still scan, and
+  // must not start failing because the worktree sits under a longer path — the
+  // resource-bounds doc rules out exactly that path dependence.
+  describe('capacity at the production default limits', () => {
+    // A real worktree checkout path; the bug appeared above ~58 characters.
+    const DEEP_ROOT = '/Users/octocat/projects/orca/.claude/worktrees/wf_d39acf3c-e7d-2'
+
+    function scanAtDefaults(
+      rootPath: string,
+      dirCount: number,
+      filesPerDir: number,
+      concurrency: number
+    ) {
+      const directories = new Map<string, readonly Entry[]>()
+      directories.set(
+        rootPath,
+        Array.from({ length: dirCount }, (_, index) => ({ name: `dir-${index}` }))
+      )
+      for (let index = 0; index < dirCount; index += 1) {
+        directories.set(
+          `${rootPath}/dir-${index}`,
+          Array.from({ length: filesPerDir }, (_, file) => ({ name: `file-${file}.ts` }))
+        )
+      }
+      return scanWorkspaceSpaceEntryTree({
+        rootPath,
+        rootName: 'root',
+        concurrency,
+        entryName: (entry: Entry) => entry.name,
+        joinPath: (parent, child) => `${parent}/${child}`,
+        classifyEntry: async (path) => ({
+          kind: directories.has(path) ? ('directory' as const) : ('file' as const),
+          sizeBytes: 1
+        }),
+        readDirectory: async (path) => {
+          const entries = directories.get(path)
+          if (!entries) {
+            throw new Error(`unreadable ${path}`)
+          }
+          return entries
+        },
+        checkCancelled: () => undefined,
+        createCancellationError: () => new Error('cancelled'),
+        isCancellationError: (error) => error instanceof Error && error.message === 'cancelled'
+      })
+    }
+
+    it.each([
+      { dirCount: 48, filesPerDir: 2_100, concurrency: 48 },
+      { dirCount: 10, filesPerDir: 10_001, concurrency: 10 },
+      { dirCount: 40, filesPerDir: 2_500, concurrency: 48 }
+    ])(
+      'scans $dirCount x $filesPerDir at concurrency $concurrency under a deep root',
+      async ({ dirCount, filesPerDir, concurrency }) => {
+        const result = await scanAtDefaults(DEEP_ROOT, dirCount, filesPerDir, concurrency)
+        expect(result.sizeBytes).toBe(dirCount * filesPerDir + dirCount + 1)
+      },
+      30_000
+    )
+
+    it('reaches the same verdict under a short root as under a deep one', async () => {
+      const shallow = await scanAtDefaults('/w', 48, 2_100, 48)
+      const deep = await scanAtDefaults(DEEP_ROOT, 48, 2_100, 48)
+
+      expect(deep.sizeBytes).toBe(shallow.sizeBytes)
+    }, 30_000)
+  })
 })
