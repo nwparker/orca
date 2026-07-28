@@ -32,14 +32,16 @@ describe('OpenCode hook plugin source', () => {
     const source = _internals.getOpenCodePluginSource()
 
     expect(source).toContain('async function isChildSession(client, sessionID)')
-    expect(source).toContain('lookupSessionList(client, sessionID, controller.signal)')
+    expect(source).toContain('walkSessionParents(client, sessionID, controller.signal)')
+    expect(source).toContain('currentSessionID = session.parentID;')
+    expect(source).toContain('rememberSessionRoot(id, currentSessionID)')
     expect(source).toContain('{ path: { id: sessionID }, signal }')
     expect(source.indexOf('[{ sessionID }, { signal }]')).toBeLessThan(
       source.indexOf('{ path: { id: sessionID }, signal }')
     )
     expect(source).toContain('return client.session.list({}, { signal });')
     expect(source).toContain('return client.session.list({ signal });')
-    expect(source).toContain('const isChild = !!session?.parentID;')
+    expect(source).toContain('return rootSessionID === null ? null : rootSessionID !== sessionID;')
     expect(source).toContain(
       'if (sessionID && (await isChildSession(client, sessionID)) !== false) {'
     )
