@@ -20,6 +20,7 @@ import type { OrcaRuntimeService } from '../../orca-runtime'
 import type { RunRow } from '../../orchestration/types'
 import { encodeFederatedControlMessage } from '../../orchestration/federation-control-message'
 import { ORCHESTRATION_FEDERATION_CONTROL_MAIL_PROTOCOL_VERSION } from '../../../../shared/protocol-version'
+import { ORCHESTRATION_DISPATCH_READY_TIMEOUT_MS } from '../../../../shared/orchestration-dispatch-readiness'
 
 const TASK_STATUSES: TaskStatus[] = [
   'pending',
@@ -1113,6 +1114,17 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
             `Cannot dispatch --inject to terminal ${to}: no recognized agent detected. ` +
               'Start an agent CLI (e.g. claude, codex, gemini, droid, cursor) in the terminal first, ' +
               'or dispatch without --inject and send the prompt manually.'
+          )
+        }
+        const wait = await runtime.waitForTerminal(to, {
+          condition: 'tui-idle',
+          timeoutMs: ORCHESTRATION_DISPATCH_READY_TIMEOUT_MS
+        })
+        if (!wait.satisfied) {
+          throw new Error(
+            wait.blockedReason
+              ? `Agent startup blocked: ${wait.blockedReason}`
+              : `Agent did not become ready (${wait.status}).`
           )
         }
       }

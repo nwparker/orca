@@ -1427,6 +1427,29 @@ describe('orchestration RPC methods', () => {
       expect(result.messages[0].delivered_at).not.toBeNull()
     })
 
+    it('returns queued typed mail after turn-boundary delivery without waiting (#10663)', async () => {
+      setup()
+      const message = db.insertMessage({
+        from: 'worker',
+        to: 'coord',
+        subject: 'needs attention',
+        type: 'escalation'
+      })
+      db.markAsDelivered([message.id])
+      const wait = vi.spyOn(runtime, 'waitForMessage')
+
+      const result = (await call('orchestration.check', {
+        terminal: 'coord',
+        wait: true,
+        types: 'escalation'
+      })) as { messages: { id: string }[]; count: number }
+
+      expect(result.messages.map((row) => row.id)).toEqual([message.id])
+      expect(result.count).toBe(1)
+      expect(wait).not.toHaveBeenCalled()
+      expect(db.getUnreadMessages('coord')).toEqual([])
+    })
+
     it('--all --terminal <unknown> returns empty list', async () => {
       setup()
       db.insertMessage({ from: 'a', to: 'b', subject: 'one' })
@@ -1798,6 +1821,13 @@ describe('orchestration RPC methods', () => {
       vi.mocked(runtime.getTerminalPaneKey).mockImplementation((candidate) =>
         candidate === handle ? `tab_worker:${handle}` : coordinatorPaneKey
       )
+      vi.spyOn(runtime, 'waitForTerminal').mockResolvedValue({
+        handle,
+        condition: 'tui-idle',
+        status: 'running',
+        satisfied: true,
+        exitCode: null
+      })
     }
 
     it('dispatches a task to a terminal', async () => {
@@ -1927,6 +1957,60 @@ describe('orchestration RPC methods', () => {
         expect.stringContaining('line one\nline two')
       )
       expect(rawSend).not.toHaveBeenCalled()
+    })
+
+    it('waits for the agent TUI before injecting the preamble', async () => {
+      setup()
+      provideInjectIdentity()
+      const task = db.createTask({ spec: 'work' })
+      vi.spyOn(runtime, 'isTerminalRunningAgent').mockResolvedValue(true)
+      const send = vi.spyOn(runtime, 'sendTerminalAgentPrompt').mockResolvedValue({
+        handle: 'term_a',
+        accepted: true,
+        bytesWritten: 1
+      })
+
+      await call('orchestration.dispatch', {
+        task: task.id,
+        to: 'term_a',
+        inject: true
+      })
+
+      expect(runtime.waitForTerminal).toHaveBeenCalledWith('term_a', {
+        condition: 'tui-idle',
+        timeoutMs: 60_000
+      })
+      expect(vi.mocked(runtime.waitForTerminal).mock.invocationCallOrder[0]).toBeLessThan(
+        send.mock.invocationCallOrder[0]!
+      )
+    })
+
+    it('keeps the task ready when agent startup is blocked', async () => {
+      setup()
+      provideInjectIdentity()
+      const task = db.createTask({ spec: 'work' })
+      vi.spyOn(runtime, 'isTerminalRunningAgent').mockResolvedValue(true)
+      vi.mocked(runtime.waitForTerminal).mockResolvedValue({
+        handle: 'term_a',
+        condition: 'tui-idle',
+        status: 'running',
+        satisfied: false,
+        exitCode: null,
+        blockedReason: 'codex-trust-workspace'
+      })
+      const send = vi.spyOn(runtime, 'sendTerminalAgentPrompt')
+
+      await expect(
+        call('orchestration.dispatch', {
+          task: task.id,
+          to: 'term_a',
+          inject: true
+        })
+      ).rejects.toThrow('Agent startup blocked: codex-trust-workspace')
+
+      expect(db.getTask(task.id)?.status).toBe('ready')
+      expect(db.getDispatchContext(task.id)).toBeUndefined()
+      expect(send).not.toHaveBeenCalled()
     })
 
     it('rejects inject to terminal without recognized agent', async () => {

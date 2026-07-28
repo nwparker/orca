@@ -3630,29 +3630,40 @@ describe('orca cli worktree awareness', () => {
       '/tmp/repo'
     )
 
-    expect(callMock).toHaveBeenCalledWith('orchestration.dispatch', {
-      task: 'task_1',
-      to: 'term_worker',
-      from: 'term_sender',
-      inject: true,
-      devMode: true
-    })
+    expect(callMock).toHaveBeenCalledWith(
+      'orchestration.dispatch',
+      {
+        task: 'task_1',
+        to: 'term_worker',
+        from: 'term_sender',
+        inject: true,
+        devMode: true
+      },
+      { timeoutMs: 65_000 }
+    )
   })
 
   it('passes dev mode from an explicit dev CLI marker with a custom profile path', async () => {
     process.env.ORCA_TERMINAL_HANDLE = 'term_sender'
     process.env.ORCA_USER_DATA_PATH = '/tmp/federation-acceptance-profile'
     process.env.ORCA_DEV_CLI_INVOCATION = '1'
-    callMock.mockResolvedValueOnce({
-      id: 'req_dispatch',
-      ok: true,
-      result: {
-        dispatch: { id: 'ctx_1', task_id: 'task_1', status: 'dispatched' }
-      },
-      _meta: {
-        runtimeId: 'runtime-1'
-      }
-    })
+    callMock
+      .mockResolvedValueOnce({
+        id: 'req_terminal',
+        ok: true,
+        result: { terminal: { handle: 'term_sender' } },
+        _meta: { runtimeId: 'runtime-1' }
+      })
+      .mockResolvedValueOnce({
+        id: 'req_dispatch',
+        ok: true,
+        result: {
+          dispatch: { id: 'ctx_1', task_id: 'task_1', status: 'dispatched' }
+        },
+        _meta: {
+          runtimeId: 'runtime-1'
+        }
+      })
     vi.spyOn(console, 'log').mockImplementation(() => {})
 
     await main(
@@ -3662,7 +3673,8 @@ describe('orca cli worktree awareness', () => {
 
     expect(callMock).toHaveBeenCalledWith(
       'orchestration.dispatch',
-      expect.objectContaining({ devMode: true })
+      expect.objectContaining({ devMode: true }),
+      { timeoutMs: 65_000 }
     )
   })
 

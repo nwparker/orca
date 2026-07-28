@@ -381,15 +381,20 @@ describe('orchestration dispatch coordinator handle', () => {
       paneKey: 'tab_coord:leaf_coord'
     })
     expect(getTerminalHandleMock).not.toHaveBeenCalled()
-    expect(callMock).toHaveBeenNthCalledWith(3, 'orchestration.dispatch', {
-      task: 'task_1',
-      to: 'term_worker',
-      from: 'term_live_coord',
-      inject: true,
-      dryRun: undefined,
-      returnPreamble: undefined,
-      devMode: false
-    })
+    expect(callMock).toHaveBeenNthCalledWith(
+      3,
+      'orchestration.dispatch',
+      {
+        task: 'task_1',
+        to: 'term_worker',
+        from: 'term_live_coord',
+        inject: true,
+        dryRun: undefined,
+        returnPreamble: undefined,
+        devMode: false
+      },
+      { timeoutMs: 65_000 }
+    )
   })
 
   it('rejects stale coordinator env handles when the caller pane cannot be proven', async () => {

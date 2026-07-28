@@ -25,6 +25,7 @@ import {
   orchestrationMigrationData,
   orchestrationSkillRecoveryData
 } from '../../shared/orchestration-rpc-contract'
+import { ORCHESTRATION_DISPATCH_CLIENT_TIMEOUT_MS } from '../../shared/orchestration-dispatch-readiness'
 
 // Why: 15 s is well under Claude Code's ~2 min Bash-tool silence budget while keeping log volume low. See design doc §3.4.
 const DEFAULT_KEEPALIVE_INTERVAL_MS = 15_000
@@ -907,16 +908,22 @@ export const ORCHESTRATION_HANDLERS: Record<string, CommandHandler> = {
       injected?: boolean
       dryRun?: boolean
       preamble?: string
-    }>(client, flags, 'orchestration.dispatch', {
-      task: getRequiredStringFlag(flags, 'task'),
-      run: getOptionalStringFlag(flags, 'run'),
-      to,
-      from,
-      inject: flags.has('inject') ? true : undefined,
-      dryRun,
-      returnPreamble,
-      devMode: isDevCliInvocation()
-    })
+    }>(
+      client,
+      flags,
+      'orchestration.dispatch',
+      {
+        task: getRequiredStringFlag(flags, 'task'),
+        run: getOptionalStringFlag(flags, 'run'),
+        to,
+        from,
+        inject: flags.has('inject') ? true : undefined,
+        dryRun,
+        returnPreamble,
+        devMode: isDevCliInvocation()
+      },
+      flags.has('inject') ? { timeoutMs: ORCHESTRATION_DISPATCH_CLIENT_TIMEOUT_MS } : undefined
+    )
     printResult(result, json, (r) => {
       if (r.dryRun) {
         return r.preamble ?? ''
