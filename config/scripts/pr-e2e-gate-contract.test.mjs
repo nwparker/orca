@@ -22,15 +22,34 @@ describe('PR E2E gate contract', () => {
     expect(verifyStep.run).toContain('"$E2E" != "success"')
   })
 
+  it('runs E2E only when the detector says the PR touches E2E paths', () => {
+    // Why: without this the job could lose its filter and run on every PR — the
+    // cost the path filter exists to avoid — while the gate assertions above
+    // stay green.
+    expect(prWorkflow.jobs.e2e.needs).toBe('e2e-paths')
+    expect(prWorkflow.jobs.e2e.if).toBe("needs.e2e-paths.outputs.should_run == 'true'")
+    expect(prWorkflow.jobs['e2e-paths'].outputs.should_run).toBe(
+      '${{ steps.filter.outputs.should_run }}'
+    )
+  })
+
   it('treats a path-filtered skip as passing without excusing the other jobs', () => {
     // Why: E2E is skipped on PRs touching no E2E files, so 'skipped' must pass.
     // The always-required jobs are checked in their own loop so that allowance
     // cannot leak to them.
     expect(verifyStep.run).toContain('"$E2E" != "skipped"')
 
+    // Why: derive from verify.needs rather than hardcoding, so adding a required
+    // job without adding it to the strict loop fails here instead of silently
+    // leaving that job unenforced.
     const strictLoop = verifyStep.run.slice(0, verifyStep.run.indexOf('done'))
-    for (const required of ['STATIC_ANALYSIS', 'TYPECHECK', 'TEST', 'PACKAGE']) {
-      expect(strictLoop).toContain(`"$${required}"`)
+    for (const job of prWorkflow.jobs.verify.needs) {
+      if (job === 'e2e') {
+        continue
+      }
+      const envVar = job.toUpperCase()
+      expect(verifyStep.env[envVar]).toBe(`\${{ needs.${job}.result }}`)
+      expect(strictLoop).toContain(`"$${envVar}"`)
     }
     expect(strictLoop).not.toContain('$E2E')
   })
