@@ -10,12 +10,13 @@ function makeTraversal(
     kind: 'directory' | 'file' | 'symlink'
     sizeBytes: number
   }>,
-  limits?: { maxEntries?: number; maxRetainedBytes?: number }
+  limits?: { maxEntries?: number; maxRetainedBytes?: number },
+  concurrency = 5
 ) {
   return scanWorkspaceSpaceEntryTree({
     rootPath: '/root',
     rootName: 'root',
-    concurrency: 5,
+    concurrency,
     entryName: (entry: Entry) => entry.name,
     joinPath: (parent, child) => `${parent}/${child}`,
     classifyEntry: (path) => classifyEntry(path),
@@ -188,5 +189,62 @@ describe('scanWorkspaceSpaceEntryTree', () => {
     )
 
     await expect(scan).rejects.toBeInstanceOf(WorkspaceSpaceScanCapacityError)
+  })
+
+  // Why: docs/workspace-space-scan-resource-bounds.md promises "a live cap
+  // depends only on directory shape". A cap that N workers can each charge
+  // against makes the verdict scale with concurrency instead, so these layouts
+  // are the documented boundary: only a single over-cap directory may fail.
+  describe('capacity depends on directory shape, not tree size or concurrency', () => {
+    function buildWideTree(dirCount: number, filesPerDir: number) {
+      const directories = new Map<string, readonly Entry[]>()
+      directories.set(
+        '/root',
+        Array.from({ length: dirCount }, (_, index) => ({ name: `dir-${index}` }))
+      )
+      for (let index = 0; index < dirCount; index += 1) {
+        directories.set(
+          `/root/dir-${index}`,
+          Array.from({ length: filesPerDir }, (_, file) => ({ name: `file-${file}` }))
+        )
+      }
+      return directories
+    }
+
+    function scanWideTree(dirCount: number, filesPerDir: number, concurrency: number) {
+      const directories = buildWideTree(dirCount, filesPerDir)
+      return makeTraversal(
+        directories,
+        async (path) => ({
+          kind: directories.has(path) ? 'directory' : 'file',
+          sizeBytes: 1
+        }),
+        { maxEntries: 100_000, maxRetainedBytes: Number.MAX_SAFE_INTEGER },
+        concurrency
+      )
+    }
+
+    // Every layout below sits under the 100,000 per-directory cap, so each must
+    // scan regardless of total entry count or worker count.
+    it.each([
+      { dirCount: 48, filesPerDir: 2_100, concurrency: 48 },
+      { dirCount: 100, filesPerDir: 1_500, concurrency: 48 },
+      { dirCount: 10, filesPerDir: 10_001, concurrency: 10 },
+      { dirCount: 40, filesPerDir: 2_500, concurrency: 48 }
+    ])(
+      'scans $dirCount x $filesPerDir at concurrency $concurrency',
+      async ({ dirCount, filesPerDir, concurrency }) => {
+        const result = await scanWideTree(dirCount, filesPerDir, concurrency)
+        expect(result.sizeBytes).toBe(dirCount * filesPerDir + dirCount + 1)
+        expect(result.skippedEntryCount).toBe(0)
+      },
+      30_000
+    )
+
+    it('still rejects a single directory above the cap', async () => {
+      await expect(scanWideTree(1, 100_001, 48)).rejects.toBeInstanceOf(
+        WorkspaceSpaceScanCapacityError
+      )
+    }, 30_000)
   })
 })

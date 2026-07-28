@@ -87,8 +87,14 @@ allocate one live operation per entry.
 
 Every portable entry is admitted through `WorkspaceSpaceScanBudget` before retention:
 
-- maximum entries held at once per worktree traversal: 100,000;
+- maximum entries in any one directory listing: 100,000;
 - maximum estimated live scan state per worktree traversal: 64 MiB.
+
+The entry cap is per listing rather than per traversal because only a single directory's width is
+fixed by directory shape. A traversal-wide entry counter is charged by every worker holding a
+listing at once, so its verdict scales with the configured concurrency: at 48 workers, 48 × 2,100
+files (100,848 entries) was rejected while 100 × 1,500 (150,100 entries, 50% more) was admitted.
+Aggregate live retention stays bounded by the 64 MiB byte cap, which all concurrent listings share.
 
 The retained-byte estimate includes parent path and entry name UTF-16 storage plus conservative
 per-entry object overhead. These are admission limits, not post-allocation observations.
@@ -169,7 +175,7 @@ The deterministic regression measurements are:
 - peak simultaneous local `du` calls across repositories: exactly one;
 - peak simultaneous desktop-side SSH fallback traversals across repositories: at most two;
 - portable traversal live entry jobs: no more than its configured worker count;
-- portable entries held at once: at most 100,000 per worktree;
+- portable entries in any one directory listing: at most 100,000;
 - estimated live portable state: at most 64 MiB per worktree; an ordinary 76,788-entry worktree
   peaks between 4 MiB and 8 MiB;
 - progress and final row counts remain unchanged for scans below the limits.

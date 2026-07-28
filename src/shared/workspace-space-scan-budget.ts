@@ -12,6 +12,11 @@ export type WorkspaceSpaceScanLimits = {
  * Tracks entries the traversal is holding right now, not entries it has ever
  * seen. Counters fall again as directory listings are dispatched and dropped,
  * so the caps bound live heap rather than total tree size.
+ *
+ * `maxEntries` bounds a single listing, because that is the only quantity fixed
+ * by directory shape; the aggregate live cost is bounded by `maxRetainedBytes`.
+ * A global entry cap would instead scale with worker concurrency, rejecting an
+ * intact worktree purely because N workers happened to hold N listings at once.
  */
 export type WorkspaceSpaceScanBudget = {
   entries: number
@@ -61,12 +66,13 @@ export function estimateWorkspaceSpaceEntryRetainedBytes(
 export function retainWorkspaceSpaceScanEntry(
   budget: WorkspaceSpaceScanBudget,
   parentPath: string,
-  entryName: string
+  entryName: string,
+  listingEntryCount: number
 ): void {
   const retainedBytes =
     budget.retainedBytes + estimateWorkspaceSpaceEntryRetainedBytes(parentPath, entryName)
   if (
-    budget.entries >= budget.limits.maxEntries ||
+    listingEntryCount >= budget.limits.maxEntries ||
     retainedBytes > budget.limits.maxRetainedBytes
   ) {
     throw new WorkspaceSpaceScanCapacityError(budget.limits)
@@ -105,7 +111,7 @@ export async function collectWorkspaceSpaceDirectoryEntries<TEntry>(
     for await (const entry of directory) {
       checkCancelled()
       const name = entryName(entry)
-      retainWorkspaceSpaceScanEntry(budget, parentPath, name)
+      retainWorkspaceSpaceScanEntry(budget, parentPath, name, entries.length)
       retainedBytes += estimateWorkspaceSpaceEntryRetainedBytes(parentPath, name)
       entries.push(entry)
     }

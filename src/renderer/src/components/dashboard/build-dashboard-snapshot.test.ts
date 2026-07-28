@@ -5,6 +5,7 @@ import {
   type AgentStatusEntry,
   type AgentStatusOrchestrationContext
 } from '../../../../shared/agent-status-types'
+import { DASHBOARD_MAX_LABEL_LENGTH } from '../../../../shared/dashboard-snapshot'
 import { makePaneKey } from '../../../../shared/stable-pane-id'
 import type { TerminalTab, Worktree } from '../../../../shared/types'
 import { selectRuntimeAgentOrchestrationBatch } from '../sidebar/worktree-agent-orchestration-batch'
@@ -162,6 +163,20 @@ describe('buildDashboardSnapshot', () => {
       NOW
     )
     expect(unnamed.cards[0].conversationName).toBeUndefined()
+  })
+
+  // Why: `orca terminal rename --title` is unbounded, and the main-process
+  // validator drops any card whose label exceeds the shared bound.
+  it('truncates labels to the length the snapshot validator accepts', () => {
+    const snapshot = buildDashboardSnapshot(
+      baseState({
+        agentStatusByPaneKey: { [PANE_KEY]: entry({}) },
+        tabsByWorktree: { w1: [{ ...tab(), customTitle: 'x'.repeat(5_000) }] }
+      }),
+      NOW
+    )
+
+    expect(snapshot.cards[0].conversationName).toHaveLength(DASHBOARD_MAX_LABEL_LENGTH)
   })
 
   it('withholds generated titles until the setting enables them', () => {

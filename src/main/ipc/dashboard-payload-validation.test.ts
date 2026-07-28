@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import type { DashboardSnapshot } from '../../shared/dashboard-snapshot'
-import { isDashboardRevealAgentArgs, isDashboardSnapshot } from './dashboard-payload-validation'
+import {
+  admitDashboardSnapshot,
+  isDashboardRevealAgentArgs,
+  isDashboardSnapshot
+} from './dashboard-payload-validation'
 
 const SNAPSHOT = {
   generatedAt: 1_700_000_000_000,
@@ -144,6 +148,65 @@ describe('dashboard payload validation', () => {
         cards: [{ ...SNAPSHOT.cards[0], conversationName: 'x'.repeat(1_025) }]
       })
     ).toBe(false)
+  })
+
+  // Why: the pop-out replays the last accepted snapshot, so rejecting the whole
+  // board over one card froze every other agent's status until it was renamed.
+  describe('admitDashboardSnapshot', () => {
+    it('drops only the offending card and keeps the rest of the board', () => {
+      const good = SNAPSHOT.cards[0]
+      const bad = { ...good, paneKey: 'tab-2:leaf-2', conversationName: 'x'.repeat(1_025) }
+
+      const admitted = admitDashboardSnapshot({ ...SNAPSHOT, cards: [good, bad] })
+
+      expect(admitted?.droppedCardCount).toBe(1)
+      expect(admitted?.snapshot.cards.map((card) => card.paneKey)).toEqual(['tab-1:leaf-1'])
+    })
+
+    it('reports nothing dropped for a fully valid snapshot', () => {
+      const admitted = admitDashboardSnapshot(SNAPSHOT)
+
+      expect(admitted?.droppedCardCount).toBe(0)
+      expect(admitted?.snapshot.cards).toHaveLength(1)
+    })
+
+    it('still rejects a snapshot whose own shape is unusable', () => {
+      expect(admitDashboardSnapshot({ ...SNAPSHOT, generatedAt: Number.NaN })).toBeNull()
+      expect(admitDashboardSnapshot({ ...SNAPSHOT, cards: 'nope' })).toBeNull()
+      expect(admitDashboardSnapshot({ ...SNAPSHOT, repoIconsByRepoId: [] })).toBeNull()
+    })
+  })
+
+  // Why: sanitizing an image icon decodes the whole payload to read a 24-byte
+  // header, and the renderer republishes the same icons every 250 ms.
+  it('validates a repeated image icon without re-decoding it every publish', () => {
+    const src = `data:image/png;base64,${Buffer.concat([
+      Buffer.from([
+        137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 64, 0, 0, 0, 64, 8,
+        6, 0, 0, 0
+      ]),
+      Buffer.alloc(256 * 1024, 7)
+    ]).toString('base64')}`
+    const snapshot = {
+      ...SNAPSHOT,
+      repoIconsByRepoId: Object.fromEntries(
+        Array.from({ length: 10 }, (_, index) => [
+          `repo-${index}`,
+          { type: 'image', src, source: 'upload' }
+        ])
+      )
+    }
+
+    expect(isDashboardSnapshot(snapshot)).toBe(true)
+    const start = performance.now()
+    for (let run = 0; run < 20; run += 1) {
+      expect(isDashboardSnapshot(snapshot)).toBe(true)
+    }
+    const perPublishMs = (performance.now() - start) / 20
+
+    // Uncached this costs ~37 ms per publish; the cached path is well under 5 ms
+    // even on a loaded CI box.
+    expect(perPublishMs).toBeLessThan(5)
   })
 
   it('requires complete bounded reveal routing', () => {
