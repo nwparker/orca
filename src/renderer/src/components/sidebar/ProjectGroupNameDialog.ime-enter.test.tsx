@@ -21,7 +21,10 @@ afterEach(() => {
   document.body.innerHTML = ''
 })
 
-function renderDialog(onSubmit: () => void): HTMLInputElement {
+function renderDialog(
+  onSubmit: () => void,
+  onOpenChange: (open: boolean) => void = vi.fn()
+): HTMLInputElement {
   act(() => {
     root.render(
       <ProjectGroupNameDialog
@@ -30,7 +33,7 @@ function renderDialog(onSubmit: () => void): HTMLInputElement {
         description="Name this group."
         initialName="グループ"
         confirmLabel="Save"
-        onOpenChange={vi.fn()}
+        onOpenChange={onOpenChange}
         onSubmit={onSubmit}
       />
     )
@@ -59,6 +62,14 @@ function pressEnter(
     input.dispatchEvent(event)
   })
   return event
+}
+
+function changeValue(input: HTMLInputElement, value: string): void {
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
+  act(() => {
+    setter?.call(input, value)
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+  })
 }
 
 describe('ProjectGroupNameDialog IME Enter guard', () => {
@@ -93,7 +104,8 @@ describe('ProjectGroupNameDialog IME Enter guard', () => {
 
   it('still saves the trimmed name when the form submits', () => {
     const onSubmit = vi.fn()
-    renderDialog(onSubmit)
+    const input = renderDialog(onSubmit)
+    changeValue(input, '  新しいグループ  ')
     const form = document.body.querySelector('form')
     if (!form) {
       throw new Error('form not rendered')
@@ -103,6 +115,24 @@ describe('ProjectGroupNameDialog IME Enter guard', () => {
       form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
     })
 
-    expect(onSubmit).toHaveBeenCalledWith('グループ')
+    expect(onSubmit).toHaveBeenCalledWith('新しいグループ')
+  })
+
+  it('keeps the dialog open when composition Escape uses keyCode 229', () => {
+    const onOpenChange = vi.fn()
+    const input = renderDialog(vi.fn(), onOpenChange)
+    const event = new KeyboardEvent('keydown', {
+      key: 'Escape',
+      bubbles: true,
+      cancelable: true
+    })
+    Object.defineProperty(event, 'keyCode', { value: 229 })
+
+    act(() => {
+      input.dispatchEvent(event)
+    })
+
+    expect(event.defaultPrevented).toBe(true)
+    expect(onOpenChange).not.toHaveBeenCalled()
   })
 })

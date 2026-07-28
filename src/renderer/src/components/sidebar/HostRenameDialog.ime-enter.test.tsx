@@ -95,4 +95,22 @@ describe('HostRenameDialog IME Enter guard', () => {
     expect(updateSettings).toHaveBeenCalledTimes(1)
     expect(onOpenChange).toHaveBeenCalledWith(false)
   })
+
+  it('keeps the dialog open on an IME-composition Escape', () => {
+    const onOpenChange = vi.fn()
+    const input = renderDialog(onOpenChange)
+
+    act(() => {
+      input.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'Escape',
+          isComposing: true,
+          bubbles: true,
+          cancelable: true
+        })
+      )
+    })
+
+    expect(onOpenChange).not.toHaveBeenCalled()
+  })
 })

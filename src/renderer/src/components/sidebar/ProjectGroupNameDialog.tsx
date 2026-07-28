@@ -104,8 +104,7 @@ export function ProjectGroupNameDialog({
               value={name}
               onChange={(event) => setName(event.target.value)}
               onKeyDown={(event) => {
-                // Why: the form submits implicitly on Enter, and a CJK IME fires one
-                // for the conversion candidate — that must not save a half-typed name.
+                // Why: implicit form submission must not save an IME conversion candidate.
                 if (event.key === 'Enter' && isImeCompositionKeyDown(event)) {
                   event.preventDefault()
                 }

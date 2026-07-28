@@ -21,7 +21,10 @@ afterEach(() => {
   document.body.innerHTML = ''
 })
 
-function renderDialog(onConfirm: (relativePath: string) => void): {
+function renderDialog(
+  onConfirm: (relativePath: string) => void,
+  onClose: () => void = vi.fn()
+): {
   nameInput: HTMLInputElement
   folderInput: HTMLInputElement
 } {
@@ -32,7 +35,7 @@ function renderDialog(onConfirm: (relativePath: string) => void): {
         currentName="議事録"
         worktreePath="/repo"
         disableBrowse
-        onClose={vi.fn()}
+        onClose={onClose}
         onConfirm={onConfirm}
       />
     )
@@ -59,6 +62,14 @@ function pressEnter(
   }
   act(() => {
     input.dispatchEvent(event)
+  })
+}
+
+function changeValue(input: HTMLInputElement, value: string): void {
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
+  act(() => {
+    setter?.call(input, value)
+    input.dispatchEvent(new Event('input', { bubbles: true }))
   })
 }
 
@@ -93,9 +104,27 @@ describe('UntitledFileRenameDialog IME Enter guard', () => {
   it('still saves on a plain Enter', () => {
     const onConfirm = vi.fn()
     const { nameInput } = renderDialog(onConfirm)
+    changeValue(nameInput, '最終版')
 
     pressEnter(nameInput)
 
-    expect(onConfirm).toHaveBeenCalledWith('議事録.md')
+    expect(onConfirm).toHaveBeenCalledWith('最終版.md')
+  })
+
+  it('keeps the dialog open when composition Escape uses keyCode 229', () => {
+    const onClose = vi.fn()
+    const { nameInput } = renderDialog(vi.fn(), onClose)
+    const event = new KeyboardEvent('keydown', {
+      key: 'Escape',
+      bubbles: true,
+      cancelable: true
+    })
+    Object.defineProperty(event, 'keyCode', { value: 229 })
+
+    act(() => {
+      nameInput.dispatchEvent(event)
+    })
+
+    expect(onClose).not.toHaveBeenCalled()
   })
 })

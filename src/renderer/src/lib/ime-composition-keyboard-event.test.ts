@@ -23,4 +23,10 @@ describe('isImeCompositionKeyDown', () => {
   it('is false for a plain Enter outside of composition', () => {
     expect(isImeCompositionKeyDown(keyEvent({ isComposing: false, keyCode: 13 }))).toBe(false)
   })
+
+  it('accepts the native keyboard event Radix provides for Escape', () => {
+    const event = { isComposing: true, keyCode: 27 } as KeyboardEvent
+
+    expect(isImeCompositionKeyDown(event)).toBe(true)
+  })
 })

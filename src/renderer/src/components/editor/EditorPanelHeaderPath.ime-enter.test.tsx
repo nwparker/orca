@@ -11,8 +11,7 @@ const { commitRename, cancelRename } = vi.hoisted(() => ({
   cancelRename: vi.fn()
 }))
 
-// Why: the rename field only mounts while the hook reports isRenaming, so the
-// hook is stubbed into that state instead of driving the whole rename flow.
+// Why: stub the hook state so this test isolates the mounted rename field.
 vi.mock('./editor-header-file-rename', () => ({
   useEditorHeaderFileRename: () => ({
     canRename: true,
@@ -79,12 +78,13 @@ function renderHeaderPath(): HTMLInputElement {
   return input
 }
 
-function pressEnter(
+function pressKey(
   input: HTMLInputElement,
+  key: string,
   init?: KeyboardEventInit & { keyCode?: number }
 ): void {
   const event = new KeyboardEvent('keydown', {
-    key: 'Enter',
+    key,
     bubbles: true,
     cancelable: true,
     ...init
@@ -101,7 +101,7 @@ describe('EditorPanelHeaderPath IME Enter guard', () => {
   it('does not commit the rename on an IME-composition Enter', () => {
     const input = renderHeaderPath()
 
-    pressEnter(input, { isComposing: true })
+    pressKey(input, 'Enter', { isComposing: true })
 
     expect(commitRename).not.toHaveBeenCalled()
   })
@@ -109,7 +109,7 @@ describe('EditorPanelHeaderPath IME Enter guard', () => {
   it('does not commit it for IMEs that report keyCode 229 without isComposing', () => {
     const input = renderHeaderPath()
 
-    pressEnter(input, { keyCode: 229 })
+    pressKey(input, 'Enter', { keyCode: 229 })
 
     expect(commitRename).not.toHaveBeenCalled()
   })
@@ -117,7 +117,34 @@ describe('EditorPanelHeaderPath IME Enter guard', () => {
   it('still commits the rename on a plain Enter', () => {
     const input = renderHeaderPath()
 
-    pressEnter(input)
+    pressKey(input, 'Enter')
+
+    expect(commitRename).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not cancel the rename on an IME-composition Escape', () => {
+    const input = renderHeaderPath()
+
+    pressKey(input, 'Escape', { isComposing: true })
+
+    expect(cancelRename).not.toHaveBeenCalled()
+  })
+
+  it('still cancels the rename on a plain Escape', () => {
+    const input = renderHeaderPath()
+
+    pressKey(input, 'Escape')
+
+    expect(cancelRename).toHaveBeenCalledTimes(1)
+  })
+
+  it('still commits the rename on blur', () => {
+    const input = renderHeaderPath()
+
+    act(() => {
+      input.focus()
+      input.blur()
+    })
 
     expect(commitRename).toHaveBeenCalledTimes(1)
   })

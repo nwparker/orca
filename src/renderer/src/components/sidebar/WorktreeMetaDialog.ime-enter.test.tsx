@@ -46,16 +46,26 @@ afterEach(() => {
   document.body.innerHTML = ''
 })
 
-function renderDialog(): { displayNameInput: HTMLInputElement; comment: HTMLTextAreaElement } {
+function renderDialog(): {
+  displayNameInput: HTMLInputElement
+  issueInput: HTMLInputElement
+  prInput: HTMLInputElement
+  comment: HTMLTextAreaElement
+} {
   act(() => {
     root.render(<WorktreeMetaDialog />)
   })
-  const displayNameInput = document.body.querySelector('input')
+  const inputs = Array.from(document.body.querySelectorAll('input'))
   const comment = document.body.querySelector('textarea')
-  if (!displayNameInput || !comment) {
+  if (inputs.length !== 3 || !comment) {
     throw new Error('worktree meta fields not rendered')
   }
-  return { displayNameInput, comment }
+  return {
+    displayNameInput: inputs[0],
+    issueInput: inputs[1],
+    prInput: inputs[2],
+    comment
+  }
 }
 
 function pressEnter(element: HTMLElement, init?: KeyboardEventInit & { keyCode?: number }): void {
@@ -70,6 +80,14 @@ function pressEnter(element: HTMLElement, init?: KeyboardEventInit & { keyCode?:
   }
   act(() => {
     element.dispatchEvent(event)
+  })
+}
+
+function changeValue(input: HTMLInputElement, value: string): void {
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
+  act(() => {
+    setter?.call(input, value)
+    input.dispatchEvent(new Event('input', { bubbles: true }))
   })
 }
 
@@ -96,6 +114,64 @@ describe('WorktreeMetaDialog IME Enter guard', () => {
     pressEnter(displayNameInput, { isComposing: true })
 
     expect(updateWorktreeMeta).not.toHaveBeenCalled()
+  })
+
+  it.each(['issueInput', 'prInput'] as const)(
+    'does not save the %s on keyCode 229 Enter',
+    (field) => {
+      const inputs = renderDialog()
+
+      pressEnter(inputs[field], { keyCode: 229 })
+
+      expect(updateWorktreeMeta).not.toHaveBeenCalled()
+    }
+  )
+
+  it('does not save a composition Enter with the platform submit modifier', () => {
+    const { comment } = renderDialog()
+    const modifier = navigator.userAgent.includes('Mac') ? { metaKey: true } : { ctrlKey: true }
+
+    pressEnter(comment, { isComposing: true, ...modifier })
+
+    expect(updateWorktreeMeta).not.toHaveBeenCalled()
+  })
+
+  it('keeps Shift+Enter available for a note newline', () => {
+    const { comment } = renderDialog()
+
+    pressEnter(comment, { shiftKey: true })
+
+    expect(updateWorktreeMeta).not.toHaveBeenCalled()
+  })
+
+  it('saves with the platform submit modifier', () => {
+    const { displayNameInput, comment } = renderDialog()
+    const modifier = navigator.userAgent.includes('Mac') ? { metaKey: true } : { ctrlKey: true }
+    changeValue(displayNameInput, '最新の名前')
+
+    pressEnter(comment, modifier)
+
+    expect(updateWorktreeMeta).toHaveBeenCalledWith(
+      'repo::/repo',
+      expect.objectContaining({ displayName: '最新の名前' })
+    )
+  })
+
+  it('keeps the dialog open on an IME-composition Escape', () => {
+    const { comment } = renderDialog()
+
+    act(() => {
+      comment.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'Escape',
+          isComposing: true,
+          bubbles: true,
+          cancelable: true
+        })
+      )
+    })
+
+    expect(closeModal).not.toHaveBeenCalled()
   })
 
   it('still saves on a plain Enter', () => {
