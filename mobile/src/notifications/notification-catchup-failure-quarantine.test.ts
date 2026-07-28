@@ -48,11 +48,14 @@ type MissedOutcome =
   | { kind: 'reject' }
   | { kind: 'notOk' }
   | { kind: 'ok'; notifications: unknown[] }
+  // Rejects only once `settle()` is called, so a live event can land mid-request.
+  | { kind: 'heldReject' }
 
 function makeHostClient() {
   let onData: ((data: unknown) => void) | null = null
   const askedFrom: number[] = []
   let outcome: MissedOutcome = { kind: 'ok', notifications: [] }
+  let releaseHeld: (() => void) | null = null
   const client = {
     subscribe: vi.fn((_m: string, _p: unknown, cb: (data: unknown) => void) => {
       onData = cb
@@ -66,6 +69,12 @@ function makeHostClient() {
         return { ok: true, result: undefined } as never
       }
       askedFrom.push((params as { lastSeenSeq: number }).lastSeenSeq)
+      if (outcome.kind === 'heldReject') {
+        await new Promise<void>((resolve) => {
+          releaseHeld = resolve
+        })
+        throw new Error('socket closed')
+      }
       if (outcome.kind === 'reject') {
         throw new Error('socket closed')
       }
@@ -83,6 +92,9 @@ function makeHostClient() {
     askedFrom,
     setOutcome(next: MissedOutcome) {
       outcome = next
+    },
+    settleHeld() {
+      releaseHeld?.()
     }
   }
 }
@@ -155,6 +167,28 @@ describe('#8591 catch-up failure quarantines the watermark', () => {
     host.onData?.({ type: 'ready', subscriptionId: 'sub-1', epoch: 'epoch-1' })
     await flushAsync()
     expect(host.askedFrom).toEqual([5, 5, 5, 12])
+  })
+
+  it('rolls back a watermark a live event stored while the catch-up was in flight', async () => {
+    // getMissedSince waits up to 30s, so live traffic routinely persists during it.
+    // Clamping only writes made AFTER the failure leaves that higher seq on disk, and
+    // the next launch reads it back and resumes past the range this catch-up abandoned.
+    storage.set(WATERMARK_KEY, JSON.stringify({ seq: 5, epoch: 'epoch-1' }))
+    const host = makeHostClient()
+    host.setOutcome({ kind: 'heldReject' })
+
+    subscribeToDesktopNotifications(host.client, 'host-1')
+    host.onData?.({ type: 'ready', subscriptionId: 'sub-1', epoch: 'epoch-1' })
+    await flushAsync()
+    expect(host.askedFrom).toEqual([5])
+
+    host.onData?.({ ...notification(11), notificationEpoch: 'epoch-1' })
+    await flushAsync()
+    expect(persistedSeq()).toBe(11)
+
+    host.settleHeld()
+    await flushAsync()
+    expect(persistedSeq()).toBe(5)
   })
 
   it('quarantines at the last replayed seq when a teardown cuts the batch short', async () => {

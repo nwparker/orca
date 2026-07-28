@@ -254,12 +254,20 @@ export function resetHostNotificationSessionsForTests(): void {
  */
 export function quarantineCatchUpWatermark(
   session: HostNotificationSession,
+  hostId: string,
   contiguousSeq: number
 ): void {
   session.catchUpQuarantineSeq =
     session.catchUpQuarantineSeq == null
       ? contiguousSeq
       : Math.min(session.catchUpQuarantineSeq, contiguousSeq)
+  // Why re-persist: a live event delivered while the catch-up was still in flight
+  // already stored a seq above the gap. Clamping only later writes would leave that
+  // value on disk, so a restart still resumes past the abandoned range.
+  void saveWatermark(hostId, {
+    seq: catchUpWatermarkSeq(session),
+    epoch: session.lastDeliveredEpoch
+  })
 }
 
 /** Lift the quarantine once a catch-up completes, persisting what it held back. */

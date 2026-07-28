@@ -161,7 +161,7 @@ export function subscribeToDesktopNotifications(client: RpcClient, hostId: strin
       // Why quarantine rather than retry: the range this catch-up abandoned stays
       // unrecovered until SOME later one succeeds, and a live seq persisting past it
       // meanwhile would make the desktop cut it forever.
-      quarantineCatchUpWatermark(session, askFrom)
+      quarantineCatchUpWatermark(session, hostId, askFrom)
       return
     }
     // Why the whole batch is ONE queue entry (#8591): awaiting per event returns to
@@ -190,7 +190,7 @@ export function subscribeToDesktopNotifications(client: RpcClient, hostId: strin
         if (drained) {
           resolveCatchUpQuarantine(session, hostId)
         } else {
-          quarantineCatchUpWatermark(session, contiguousSeq)
+          quarantineCatchUpWatermark(session, hostId, contiguousSeq)
         }
       }
     })

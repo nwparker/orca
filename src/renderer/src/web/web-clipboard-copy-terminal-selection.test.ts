@@ -74,17 +74,24 @@ describe('web copy fallback vs. the terminal selection', () => {
     expect(clipboardData.getData('text/plain')).toBe('/Users/me/repo/src/index.ts')
   })
 
-  it('wins over a document-level copy handler registered after it', () => {
+  it('wins over a copy handler that still runs after the document', () => {
+    // Bubbling reaches the document before the window, so phase order alone does not
+    // protect against a window-level listener — only stopImmediatePropagation does.
     const source = document.createElement('div')
     document.body.appendChild(source)
     const clipboardData = createClipboardDataStub()
     stubExecCommand(source, clipboardData)
-    document.addEventListener('copy', (event) => {
+    const clobber = (event: Event): void => {
       const data = (event as unknown as { clipboardData?: ClipboardDataStub }).clipboardData
-      data?.setData('text/plain', 'late document handler')
-    })
+      data?.setData('text/plain', 'later window handler')
+    }
+    window.addEventListener('copy', clobber)
 
-    expect(copyClipboardTextViaExecCommand('pane-42', document)).toBe(true)
-    expect(clipboardData.getData('text/plain')).toBe('pane-42')
+    try {
+      expect(copyClipboardTextViaExecCommand('pane-42', document)).toBe(true)
+      expect(clipboardData.getData('text/plain')).toBe('pane-42')
+    } finally {
+      window.removeEventListener('copy', clobber)
+    }
   })
 })
