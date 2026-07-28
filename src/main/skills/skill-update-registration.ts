@@ -52,7 +52,9 @@ export async function readGloballyUpdatableSkillNames(
           }
           return (
             typeof entry.skillFolderHash === 'string' &&
+            entry.skillFolderHash.length > 0 &&
             typeof entry.skillPath === 'string' &&
+            entry.skillPath.length > 0 &&
             typeof entry.source === 'string' &&
             entry.source.length > 0
           )

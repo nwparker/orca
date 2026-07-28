@@ -30,7 +30,17 @@ describe('global skill update registration', () => {
             skillPath: 'skills/orchestration/SKILL.md',
             source: 'stablyai/orca'
           },
-          copied: {}
+          copied: {},
+          emptyHash: {
+            skillFolderHash: '',
+            skillPath: 'skills/empty-hash/SKILL.md',
+            source: 'stablyai/orca'
+          },
+          emptyPath: {
+            skillFolderHash: 'hash',
+            skillPath: '',
+            source: 'stablyai/orca'
+          }
         }
       })
     )
