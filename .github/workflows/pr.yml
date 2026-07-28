@@ -265,6 +265,52 @@ jobs:
       - name: Smoke packaged CLI
         run: node config/scripts/smoke-packaged-cli.mjs --app-dir=dist/linux-unpacked
 
+  # Why: regression specs under tests/e2e/** used to merge green without ever
+  # running — e2e.yml only fired on schedule/release (#10518). Path-filter so
+  # ordinary PRs stay light; any E2E suite change still gets a full shard run.
+  e2e-paths:
+    name: detect e2e path changes
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.draft != true
+    # Why: detector only needs to read the checkout; do not inherit repo defaults.
+    permissions:
+      contents: read
+    outputs:
+      should_run: ${{ steps.filter.outputs.should_run }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Filter E2E-relevant paths
+        id: filter
+        run: |
+          set -euo pipefail
+          BASE="${{ github.event.pull_request.base.sha }}"
+          HEAD="${{ github.event.pull_request.head.sha }}"
+          # Why: capture first so a failed git diff does not look like "no matches"
+          # (pipeline status in `if` is not aborted by set -e). Merge-base limits the
+          # list to files this PR introduced, not base-branch drift.
+          CHANGED="$(git diff --name-only --merge-base "$BASE" "$HEAD")"
+          if printf '%s\n' "$CHANGED" | grep -E '^(tests/e2e/|playwright\.|\.github/workflows/e2e\.yml$)' >/dev/null; then
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+            echo "E2E path changes detected"
+          else
+            echo "should_run=false" >> "$GITHUB_OUTPUT"
+            echo "No E2E path changes"
+          fi
+
+  e2e:
+    name: e2e
+    needs: e2e-paths
+    if: needs.e2e-paths.outputs.should_run == 'true'
+    # Why: reusable e2e.yml only checkouts, builds, and uploads artifacts.
+    permissions:
+      contents: read
+    uses: ./.github/workflows/e2e.yml
+
   verify:
     if: always()
     needs:
