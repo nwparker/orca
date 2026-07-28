@@ -1,5 +1,4 @@
 export const TERMINAL_IME_DEFERRED_NEWLINE_FALLBACK_MS = 200
-export const TERMINAL_IME_ENTER_REDISPATCH_ABSORB_WINDOW_MS = 50
 
 export function sendTerminalInputAfterComposition(
   terminalElement: HTMLElement | null | undefined,
@@ -31,60 +30,85 @@ export function sendTerminalInputAfterComposition(
 }
 
 export type TerminalImeDeferredNewlineSender = {
-  defer: (paneId: number, terminalElement: HTMLElement | null | undefined, send: () => void) => void
-  absorbRedispatchedEnter: (paneId: number) => boolean
+  defer: (
+    enter: TerminalImeEnterIdentity,
+    terminalElement: HTMLElement | null | undefined,
+    send: () => void
+  ) => void
+  absorbRedispatchedEnter: (enter: TerminalImeEnterIdentity) => boolean
+  releaseRedispatchedEnter: (enter: TerminalImeEnterIdentity) => void
+  clearRedispatchedEnters: () => void
 }
 
-type PaneDeferredNewlineState = {
+export type TerminalImeEnterIdentity = Pick<KeyboardEvent, 'code' | 'timeStamp'>
+
+type DeferredNewlineState = {
   inFlightSends: number
   absorbCredits: number
-  absorbDeadline: number | null
 }
 
 export function createTerminalImeDeferredNewlineSender(): TerminalImeDeferredNewlineSender {
-  const statesByPaneId = new Map<number, PaneDeferredNewlineState>()
+  const statesByEnterCode = new Map<string, Map<number, DeferredNewlineState>>()
 
-  const cleanUpIfSettled = (paneId: number, state: PaneDeferredNewlineState): void => {
+  const cleanUpIfSettled = (enter: TerminalImeEnterIdentity, state: DeferredNewlineState): void => {
     if (state.inFlightSends <= 0 && state.absorbCredits <= 0) {
-      statesByPaneId.delete(paneId)
+      const statesByTimeStamp = statesByEnterCode.get(enter.code)
+      statesByTimeStamp?.delete(enter.timeStamp)
+      if (statesByTimeStamp?.size === 0) {
+        statesByEnterCode.delete(enter.code)
+      }
+    }
+  }
+
+  const clearCreditsForCode = (enterCode: string): void => {
+    const statesByTimeStamp = statesByEnterCode.get(enterCode)
+    if (!statesByTimeStamp) {
+      return
+    }
+    for (const [timeStamp, state] of statesByTimeStamp) {
+      state.absorbCredits = 0
+      cleanUpIfSettled({ code: enterCode, timeStamp }, state)
     }
   }
 
   return {
-    defer: (paneId, terminalElement, send) => {
-      const state = statesByPaneId.get(paneId) ?? {
+    defer: (enter, terminalElement, send) => {
+      const statesByTimeStamp = statesByEnterCode.get(enter.code) ?? new Map()
+      const state = statesByTimeStamp.get(enter.timeStamp) ?? {
         inFlightSends: 0,
-        absorbCredits: 0,
-        absorbDeadline: null
+        absorbCredits: 0
       }
       state.inFlightSends += 1
       state.absorbCredits += 1
-      state.absorbDeadline = null
-      statesByPaneId.set(paneId, state)
+      statesByTimeStamp.set(enter.timeStamp, state)
+      statesByEnterCode.set(enter.code, statesByTimeStamp)
       sendTerminalInputAfterComposition(terminalElement, () => {
         state.inFlightSends -= 1
-        if (state.inFlightSends <= 0 && state.absorbCredits > 0) {
-          state.absorbDeadline = Date.now() + TERMINAL_IME_ENTER_REDISPATCH_ABSORB_WINDOW_MS
-        }
-        cleanUpIfSettled(paneId, state)
+        cleanUpIfSettled(enter, state)
         send()
       })
     },
-    absorbRedispatchedEnter: (paneId) => {
-      const state = statesByPaneId.get(paneId)
+    absorbRedispatchedEnter: (enter) => {
+      const state = statesByEnterCode.get(enter.code)?.get(enter.timeStamp)
       if (!state || state.absorbCredits <= 0) {
-        return false
-      }
-      if (
-        state.inFlightSends <= 0 &&
-        (state.absorbDeadline === null || Date.now() > state.absorbDeadline)
-      ) {
-        statesByPaneId.delete(paneId)
+        clearCreditsForCode(enter.code)
         return false
       }
       state.absorbCredits -= 1
-      cleanUpIfSettled(paneId, state)
+      cleanUpIfSettled(enter, state)
       return true
+    },
+    releaseRedispatchedEnter: (enter) => {
+      if (statesByEnterCode.get(enter.code)?.has(enter.timeStamp)) {
+        // Chromium's balancing Process-key keyup is copied from the same native event.
+        return
+      }
+      clearCreditsForCode(enter.code)
+    },
+    clearRedispatchedEnters: () => {
+      for (const enterCode of statesByEnterCode.keys()) {
+        clearCreditsForCode(enterCode)
+      }
     }
   }
 }

@@ -66,8 +66,10 @@ function terminalImeHarnessScript(runId: string): string {
   return `
 const runId = ${JSON.stringify(runId)}
 let model = ''
+let received = ''
 
 function handleData(data) {
+  received += data
   for (const ch of data) {
     if (ch === '\\u0003') {
       process.exit(0)
@@ -83,6 +85,7 @@ function handleData(data) {
     }
     model += ch
   }
+  process.stdout.write('\\r\\x1b[2K[RECEIVED_JSON_' + runId + ']' + JSON.stringify(received) + '\\n')
   process.stdout.write('\\r\\x1b[2K${PROMPT}' + model.replace(/\\x1b/g, '<ESC>'))
 }
 
@@ -108,8 +111,64 @@ async function readSubmitted(page: Page): Promise<string[]> {
     .filter((value): value is string => value !== null)
 }
 
+async function readReceived(page: Page): Promise<string | null> {
+  const content = stripTerminalControls(await getTerminalContent(page, 20_000))
+  const matches = [...content.matchAll(/\[RECEIVED_JSON_[^\]]+\]("[\s\S]*?")/g)]
+  const encoded = matches.at(-1)?.[1]
+  if (!encoded) {
+    return null
+  }
+  try {
+    return JSON.parse(encoded) as string
+  } catch {
+    return null
+  }
+}
+
+type ImeKeyEvent = {
+  type: string
+  key: string
+  code: string
+  keyCode: number
+  isComposing: boolean
+  repeat: boolean
+  shiftKey: boolean
+  ctrlKey: boolean
+  timeStamp: number
+}
+
+async function installImeKeyEventLog(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const target = window as unknown as { __imeKeyEvents: ImeKeyEvent[] }
+    target.__imeKeyEvents = []
+    const record = (event: KeyboardEvent): void => {
+      target.__imeKeyEvents.push({
+        type: event.type,
+        key: event.key,
+        code: event.code,
+        keyCode: event.keyCode,
+        isComposing: event.isComposing,
+        repeat: event.repeat,
+        shiftKey: event.shiftKey,
+        ctrlKey: event.ctrlKey,
+        timeStamp: event.timeStamp
+      })
+    }
+    window.addEventListener('keydown', record, true)
+    window.addEventListener('keyup', record, true)
+  })
+}
+
+async function readImeKeyEventLog(page: Page): Promise<ImeKeyEvent[]> {
+  return page.evaluate(
+    () => (window as unknown as { __imeKeyEvents?: ImeKeyEvent[] }).__imeKeyEvents ?? []
+  )
+}
+
 async function attachEvidence(page: Page, testInfo: TestInfo, name: string): Promise<void> {
   const evidence = {
+    keyEvents: await readImeKeyEventLog(page),
+    received: await readReceived(page),
     terminal: await getTerminalContent(page, 20_000),
     submitted: await readSubmitted(page)
   }
@@ -185,38 +244,73 @@ async function commitSyllableAndSpace(session: CDPSession, page: Page): Promise<
  * flush; awaiting each CDP round-trip would let the flush win and hide the
  * race.
  */
-async function dispatchCommittingEnterChord(session: CDPSession, modifiers: number): Promise<void> {
-  await Promise.all([
+async function dispatchCommittingEnterChord(
+  session: CDPSession,
+  page: Page,
+  modifiers: number,
+  redispatchedModifiers: number,
+  redispatchAfterKeyup: boolean
+): Promise<void> {
+  const timestamp = Date.now() / 1000
+  const composingKeydown = session.send('Input.dispatchKeyEvent', {
+    type: 'rawKeyDown',
+    key: 'Enter',
+    code: 'Enter',
+    modifiers,
+    timestamp,
+    windowsVirtualKeyCode: 229,
+    nativeVirtualKeyCode: 229,
+    text: '',
+    unmodifiedText: ''
+  })
+  const commit = session.send('Input.insertText', { text: '하' })
+  const redispatch = () =>
     session.send('Input.dispatchKeyEvent', {
       type: 'rawKeyDown',
       key: 'Enter',
       code: 'Enter',
-      modifiers,
-      windowsVirtualKeyCode: 229,
-      nativeVirtualKeyCode: 229,
-      text: '',
-      unmodifiedText: ''
-    }),
-    session.send('Input.insertText', { text: '하' }),
-    session.send('Input.dispatchKeyEvent', {
-      type: 'rawKeyDown',
-      key: 'Enter',
-      code: 'Enter',
-      modifiers,
+      modifiers: redispatchedModifiers,
+      timestamp,
       windowsVirtualKeyCode: 13,
       nativeVirtualKeyCode: 13,
       text: '',
       unmodifiedText: ''
-    }),
+    })
+  const balancingKeyup = () =>
     session.send('Input.dispatchKeyEvent', {
       type: 'keyUp',
       key: 'Enter',
       code: 'Enter',
-      modifiers,
+      modifiers: redispatchedModifiers,
+      timestamp,
       windowsVirtualKeyCode: 13,
       nativeVirtualKeyCode: 13
     })
-  ])
+
+  if (!redispatchAfterKeyup) {
+    await Promise.all([composingKeydown, commit, redispatch(), balancingKeyup()])
+    return
+  }
+  await Promise.all([composingKeydown, commit, balancingKeyup()])
+  await page.waitForTimeout(80)
+  await redispatch()
+}
+
+async function dispatchPlainEnter(session: CDPSession): Promise<void> {
+  await session.send('Input.dispatchKeyEvent', {
+    type: 'rawKeyDown',
+    key: 'Enter',
+    code: 'Enter',
+    windowsVirtualKeyCode: 13,
+    nativeVirtualKeyCode: 13
+  })
+  await session.send('Input.dispatchKeyEvent', {
+    type: 'keyUp',
+    key: 'Enter',
+    code: 'Enter',
+    windowsVirtualKeyCode: 13,
+    nativeVirtualKeyCode: 13
+  })
 }
 
 async function readPromptLine(page: Page): Promise<string> {
@@ -231,9 +325,52 @@ async function readPromptLine(page: Page): Promise<string> {
 type CommittingEnterChordCase = {
   name: string
   slug: string
-  /** CDP modifier bitmask: 8 = Shift, 2 = Ctrl. */
   modifiers: number
+  redispatchedModifiers?: number
   assertOutcome: (page: Page) => Promise<void>
+  expectedAfterPlainEnter: {
+    received: string
+    submitted: string[]
+  }
+}
+
+async function assertShiftOutcome(page: Page): Promise<void> {
+  await expect
+    .poll(() => readReceived(page), {
+      timeout: 10_000,
+      message: 'PTY bytes must contain committed Hangul before exactly one Shift+Enter chord'
+    })
+    .toBe('하 하 하\u001b\r')
+  await expect
+    .poll(async () => (await readSubmitted(page)).at(-1) ?? null, {
+      timeout: 10_000,
+      message: 'submitted line must contain the full text with the trailing syllable inline'
+    })
+    .toBe('하 하 하\u001b')
+  await page.waitForTimeout(500)
+  expect(await readSubmitted(page), 'Shift+Enter must produce exactly one newline').toEqual([
+    '하 하 하\u001b'
+  ])
+}
+
+async function assertCtrlOutcome(page: Page): Promise<void> {
+  await expect
+    .poll(() => readReceived(page), {
+      timeout: 10_000,
+      message: 'PTY bytes must contain committed Hangul before exactly one Ctrl+Enter chord'
+    })
+    .toBe('하 하 하\u001b[13;5u')
+  await expect
+    .poll(() => readPromptLine(page), {
+      timeout: 10_000,
+      message: 'prompt must show the committed syllables followed by exactly one CSI-u chord'
+    })
+    .toBe('하 하 하<ESC>[13;5u')
+  await page.waitForTimeout(500)
+  expect(await readPromptLine(page), 'Ctrl+Enter must produce exactly one CSI-u chord').toBe(
+    '하 하 하<ESC>[13;5u'
+  )
+  expect(await readSubmitted(page), 'CSI-u must not submit the line').toEqual([])
 }
 
 const COMMITTING_ENTER_CHORDS: CommittingEnterChordCase[] = [
@@ -241,90 +378,95 @@ const COMMITTING_ENTER_CHORDS: CommittingEnterChordCase[] = [
     name: 'Shift+Enter',
     slug: 'shift-enter',
     modifiers: 8,
-    assertOutcome: async (page) => {
-      // The harness records the chord's ESC (of ESC CR) as a literal char and
-      // CR submits, so the ESC's position inside the submitted string marks
-      // exactly where the newline bytes landed.
-      await expect
-        .poll(async () => (await readSubmitted(page)).at(-1) ?? null, {
-          timeout: 10_000,
-          message: 'submitted line must contain the full text with the trailing syllable inline'
-        })
-        .toBe('하 하 하\u001b')
-      // Exactly one submission: the re-dispatched keydown must not add a
-      // second newline on top of the deferred one.
-      await page.waitForTimeout(500)
-      expect(
-        await readSubmitted(page),
-        'the committing Shift+Enter must produce exactly one newline'
-      ).toEqual(['하 하 하\u001b'])
+    assertOutcome: assertShiftOutcome,
+    expectedAfterPlainEnter: {
+      received: '하 하 하\u001b\r\r',
+      submitted: ['하 하 하\u001b', '']
     }
   },
   {
     name: 'Ctrl+Enter',
     slug: 'ctrl-enter',
     modifiers: 2,
-    assertOutcome: async (page) => {
-      // The CSI-u chord (ESC [13;5u) carries no CR, so nothing submits; the
-      // harness echoes the model with ESC rendered as <ESC>. The sequence must
-      // appear exactly once, after the committed syllables.
-      await expect
-        .poll(() => readPromptLine(page), {
-          timeout: 10_000,
-          message: 'prompt must show the committed syllables followed by exactly one CSI-u chord'
-        })
-        .toBe('하 하 하<ESC>[13;5u')
-      await page.waitForTimeout(500)
-      expect(
-        await readPromptLine(page),
-        'the committing Ctrl+Enter must produce exactly one CSI-u chord'
-      ).toBe('하 하 하<ESC>[13;5u')
-      expect(await readSubmitted(page), 'CSI-u must not submit the line').toEqual([])
+    assertOutcome: assertCtrlOutcome,
+    expectedAfterPlainEnter: {
+      received: '하 하 하\u001b[13;5u\r',
+      submitted: ['하 하 하\u001b[13;5u']
+    }
+  },
+  {
+    name: 'Shift+Enter with modifier-lost redispatch',
+    slug: 'shift-enter-bare-redispatch',
+    modifiers: 8,
+    redispatchedModifiers: 0,
+    assertOutcome: assertShiftOutcome,
+    expectedAfterPlainEnter: {
+      received: '하 하 하\u001b\r\r',
+      submitted: ['하 하 하\u001b', '']
     }
   }
 ]
 
 test.describe('Korean IME terminal committing Enter chords', () => {
+  test.describe.configure({ mode: 'serial' })
   for (const chord of COMMITTING_ENTER_CHORDS) {
-    test(`${chord.name} sends exactly one newline chord, after the trailing syllable commits`, async ({
-      orcaPage,
-      testRepoPath
-    }, testInfo) => {
-      await waitForSessionReady(orcaPage)
-      await waitForActiveWorktree(orcaPage)
-      await ensureTerminalVisible(orcaPage)
-      await waitForActiveTerminalManager(orcaPage, 30_000)
+    for (const redispatchAfterKeyup of [false, true]) {
+      const order = redispatchAfterKeyup ? 'keyup-before-redispatch' : 'redispatch-before-keyup'
+      test(`${chord.name} sends once with ${order}`, async ({
+        orcaPage,
+        testRepoPath
+      }, testInfo) => {
+        await waitForSessionReady(orcaPage)
+        await waitForActiveWorktree(orcaPage)
+        await ensureTerminalVisible(orcaPage)
+        await waitForActiveTerminalManager(orcaPage, 30_000)
 
-      const ptyId = await waitForActivePanePtyId(orcaPage)
-      const runId = randomUUID()
-      const scriptPath = path.join(testRepoPath, `.orca-korean-ime-harness-${runId}.cjs`)
-      const session = await orcaPage.context().newCDPSession(orcaPage)
+        const ptyId = await waitForActivePanePtyId(orcaPage)
+        const runId = randomUUID()
+        const scriptPath = path.join(testRepoPath, `.orca-korean-ime-harness-${runId}.cjs`)
+        const session = await orcaPage.context().newCDPSession(orcaPage)
 
-      try {
-        writeFileSync(scriptPath, terminalImeHarnessScript(runId))
-        await sendToTerminal(orcaPage, ptyId, `node ${JSON.stringify(scriptPath)}\r`)
-        await waitForTerminalOutput(orcaPage, `IME_HARNESS_READY_${runId}`, 10_000, 20_000)
-        await focusActiveTerminalInput(orcaPage)
+        try {
+          writeFileSync(scriptPath, terminalImeHarnessScript(runId))
+          await sendToTerminal(orcaPage, ptyId, `node ${JSON.stringify(scriptPath)}\r`)
+          await waitForTerminalOutput(orcaPage, `IME_HARNESS_READY_${runId}`, 10_000, 20_000)
+          await focusActiveTerminalInput(orcaPage)
+          await installImeKeyEventLog(orcaPage)
 
-        // 하 하 하 with the first two syllables committed by Space and the last
-        // one left composing, so the Enter chord is the committing keystroke.
-        await composeHangulSyllable(session, orcaPage)
-        await commitSyllableAndSpace(session, orcaPage)
-        await composeHangulSyllable(session, orcaPage)
-        await commitSyllableAndSpace(session, orcaPage)
-        await composeHangulSyllable(session, orcaPage)
-        await dispatchCommittingEnterChord(session, chord.modifiers)
+          // 하 하 하 with the first two syllables committed by Space and the last
+          // one left composing, so the Enter chord is the committing keystroke.
+          await composeHangulSyllable(session, orcaPage)
+          await commitSyllableAndSpace(session, orcaPage)
+          await composeHangulSyllable(session, orcaPage)
+          await commitSyllableAndSpace(session, orcaPage)
+          await composeHangulSyllable(session, orcaPage)
+          await dispatchCommittingEnterChord(
+            session,
+            orcaPage,
+            chord.modifiers,
+            chord.redispatchedModifiers ?? chord.modifiers,
+            redispatchAfterKeyup
+          )
 
-        await chord.assertOutcome(orcaPage)
-        await attachEvidence(orcaPage, testInfo, `korean-${chord.slug}-commit`)
-      } finally {
-        await attachEvidence(orcaPage, testInfo, `korean-${chord.slug}-final`).catch(
-          () => undefined
-        )
-        await session.detach().catch(() => undefined)
-        await sendToTerminal(orcaPage, ptyId, '\x03').catch(() => undefined)
-        rmSync(scriptPath, { force: true })
-      }
-    })
+          await chord.assertOutcome(orcaPage)
+          await dispatchPlainEnter(session)
+          await expect
+            .poll(() => readReceived(orcaPage), {
+              timeout: 10_000,
+              message: 'the next physical Enter must not be consumed by stale IME state'
+            })
+            .toBe(chord.expectedAfterPlainEnter.received)
+          expect(await readSubmitted(orcaPage)).toEqual(chord.expectedAfterPlainEnter.submitted)
+          await attachEvidence(orcaPage, testInfo, `korean-${chord.slug}-${order}-commit`)
+        } finally {
+          await attachEvidence(orcaPage, testInfo, `korean-${chord.slug}-${order}-final`).catch(
+            () => undefined
+          )
+          await session.detach().catch(() => undefined)
+          await sendToTerminal(orcaPage, ptyId, '\x03').catch(() => undefined)
+          rmSync(scriptPath, { force: true })
+        }
+      })
+    }
   }
 })

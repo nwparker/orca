@@ -2,8 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   createTerminalImeDeferredNewlineSender,
-  sendTerminalInputAfterComposition,
-  TERMINAL_IME_ENTER_REDISPATCH_ABSORB_WINDOW_MS
+  sendTerminalInputAfterComposition
 } from './terminal-ime-deferred-newline'
 
 describe('sendTerminalInputAfterComposition', () => {
@@ -87,93 +86,136 @@ describe('createTerminalImeDeferredNewlineSender', () => {
   })
 
   const createSender = () => createTerminalImeDeferredNewlineSender()
+  const enter = (timeStamp: number, code = 'Enter') => ({ code, timeStamp })
 
   it('absorbs the re-dispatch while the deferred send is still in flight, exactly once', () => {
     const el = document.createElement('div')
     const send = vi.fn()
     const sender = createSender()
 
-    sender.defer(1, el, send)
-    expect(sender.absorbRedispatchedEnter(1)).toBe(true)
-    expect(sender.absorbRedispatchedEnter(1)).toBe(false)
+    sender.defer(enter(10), el, send)
+    expect(sender.absorbRedispatchedEnter(enter(10))).toBe(true)
+    expect(sender.absorbRedispatchedEnter(enter(10))).toBe(false)
 
     el.dispatchEvent(new Event('compositionend'))
     vi.runAllTimers()
     expect(send).toHaveBeenCalledTimes(1)
     // The credit was consumed pre-send, so nothing lingers to eat a real Enter.
-    expect(sender.absorbRedispatchedEnter(1)).toBe(false)
+    expect(sender.absorbRedispatchedEnter(enter(10))).toBe(false)
   })
 
-  it('absorbs the re-dispatch shortly after the deferred send fired', () => {
-    // Why: when the send's macrotask beats the re-dispatched keydown, the
-    // duplicate arrives a few ms after the newline went out.
+  it('absorbs after the deferred send even if focus moved to another pane', () => {
     const el = document.createElement('div')
     const send = vi.fn()
     const sender = createSender()
 
-    sender.defer(1, el, send)
+    sender.defer(enter(10), el, send)
     el.dispatchEvent(new Event('compositionend'))
     vi.runAllTimers()
     expect(send).toHaveBeenCalledTimes(1)
 
-    vi.advanceTimersByTime(TERMINAL_IME_ENTER_REDISPATCH_ABSORB_WINDOW_MS)
-    expect(sender.absorbRedispatchedEnter(1)).toBe(true)
-    expect(sender.absorbRedispatchedEnter(1)).toBe(false)
+    expect(sender.absorbRedispatchedEnter(enter(10))).toBe(true)
+    expect(sender.absorbRedispatchedEnter(enter(10))).toBe(false)
   })
 
-  it('expires the post-send absorb window so a later real Enter is never eaten', () => {
+  it('keeps a credit across the balancing keyup copied from the same native event', () => {
     const el = document.createElement('div')
     const sender = createSender()
 
-    sender.defer(1, el, vi.fn())
+    sender.defer(enter(10), el, vi.fn())
     el.dispatchEvent(new Event('compositionend'))
     vi.runAllTimers()
 
-    vi.advanceTimersByTime(TERMINAL_IME_ENTER_REDISPATCH_ABSORB_WINDOW_MS + 1)
-    expect(sender.absorbRedispatchedEnter(1)).toBe(false)
+    sender.releaseRedispatchedEnter(enter(10))
+    expect(sender.absorbRedispatchedEnter(enter(10))).toBe(true)
   })
 
-  it('tracks panes independently', () => {
+  it('releases an unused credit on a later physical keyup', () => {
     const el = document.createElement('div')
     const sender = createSender()
 
-    sender.defer(1, el, vi.fn())
-    expect(sender.absorbRedispatchedEnter(2)).toBe(false)
-    expect(sender.absorbRedispatchedEnter(1)).toBe(true)
+    sender.defer(enter(10), el, vi.fn())
+    sender.releaseRedispatchedEnter(enter(11))
+    el.dispatchEvent(new Event('compositionend'))
+    vi.runAllTimers()
+
+    expect(sender.absorbRedispatchedEnter(enter(10))).toBe(false)
   })
 
-  it('grants one credit per overlapping defer on the same pane', () => {
+  it('retires stale credit when a genuinely new Enter begins without a redispatch', () => {
     const el = document.createElement('div')
     const sender = createSender()
 
-    sender.defer(1, el, vi.fn())
-    sender.defer(1, el, vi.fn())
-    expect(sender.absorbRedispatchedEnter(1)).toBe(true)
-    expect(sender.absorbRedispatchedEnter(1)).toBe(true)
-    expect(sender.absorbRedispatchedEnter(1)).toBe(false)
+    sender.defer(enter(10), el, vi.fn())
+
+    expect(sender.absorbRedispatchedEnter(enter(20))).toBe(false)
+    expect(sender.absorbRedispatchedEnter(enter(10))).toBe(false)
   })
 
-  it('arms the absorb window on the fallback path too', () => {
+  it('absorbs a matching repeated composition cycle but not a new plain repeat', () => {
+    const el = document.createElement('div')
+    const sender = createSender()
+
+    sender.defer(enter(10), el, vi.fn())
+    expect(sender.absorbRedispatchedEnter(enter(20))).toBe(false)
+
+    sender.defer(enter(30), el, vi.fn())
+    expect(sender.absorbRedispatchedEnter(enter(30))).toBe(true)
+  })
+
+  it('tracks the main and numpad Enter keys independently', () => {
+    const el = document.createElement('div')
+    const sender = createSender()
+
+    sender.defer(enter(10), el, vi.fn())
+    expect(sender.absorbRedispatchedEnter(enter(10, 'NumpadEnter'))).toBe(false)
+    expect(sender.absorbRedispatchedEnter(enter(10))).toBe(true)
+  })
+
+  it('tracks two overlapping Enter cycles independently by native timestamp', () => {
+    const el = document.createElement('div')
+    const sender = createSender()
+
+    sender.defer(enter(10), el, vi.fn())
+    sender.defer(enter(20), el, vi.fn())
+    expect(sender.absorbRedispatchedEnter(enter(20))).toBe(true)
+    expect(sender.absorbRedispatchedEnter(enter(10))).toBe(true)
+    expect(sender.absorbRedispatchedEnter(enter(20))).toBe(false)
+  })
+
+  it('keeps a re-dispatch credit on the fallback path', () => {
     const el = document.createElement('div')
     const send = vi.fn()
     const sender = createSender()
 
-    sender.defer(1, el, send)
+    sender.defer(enter(10), el, send)
     vi.runAllTimers()
     expect(send).toHaveBeenCalledTimes(1)
 
-    expect(sender.absorbRedispatchedEnter(1)).toBe(true)
+    expect(sender.absorbRedispatchedEnter(enter(10))).toBe(true)
   })
 
-  it('still delivers without a terminal element and arms the absorb window', () => {
+  it('still delivers without a terminal element and keeps one credit', () => {
     const send = vi.fn()
     const sender = createSender()
 
-    sender.defer(1, null, send)
+    sender.defer(enter(10), null, send)
     vi.runAllTimers()
 
     expect(send).toHaveBeenCalledTimes(1)
-    expect(sender.absorbRedispatchedEnter(1)).toBe(true)
-    expect(sender.absorbRedispatchedEnter(1)).toBe(false)
+    expect(sender.absorbRedispatchedEnter(enter(10))).toBe(true)
+    expect(sender.absorbRedispatchedEnter(enter(10))).toBe(false)
+  })
+
+  it('clears credits after a missed keyup when the window blurs', () => {
+    const el = document.createElement('div')
+    const sender = createSender()
+
+    sender.defer(enter(10), el, vi.fn())
+    el.dispatchEvent(new Event('compositionend'))
+    vi.runAllTimers()
+
+    sender.clearRedispatchedEnters()
+    expect(sender.absorbRedispatchedEnter(enter(10))).toBe(false)
   })
 })

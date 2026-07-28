@@ -11,6 +11,10 @@ import type { MacOptionAsAlt } from './terminal-shortcut-policy'
 import { createTerminalNativeOnlyShortcutTracker } from './terminal-native-only-shortcut'
 import { createTerminalImeDeferredNewlineSender } from './terminal-ime-deferred-newline'
 import {
+  requestCapturedTerminalReconfirmation,
+  sendCapturedTerminalInput
+} from './terminal-captured-input-dispatch'
+import {
   keybindingMatchesAction,
   type KeybindingOverrides,
   type KeybindingPlatform,
@@ -271,9 +275,12 @@ export function useTerminalKeyboardShortcuts({
         optionKeyLocation = e.location
       }
     }
-    const onModifierUp = (e: KeyboardEvent): void => {
+    const onKeyUp = (e: KeyboardEvent): void => {
       if (e.key === 'Alt') {
         optionKeyLocation = 0
+      }
+      if (e.key === 'Enter') {
+        deferredNewlineSender.releaseRedispatchedEnter(e)
       }
     }
 
@@ -315,6 +322,18 @@ export function useTerminalKeyboardShortcuts({
       }
       const keyboardScope = keyboardScopeRef.current
       if (keyboardScope && !keyboardEventBelongsToScope(e, keyboardScope)) {
+        return
+      }
+
+      if (
+        e.key === 'Enter' &&
+        e.keyCode === 13 &&
+        !e.isComposing &&
+        deferredNewlineSender.absorbRedispatchedEnter(e)
+      ) {
+        // Chromium can drop the modifier when re-dispatching the committing Enter.
+        e.preventDefault()
+        e.stopImmediatePropagation()
         return
       }
 
@@ -423,24 +442,37 @@ export function useTerminalKeyboardShortcuts({
         if (!pane) {
           return
         }
+        const capturedTransport = paneTransportsRef.current.get(pane.id)
+        const capturedPtyId = capturedTransport?.getPtyId() ?? null
+        const capturedBinding = panePtyBindingsRef.current.get(pane.id) as
+          | (IDisposable & { requestDroidReconfirmation?: () => void })
+          | undefined
         const sendResolvedInput = (): void => {
-          const sent = paneTransportsRef.current.get(pane.id)?.sendInput(action.data) === true
+          const targetPaneMounted =
+            managerRef.current
+              ?.getPanes()
+              .some((candidate) => candidate.id === pane.id && candidate.leafId === pane.leafId) ===
+            true
+          const sent = sendCapturedTerminalInput({
+            targetPaneMounted,
+            currentTransport: paneTransportsRef.current.get(pane.id),
+            capturedTransport,
+            capturedPtyId,
+            data: action.data
+          })
           if (sent) {
             recordTerminalUserInputForLeaf(tabId, pane.leafId)
             if (action.data === '\x1b[13;2u') {
               // Why: this write bypasses PTY onData, so no-OSC shells need reconfirmation.
-              const binding = panePtyBindingsRef.current.get(pane.id) as
-                | (IDisposable & { requestDroidReconfirmation?: () => void })
-                | undefined
-              binding?.requestDroidReconfirmation?.()
+              requestCapturedTerminalReconfirmation(
+                panePtyBindingsRef.current.get(pane.id),
+                capturedBinding
+              )
             }
           }
         }
         if (e.isComposing && e.key === 'Enter') {
-          deferredNewlineSender.defer(pane.id, pane.terminal.element, sendResolvedInput)
-          return
-        }
-        if (e.key === 'Enter' && deferredNewlineSender.absorbRedispatchedEnter(pane.id)) {
+          deferredNewlineSender.defer(e, pane.terminal.element, sendResolvedInput)
           return
         }
         sendResolvedInput()
@@ -657,18 +689,20 @@ export function useTerminalKeyboardShortcuts({
 
     const onNativeOnlyBlur = (): void => {
       nativeOnlyShortcutTracker.clear()
+      deferredNewlineSender.clearRedispatchedEnters()
     }
 
     window.addEventListener('keydown', onModifierDown, { capture: true })
-    window.addEventListener('keyup', onModifierUp, { capture: true })
+    window.addEventListener('keyup', onKeyUp, { capture: true })
     window.addEventListener('keydown', onKeyDown, { capture: true })
     window.addEventListener('keypress', onNativeOnlyShortcutCompanion, { capture: true })
     window.addEventListener('keyup', onNativeOnlyShortcutCompanion, { capture: true })
     window.addEventListener('beforeinput', onNativeOnlyBeforeInput, { capture: true })
     window.addEventListener('blur', onNativeOnlyBlur)
     return () => {
+      deferredNewlineSender.clearRedispatchedEnters()
       window.removeEventListener('keydown', onModifierDown, { capture: true })
-      window.removeEventListener('keyup', onModifierUp, { capture: true })
+      window.removeEventListener('keyup', onKeyUp, { capture: true })
       window.removeEventListener('keydown', onKeyDown, { capture: true })
       window.removeEventListener('keypress', onNativeOnlyShortcutCompanion, { capture: true })
       window.removeEventListener('keyup', onNativeOnlyShortcutCompanion, { capture: true })
