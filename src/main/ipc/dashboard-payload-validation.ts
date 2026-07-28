@@ -221,10 +221,12 @@ function imageIconCacheKey(icon: unknown): string | null {
   const candidate = icon as Record<string, unknown>
   // Why: `source` and `src` are the only fields an image icon can be rejected
   // on — `label` is normalized rather than rejected — so they alone key it.
+  // Length-prefixed because a valid `src` may contain whitespace, so a plain
+  // separator would let a rejected icon collide with an accepted one's verdict.
   return candidate.type === 'image' &&
     typeof candidate.src === 'string' &&
     typeof candidate.source === 'string'
-    ? `${candidate.source} ${candidate.src}`
+    ? `${candidate.source.length}:${candidate.source}${candidate.src}`
     : null
 }
 

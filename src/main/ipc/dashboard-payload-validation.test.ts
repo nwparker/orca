@@ -61,12 +61,14 @@ const SNAPSHOT = {
 } satisfies DashboardSnapshot
 
 /** A real PNG header plus `bodyBytes` of filler, so sanitizing actually decodes. */
-function imageIconSrc(bodyBytes: number): string {
+function imageIconSrc(bodyBytes: number, withWhitespace = false): string {
   const header = Buffer.from([
     137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 64, 0, 0, 0, 64, 8, 6, 0,
     0, 0
   ])
-  return `data:image/png;base64,${Buffer.concat([header, Buffer.alloc(bodyBytes, bodyBytes % 251)]).toString('base64')}`
+  const body = Buffer.concat([header, Buffer.alloc(bodyBytes, bodyBytes % 251)]).toString('base64')
+  // The sanitizer's base64 pattern admits whitespace, so a real src can hold it.
+  return `data:image/png;base64,${withWhitespace ? `${body.slice(0, 20)} ${body.slice(20)}` : body}`
 }
 
 describe('dashboard payload validation', () => {
@@ -308,6 +310,30 @@ describe('dashboard payload validation', () => {
     }
 
     expect(sanitizeRepoIconCalls).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not let a split of one icon key inherit another icon verdict', () => {
+    // A valid base64 src may contain whitespace, so `source` and `src` must not
+    // be joined ambiguously: this pair concatenates identically.
+    const accepted = { type: 'image', src: imageIconSrc(1_024, true), source: 'upload' }
+    const joined = `upload ${accepted.src}`
+    const splitAt = joined.indexOf(' ', 'upload '.length)
+    const forged = {
+      type: 'image',
+      source: joined.slice(0, splitAt),
+      src: joined.slice(splitAt + 1)
+    }
+    sanitizeRepoIconCalls.mockClear()
+
+    expect(isDashboardSnapshot({ ...SNAPSHOT, repoIconsByRepoId: { 'repo-1': accepted } })).toBe(
+      true
+    )
+    // `forged.source` is not a legal RepoIconImageSource, so it must be rejected
+    // no matter what the accepted icon left in the cache.
+    expect(isDashboardSnapshot({ ...SNAPSHOT, repoIconsByRepoId: { 'repo-1': forged } })).toBe(
+      false
+    )
+    expect(sanitizeRepoIconCalls).toHaveBeenCalledTimes(2)
   })
 
   it('does not let a cached image verdict answer for a non-image icon', () => {
