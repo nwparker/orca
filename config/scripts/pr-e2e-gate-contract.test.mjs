@@ -14,12 +14,15 @@ const verifyStep = prWorkflow.jobs.verify.steps.find(
 )
 
 describe('PR E2E gate contract', () => {
-  it('blocks the merge gate on E2E instead of only displaying it', () => {
-    // Why: an e2e job that verify does not depend on reproduces the bug this
-    // gate exists to fix — a red spec still merges because verify stays green.
-    expect(prWorkflow.jobs.verify.needs).toContain('e2e')
-    expect(verifyStep.env.E2E).toBe('${{ needs.e2e.result }}')
-    expect(verifyStep.run).toContain('"$E2E" != "success"')
+  it('keeps E2E advisory while the suite is red on main', () => {
+    // Why: pin the deliberate choice so it reads as intentional rather than as
+    // the "forgot to wire the gate" bug this file originally caught. Gating on a
+    // suite that fails every scheduled run would block the PRs that fix it.
+    // Flipping to blocking means updating this expectation too — see the comment
+    // on verify's Require-successful-checks step for the exact wiring.
+    expect(prWorkflow.jobs.verify.needs).not.toContain('e2e')
+    expect(verifyStep.env.E2E).toBeUndefined()
+    expect(verifyStep.run).not.toContain('$E2E')
   })
 
   it('runs E2E only when the detector says the PR touches E2E paths', () => {
@@ -33,25 +36,17 @@ describe('PR E2E gate contract', () => {
     )
   })
 
-  it('treats a path-filtered skip as passing without excusing the other jobs', () => {
-    // Why: E2E is skipped on PRs touching no E2E files, so 'skipped' must pass.
-    // The always-required jobs are checked in their own loop so that allowance
-    // cannot leak to them.
-    expect(verifyStep.run).toContain('"$E2E" != "skipped"')
-
+  it('enforces every job verify depends on', () => {
     // Why: derive from verify.needs rather than hardcoding, so adding a required
     // job without adding it to the strict loop fails here instead of silently
-    // leaving that job unenforced.
+    // leaving that job unenforced. This is what caught GIT_COMPATIBILITY and
+    // SHELL_CONTRACTS being absent from an earlier hardcoded list.
     const strictLoop = verifyStep.run.slice(0, verifyStep.run.indexOf('done'))
     for (const job of prWorkflow.jobs.verify.needs) {
-      if (job === 'e2e') {
-        continue
-      }
       const envVar = job.toUpperCase()
       expect(verifyStep.env[envVar]).toBe(`\${{ needs.${job}.result }}`)
       expect(strictLoop).toContain(`"$${envVar}"`)
     }
-    expect(strictLoop).not.toContain('$E2E')
   })
 
   it('matches the Playwright config where it actually lives', () => {

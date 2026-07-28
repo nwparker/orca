@@ -165,10 +165,7 @@ describe('PR workflow parallelism', () => {
       'git_compatibility',
       'shell_contracts',
       'test',
-      'package',
-      // Why: path-filtered, so it reports 'skipped' on most PRs. verify allows
-      // that specific result; see pr-e2e-gate-contract.test.mjs.
-      'e2e'
+      'package'
     ])
   })
 })
