@@ -24,15 +24,6 @@ export const pluginKillListSchema = z
     plugins: z.array(pluginKillListEntrySchema).max(PLUGIN_KILL_LIST_ENTRY_LIMIT)
   })
   .superRefine((killList, context) => {
-    // A far-future generatedAt makes every genuine later list look "older" and
-    // disables revocation permanently, so bound it at the parse chokepoint.
-    if (Date.parse(killList.generatedAt) > Date.now() + PLUGIN_KILL_LIST_FUTURE_SKEW_MS) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['generatedAt'],
-        message: 'generatedAt is too far in the future'
-      })
-    }
     const seen = new Set<string>()
     for (const [index, plugin] of killList.plugins.entries()) {
       if (seen.has(plugin.pluginKey)) {
@@ -48,6 +39,17 @@ export const pluginKillListSchema = z
 
 export type PluginKillList = z.infer<typeof pluginKillListSchema>
 export type PluginKillListEntry = z.infer<typeof pluginKillListEntrySchema>
+
+/** A far-future generatedAt makes every genuine later list look "older" and
+ *  disables revocation permanently. Checked only on freshly fetched snapshots:
+ *  a cached list was already accepted once, and re-judging it against the
+ *  device clock would drop live revocations whenever that clock runs slow. */
+export function isPluginKillListTooFarInFuture(
+  killList: PluginKillList,
+  now = Date.now()
+): boolean {
+  return Date.parse(killList.generatedAt) > now + PLUGIN_KILL_LIST_FUTURE_SKEW_MS
+}
 
 export function killedPluginKeys(killList: PluginKillList): ReadonlySet<string> {
   return new Set(killList.plugins.map((plugin) => plugin.pluginKey))

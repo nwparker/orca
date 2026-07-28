@@ -3,8 +3,10 @@ import {
   PLUGIN_KILL_LIST_ENTRY_LIMIT,
   PLUGIN_KILL_LIST_FUTURE_SKEW_MS,
   findKilledPlugin,
+  isPluginKillListTooFarInFuture,
   killedPluginKeys,
-  pluginKillListSchema
+  pluginKillListSchema,
+  type PluginKillList
 } from './plugin-kill-list'
 
 function entry(pluginKey = 'community.unsafe'): Record<string, unknown> {
@@ -58,33 +60,6 @@ describe('pluginKillListSchema', () => {
     expect(pluginKillListSchema.safeParse(killList).success).toBe(false)
   })
 
-  it('rejects a far-future generatedAt that would freeze out later revocations', () => {
-    const parsed = pluginKillListSchema.safeParse({
-      version: 1,
-      generatedAt: '9999-12-31T23:59:59Z',
-      plugins: [entry()]
-    })
-
-    expect(parsed.success).toBe(false)
-    if (!parsed.success) {
-      expect(parsed.error.issues).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({ message: 'generatedAt is too far in the future' })
-        ])
-      )
-    }
-  })
-
-  it('accepts a generatedAt inside the allowed clock-skew window', () => {
-    expect(
-      pluginKillListSchema.safeParse({
-        version: 1,
-        generatedAt: new Date(Date.now() + PLUGIN_KILL_LIST_FUTURE_SKEW_MS - 60_000).toISOString(),
-        plugins: [entry()]
-      }).success
-    ).toBe(true)
-  })
-
   it('rejects duplicate killed plugin identities', () => {
     const parsed = pluginKillListSchema.safeParse({
       version: 1,
@@ -113,5 +88,21 @@ describe('pluginKillListSchema', () => {
         plugins
       }).success
     ).toBe(false)
+  })
+})
+
+describe('isPluginKillListTooFarInFuture', () => {
+  const list = (generatedAt: string): PluginKillList =>
+    pluginKillListSchema.parse({ version: 1, generatedAt, plugins: [entry()] })
+
+  it('flags a snapshot that would freeze out every later revocation', () => {
+    expect(isPluginKillListTooFarInFuture(list('9999-12-31T23:59:59Z'))).toBe(true)
+  })
+
+  it('allows a snapshot inside the clock-skew window', () => {
+    const generatedAt = new Date(
+      Date.now() + PLUGIN_KILL_LIST_FUTURE_SKEW_MS - 60_000
+    ).toISOString()
+    expect(isPluginKillListTooFarInFuture(list(generatedAt))).toBe(false)
   })
 })

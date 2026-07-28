@@ -23,6 +23,7 @@ function killList(date = '2026-07-12T20:00:00Z'): PluginKillList {
 }
 
 afterEach(async () => {
+  vi.useRealTimers()
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })))
 })
 
@@ -96,6 +97,33 @@ describe('PluginKillListService', () => {
     const restarted = new PluginKillListService({ pluginsDataDir: root, fetcher })
     await restarted.initialize()
     expect(restarted.snapshot()?.generatedAt).toBe('2026-07-12T20:00:00Z')
+  })
+
+  it('keeps cached revocations live when the device clock runs far behind', async () => {
+    const root = await tempRoot()
+    const generatedAt = new Date().toISOString()
+    const published = new PluginKillListService({
+      pluginsDataDir: root,
+      fetcher: async () => killList(generatedAt)
+    })
+    await published.refresh()
+    // A dead RTC / restored VM snapshot must not re-judge an already-accepted
+    // cache against the wrong clock and silently un-revoke a killed plugin.
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(Date.parse(generatedAt) - 30 * 24 * 60 * 60 * 1000))
+    const restarted = new PluginKillListService({
+      pluginsDataDir: root,
+      fetcher: async () => killList(generatedAt)
+    })
+
+    await restarted.initialize()
+
+    expect(restarted.snapshot()?.generatedAt).toBe(generatedAt)
+    expect(restarted.reason('community.unsafe')).toBe('Malware advisory')
+    // A refresh the skewed clock cannot vouch for is refused, but refusing it
+    // must never downgrade the revocations already in force.
+    await expect(restarted.refresh()).rejects.toThrow()
+    expect(restarted.reason('community.unsafe')).toBe('Malware advisory')
   })
 
   it('rejects a replayed older snapshot without replacing cached revocations', async () => {
