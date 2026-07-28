@@ -15,9 +15,8 @@ type CacheEntry = {
 const cache = new Map<string, CacheEntry>()
 const inFlight = new Map<string, Promise<string | null>>()
 // Why: mid-flight downloads must not repopulate cache after disconnect/clearToken.
-// Why ONE ticker for both scopes: summing independent per-site and global counters
-// makes distinct clear states collide (site at 1 before a global clear reads the
-// same 1 after it), so the guard passes and re-inserts credentialed bytes.
+// Why ONE ticker across both scopes: summing separate counters lets distinct clear
+// states collide, passing the guard and re-inserting credentialed bytes.
 let epochTicker = 0
 let globalEpoch = 0
 const siteEpoch = new Map<string, number>()

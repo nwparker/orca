@@ -60,10 +60,7 @@ describe('attachment image cache', () => {
   })
 
   it('does not repopulate after "disconnect all" when the site was cleared before', async () => {
-    // Summed epochs collide: a site at per-site 1 reads the same value before a
-    // global clear (1 + 0) and after it (0 + 1), so the mid-flight guard passes and
-    // the download re-inserts credentialed bytes the logout just purged. Reached by
-    // any prior per-site clear (401 → clearToken, or disconnect(siteId)).
+    // Summed epochs read the same before a global clear (1 + 0) and after it (0 + 1).
     clearAttachmentImagesForSite('site-a')
 
     let resolveLoad: (value: { dataUrl: string; byteSize: number } | null) => void = () => {}

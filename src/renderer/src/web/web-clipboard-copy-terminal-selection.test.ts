@@ -2,8 +2,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { copyClipboardTextViaExecCommand } from './web-clipboard-copy-fallback'
 
-// Why a real DOM: the bug is purely about listener phase ordering, which only a
-// DOM with genuine capture/bubble propagation can reproduce.
+// Why a real DOM: only genuine capture/bubble propagation reproduces the ordering bug.
 
 type ClipboardDataStub = {
   setData: (format: string, value: string) => void
@@ -22,10 +21,7 @@ function createClipboardDataStub(): ClipboardDataStub {
   }
 }
 
-/**
- * Stands in for xterm: a bubble-phase 'copy' listener on terminal.element that
- * overwrites text/plain with the terminal selection (xterm's copyHandler).
- */
+/** Stands in for xterm's copyHandler: bubble-phase, overwrites text/plain. */
 function mountTerminalWithSelection(selectionText: string): HTMLElement {
   const terminalElement = document.createElement('div')
   document.body.appendChild(terminalElement)
@@ -37,10 +33,7 @@ function mountTerminalWithSelection(selectionText: string): HTMLElement {
   return terminalElement
 }
 
-/**
- * Stands in for the browser's execCommand('copy'): dispatches one bubbling,
- * cancelable copy event from the element the DOM selection anchors to.
- */
+/** Stands in for execCommand('copy'): dispatches from the DOM selection's anchor. */
 function stubExecCommand(source: HTMLElement, clipboardData: ClipboardDataStub): void {
   ;(document as unknown as { execCommand: (command: string) => boolean }).execCommand = (
     command
@@ -61,11 +54,8 @@ describe('web copy fallback vs. the terminal selection', () => {
   })
 
   it('copies the requested text even when the selection anchor is inside a terminal', () => {
-    // Every Orca copy affordance (Copy Pane ID, Copy Path, commit SHA, PR URL) leaves
-    // the DOM selection inside the terminal, so execCommand('copy') dispatches from
-    // there. A capture-phase handler sets text/plain FIRST and xterm's bubble handler
-    // then overwrites it — and preventDefault does not stop propagation, so the copy
-    // reports success while the clipboard holds the terminal selection.
+    // Copy Path / Copy Pane ID leave the selection in the terminal, so the copy event
+    // dispatches from there and a capture-phase write loses to xterm's bubble handler.
     const terminalElement = mountTerminalWithSelection('rm -rf ./secret-dir')
     const clipboardData = createClipboardDataStub()
     stubExecCommand(terminalElement, clipboardData)
@@ -75,8 +65,8 @@ describe('web copy fallback vs. the terminal selection', () => {
   })
 
   it('wins over a copy handler that still runs after the document', () => {
-    // Bubbling reaches the document before the window, so phase order alone does not
-    // protect against a window-level listener — only stopImmediatePropagation does.
+    // Bubbling hits the document before the window, so only stopImmediatePropagation
+    // protects against a window-level listener.
     const source = document.createElement('div')
     document.body.appendChild(source)
     const clipboardData = createClipboardDataStub()

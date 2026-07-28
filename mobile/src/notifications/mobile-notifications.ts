@@ -71,7 +71,10 @@ export function subscribeToDesktopNotifications(client: RpcClient, hostId: strin
           releaseQueuedShowNotificationId(session, event.notificationId)
         }
       }
-    })
+      // Why swallowed: the caller is an un-awaited handler, so a rejected show would
+      // surface as an unhandled rejection (a RN redbox) instead of being retried by
+      // the next catch-up — which is now possible, since `seen` is marked after the show.
+    }).catch(() => {})
   }
 
   async function deliverLive(
@@ -79,15 +82,20 @@ export function subscribeToDesktopNotifications(client: RpcClient, hostId: strin
     event: NotificationEvent | DismissNotificationEvent
   ): Promise<void> {
     adoptNotificationEpoch(session, hostId, event.notificationEpoch)
-    // Why (#8129): mark seen on the live path too, so a later replay of an already-pushed id dedups instead of double-pushing.
-    const key = seenKeyForEvent(event)
-    if (key) {
-      session.seen.add(key)
-    }
+    const epochAtDelivery = session.lastDeliveredEpoch
     if (type === 'notification') {
       await showLocalNotification(event as NotificationEvent, hostId)
     } else {
       await dismissLocalNotification(event as DismissNotificationEvent, hostId)
+    }
+    // Why after the await, exactly like the watermark below: `seen` asserts this event
+    // reached the user (#8129). Marked before, a rejected show leaves the key behind and
+    // every later replay is dropped as a duplicate — loss the quarantine cannot recover,
+    // since the first event to drain a batch lifts it past the one never shown.
+    const key = seenKeyForEvent(event)
+    // A mid-flight epoch adoption already cleared the counter lifetime this key indexes.
+    if (key && session.lastDeliveredEpoch === epochAtDelivery) {
+      session.seen.add(key)
     }
     // Why after the await (#8591): the watermark is a promise that everything up
     // to this seq has been shown. Advancing it before the local notification lands
@@ -110,12 +118,10 @@ export function subscribeToDesktopNotifications(client: RpcClient, hostId: strin
   async function deliverMissedEvent(
     event: NotificationEvent | DismissNotificationEvent
   ): Promise<void> {
+    // No pre-marking here either: deliverLive marks the key once the show lands.
     const key = seenKeyForEvent(event)
     if (key && session.seen.has(key)) {
       return
-    }
-    if (key) {
-      session.seen.add(key)
     }
     if (event.type === 'notification') {
       if (!shouldQueueShowForNotificationId(session, event.notificationId)) {
@@ -193,7 +199,10 @@ export function subscribeToDesktopNotifications(client: RpcClient, hostId: strin
           quarantineCatchUpWatermark(session, hostId, contiguousSeq)
         }
       }
-    })
+      // Why swallowed here: the `finally` above already recorded the contiguous point,
+      // and the only caller is an un-awaited 'ready' continuation — letting a failed
+      // show escape turns every one into an unhandled rejection (a RN redbox).
+    }).catch(() => {})
   }
 
   seedWatermarkFromStorage(session, hostId)

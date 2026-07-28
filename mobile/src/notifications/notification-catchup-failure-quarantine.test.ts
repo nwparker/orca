@@ -160,7 +160,9 @@ describe('#8591 catch-up failure quarantines the watermark', () => {
     const titles = vi
       .mocked(Notifications.scheduleNotificationAsync)
       .mock.calls.map((call) => (call[0] as { content: { title: string } }).content.title)
-    expect(titles).toEqual(expect.arrayContaining(['m6', 'm7']))
+    // Exact, not arrayContaining: a duplicate here is the double-push `seen` prevents.
+    // m11/m12 are the live events that kept flowing while the gap stayed open.
+    expect(titles).toEqual(['m11', 'm12', 'm6', 'm7'])
 
     // Only now may the watermark move past the recovered range.
     expect(persistedSeq()).toBe(12)
@@ -233,6 +235,82 @@ describe('#8591 catch-up failure quarantines the watermark', () => {
     await flushAsync()
 
     expect(host2.askedFrom).toEqual([6])
+    expect(
+      vi
+        .mocked(Notifications.scheduleNotificationAsync)
+        .mock.calls.map((call) => (call[0] as { content: { title: string } }).content.title)
+    ).toEqual(['m6', 'm20', 'm7', 'm8'])
     expect(persistedSeq()).toBe(20)
+  })
+
+  it('re-shows a replay whose show threw, instead of dropping it as already seen', async () => {
+    // The quarantine only holds the RANGE. If the failing event is also marked seen,
+    // the next catch-up re-fetches it and the dedup guard drops it — the banner is
+    // never shown, and the first later event to drain the batch lifts the quarantine
+    // past it. Silent loss with the watermark looking healthy.
+    storage.set(WATERMARK_KEY, JSON.stringify({ seq: 5, epoch: 'epoch-1' }))
+    const host = makeHostClient()
+    host.setOutcome({ kind: 'ok', notifications: [notification(6), notification(7)] })
+
+    let failNext = true
+    vi.mocked(Notifications.scheduleNotificationAsync).mockImplementation(async (request) => {
+      const title = (request as { content: { title: string } }).content.title
+      if (title === 'm6' && failNext) {
+        failNext = false
+        throw new Error('scheduling rejected')
+      }
+      return 'sched-1'
+    })
+
+    subscribeToDesktopNotifications(host.client, 'host-1')
+    host.onData?.({ type: 'ready', subscriptionId: 'sub-1', epoch: 'epoch-1' })
+    await flushAsync()
+    expect(persistedSeq()).toBe(5)
+
+    host.onData?.({ type: 'ready', subscriptionId: 'sub-1', epoch: 'epoch-1' })
+    await flushAsync()
+
+    const titles = vi
+      .mocked(Notifications.scheduleNotificationAsync)
+      .mock.calls.map((call) => (call[0] as { content: { title: string } }).content.title)
+    expect(titles).toEqual(['m6', 'm6', 'm7'])
+    expect(host.askedFrom).toEqual([5, 5])
+    expect(persistedSeq()).toBe(7)
+  })
+
+  it('re-shows a live event whose show threw, instead of dropping it as already seen', async () => {
+    // The same hole without any catch-up failing: the live path marks seen before the
+    // show, so a rejected show leaves the key behind while the watermark stays put.
+    // The next catch-up dutifully re-fetches the seq and the guard eats it.
+    storage.set(WATERMARK_KEY, JSON.stringify({ seq: 5, epoch: 'epoch-1' }))
+    const host = makeHostClient()
+    host.setOutcome({ kind: 'ok', notifications: [] })
+
+    let failNext = true
+    vi.mocked(Notifications.scheduleNotificationAsync).mockImplementation(async () => {
+      if (failNext) {
+        failNext = false
+        throw new Error('scheduling rejected')
+      }
+      return 'sched-1'
+    })
+
+    subscribeToDesktopNotifications(host.client, 'host-1')
+    host.onData?.({ type: 'ready', subscriptionId: 'sub-1', epoch: 'epoch-1' })
+    await flushAsync()
+
+    host.onData?.({ ...notification(6), notificationEpoch: 'epoch-1' })
+    await flushAsync()
+    expect(persistedSeq()).toBe(5)
+
+    host.setOutcome({ kind: 'ok', notifications: [notification(6)] })
+    host.onData?.({ type: 'ready', subscriptionId: 'sub-1', epoch: 'epoch-1' })
+    await flushAsync()
+
+    const titles = vi
+      .mocked(Notifications.scheduleNotificationAsync)
+      .mock.calls.map((call) => (call[0] as { content: { title: string } }).content.title)
+    expect(titles).toEqual(['m6', 'm6'])
+    expect(persistedSeq()).toBe(6)
   })
 })

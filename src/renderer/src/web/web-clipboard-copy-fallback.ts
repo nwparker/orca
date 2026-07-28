@@ -11,10 +11,8 @@ export function copyClipboardTextViaExecCommand(text: string, doc: Document = do
       return
     }
     event.clipboardData.setData('text/plain', text)
-    // Why: xterm's own copy listener sits on terminal.element and overwrites
-    // text/plain with the terminal selection. Capture ran before it and lost;
-    // bubbling to the document runs after it, and this keeps any later
-    // document-level listener from clobbering us in turn.
+    // Why bubble + stop: xterm's listener on terminal.element overwrites text/plain,
+    // and preventDefault alone does not stop it or any later window-level handler.
     event.stopImmediatePropagation()
     event.preventDefault()
     served = true
