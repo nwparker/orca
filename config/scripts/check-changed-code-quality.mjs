@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import process from 'node:process'
 import { pathToFileURL } from 'node:url'
+import { resolvePullRequestDiffBase } from './git-pull-request-diff-base.mjs'
 
 const SOURCE_FILE_PATTERN = /\.(?:[cm]?[jt]sx?)$/
 const OXLINT_SCANS = [
@@ -82,8 +83,9 @@ function resolveBase(root, requestedBase) {
 export function collectAddedLineRanges(root, requestedBase) {
   const base = resolveBase(root, requestedBase)
   const mergeBase = runGit(root, ['merge-base', base, 'HEAD']).trim()
+  const comparisonBase = resolvePullRequestDiffBase(root, mergeBase)
   const changedFiles = splitNullDelimited(
-    runGit(root, ['diff', '--name-only', '-z', '--diff-filter=ACMRTUB', mergeBase, '--'])
+    runGit(root, ['diff', '--name-only', '-z', '--diff-filter=ACMRTUB', comparisonBase, '--'])
   )
   const untrackedFiles = splitNullDelimited(
     runGit(root, ['ls-files', '--others', '--exclude-standard', '-z'])
@@ -94,7 +96,7 @@ export function collectAddedLineRanges(root, requestedBase) {
     if (!SOURCE_FILE_PATTERN.test(file) || !existsSync(path.join(root, file))) {
       continue
     }
-    const diff = runGit(root, ['diff', '--unified=0', '--no-color', mergeBase, '--', file])
+    const diff = runGit(root, ['diff', '--unified=0', '--no-color', comparisonBase, '--', file])
     const ranges = parseAddedLineRanges(diff)
     if (ranges.length > 0) {
       rangesByFile.set(file, ranges)
@@ -109,7 +111,7 @@ export function collectAddedLineRanges(root, requestedBase) {
     const lineCount = readFileSync(absolutePath, 'utf8').split(/\r?\n/).length
     rangesByFile.set(file, [{ start: 1, end: lineCount }])
   }
-  return { base, mergeBase, rangesByFile }
+  return { base, comparisonBase, rangesByFile }
 }
 
 function parseOxlintOutput(stdout, label) {
@@ -187,7 +189,7 @@ export function main(
   root = process.cwd(),
   requestedBase = process.argv.slice(2).find((argument) => argument !== '--')
 ) {
-  const { base, mergeBase, rangesByFile } = collectAddedLineRanges(root, requestedBase)
+  const { base, comparisonBase, rangesByFile } = collectAddedLineRanges(root, requestedBase)
   const files = [...rangesByFile.keys()]
   if (files.length === 0) {
     console.log(`Changed-code quality gate: no changed JavaScript or TypeScript since ${base}.`)
@@ -210,11 +212,11 @@ export function main(
 
   if (failures > 0) {
     console.error(
-      `Changed-code quality gate failed with ${failures} finding(s) since ${mergeBase.slice(0, 12)}.`
+      `Changed-code quality gate failed with ${failures} finding(s) since ${comparisonBase.slice(0, 12)}.`
     )
     return 1
   }
-  console.log(`Changed-code quality gate passed since ${mergeBase.slice(0, 12)}.`)
+  console.log(`Changed-code quality gate passed since ${comparisonBase.slice(0, 12)}.`)
   return 0
 }
 
