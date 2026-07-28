@@ -101,7 +101,6 @@ export const ORCHESTRATION_COMMAND_SPECS: CommandSpec[] = [
       'retry-request'
     ],
     notes: [
-      'Valid --types values: status, dispatch, worker_done, merge_ready, escalation, handoff, decision_gate, question, heartbeat.',
       'On Windows PowerShell, quote comma-separated type filters, e.g. --types "worker_done,escalation".',
       '--format renders the returned rows as local text only; it never writes to another terminal.',
       'A bound Run replays the same Delivery until --ack; process every message before acknowledging.'

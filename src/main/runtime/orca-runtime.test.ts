@@ -17927,6 +17927,50 @@ describe('OrcaRuntimeService', () => {
     await expect(runtime.isTerminalRunningAgent(handle)).resolves.toBe(false)
   })
 
+  it('cancels a bounded foreground-process probe', async () => {
+    const abort = new AbortController()
+    const getForegroundProcess = vi.fn(
+      (
+        _ptyId: string,
+        options?: { signal?: AbortSignal; deadlineMs?: number }
+      ): Promise<string | null> =>
+        new Promise((_resolve, reject) => {
+          options?.signal?.addEventListener(
+            'abort',
+            () => reject(new Error('provider_probe_aborted')),
+            { once: true }
+          )
+        })
+    )
+    const runtime = new OrcaRuntimeService(store)
+    runtime.setPtyController({
+      spawn: vi.fn().mockResolvedValue({ id: 'pty-bg' }),
+      write: () => true,
+      kill: () => true,
+      getForegroundProcess
+    })
+    runtime.attachWindow(1)
+    runtime.syncWindowGraph(1, { tabs: [], leaves: [] })
+    const { handle } = await runtime.createTerminal(`path:${TEST_WORKTREE_PATH}`, {
+      command: 'bash',
+      title: 'bash'
+    })
+    syncSinglePty(runtime, 'pty-bg', { paneTitle: 'bash' })
+    const deadlineMs = Date.now() + 60_000
+
+    const result = runtime.isTerminalRunningAgent(handle, {
+      signal: abort.signal,
+      deadlineMs
+    })
+    abort.abort()
+
+    await expect(result).rejects.toThrow('request_aborted')
+    expect(getForegroundProcess).toHaveBeenCalledWith('pty-bg', {
+      signal: abort.signal,
+      deadlineMs
+    })
+  })
+
   it('does not recognize unresolved wrapper foregrounds as running agents', async () => {
     const getForegroundProcess = vi.fn().mockResolvedValue('node')
     const runtime = new OrcaRuntimeService(store)

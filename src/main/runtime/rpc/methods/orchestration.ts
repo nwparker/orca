@@ -1063,7 +1063,7 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
   defineMethod({
     name: 'orchestration.dispatch',
     params: DispatchParams,
-    handler: async (params, { runtime }) => {
+    handler: async (params, { runtime, signal }) => {
       const db = runtime.getOrchestrationDb()
       const task = db.getTask(params.task)
       if (!task) {
@@ -1108,7 +1108,17 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
 
       // Why: injecting the preamble into a bare shell dumps it as shell commands (gibberish), so require a detected agent first.
       if (params.inject) {
-        const hasAgent = await runtime.isTerminalRunningAgent(to)
+        const readinessDeadline = Date.now() + ORCHESTRATION_DISPATCH_READY_TIMEOUT_MS
+        if (signal?.aborted) {
+          throw new Error('request_aborted')
+        }
+        const hasAgent = await runtime.isTerminalRunningAgent(to, {
+          signal,
+          deadlineMs: readinessDeadline
+        })
+        if (signal?.aborted) {
+          throw new Error('request_aborted')
+        }
         if (!hasAgent) {
           throw new Error(
             `Cannot dispatch --inject to terminal ${to}: no recognized agent detected. ` +
@@ -1116,9 +1126,14 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
               'or dispatch without --inject and send the prompt manually.'
           )
         }
+        const remainingMs = readinessDeadline - Date.now()
+        if (remainingMs <= 0) {
+          throw new Error('Agent did not become ready (timeout).')
+        }
         const wait = await runtime.waitForTerminal(to, {
           condition: 'tui-idle',
-          timeoutMs: ORCHESTRATION_DISPATCH_READY_TIMEOUT_MS
+          timeoutMs: remainingMs,
+          signal
         })
         if (!wait.satisfied) {
           throw new Error(

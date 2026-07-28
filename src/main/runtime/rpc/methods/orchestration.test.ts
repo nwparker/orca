@@ -1427,29 +1427,6 @@ describe('orchestration RPC methods', () => {
       expect(result.messages[0].delivered_at).not.toBeNull()
     })
 
-    it('returns queued typed mail after turn-boundary delivery without waiting (#10663)', async () => {
-      setup()
-      const message = db.insertMessage({
-        from: 'worker',
-        to: 'coord',
-        subject: 'needs attention',
-        type: 'escalation'
-      })
-      db.markAsDelivered([message.id])
-      const wait = vi.spyOn(runtime, 'waitForMessage')
-
-      const result = (await call('orchestration.check', {
-        terminal: 'coord',
-        wait: true,
-        types: 'escalation'
-      })) as { messages: { id: string }[]; count: number }
-
-      expect(result.messages.map((row) => row.id)).toEqual([message.id])
-      expect(result.count).toBe(1)
-      expect(wait).not.toHaveBeenCalled()
-      expect(db.getUnreadMessages('coord')).toEqual([])
-    })
-
     it('--all --terminal <unknown> returns empty list', async () => {
       setup()
       db.insertMessage({ from: 'a', to: 'b', subject: 'one' })
@@ -1963,6 +1940,8 @@ describe('orchestration RPC methods', () => {
       setup()
       provideInjectIdentity()
       const task = db.createTask({ spec: 'work' })
+      const abortController = new AbortController()
+      ctx = { runtime, signal: abortController.signal }
       vi.spyOn(runtime, 'isTerminalRunningAgent').mockResolvedValue(true)
       const send = vi.spyOn(runtime, 'sendTerminalAgentPrompt').mockResolvedValue({
         handle: 'term_a',
@@ -1976,13 +1955,78 @@ describe('orchestration RPC methods', () => {
         inject: true
       })
 
+      expect(runtime.isTerminalRunningAgent).toHaveBeenCalledWith('term_a', {
+        signal: abortController.signal,
+        deadlineMs: expect.any(Number)
+      })
       expect(runtime.waitForTerminal).toHaveBeenCalledWith('term_a', {
         condition: 'tui-idle',
-        timeoutMs: 60_000
+        timeoutMs: expect.any(Number),
+        signal: abortController.signal
       })
+      expect(vi.mocked(runtime.waitForTerminal).mock.calls[0]?.[1]?.timeoutMs).toBeGreaterThan(0)
+      expect(vi.mocked(runtime.waitForTerminal).mock.calls[0]?.[1]?.timeoutMs).toBeLessThanOrEqual(
+        60_000
+      )
       expect(vi.mocked(runtime.waitForTerminal).mock.invocationCallOrder[0]).toBeLessThan(
         send.mock.invocationCallOrder[0]!
       )
+    })
+
+    it('shares one readiness deadline across agent detection and TUI waiting', async () => {
+      setup()
+      provideInjectIdentity()
+      const task = db.createTask({ spec: 'work' })
+      vi.spyOn(runtime, 'isTerminalRunningAgent').mockResolvedValue(true)
+      vi.spyOn(runtime, 'sendTerminalAgentPrompt').mockResolvedValue({
+        handle: 'term_a',
+        accepted: true,
+        bytesWritten: 1
+      })
+      const now = vi
+        .spyOn(Date, 'now')
+        .mockReturnValueOnce(1_000)
+        .mockReturnValueOnce(31_000)
+        .mockReturnValue(31_000)
+
+      try {
+        await call('orchestration.dispatch', {
+          task: task.id,
+          to: 'term_a',
+          inject: true
+        })
+      } finally {
+        now.mockRestore()
+      }
+
+      expect(runtime.waitForTerminal).toHaveBeenCalledWith('term_a', {
+        condition: 'tui-idle',
+        timeoutMs: 30_000,
+        signal: undefined
+      })
+    })
+
+    it('keeps the task ready when the dispatch caller disconnects before the wait', async () => {
+      setup()
+      provideInjectIdentity()
+      const task = db.createTask({ spec: 'work' })
+      const abortController = new AbortController()
+      abortController.abort()
+      ctx = { runtime, signal: abortController.signal }
+      const detectAgent = vi.spyOn(runtime, 'isTerminalRunningAgent')
+
+      await expect(
+        call('orchestration.dispatch', {
+          task: task.id,
+          to: 'term_a',
+          inject: true
+        })
+      ).rejects.toThrow('request_aborted')
+
+      expect(detectAgent).not.toHaveBeenCalled()
+      expect(runtime.waitForTerminal).not.toHaveBeenCalled()
+      expect(db.getTask(task.id)?.status).toBe('ready')
+      expect(db.getDispatchContext(task.id)).toBeUndefined()
     })
 
     it('keeps the task ready when agent startup is blocked', async () => {

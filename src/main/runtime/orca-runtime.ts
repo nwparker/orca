@@ -1478,7 +1478,10 @@ type RuntimePtyController = {
   ): Promise<boolean>
   markReversibleStops?(ptyIds: readonly string[]): () => void
   getCwd?(ptyId: string): Promise<string | null>
-  getForegroundProcess(ptyId: string): Promise<string | null>
+  getForegroundProcess(
+    ptyId: string,
+    options?: { signal?: AbortSignal; deadlineMs?: number }
+  ): Promise<string | null>
   inspectProcess?(
     ptyId: string
   ): Promise<{ foregroundProcess: string | null; hasChildProcesses: boolean; unavailable?: true }>
@@ -1547,6 +1550,49 @@ const MOBILE_TERMINAL_CREATE_RESULT_TTL_MS = 60_000
 const WORKTREE_CREATE_RESULT_TTL_MS = 60_000
 const FOREGROUND_AGENT_WRAPPER_RETRY_INTERVAL_MS = 150
 const FOREGROUND_AGENT_WRAPPER_RETRY_TIMEOUT_MS = 6_500
+type TerminalAgentProbeOptions = { signal?: AbortSignal; deadlineMs?: number }
+
+function awaitTerminalAgentProbe<T>(
+  operation: Promise<T>,
+  options: TerminalAgentProbeOptions
+): Promise<T> {
+  if (!options.signal && options.deadlineMs === undefined) {
+    return operation
+  }
+  return new Promise<T>((resolve, reject) => {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const cleanup = (): void => {
+      if (timer) {
+        clearTimeout(timer)
+      }
+      options.signal?.removeEventListener('abort', onAbort)
+    }
+    const settle = (fn: () => void): void => {
+      cleanup()
+      fn()
+    }
+    const onAbort = (): void => settle(() => reject(new Error('request_aborted')))
+    options.signal?.addEventListener('abort', onAbort, { once: true })
+    const remainingMs =
+      options.deadlineMs === undefined ? undefined : options.deadlineMs - Date.now()
+    if (options.signal?.aborted) {
+      onAbort()
+      return
+    }
+    if (remainingMs !== undefined) {
+      if (remainingMs <= 0) {
+        settle(() => reject(new Error('timeout')))
+        return
+      }
+      timer = setTimeout(() => settle(() => reject(new Error('timeout'))), remainingMs)
+    }
+    operation.then(
+      (value) => settle(() => resolve(value)),
+      (error: unknown) => settle(() => reject(error))
+    )
+  })
+}
+
 const BRACKETED_PASTE_BEGIN = '\x1b[200~'
 const BRACKETED_PASTE_END = '\x1b[201~'
 const BRACKETED_PASTE_QUIET_MS = 1500
@@ -27288,12 +27334,28 @@ export class OrcaRuntimeService {
   }
 
   // Why: title is the tightest agent-presence signal, but a Claude management title is negative evidence for task activity.
-  async isTerminalRunningAgent(handle: string): Promise<boolean> {
+  async isTerminalRunningAgent(
+    handle: string,
+    options: TerminalAgentProbeOptions = {}
+  ): Promise<boolean> {
+    if (
+      options.signal?.aborted ||
+      (options.deadlineMs !== undefined && Date.now() >= options.deadlineMs)
+    ) {
+      throw new Error(options.signal?.aborted ? 'request_aborted' : 'timeout')
+    }
+    return await awaitTerminalAgentProbe(this.detectTerminalRunningAgent(handle, options), options)
+  }
+
+  private async detectTerminalRunningAgent(
+    handle: string,
+    options: TerminalAgentProbeOptions
+  ): Promise<boolean> {
     try {
       const pty = this.getLivePtyForHandle(handle)
       if (pty) {
         const leaf = this.getPrimaryLeafForPty(pty.pty.ptyId)
-        return await this.isPtyRunningAgent(pty.pty, leaf)
+        return await this.isPtyRunningAgent(pty.pty, leaf, options)
       }
       const { leaf } = this.getLiveLeafForHandle(handle)
       // Why: check the leaf pane title and the tab title, which already carries OSC-enriched agent indicators (e.g. ✳ prefix).
@@ -27318,7 +27380,7 @@ export class OrcaRuntimeService {
       if (!leaf.ptyId || !this.ptyController) {
         return false
       }
-      const fg = await this.ptyController.getForegroundProcess(leaf.ptyId)
+      const fg = await this.readTerminalAgentForegroundProcess(leaf.ptyId, options)
       if (!fg) {
         return false
       }
@@ -27330,16 +27392,24 @@ export class OrcaRuntimeService {
       }
       // Why: review-note delivery auto-submits with Enter, so only known agent processes are safe (not arbitrary focused TUIs).
       return await this.isRecognizedForegroundAgentProcess(leaf.ptyId, fg, {
-        suppressClaude: shouldSuppressClaudeForeground
+        suppressClaude: shouldSuppressClaudeForeground,
+        ...options
       })
-    } catch {
+    } catch (error) {
+      if (
+        options.signal?.aborted ||
+        (options.deadlineMs !== undefined && Date.now() >= options.deadlineMs)
+      ) {
+        throw error
+      }
       return false
     }
   }
 
   private async isPtyRunningAgent(
     pty: RuntimePtyWorktreeRecord,
-    leaf: RuntimeLeafRecord | null = null
+    leaf: RuntimeLeafRecord | null = null,
+    options: TerminalAgentProbeOptions = {}
   ): Promise<boolean> {
     const leafTitle = leaf
       ? getLatestAgentCandidateTitle(
@@ -27379,7 +27449,7 @@ export class OrcaRuntimeService {
     if (!this.ptyController) {
       return false
     }
-    const fg = await this.ptyController.getForegroundProcess(pty.ptyId)
+    const fg = await this.readTerminalAgentForegroundProcess(pty.ptyId, options)
     if (!fg) {
       return false
     }
@@ -27392,14 +27462,15 @@ export class OrcaRuntimeService {
     }
     // Why: review-note delivery auto-submits with Enter, so only known agent processes are safe (not arbitrary focused TUIs).
     return await this.isRecognizedForegroundAgentProcess(pty.ptyId, fg, {
-      suppressClaude: shouldSuppressClaudeForeground
+      suppressClaude: shouldSuppressClaudeForeground,
+      ...options
     })
   }
 
   private async isRecognizedForegroundAgentProcess(
     ptyId: string,
     foregroundProcess: string,
-    options: { suppressClaude?: boolean } = {}
+    options: TerminalAgentProbeOptions & { suppressClaude?: boolean } = {}
   ): Promise<boolean> {
     const initialRecognition = recognizeAgentProcess(foregroundProcess)
     if (initialRecognition !== null) {
@@ -27413,10 +27484,18 @@ export class OrcaRuntimeService {
     }
     const startedAt = Date.now()
     while (Date.now() - startedAt < FOREGROUND_AGENT_WRAPPER_RETRY_TIMEOUT_MS) {
-      await new Promise((resolve) =>
-        setTimeout(resolve, FOREGROUND_AGENT_WRAPPER_RETRY_INTERVAL_MS)
-      )
-      const refreshedProcess = await this.ptyController.getForegroundProcess(ptyId)
+      if (
+        options.signal?.aborted ||
+        (options.deadlineMs !== undefined && Date.now() >= options.deadlineMs)
+      ) {
+        throw new Error(options.signal?.aborted ? 'request_aborted' : 'timeout')
+      }
+      const retryDelayMs =
+        options.deadlineMs === undefined
+          ? FOREGROUND_AGENT_WRAPPER_RETRY_INTERVAL_MS
+          : Math.min(FOREGROUND_AGENT_WRAPPER_RETRY_INTERVAL_MS, options.deadlineMs - Date.now())
+      await new Promise((resolve) => setTimeout(resolve, Math.max(1, retryDelayMs)))
+      const refreshedProcess = await this.readTerminalAgentForegroundProcess(ptyId, options)
       const refreshedRecognition = recognizeAgentProcess(refreshedProcess)
       if (refreshedRecognition !== null) {
         return !(
@@ -27429,6 +27508,16 @@ export class OrcaRuntimeService {
       }
     }
     return false
+  }
+
+  private readTerminalAgentForegroundProcess(
+    ptyId: string,
+    options: TerminalAgentProbeOptions
+  ): Promise<string | null> {
+    if (!options.signal && options.deadlineMs === undefined) {
+      return this.ptyController!.getForegroundProcess(ptyId)
+    }
+    return this.ptyController!.getForegroundProcess(ptyId, options)
   }
 
   private isAgentWrapperForegroundProcess(processName: string): boolean {

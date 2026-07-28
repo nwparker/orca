@@ -4,9 +4,24 @@ import { join } from 'node:path'
 import { createServer, type Server, type Socket } from 'node:net'
 import { afterEach, describe, expect, it } from 'vitest'
 import { RuntimeClient } from './client'
+import { resolveRuntimeClientTimeoutMs } from './client-timeout-policy'
 
 const servers = new Set<Server>()
 const sockets = new Set<Socket>()
+
+describe('RuntimeClient dispatch timeout policy', () => {
+  it('adds long-poll grace only to injected non-preview dispatches', () => {
+    expect(resolveRuntimeClientTimeoutMs('orchestration.dispatch', { inject: true }, 1_000)).toBe(
+      70_000
+    )
+    expect(
+      resolveRuntimeClientTimeoutMs('orchestration.dispatch', { inject: true, dryRun: true }, 1_000)
+    ).toBe(1_000)
+    expect(resolveRuntimeClientTimeoutMs('orchestration.dispatch', { inject: false }, 1_000)).toBe(
+      1_000
+    )
+  })
+})
 
 afterEach(async () => {
   for (const socket of sockets) {
