@@ -36,6 +36,7 @@ describe('OpenCode hook plugin source', () => {
     expect(source).toContain('currentSessionID = session.parentID;')
     expect(source).toContain('rememberSessionRoot(id, currentSessionID)')
     expect(source).toContain('{ path: { id: sessionID }, signal }')
+    expect(source).toContain('[{ sessionID }, { signal }]')
     expect(source.indexOf('[{ sessionID }, { signal }]')).toBeLessThan(
       source.indexOf('{ path: { id: sessionID }, signal }')
     )
@@ -45,7 +46,9 @@ describe('OpenCode hook plugin source', () => {
     expect(source).toContain(
       'if (sessionID && (await isChildSession(client, sessionID)) !== false) {'
     )
-    expect(source).toContain('return null;')
+    expect(source).toContain(
+      'if (sessionID && (await isChildSession(client, sessionID)) !== false) {\n      return;\n    }'
+    )
   })
 
   it('still accepts an optional opaque plugin context instead of destructuring', () => {
