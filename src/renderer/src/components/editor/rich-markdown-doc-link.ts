@@ -9,28 +9,12 @@ import {
   parseMarkdownDocLink,
   resolveMarkdownDocLink
 } from './markdown-doc-links'
-import { isDocLinkLiteralCodeTextNode } from './rich-markdown-doc-link-code-context'
 import {
   isReservedRichMarkdownTransportBody,
   type RichMarkdownSourceTransport
 } from './rich-markdown-source-transport'
 import { renderRichMarkdownDocLinkHtml } from './rich-markdown-doc-link-dom'
-
-// Why: `.matchAll()` at each call site creates a fresh iterator so the shared
-// `/g` regex never leaks `lastIndex` state across nested or concurrent scans.
-const DOC_LINK_PATTERN = /\[\[([^[\]\r\n]+)\]\]/g
-const DOC_LINK_OPEN = '[['
-
-// Why the substring gate: both plugins walk every text node per transaction (and
-// per caret move), and a link needs `[[`, so this skips matchAll for most nodes.
-const canHoldDocLink = (
-  node: { type: { name: string }; text?: string },
-  parent: unknown
-): node is { type: { name: string }; text: string } =>
-  node.type.name === 'text' &&
-  !!node.text &&
-  node.text.includes(DOC_LINK_OPEN) &&
-  !isDocLinkLiteralCodeTextNode(node as never, parent as never)
+import { canHoldDocLink, DOC_LINK_PATTERN } from './rich-markdown-doc-link-scan'
 
 const docLinkDissolveKey = new PluginKey('docLinkDissolve')
 const docLinkAutoConvertKey = new PluginKey('docLinkAutoConvert')
