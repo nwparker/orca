@@ -1,7 +1,4 @@
-import {
-  isInjectedOrchestrationDispatch,
-  ORCHESTRATION_DISPATCH_READY_TIMEOUT_MS
-} from '../../shared/orchestration-dispatch-readiness'
+import { resolveOrchestrationAgentReadinessTimeoutMs } from '../../shared/orchestration-dispatch-readiness'
 
 const LONG_POLL_CLIENT_GRACE_MS = 10_000
 
@@ -10,11 +7,9 @@ export function resolveRuntimeClientTimeoutMs(
   params: unknown,
   defaultTimeoutMs: number
 ): number {
-  if (isInjectedOrchestrationDispatch(method, params)) {
-    return Math.max(
-      ORCHESTRATION_DISPATCH_READY_TIMEOUT_MS + LONG_POLL_CLIENT_GRACE_MS,
-      defaultTimeoutMs
-    )
+  const readinessTimeoutMs = resolveOrchestrationAgentReadinessTimeoutMs(method, params)
+  if (readinessTimeoutMs !== null) {
+    return Math.max(readinessTimeoutMs + LONG_POLL_CLIENT_GRACE_MS, defaultTimeoutMs)
   }
   if ((method === 'orchestration.check' && isWaitingCheck(params)) || method === 'terminal.wait') {
     const inner = Number(getTimeoutMsParam(params))

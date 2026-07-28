@@ -46,7 +46,7 @@ import {
   decodeTerminalStreamFrame,
   type TerminalStreamFrame
 } from '../../shared/terminal-stream-protocol'
-import { isInjectedOrchestrationDispatch } from '../../shared/orchestration-dispatch-readiness'
+import { isOrchestrationAgentReadinessRequest } from '../../shared/orchestration-dispatch-readiness'
 
 const DEFAULT_WS_PORT = 6768
 
@@ -428,7 +428,7 @@ function longPollClassOf(request: RpcRequest): LongPollClass | null {
     const params = request.params as { wait?: unknown } | undefined
     return params?.wait === true ? 'wait' : null
   }
-  if (isInjectedOrchestrationDispatch(request.method, request.params)) {
+  if (isOrchestrationAgentReadinessRequest(request.method, request.params)) {
     return 'wait'
   }
   return null

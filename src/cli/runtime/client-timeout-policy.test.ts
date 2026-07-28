@@ -21,6 +21,20 @@ describe('RuntimeClient dispatch timeout policy', () => {
       1_000
     )
   })
+
+  it('adds readiness grace to local and federated worker starts', () => {
+    expect(resolveRuntimeClientTimeoutMs('orchestration.workerStart', {}, 1_000)).toBe(70_000)
+    expect(
+      resolveRuntimeClientTimeoutMs('orchestration.workerStart', { timeoutMs: 5_000 }, 1_000)
+    ).toBe(15_000)
+    expect(
+      resolveRuntimeClientTimeoutMs(
+        'orchestration.federationAttachStart',
+        { timeoutMs: 8_000 },
+        1_000
+      )
+    ).toBe(18_000)
+  })
 })
 
 afterEach(async () => {

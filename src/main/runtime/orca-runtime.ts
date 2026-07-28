@@ -79,6 +79,12 @@ import {
   AGENT_PROMPT_SUBMIT_DELAY_MS,
   buildAgentPromptPasteBytes
 } from '../../shared/agent-prompt-injection'
+import {
+  createOrchestrationOperationCommitTracker,
+  isOrchestrationOperationOutcomeUnknown,
+  OrchestrationAgentPromptOutcomeUnknownError,
+  OrchestrationOperationOutcomeUnknownError
+} from '../../shared/orchestration-agent-prompt-outcome'
 import { gitExecFileAsync, gitSpawn, nonInteractiveGitEnv } from '../git/runner'
 import { runWithGitReadCacheInvalidation } from '../git/status'
 import {
@@ -851,7 +857,10 @@ import {
   shouldSetDisplayName,
   areWorktreePathsEqual
 } from '../ipc/worktree-logic'
-import { findCreatedWorktree } from '../ipc/created-worktree-reconciliation'
+import {
+  findConfirmedCreatedWorktree,
+  findCreatedWorktree
+} from '../ipc/created-worktree-reconciliation'
 import { worktreePathComparisonKey } from '../ipc/worktree-path-comparison'
 import {
   assertWorktreeDoesNotContainRegisteredWorktree,
@@ -1749,6 +1758,7 @@ type TerminalHandleRecord = {
 type TerminalWaiter = {
   handle: string
   condition: RuntimeTerminalWaitCondition
+  strictTuiIdle: boolean
   resolve: (result: RuntimeTerminalWait) => void
   reject: (error: Error) => void
   timeout: NodeJS.Timeout | null
@@ -3540,7 +3550,9 @@ export class OrcaRuntimeService {
     method: string,
     params: unknown,
     timeoutMs?: number,
-    envelope?: RuntimeOrchestrationEnvelope
+    envelope?: RuntimeOrchestrationEnvelope,
+    signal?: AbortSignal,
+    contractPreflightComplete = false
   ): Promise<unknown> {
     if (!this.orchestrationEnvironmentTransport) {
       throw new OrchestrationError(
@@ -3548,12 +3560,14 @@ export class OrcaRuntimeService {
         'Connected-server orchestration is unavailable in this runtime.'
       )
     }
-    if (isOrchestrationMutation(method, params)) {
+    if (isOrchestrationMutation(method, params) && !contractPreflightComplete) {
       const statusResponse = await this.orchestrationEnvironmentTransport.call(
         selector,
         'status.get',
         undefined,
-        timeoutMs
+        timeoutMs,
+        undefined,
+        signal
       )
       if (statusResponse.ok === false) {
         throw new OrchestrationError(
@@ -3578,7 +3592,8 @@ export class OrcaRuntimeService {
       timeoutMs,
       method.startsWith('orchestration.')
         ? { ...envelope, orchestrationContractVersion: ORCHESTRATION_CONTRACT_VERSION }
-        : envelope
+        : envelope,
+      signal
     )
     if (response.ok === false) {
       throw new OrchestrationError(response.error.code, response.error.message, response.error.data)
@@ -14558,25 +14573,21 @@ export class OrcaRuntimeService {
         }
       }
       completedPaste = true
+
+      await new Promise((resolve) => setTimeout(resolve, AGENT_PROMPT_SUBMIT_DELAY_MS))
+      await options.beforeWrite?.(ptyId)
+      const suffixWrote = this.ptyController?.write(ptyId, AGENT_PROMPT_SUBMIT) ?? false
+      if (!suffixWrote) {
+        throw new Error(options.suffixFailureError ?? 'terminal_not_writable')
+      }
     } catch (error) {
-      if (wrotePasteBytes && !completedPaste) {
+      if (!wrotePasteBytes) {
+        throw error
+      }
+      if (!completedPaste) {
         this.ptyController?.write(ptyId, AGENT_PROMPT_BRACKETED_PASTE_END)
       }
-      throw error
-    }
-
-    await new Promise((resolve) => setTimeout(resolve, AGENT_PROMPT_SUBMIT_DELAY_MS))
-    try {
-      await options.beforeWrite?.(ptyId)
-    } catch (error) {
-      if (options.suffixFailureError) {
-        throw new Error(options.suffixFailureError)
-      }
-      throw error
-    }
-    const suffixWrote = this.ptyController?.write(ptyId, AGENT_PROMPT_SUBMIT) ?? false
-    if (!suffixWrote) {
-      throw new Error(options.suffixFailureError ?? 'terminal_not_writable')
+      throw new OrchestrationAgentPromptOutcomeUnknownError(error)
     }
   }
 
@@ -14586,9 +14597,11 @@ export class OrcaRuntimeService {
       condition?: RuntimeTerminalWaitCondition
       timeoutMs?: number
       signal?: AbortSignal
+      strictTuiIdle?: boolean
     }
   ): Promise<RuntimeTerminalWait> {
     const condition = options?.condition ?? 'exit'
+    const strictTuiIdle = options?.strictTuiIdle === true
     const pty = this.getLivePtyForHandle(handle)
     if (pty) {
       if (condition === 'exit' && !pty.pty.connected) {
@@ -14609,7 +14622,7 @@ export class OrcaRuntimeService {
       if (
         condition === 'tui-idle' &&
         (this.getAdoptedPtyExplicitIdleStatus(pty.pty) === 'idle' ||
-          isKnownReadyPromptPreview(ptyWaitText))
+          isReadyPromptForTerminalWait(ptyWaitText, pty.pty.lastAgentStatus, strictTuiIdle))
       ) {
         return buildPtyTerminalWaitResult(handle, condition, pty.pty)
       }
@@ -14623,6 +14636,7 @@ export class OrcaRuntimeService {
         const waiter: TerminalWaiter = {
           handle,
           condition,
+          strictTuiIdle,
           resolve,
           reject,
           timeout: null,
@@ -14667,7 +14681,7 @@ export class OrcaRuntimeService {
             this.resolveWaiter(waiter, buildPtyTerminalWaitResult(handle, condition, live.pty))
           } else if (
             this.getAdoptedPtyExplicitIdleStatus(live.pty) === 'idle' ||
-            isKnownReadyPromptPreview(livePtyWaitText)
+            isReadyPromptForTerminalWait(livePtyWaitText, live.pty.lastAgentStatus, strictTuiIdle)
           ) {
             this.resolveWaiter(waiter, buildPtyTerminalWaitResult(handle, condition, live.pty))
           } else {
@@ -14700,7 +14714,7 @@ export class OrcaRuntimeService {
       const fastPathTitle = leaf.paneTitle ?? this.tabs.get(leaf.tabId)?.title
       if (
         (fastPathTitle && detectExplicitIdleStatusFromTitle(fastPathTitle) === 'idle') ||
-        isKnownReadyPromptPreview(leafWaitText)
+        isReadyPromptForTerminalWait(leafWaitText, leaf.lastAgentStatus, strictTuiIdle)
       ) {
         return buildTerminalWaitResult(handle, condition, leaf)
       }
@@ -14720,6 +14734,7 @@ export class OrcaRuntimeService {
       const waiter: TerminalWaiter = {
         handle,
         condition,
+        strictTuiIdle,
         resolve,
         reject,
         timeout: null,
@@ -14772,13 +14787,14 @@ export class OrcaRuntimeService {
             // the first waiter consumes the status and all later ones see null.
             this.resolveWaiter(waiter, buildTerminalWaitResult(handle, condition, live.leaf))
           } else {
-            // Why: renderer-synced previews can show a known ready prompt even
-            // while the last OSC title is still "working"; keep polling the
-            // preview/title until the waiter resolves or hits its timeout.
             const fastPathTitle = live.leaf.paneTitle ?? this.tabs.get(live.leaf.tabId)?.title
             if (
               (fastPathTitle && detectExplicitIdleStatusFromTitle(fastPathTitle) === 'idle') ||
-              isKnownReadyPromptPreview(liveLeafWaitText)
+              isReadyPromptForTerminalWait(
+                liveLeafWaitText,
+                live.leaf.lastAgentStatus,
+                strictTuiIdle
+              )
             ) {
               this.resolveWaiter(waiter, buildTerminalWaitResult(handle, condition, live.leaf))
             } else {
@@ -18503,7 +18519,8 @@ export class OrcaRuntimeService {
   private async createDefaultTabTerminals(
     worktreeSelector: string,
     worktreeId: string,
-    defaultTabs: CreateWorktreeResult['defaultTabs'] | undefined
+    defaultTabs: CreateWorktreeResult['defaultTabs'] | undefined,
+    signal?: AbortSignal
   ): Promise<string[]> {
     if (!defaultTabs || defaultTabs.tabs.length === 0 || !this.ptyController?.spawn) {
       return []
@@ -18514,7 +18531,8 @@ export class OrcaRuntimeService {
         const command = template.command?.trim()
         const terminal = await this.createTerminal(worktreeSelector, {
           ...(template.title ? { title: template.title } : {}),
-          ...(command && defaultTabs.runCommands ? { command } : {})
+          ...(command && defaultTabs.runCommands ? { command } : {}),
+          signal
         })
         handles.push(terminal.handle)
         if (template.color && terminal.tabId) {
@@ -18540,13 +18558,14 @@ export class OrcaRuntimeService {
     hasStartupTerminal: boolean
     setupCommandPlatform: 'windows' | 'posix'
     observeSetupCompletion?: boolean
+    signal?: AbortSignal
     // Why: when the agent startup is sequenced to wait for setup
     // (waitForAgentStartup), the startup PTY runs a wrapper that already embeds
     // the setup command. Pass that wrapped command through so the Setup tab runs
     // the same script the agent is waiting on instead of a bare runner.
     wrappedSetupCommand?: string
   }): Promise<{ setupSpawned: boolean; setupTerminalHandle: string | null }> {
-    if (!this.ptyController?.spawn) {
+    if (!this.ptyController?.spawn || args.signal?.aborted) {
       return { setupSpawned: false, setupTerminalHandle: null }
     }
     let setupSpawned = false
@@ -18555,9 +18574,13 @@ export class OrcaRuntimeService {
       const defaultTabHandles = await this.createDefaultTabTerminals(
         args.worktreeSelector,
         args.worktreeId,
-        args.defaultTabs
+        args.defaultTabs,
+        args.signal
       )
       let primaryTerminalHandle = args.primaryTerminalHandle ?? defaultTabHandles[0] ?? null
+      if (args.signal?.aborted) {
+        return { setupSpawned: false, setupTerminalHandle: null }
+      }
       const setupLaunchMode =
         (
           this.requireStore().getSettings() as Partial<
@@ -18565,7 +18588,7 @@ export class OrcaRuntimeService {
           >
         ).setupScriptLaunchMode ?? 'new-tab'
       if (!args.hasStartupTerminal && !primaryTerminalHandle) {
-        const terminal = await this.createTerminal(args.worktreeSelector)
+        const terminal = await this.createTerminal(args.worktreeSelector, { signal: args.signal })
         primaryTerminalHandle = terminal.handle
       }
       if (args.setup) {
@@ -18596,7 +18619,8 @@ export class OrcaRuntimeService {
           : this.createTerminal(args.worktreeSelector, {
               title: 'Setup',
               command: setupCommand,
-              env: setupEnv
+              env: setupEnv,
+              signal: args.signal
             }))
         setupTerminalHandle = setupTerminal.handle
         setupSpawned = true
@@ -18757,9 +18781,22 @@ export class OrcaRuntimeService {
     startupDraft?: string
     startupDraftPaste?: WorktreeStartupDraftPaste
     lineage?: WorktreeLineageInput
+    signal?: AbortSignal
+    onWorktreeCreateCommitted?: (worktree: { id: string; path: string; branch: string }) => void
+    startupTerminalIdentity?: Pick<
+      TerminalCreateOptions,
+      | 'agentSessionCreateOperationId'
+      | 'tabId'
+      | 'leafId'
+      | 'preAllocatedHandle'
+      | 'onPtySpawnCommitted'
+    >
   }): Promise<CreateWorktreeResult> {
     if (!this.store) {
       throw new Error('runtime_unavailable')
+    }
+    if (args.signal?.aborted) {
+      throw new Error('request_aborted')
     }
 
     const repo = await this.resolveRepoSelector(args.repoSelector)
@@ -18855,6 +18892,10 @@ export class OrcaRuntimeService {
       let didSpawnStartup = false
       let startupTerminal: CreateWorktreeResult['startupTerminal']
       if (effectiveStartup && this.ptyController?.spawn) {
+        const startupCommit = createOrchestrationOperationCommitTracker(
+          'Startup terminal creation',
+          args.startupTerminalIdentity?.onPtySpawnCommitted
+        )
         try {
           const startupTrustAgent = effectiveDraftPaste?.agent ?? effectiveCreatedWithAgent
           if (startupTrustAgent) {
@@ -18868,7 +18909,10 @@ export class OrcaRuntimeService {
               : {}),
             ...(effectiveCreatedWithAgent ? { launchAgent: effectiveCreatedWithAgent } : {}),
             startupCommandDelivery: effectiveStartup.startupCommandDelivery,
-            telemetry: effectiveStartup.telemetry
+            telemetry: effectiveStartup.telemetry,
+            signal: args.signal,
+            ...args.startupTerminalIdentity,
+            onPtySpawnCommitted: startupCommit.onCommitted
           })
           if (effectiveDraftPaste) {
             this.pasteStartupDraftWhenReady(terminal.handle, effectiveDraftPaste)
@@ -18886,6 +18930,10 @@ export class OrcaRuntimeService {
             surface: 'background'
           }
         } catch (err) {
+          startupCommit.rethrowIfCommitted(err)
+          if (isOrchestrationOperationOutcomeUnknown(err)) {
+            throw err
+          }
           const message = err instanceof Error ? err.message : String(err)
           warning = `Failed to create the startup terminal for ${worktree.path}: ${message}`
           console.warn(`[worktree-create] ${warning}`)
@@ -18899,7 +18947,7 @@ export class OrcaRuntimeService {
         }
       } else if (this.ptyController?.spawn && !didSpawnStartup) {
         try {
-          await this.createTerminal(`id:${worktree.id}`)
+          await this.createTerminal(`id:${worktree.id}`, { signal: args.signal })
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err)
           warning = warning
@@ -18966,7 +19014,13 @@ export class OrcaRuntimeService {
     const settings = createSettings
     const worktreePathSettings = getWorktreePathSettings(repo, settings)
     const localGitExecOptions = getLocalProjectGitExecOptions(this.requireStore(), repo)
-    const localWorktreeGitOptions = getLocalProjectWorktreeGitOptions(this.requireStore(), repo)
+    const storedLocalWorktreeGitOptions = getLocalProjectWorktreeGitOptions(
+      this.requireStore(),
+      repo
+    )
+    const localWorktreeGitOptions = args.signal
+      ? { ...storedLocalWorktreeGitOptions, signal: args.signal }
+      : storedLocalWorktreeGitOptions
     const hasLocalWorktreeGitOptions = hasLocalGitOptions(localWorktreeGitOptions)
     const localWorktreeGitOptionArgs: [] | [{ wslDistro?: string }] = hasLocalWorktreeGitOptions
       ? [localWorktreeGitOptions]
@@ -19251,19 +19305,11 @@ export class OrcaRuntimeService {
       ...(suggestLocalBaseRefUpdate ? { suggestLocalBaseRefUpdate } : {})
     }
     const defaultAddWorktreeOption = addProjectGitOptions()
-    const addResult: AddWorktreeResult =
-      (await (sparseDirectories.length > 0
-        ? checkoutExistingBranch
-          ? addSparseWorktree(
-              repo.path,
-              worktreePath,
-              branchName,
-              sparseDirectories,
-              baseBranch,
-              settings.refreshLocalBaseRefOnWorktreeCreate,
-              addProjectGitOptions(existingBranchOption)
-            )
-          : suggestLocalBaseRefUpdate
+    let addResult: AddWorktreeResult
+    try {
+      addResult =
+        (await (sparseDirectories.length > 0
+          ? checkoutExistingBranch
             ? addSparseWorktree(
                 repo.path,
                 worktreePath,
@@ -19271,9 +19317,9 @@ export class OrcaRuntimeService {
                 sparseDirectories,
                 baseBranch,
                 settings.refreshLocalBaseRefOnWorktreeCreate,
-                addProjectGitOptions({ ...remoteTrackingBaseOption, suggestLocalBaseRefUpdate })
+                addProjectGitOptions(existingBranchOption)
               )
-            : remoteTrackingBaseOption
+            : suggestLocalBaseRefUpdate
               ? addSparseWorktree(
                   repo.path,
                   worktreePath,
@@ -19281,9 +19327,9 @@ export class OrcaRuntimeService {
                   sparseDirectories,
                   baseBranch,
                   settings.refreshLocalBaseRefOnWorktreeCreate,
-                  addProjectGitOptions(remoteTrackingBaseOption)
+                  addProjectGitOptions({ ...remoteTrackingBaseOption, suggestLocalBaseRefUpdate })
                 )
-              : defaultAddWorktreeOption
+              : remoteTrackingBaseOption
                 ? addSparseWorktree(
                     repo.path,
                     worktreePath,
@@ -19291,27 +19337,27 @@ export class OrcaRuntimeService {
                     sparseDirectories,
                     baseBranch,
                     settings.refreshLocalBaseRefOnWorktreeCreate,
-                    defaultAddWorktreeOption
+                    addProjectGitOptions(remoteTrackingBaseOption)
                   )
-                : addSparseWorktree(
-                    repo.path,
-                    worktreePath,
-                    branchName,
-                    sparseDirectories,
-                    baseBranch,
-                    settings.refreshLocalBaseRefOnWorktreeCreate
-                  )
-        : checkoutExistingBranch
-          ? addWorktree(
-              repo.path,
-              worktreePath,
-              branchName,
-              baseBranch,
-              settings.refreshLocalBaseRefOnWorktreeCreate,
-              false,
-              addProjectGitOptions(existingBranchOption)
-            )
-          : suggestLocalBaseRefUpdate
+                : defaultAddWorktreeOption
+                  ? addSparseWorktree(
+                      repo.path,
+                      worktreePath,
+                      branchName,
+                      sparseDirectories,
+                      baseBranch,
+                      settings.refreshLocalBaseRefOnWorktreeCreate,
+                      defaultAddWorktreeOption
+                    )
+                  : addSparseWorktree(
+                      repo.path,
+                      worktreePath,
+                      branchName,
+                      sparseDirectories,
+                      baseBranch,
+                      settings.refreshLocalBaseRefOnWorktreeCreate
+                    )
+          : checkoutExistingBranch
             ? addWorktree(
                 repo.path,
                 worktreePath,
@@ -19319,9 +19365,9 @@ export class OrcaRuntimeService {
                 baseBranch,
                 settings.refreshLocalBaseRefOnWorktreeCreate,
                 false,
-                addProjectGitOptions({ ...remoteTrackingBaseOption, suggestLocalBaseRefUpdate })
+                addProjectGitOptions(existingBranchOption)
               )
-            : remoteTrackingBaseOption
+            : suggestLocalBaseRefUpdate
               ? addWorktree(
                   repo.path,
                   worktreePath,
@@ -19329,9 +19375,9 @@ export class OrcaRuntimeService {
                   baseBranch,
                   settings.refreshLocalBaseRefOnWorktreeCreate,
                   false,
-                  addProjectGitOptions(remoteTrackingBaseOption)
+                  addProjectGitOptions({ ...remoteTrackingBaseOption, suggestLocalBaseRefUpdate })
                 )
-              : defaultAddWorktreeOption
+              : remoteTrackingBaseOption
                 ? addWorktree(
                     repo.path,
                     worktreePath,
@@ -19339,15 +19385,55 @@ export class OrcaRuntimeService {
                     baseBranch,
                     settings.refreshLocalBaseRefOnWorktreeCreate,
                     false,
-                    defaultAddWorktreeOption
+                    addProjectGitOptions(remoteTrackingBaseOption)
                   )
-                : addWorktree(
-                    repo.path,
-                    worktreePath,
-                    branchName,
-                    baseBranch,
-                    settings.refreshLocalBaseRefOnWorktreeCreate
-                  ))) ?? {}
+                : defaultAddWorktreeOption
+                  ? addWorktree(
+                      repo.path,
+                      worktreePath,
+                      branchName,
+                      baseBranch,
+                      settings.refreshLocalBaseRefOnWorktreeCreate,
+                      false,
+                      defaultAddWorktreeOption
+                    )
+                  : addWorktree(
+                      repo.path,
+                      worktreePath,
+                      branchName,
+                      baseBranch,
+                      settings.refreshLocalBaseRefOnWorktreeCreate
+                    ))) ?? {}
+    } catch (error) {
+      if (args.signal?.aborted && error instanceof Error && error.name === 'AbortError') {
+        let reconciledWorktrees
+        try {
+          reconciledWorktrees = hasLocalGitOptions(storedLocalWorktreeGitOptions)
+            ? await listWorktrees(repo.path, storedLocalWorktreeGitOptions)
+            : await listWorktrees(repo.path)
+        } catch (reconciliationError) {
+          throw new OrchestrationOperationOutcomeUnknownError(
+            'Worktree creation',
+            reconciliationError
+          )
+        }
+        if (!findConfirmedCreatedWorktree(reconciledWorktrees, worktreePath, branchName)) {
+          throw new OrchestrationOperationOutcomeUnknownError('Worktree creation', error)
+        }
+        addResult = {}
+      } else {
+        throw error
+      }
+    }
+    try {
+      args.onWorktreeCreateCommitted?.({
+        id: `${repo.id}::${worktreePath}`,
+        path: worktreePath,
+        branch: branchName
+      })
+    } catch (error) {
+      console.warn('[worktree-create] physical-create observer failed:', error)
+    }
 
     let configuredPushTarget: GitPushTarget | undefined
     if (preparedPushTarget) {
@@ -19355,12 +19441,12 @@ export class OrcaRuntimeService {
         worktreePath,
         branchName,
         preparedPushTarget,
-        localWorktreeGitOptions
+        storedLocalWorktreeGitOptions
       )
     }
 
-    const gitWorktrees = hasLocalWorktreeGitOptions
-      ? await listWorktrees(repo.path, localWorktreeGitOptions)
+    const gitWorktrees = hasLocalGitOptions(storedLocalWorktreeGitOptions)
+      ? await listWorktrees(repo.path, storedLocalWorktreeGitOptions)
       : await listWorktrees(repo.path)
     // Why: Git may canonicalize a symlinked create path; its exact branch identifies the listed row.
     const created = findCreatedWorktree(gitWorktrees, worktreePath, branchName)
@@ -19576,6 +19662,10 @@ export class OrcaRuntimeService {
     }
 
     if (sequencedStartup && this.ptyController?.spawn) {
+      const startupCommit = createOrchestrationOperationCommitTracker(
+        'Startup terminal creation',
+        args.startupTerminalIdentity?.onPtySpawnCommitted
+      )
       try {
         // Why: automation startup must not depend on a renderer TerminalPane
         // mounting. Runtime-spawned PTYs run immediately and the UI adopts the
@@ -19593,7 +19683,10 @@ export class OrcaRuntimeService {
           ...(sequencedStartup.launchConfig ? { launchConfig: sequencedStartup.launchConfig } : {}),
           ...(effectiveCreatedWithAgent ? { launchAgent: effectiveCreatedWithAgent } : {}),
           startupCommandDelivery: sequencedStartup.startupCommandDelivery,
-          telemetry: sequencedStartup.telemetry
+          telemetry: sequencedStartup.telemetry,
+          signal: args.signal,
+          ...args.startupTerminalIdentity,
+          onPtySpawnCommitted: startupCommit.onCommitted
         })
         if (effectiveDraftPaste) {
           this.pasteStartupDraftWhenReady(terminal.handle, effectiveDraftPaste)
@@ -19607,6 +19700,10 @@ export class OrcaRuntimeService {
         startupTerminalPaneKey = terminal.paneKey ?? null
         startupTerminalPtyId = terminal.ptyId ?? null
       } catch (err) {
+        startupCommit.rethrowIfCommitted(err)
+        if (isOrchestrationOperationOutcomeUnknown(err)) {
+          throw err
+        }
         const message = err instanceof Error ? err.message : String(err)
         warning = warning
           ? `${warning} Also failed to create the startup terminal for ${worktreePath}: ${message}`
@@ -19639,6 +19736,7 @@ export class OrcaRuntimeService {
               : 'posix'
             : 'posix',
           observeSetupCompletion: args.observeSetupCompletion,
+          signal: args.signal,
           // Why: carry the wait-for-agent wrapped setup command (#6298) so the
           // Setup tab runs the same script the sequenced agent waits on.
           ...(wrappedSetupCommandStr ? { wrappedSetupCommand: wrappedSetupCommandStr } : {})
@@ -19694,6 +19792,7 @@ export class OrcaRuntimeService {
             : 'posix'
           : 'posix',
         observeSetupCompletion: args.observeSetupCompletion,
+        signal: args.signal,
         ...(wrappedSetupCommandStr ? { wrappedSetupCommand: wrappedSetupCommandStr } : {})
       })
       // Why: runtime owns setup spawning here, so the RPC result must omit setup
@@ -19710,7 +19809,7 @@ export class OrcaRuntimeService {
       }
     } else if (this.ptyController?.spawn) {
       try {
-        await this.createTerminal(`id:${worktree.id}`)
+        await this.createTerminal(`id:${worktree.id}`, { signal: args.signal })
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
         warning = warning
@@ -19823,6 +19922,16 @@ export class OrcaRuntimeService {
       startup?: WorktreeStartupLaunch
       startupFollowup?: WorktreeStartupFollowup
       startupDraftPaste?: WorktreeStartupDraftPaste
+      signal?: AbortSignal
+      onWorktreeCreateCommitted?: (worktree: { id: string; path: string; branch: string }) => void
+      startupTerminalIdentity?: Pick<
+        TerminalCreateOptions,
+        | 'agentSessionCreateOperationId'
+        | 'tabId'
+        | 'leafId'
+        | 'preAllocatedHandle'
+        | 'onPtySpawnCommitted'
+      >
     }
   ): Promise<CreateWorktreeResult> {
     if (!this.store) {
@@ -19837,47 +19946,56 @@ export class OrcaRuntimeService {
       webContents: { send: () => undefined }
     } as unknown as BrowserWindow
 
-    const result = await createRemoteWorktree(
-      {
-        repoId: repo.id,
-        name: args.name,
-        ...(args.displayName ? { displayName: args.displayName } : {}),
-        ...(args.baseBranch ? { baseBranch: args.baseBranch } : {}),
-        ...(args.compareBaseRef ? { compareBaseRef: args.compareBaseRef } : {}),
-        ...(args.branchNameOverride ? { branchNameOverride: args.branchNameOverride } : {}),
-        ...(args.runHooks ? { setupDecision: 'run' as const } : {}),
-        ...(!args.runHooks && args.setupDecision ? { setupDecision: args.setupDecision } : {}),
-        ...(args.sparseCheckout ? { sparseCheckout: args.sparseCheckout } : {}),
-        ...(args.linkedIssue != null ? { linkedIssue: args.linkedIssue } : {}),
-        ...(args.linkedPR != null ? { linkedPR: args.linkedPR } : {}),
-        ...(args.linkedLinearIssue ? { linkedLinearIssue: args.linkedLinearIssue } : {}),
-        ...(args.linkedLinearIssueWorkspaceId !== undefined
-          ? { linkedLinearIssueWorkspaceId: args.linkedLinearIssueWorkspaceId }
-          : {}),
-        ...(args.linkedLinearIssueOrganizationUrlKey !== undefined
-          ? { linkedLinearIssueOrganizationUrlKey: args.linkedLinearIssueOrganizationUrlKey }
-          : {}),
-        ...(args.linkedGitLabMR != null ? { linkedGitLabMR: args.linkedGitLabMR } : {}),
-        ...(args.linkedGitLabIssue != null ? { linkedGitLabIssue: args.linkedGitLabIssue } : {}),
-        ...(args.linkedBitbucketPR != null ? { linkedBitbucketPR: args.linkedBitbucketPR } : {}),
-        ...(args.linkedAzureDevOpsPR != null
-          ? { linkedAzureDevOpsPR: args.linkedAzureDevOpsPR }
-          : {}),
-        ...(args.linkedGiteaPR != null ? { linkedGiteaPR: args.linkedGiteaPR } : {}),
-        ...(args.pushTarget ? { pushTarget: args.pushTarget } : {}),
-        ...(args.workspaceStatus ? { workspaceStatus: args.workspaceStatus as never } : {}),
-        ...(args.manualOrder !== undefined ? { manualOrder: args.manualOrder } : {}),
-        ...(args.createdWithAgent ? { createdWithAgent: args.createdWithAgent } : {}),
-        ...(args.pendingFirstAgentMessageRename === true
-          ? { pendingFirstAgentMessageRename: true }
-          : {}),
-        ...(args.automationProvenance ? { automationProvenance: args.automationProvenance } : {}),
-        ...(args.cliProvenance ? { cliProvenance: args.cliProvenance } : {})
-      },
-      repo,
-      this.store as unknown as Store,
-      headlessWindow
-    )
+    let result: CreateWorktreeResult
+    try {
+      result = await createRemoteWorktree(
+        {
+          repoId: repo.id,
+          name: args.name,
+          ...(args.displayName ? { displayName: args.displayName } : {}),
+          ...(args.baseBranch ? { baseBranch: args.baseBranch } : {}),
+          ...(args.compareBaseRef ? { compareBaseRef: args.compareBaseRef } : {}),
+          ...(args.branchNameOverride ? { branchNameOverride: args.branchNameOverride } : {}),
+          ...(args.runHooks ? { setupDecision: 'run' as const } : {}),
+          ...(!args.runHooks && args.setupDecision ? { setupDecision: args.setupDecision } : {}),
+          ...(args.sparseCheckout ? { sparseCheckout: args.sparseCheckout } : {}),
+          ...(args.linkedIssue != null ? { linkedIssue: args.linkedIssue } : {}),
+          ...(args.linkedPR != null ? { linkedPR: args.linkedPR } : {}),
+          ...(args.linkedLinearIssue ? { linkedLinearIssue: args.linkedLinearIssue } : {}),
+          ...(args.linkedLinearIssueWorkspaceId !== undefined
+            ? { linkedLinearIssueWorkspaceId: args.linkedLinearIssueWorkspaceId }
+            : {}),
+          ...(args.linkedLinearIssueOrganizationUrlKey !== undefined
+            ? { linkedLinearIssueOrganizationUrlKey: args.linkedLinearIssueOrganizationUrlKey }
+            : {}),
+          ...(args.linkedGitLabMR != null ? { linkedGitLabMR: args.linkedGitLabMR } : {}),
+          ...(args.linkedGitLabIssue != null ? { linkedGitLabIssue: args.linkedGitLabIssue } : {}),
+          ...(args.linkedBitbucketPR != null ? { linkedBitbucketPR: args.linkedBitbucketPR } : {}),
+          ...(args.linkedAzureDevOpsPR != null
+            ? { linkedAzureDevOpsPR: args.linkedAzureDevOpsPR }
+            : {}),
+          ...(args.linkedGiteaPR != null ? { linkedGiteaPR: args.linkedGiteaPR } : {}),
+          ...(args.pushTarget ? { pushTarget: args.pushTarget } : {}),
+          ...(args.workspaceStatus ? { workspaceStatus: args.workspaceStatus as never } : {}),
+          ...(args.manualOrder !== undefined ? { manualOrder: args.manualOrder } : {}),
+          ...(args.createdWithAgent ? { createdWithAgent: args.createdWithAgent } : {}),
+          ...(args.pendingFirstAgentMessageRename === true
+            ? { pendingFirstAgentMessageRename: true }
+            : {}),
+          ...(args.automationProvenance ? { automationProvenance: args.automationProvenance } : {}),
+          ...(args.cliProvenance ? { cliProvenance: args.cliProvenance } : {})
+        },
+        repo,
+        this.store as unknown as Store,
+        headlessWindow,
+        args.onWorktreeCreateCommitted
+      )
+    } catch (error) {
+      if (args.signal?.aborted) {
+        throw new OrchestrationOperationOutcomeUnknownError('Remote worktree creation', error)
+      }
+      throw error
+    }
 
     if (args.comment !== undefined) {
       this.store.setWorktreeMeta(result.worktree.id, { comment: args.comment })
@@ -19916,7 +20034,11 @@ export class OrcaRuntimeService {
       wrappedSetupCommandStr = sequenced.setupCommand
     }
 
-    if (sequencedStartup && this.ptyController?.spawn) {
+    if (sequencedStartup && this.ptyController?.spawn && !args.signal?.aborted) {
+      const startupCommit = createOrchestrationOperationCommitTracker(
+        'Startup terminal creation',
+        args.startupTerminalIdentity?.onPtySpawnCommitted
+      )
       try {
         const startupTrustAgent = args.startupDraftPaste?.agent ?? args.createdWithAgent
         if (startupTrustAgent) {
@@ -19935,7 +20057,10 @@ export class OrcaRuntimeService {
           ...(sequencedStartup.launchConfig ? { launchConfig: sequencedStartup.launchConfig } : {}),
           ...(args.createdWithAgent ? { launchAgent: args.createdWithAgent } : {}),
           startupCommandDelivery: sequencedStartup.startupCommandDelivery,
-          telemetry: sequencedStartup.telemetry
+          telemetry: sequencedStartup.telemetry,
+          signal: args.signal,
+          ...args.startupTerminalIdentity,
+          onPtySpawnCommitted: startupCommit.onCommitted
         })
         if (args.startupDraftPaste) {
           this.pasteStartupDraftWhenReady(terminal.handle, args.startupDraftPaste)
@@ -19949,6 +20074,10 @@ export class OrcaRuntimeService {
         startupTerminalPaneKey = terminal.paneKey ?? null
         startupTerminalPtyId = terminal.ptyId ?? null
       } catch (err) {
+        startupCommit.rethrowIfCommitted(err)
+        if (isOrchestrationOperationOutcomeUnknown(err)) {
+          throw err
+        }
         const message = err instanceof Error ? err.message : String(err)
         warning = warning
           ? `${warning} Also failed to create the startup terminal for ${result.worktree.path}: ${message}`
@@ -19978,6 +20107,7 @@ export class OrcaRuntimeService {
               : 'posix'
             : 'posix',
           observeSetupCompletion: args.observeSetupCompletion,
+          signal: args.signal,
           // Why: carry the wait-for-agent wrapped setup command (#6298) so the
           // remote Setup tab runs the same script the sequenced agent waits on.
           ...(wrappedSetupCommandStr ? { wrappedSetupCommand: wrappedSetupCommandStr } : {})
@@ -20038,6 +20168,7 @@ export class OrcaRuntimeService {
             : 'posix'
           : 'posix',
         observeSetupCompletion: args.observeSetupCompletion,
+        signal: args.signal,
         ...(wrappedSetupCommandStr ? { wrappedSetupCommand: wrappedSetupCommandStr } : {})
       })
       // Why: runtime owns setup spawning here, so omit setup from the RPC result
@@ -20054,7 +20185,7 @@ export class OrcaRuntimeService {
       }
     } else if (!shouldActivate && this.ptyController?.spawn) {
       try {
-        await this.createTerminal(`path:${result.worktree.path}`)
+        await this.createTerminal(`path:${result.worktree.path}`, { signal: args.signal })
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
         warning = warning
@@ -28008,7 +28139,9 @@ export class OrcaRuntimeService {
           )
           return
         }
-        if (isKnownReadyPromptPreview(leafWaitText)) {
+        if (
+          isReadyPromptForTerminalWait(leafWaitText, leaf.lastAgentStatus, waiter.strictTuiIdle)
+        ) {
           if (waiter.pollInterval) {
             clearInterval(waiter.pollInterval)
             waiter.pollInterval = null
@@ -28018,6 +28151,7 @@ export class OrcaRuntimeService {
         }
         // Foreground fallback: a reported non-shell process with quiet output is treated as idle.
         if (
+          !waiter.strictTuiIdle &&
           leaf.lastAgentStatus === null &&
           leaf.ptyId &&
           this.ptyController &&
@@ -28079,7 +28213,7 @@ export class OrcaRuntimeService {
         // Why: adopted background PTY handles use their live xterm title as the same readiness signal as leaf handles.
         if (
           this.getAdoptedPtyExplicitIdleStatus(pty) === 'idle' ||
-          isKnownReadyPromptPreview(ptyWaitText)
+          isReadyPromptForTerminalWait(ptyWaitText, pty.lastAgentStatus, waiter.strictTuiIdle)
         ) {
           if (waiter.pollInterval) {
             clearInterval(waiter.pollInterval)
@@ -28088,7 +28222,12 @@ export class OrcaRuntimeService {
           this.resolveWaiter(waiter, buildPtyTerminalWaitResult(waiter.handle, 'tui-idle', pty))
           return
         }
-        if (pty.lastAgentStatus === null && this.ptyController && !foregroundPollInFlight) {
+        if (
+          !waiter.strictTuiIdle &&
+          pty.lastAgentStatus === null &&
+          this.ptyController &&
+          !foregroundPollInFlight
+        ) {
           foregroundPollInFlight = true
           startedForegroundPoll = true
           const fg = await this.ptyController.getForegroundProcess(pty.ptyId)
@@ -32637,6 +32776,14 @@ function isKnownReadyPromptPreview(preview: string): boolean {
     return false
   }
   return true
+}
+
+function isReadyPromptForTerminalWait(
+  preview: string,
+  currentStatus: AgentStatus | null,
+  strict: boolean
+): boolean {
+  return (!strict || currentStatus === null) && isKnownReadyPromptPreview(preview)
 }
 
 function detectTerminalWaitBlockedReason(preview: string): RuntimeTerminalWaitBlockedReason | null {

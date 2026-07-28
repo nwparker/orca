@@ -1,11 +1,5 @@
 import type { SshChannelMultiplexer } from '../ssh/ssh-channel-multiplexer'
-import type {
-  IPtyProvider,
-  PtyProbeOptions,
-  PtyProcessInfo,
-  PtySpawnOptions,
-  PtySpawnResult
-} from './types'
+import type { IPtyProvider, PtyProcessInfo, PtySpawnOptions, PtySpawnResult } from './types'
 import { toAppSshPtyId, toRelaySshPtyId } from './ssh-pty-id'
 import { createSshPtyAppliedSizeReader } from './ssh-pty-applied-size'
 import type {
@@ -31,6 +25,8 @@ import { SshPtySpawnExitRaceTracker } from './ssh-pty-spawn-exit-race'
 import { SshAgentSessionCapabilities } from './ssh-agent-session-capabilities'
 import type { PtyProcessInspection } from './pty-process-inspection'
 import { getSshPtyForegroundProcess } from './ssh-pty-foreground-process'
+
+type ForegroundProcessOptions = Parameters<IPtyProvider['getForegroundProcess']>[1]
 
 // Why: sequential relay teardown calls share one absolute budget; convert to the mux-relative timeout only at dispatch.
 function relayTimeoutOptions(deadlineMs: number | undefined): { timeoutMs: number } | undefined {
@@ -284,7 +280,10 @@ export class SshPtyProvider implements IPtyProvider {
     return result as boolean
   }
 
-  async getForegroundProcess(id: string, options?: PtyProbeOptions): Promise<string | null> {
+  async getForegroundProcess(
+    id: string,
+    options?: ForegroundProcessOptions
+  ): Promise<string | null> {
     return getSshPtyForegroundProcess(this.mux, this.toRelayPtyId(id), options)
   }
 
