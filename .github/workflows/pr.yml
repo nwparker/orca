@@ -294,7 +294,10 @@ jobs:
           # (pipeline status in `if` is not aborted by set -e). Merge-base limits the
           # list to files this PR introduced, not base-branch drift.
           CHANGED="$(git diff --name-only --merge-base "$BASE" "$HEAD")"
-          if printf '%s\n' "$CHANGED" | grep -E '^(tests/e2e/|playwright\.|\.github/workflows/e2e\.yml$)' >/dev/null; then
+          # Why: tests/playwright.config.ts sits beside tests/e2e/, not inside it, so
+          # it needs its own pattern — a bare `playwright.` prefix matches no tracked
+          # file and would silently skip E2E when the runner config changes.
+          if printf '%s\n' "$CHANGED" | grep -E '^(tests/e2e/|tests/playwright\.|\.github/workflows/e2e\.yml$)' >/dev/null; then
             echo "should_run=true" >> "$GITHUB_OUTPUT"
             echo "E2E path changes detected"
           else
@@ -320,6 +323,7 @@ jobs:
       - shell_contracts
       - test
       - package
+      - e2e
     runs-on: ubuntu-latest
 
     steps:
@@ -331,6 +335,7 @@ jobs:
           SHELL_CONTRACTS: ${{ needs.shell_contracts.result }}
           TEST: ${{ needs.test.result }}
           PACKAGE: ${{ needs.package.result }}
+          E2E: ${{ needs.e2e.result }}
         run: |
           for result in \
             "$STATIC_ANALYSIS" \
@@ -343,3 +348,10 @@ jobs:
               exit 1
             fi
           done
+
+          # Why: E2E is path-filtered, so "skipped" is the expected result on a PR
+          # that touches no E2E files and must stay passing. Check it separately
+          # from the always-required jobs above so a skip can never satisfy those.
+          if [ "$E2E" != "success" ] && [ "$E2E" != "skipped" ]; then
+            exit 1
+          fi
