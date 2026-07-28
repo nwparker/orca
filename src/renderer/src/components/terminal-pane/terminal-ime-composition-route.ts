@@ -39,7 +39,11 @@ export function installTerminalImeCompositionRoute(args: {
   let previousSession: CapturedCompositionSession | null = null
   let disposed = false
 
-  if (!terminalElement) {
+  if (
+    !terminalElement ||
+    typeof terminalElement.addEventListener !== 'function' ||
+    typeof terminalElement.removeEventListener !== 'function'
+  ) {
     return { dispose: () => undefined }
   }
 

@@ -44,6 +44,19 @@ function createHarness(ptyId = 'pty-original') {
 }
 
 describe('installTerminalImeCompositionRoute', () => {
+  it('does not install on an uninitialized terminal element', () => {
+    const transport = createTransport('pty-original')
+
+    const route = installTerminalImeCompositionRoute({
+      terminalElement: {} as HTMLElement,
+      terminal: { input: vi.fn() },
+      capturedTransport: transport,
+      getCurrentTransport: () => transport
+    })
+
+    expect(() => route.dispose()).not.toThrow()
+  })
+
   it.each(['visible blur', 'terminal tab switch', 'split pane switch'])(
     'delivers one Hangul commit to the captured route after %s',
     () => {

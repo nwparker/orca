@@ -189,6 +189,19 @@ describe('xterm IME composition de-duplication', () => {
     terminal.dispose()
   })
 
+  it('commits the visible composition when pane blur precedes compositionend', async () => {
+    const { emitted, terminal, textarea } = openTerminal()
+    startComposition(textarea, '한')
+    await nextEventLoop()
+
+    textarea.dispatchEvent(new FocusEvent('blur'))
+    textarea.dispatchEvent(new CompositionEvent('compositionend', { data: '한', bubbles: true }))
+    await nextEventLoop()
+
+    expect(emitted.join('')).toBe('한')
+    terminal.dispose()
+  })
+
   it('commits to the composing terminal when focus switches to another terminal', async () => {
     const original = openTerminal()
     const unrelated = openTerminal()
@@ -226,6 +239,20 @@ describe('xterm IME composition de-duplication', () => {
     await nextEventLoop()
 
     expect(emitted.join('')).toBe('한')
+    terminal.dispose()
+  })
+
+  it('cancels a pending completion when Escape follows compositionend', async () => {
+    const { emitted, terminal, textarea } = openTerminal()
+    startComposition(textarea, '한')
+    await nextEventLoop()
+
+    textarea.dispatchEvent(new CompositionEvent('compositionend', { data: '한', bubbles: true }))
+    dispatchKeydown(textarea, 'Escape', 'Escape', 229, true, 100)
+    dispatchKeydown(textarea, 'Escape', 'Escape', 27, false, 100)
+    await nextEventLoop()
+
+    expect(emitted).toEqual([])
     terminal.dispose()
   })
 })

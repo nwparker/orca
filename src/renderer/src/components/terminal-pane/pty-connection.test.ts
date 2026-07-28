@@ -5042,8 +5042,12 @@ describe('connectPanePty', () => {
 
     connectPanePty(pane as never, createManager(1) as never, createDeps() as never)
     expect(terminalTarget.handlers.size).toBe(1)
-    expect(terminalTarget.target.addEventListener).toHaveBeenCalledTimes(2)
-    expect(terminalTarget.target.removeEventListener).toHaveBeenCalledTimes(1)
+    expect(
+      terminalTarget.target.addEventListener.mock.calls.filter(([type]) => type === 'keydown')
+    ).toHaveLength(2)
+    expect(
+      terminalTarget.target.removeEventListener.mock.calls.filter(([type]) => type === 'keydown')
+    ).toHaveLength(1)
   })
 
   it('clears the mobile-fit pane binding when the pane connection is disposed', async () => {
