@@ -9,6 +9,7 @@ import { safeFind } from '../terminal-search-safe-find'
 import { resolveTerminalShortcutAction } from './terminal-shortcut-policy'
 import type { MacOptionAsAlt } from './terminal-shortcut-policy'
 import { createTerminalNativeOnlyShortcutTracker } from './terminal-native-only-shortcut'
+import { createTerminalImeDeferredNewlineSender } from './terminal-ime-deferred-newline'
 import {
   keybindingMatchesAction,
   type KeybindingOverrides,
@@ -264,6 +265,7 @@ export function useTerminalKeyboardShortcuts({
     // location from its own keydown event and clear it on keyup.
     let optionKeyLocation = 0
     const nativeOnlyShortcutTracker = createTerminalNativeOnlyShortcutTracker()
+    const deferredNewlineSender = createTerminalImeDeferredNewlineSender()
     const onModifierDown = (e: KeyboardEvent): void => {
       if (e.key === 'Alt') {
         optionKeyLocation = e.location
@@ -421,18 +423,27 @@ export function useTerminalKeyboardShortcuts({
         if (!pane) {
           return
         }
-        const sent = paneTransportsRef.current.get(pane.id)?.sendInput(action.data) === true
-        if (sent) {
-          recordTerminalUserInputForLeaf(tabId, pane.leafId)
-          if (action.data === '\x1b[13;2u') {
-            // Why: this direct shortcut write does not pass through PTY onData,
-            // so no-OSC shells need an explicit post-write confirmation ladder.
-            const binding = panePtyBindingsRef.current.get(pane.id) as
-              | (IDisposable & { requestDroidReconfirmation?: () => void })
-              | undefined
-            binding?.requestDroidReconfirmation?.()
+        const sendResolvedInput = (): void => {
+          const sent = paneTransportsRef.current.get(pane.id)?.sendInput(action.data) === true
+          if (sent) {
+            recordTerminalUserInputForLeaf(tabId, pane.leafId)
+            if (action.data === '\x1b[13;2u') {
+              // Why: this write bypasses PTY onData, so no-OSC shells need reconfirmation.
+              const binding = panePtyBindingsRef.current.get(pane.id) as
+                | (IDisposable & { requestDroidReconfirmation?: () => void })
+                | undefined
+              binding?.requestDroidReconfirmation?.()
+            }
           }
         }
+        if (e.isComposing && e.key === 'Enter') {
+          deferredNewlineSender.defer(pane.id, pane.terminal.element, sendResolvedInput)
+          return
+        }
+        if (e.key === 'Enter' && deferredNewlineSender.absorbRedispatchedEnter(pane.id)) {
+          return
+        }
+        sendResolvedInput()
         return
       }
 
