@@ -15,9 +15,12 @@ import {
 } from './local-notification-scheduling'
 import {
   adoptNotificationEpoch,
+  catchUpWatermarkSeq,
   enqueueHostDelivery,
   getHostNotificationSession,
+  quarantineCatchUpWatermark,
   releaseQueuedShowNotificationId,
+  resolveCatchUpQuarantine,
   saveWatermark,
   seedWatermarkFromStorage,
   seenKeyForEvent,
@@ -92,11 +95,41 @@ export function subscribeToDesktopNotifications(client: RpcClient, hostId: strin
     // desktop for seq greater than one the user never saw.
     if (event.notificationSeq != null && event.notificationSeq > session.lastDeliveredSeq) {
       session.lastDeliveredSeq = event.notificationSeq
-      // Persisted as a pair: a seq is only trustworthy alongside the epoch it indexes.
+      // Why clamped: while a failed catch-up's range is still unrecovered, persisting
+      // the live seq would let the next catch-up ask from above the gap and the desktop
+      // would cut it. resolveCatchUpQuarantine writes the held-back value on success.
       void saveWatermark(hostId, {
-        seq: session.lastDeliveredSeq,
+        seq: catchUpWatermarkSeq(session),
         epoch: session.lastDeliveredEpoch
       })
+    }
+  }
+
+  // Claimed inline rather than via queueDelivery: the batch is already one queue
+  // entry, and re-enqueueing per item is what let a live event cut in.
+  async function deliverMissedEvent(
+    event: NotificationEvent | DismissNotificationEvent
+  ): Promise<void> {
+    const key = seenKeyForEvent(event)
+    if (key && session.seen.has(key)) {
+      return
+    }
+    if (key) {
+      session.seen.add(key)
+    }
+    if (event.type === 'notification') {
+      if (!shouldQueueShowForNotificationId(session, event.notificationId)) {
+        return
+      }
+      try {
+        await deliverLive('notification', event)
+      } finally {
+        releaseQueuedShowNotificationId(session, event.notificationId)
+      }
+      return
+    }
+    if (event.type === 'dismiss') {
+      await deliverLive('dismiss', event)
     }
   }
 
@@ -105,55 +138,59 @@ export function subscribeToDesktopNotifications(client: RpcClient, hostId: strin
     if (disposed) {
       return
     }
+    // Captured before the request: everything at or below it is known delivered, so
+    // it is the floor the watermark falls back to if this catch-up never completes.
+    const askFrom = catchUpWatermarkSeq(session)
     const missed = await client
       .sendRequest('notifications.getMissedSince', {
-        lastSeenSeq: session.lastDeliveredSeq,
+        lastSeenSeq: askFrom,
         // Why: sending the epoch lets the desktop reject a watermark from a counter
         // it no longer has and return the whole retained buffer instead of nothing.
         ...(session.lastDeliveredEpoch != null ? { epoch: session.lastDeliveredEpoch } : {})
       })
       .then((response) => {
         if (!response.ok) {
-          return []
+          return null
         }
         const result = response.result as { notifications?: unknown[]; epoch?: string } | undefined
         adoptNotificationEpoch(session, hostId, result?.epoch)
         return Array.isArray(result?.notifications) ? result.notifications : []
       })
-      .catch(() => [])
+      .catch(() => null)
+    if (missed == null) {
+      // Why quarantine rather than retry: the range this catch-up abandoned stays
+      // unrecovered until SOME later one succeeds, and a live seq persisting past it
+      // meanwhile would make the desktop cut it forever.
+      quarantineCatchUpWatermark(session, askFrom)
+      return
+    }
     // Why the whole batch is ONE queue entry (#8591): awaiting per event returns to
     // the event loop between replays, so a live seq 11 slots into the chain between
     // seq 6 and 7 and persists a watermark past a notification still unshown. Why the
     // request stays OUTSIDE the queue: sendRequest waits up to 30s, and holding the
     // chain for that would stall live delivery on a slow link.
     await enqueueHostDelivery(session, async () => {
-      for (const raw of missed) {
-        // Re-checked per event: the batch can start before a teardown and still be
-        // draining after it, and a torn-down host must stop pushing.
-        if (disposed) {
-          return
-        }
-        const event = raw as NotificationEvent | DismissNotificationEvent
-        const key = seenKeyForEvent(event)
-        if (key && session.seen.has(key)) {
-          continue
-        }
-        if (key) {
-          session.seen.add(key)
-        }
-        // Claimed inline rather than via queueDelivery: the batch is already one
-        // queue entry, and re-enqueueing per item is what let a live event cut in.
-        if (event.type === 'notification') {
-          if (!shouldQueueShowForNotificationId(session, event.notificationId)) {
-            continue
+      // Advances only past events this batch settled, so a teardown or a failing show
+      // quarantines the true contiguous point instead of the range it never reached.
+      let contiguousSeq = askFrom
+      let drained = false
+      try {
+        for (const raw of missed) {
+          // Re-checked per event: the batch can start before a teardown and still be
+          // draining after it, and a torn-down host must stop pushing.
+          if (disposed) {
+            return
           }
-          try {
-            await deliverLive('notification', event)
-          } finally {
-            releaseQueuedShowNotificationId(session, event.notificationId)
-          }
-        } else if (event.type === 'dismiss') {
-          await deliverLive('dismiss', event)
+          const event = raw as NotificationEvent | DismissNotificationEvent
+          await deliverMissedEvent(event)
+          contiguousSeq = event.notificationSeq ?? contiguousSeq
+        }
+        drained = true
+      } finally {
+        if (drained) {
+          resolveCatchUpQuarantine(session, hostId)
+        } else {
+          quarantineCatchUpWatermark(session, contiguousSeq)
         }
       }
     })
