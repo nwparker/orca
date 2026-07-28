@@ -310,7 +310,5 @@ export const UiUpdate = z
   .default({})
   .transform(omitUndefinedValues)
 
-// The key/value parity assertions over these live in ui-state-schema-parity-checks.ts.
+// The key/value parity assertions over this live in ui-state-schema-parity-checks.ts.
 export type UiUpdateFieldsSchema = typeof UiUpdateFields
-export type WorktreeCardPropertySchema = typeof WorktreeCardPropertyParam
-export type RightSidebarTabSchema = typeof RightSidebarTabParam

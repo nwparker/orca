@@ -16,7 +16,21 @@ export type AssertNoMissingKeys<TType, TSchema extends Record<string, unknown>> 
 /**
  * Key parity alone is blind to VALUE drift: a schema can list `rightSidebarTab`
  * yet omit half its union members, which the strict schema then rejects. This
- * asserts the schema's parsed value domain still covers the shared union.
+ * asserts the schema's accepted value domain still covers the shared type for
+ * EVERY shared key, so a field nobody thought to name is covered too.
+ *
+ * `TSchema` must be the schema's INPUT type: what a client is allowed to send,
+ * before any `.transform()` narrows it.
  */
 export type AssertNoMissingValues<TType, TSchema> =
-  Exclude<TType, TSchema> extends never ? true : { missingFromSchema: Exclude<TType, TSchema> }
+  MissingValueKeys<TType, TSchema> extends never
+    ? true
+    : { valueDomainTooNarrowFor: MissingValueKeys<TType, TSchema> }
+
+// `undefined` is stripped from both sides: optionality is the key guard's job,
+// and a schema field is always `| undefined` once `.optional()` is applied.
+type MissingValueKeys<TType, TSchema> = {
+  [K in Extract<keyof TType, keyof TSchema>]: NonNullable<TType[K]> extends NonNullable<TSchema[K]>
+    ? never
+    : K
+}[Extract<keyof TType, keyof TSchema>]
