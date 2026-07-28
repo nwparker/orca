@@ -12,3 +12,11 @@ export type AssertNoMissingKeys<TType, TSchema extends Record<string, unknown>> 
   Exclude<keyof TType, keyof TSchema> extends never
     ? true
     : { missingFromSchema: Exclude<keyof TType, keyof TSchema> }
+
+/**
+ * Key parity alone is blind to VALUE drift: a schema can list `rightSidebarTab`
+ * yet omit half its union members, which the strict schema then rejects. This
+ * asserts the schema's parsed value domain still covers the shared union.
+ */
+export type AssertNoMissingValues<TType, TSchema> =
+  Exclude<TType, TSchema> extends never ? true : { missingFromSchema: Exclude<TType, TSchema> }
