@@ -223,26 +223,29 @@ describe('createPanelBridgeMessageHandler', () => {
     expect(panelWindow.postMessage).not.toHaveBeenCalled()
   })
 
-  it('charges pong and invalid guest traffic before parsing either message', () => {
+  it('charges invalid guest traffic to the data budget before parsing it', () => {
     const panelWindow = createFakePanelWindow()
     const admit = vi.fn<PanelMessageBudget['admit']>().mockReturnValue(null)
+    const controlAdmit = vi.fn<PanelMessageBudget['admit']>().mockReturnValue(null)
     const onPong = vi.fn()
     const handler = createPanelBridgeMessageHandler({
       sessionToken: SESSION_TOKEN,
       getPanelWindow: () => panelWindow,
       callPanelAction: vi.fn(),
       onPong,
-      budget: { maxBytes: 1024, admit }
+      budget: { maxBytes: 1024, admit },
+      controlBudget: { maxBytes: 1024, admit: controlAdmit }
     })
 
     handler(messageEvent({ type: 'invalid-hostile-message' }, panelWindow))
     handler(messageEvent({ type: 'orca-panel-pong', pingId: 7 }, panelWindow))
 
-    expect(admit).toHaveBeenCalledTimes(2)
+    expect(admit).toHaveBeenCalledTimes(1)
+    expect(controlAdmit).toHaveBeenCalledTimes(1)
     expect(onPong).toHaveBeenCalledWith(7)
   })
 
-  it('does not accept a pong refused by the rate budget', () => {
+  it('keeps answering the watchdog while the data budget is saturated', () => {
     const panelWindow = createFakePanelWindow()
     const onPong = vi.fn()
     const handler = createPanelBridgeMessageHandler({
@@ -251,6 +254,22 @@ describe('createPanelBridgeMessageHandler', () => {
       callPanelAction: vi.fn(),
       onPong,
       budget: { maxBytes: 1024, admit: () => 'rate_limited' }
+    })
+
+    handler(messageEvent({ type: 'orca-panel-pong', pingId: 7 }, panelWindow))
+
+    expect(onPong).toHaveBeenCalledWith(7)
+  })
+
+  it('does not accept a pong refused by the reserved control budget', () => {
+    const panelWindow = createFakePanelWindow()
+    const onPong = vi.fn()
+    const handler = createPanelBridgeMessageHandler({
+      sessionToken: SESSION_TOKEN,
+      getPanelWindow: () => panelWindow,
+      callPanelAction: vi.fn(),
+      onPong,
+      controlBudget: { maxBytes: 1024, admit: () => 'rate_limited' }
     })
 
     handler(messageEvent({ type: 'orca-panel-pong', pingId: 7 }, panelWindow))

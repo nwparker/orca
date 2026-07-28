@@ -51,7 +51,7 @@ describe('PluginContentPackRegistry', () => {
       contentHash: null,
       isDev: true
     }
-    const registry = new PluginContentPackRegistry(new PluginContentVerifier())
+    const registry = new PluginContentPackRegistry(new PluginContentVerifier(), () => false)
 
     await registry.reconcile([plugin], () => true)
 
@@ -97,7 +97,7 @@ describe('PluginContentPackRegistry', () => {
       contentHash: null,
       isDev: true
     }
-    const registry = new PluginContentPackRegistry(new PluginContentVerifier())
+    const registry = new PluginContentPackRegistry(new PluginContentVerifier(), () => false)
 
     await registry.reconcile([plugin], () => true)
 

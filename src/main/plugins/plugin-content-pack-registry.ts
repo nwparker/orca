@@ -16,7 +16,12 @@ export class PluginContentPackRegistry {
   readonly commands: PluginCommandRegistry
   private readonly activationErrors = new Map<string, string>()
 
-  constructor(contentVerifier: PluginContentVerifier) {
+  constructor(
+    contentVerifier: PluginContentVerifier,
+    /** Revocation chokepoint: no caller-supplied predicate can readmit a
+     *  killed plugin's language packs, VM recipes, or commands. */
+    private readonly isKilled: (pluginKey: string) => boolean
+  ) {
     this.languagePacks = new PluginLanguagePackRegistry(contentVerifier)
     this.vmRecipes = new PluginVmRecipeRegistry()
     this.commands = new PluginCommandRegistry()
@@ -30,7 +35,7 @@ export class PluginContentPackRegistry {
     const approvedKeys = new Set(
       discovered
         .filter((plugin): plugin is ValidDiscoveredPlugin => !isInvalidDiscoveredPlugin(plugin))
-        .filter(isApproved)
+        .filter((plugin) => isApproved(plugin) && !this.isKilled(plugin.pluginKey))
         .map((plugin) => plugin.pluginKey)
     )
     const excluded = new Set<string>()

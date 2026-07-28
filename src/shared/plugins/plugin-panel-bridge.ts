@@ -22,6 +22,11 @@ export const PLUGIN_PANEL_FRAME_NAME_PREFIX = 'orca-plugin-panel:'
 export const PANEL_MESSAGE_MAX_BYTES = 64 * 1024
 export const PANEL_MESSAGE_RATE_LIMIT = { maxMessages: 30, perMs: 10_000 }
 
+/** Liveness frames get a reserved budget sized for the ping cadence: a panel
+ *  saturating its action budget must still be able to prove it is alive. */
+export const PANEL_CONTROL_MESSAGE_MAX_BYTES = 1024
+export const PANEL_CONTROL_RATE_LIMIT = { maxMessages: 4, perMs: 10_000 }
+
 /** Watchdog cadence: a panel that misses a pong deadline is demoted to an
  *  errored badge. Busy-loop detection is valid only while the runtime frame-
  *  process gate confirms the sandbox stays outside the host renderer. */
@@ -124,6 +129,16 @@ export function looksLikePanelActionRequest(data: unknown): boolean {
     typeof data === 'object' &&
     data !== null &&
     (data as { type?: unknown }).type === PANEL_ACTION_REQUEST_TYPE
+  )
+}
+
+/** Cheap routing check (no schema work) for liveness frames, so the reserved
+ *  control budget — not the data budget — pays for pong-shaped traffic. */
+export function looksLikePanelControlFrame(data: unknown): boolean {
+  return (
+    typeof data === 'object' &&
+    data !== null &&
+    (data as { type?: unknown }).type === PANEL_PONG_TYPE
   )
 }
 

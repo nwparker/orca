@@ -1,4 +1,9 @@
-import { PANEL_MESSAGE_MAX_BYTES, PANEL_MESSAGE_RATE_LIMIT } from './plugin-panel-bridge'
+import {
+  PANEL_CONTROL_MESSAGE_MAX_BYTES,
+  PANEL_CONTROL_RATE_LIMIT,
+  PANEL_MESSAGE_MAX_BYTES,
+  PANEL_MESSAGE_RATE_LIMIT
+} from './plugin-panel-bridge'
 
 /**
  * Per-plugin bridge budgets: message size cap and a sliding-window rate
@@ -38,6 +43,16 @@ export function createPanelMessageBudget(
       return null
     }
   }
+}
+
+/** Reserved liveness budget, separate from the data budget so a panel that
+ *  saturates its action allowance can still answer the watchdog. */
+export function createPanelControlMessageBudget(): PanelMessageBudget {
+  return createPanelMessageBudget({
+    maxBytes: PANEL_CONTROL_MESSAGE_MAX_BYTES,
+    maxMessages: PANEL_CONTROL_RATE_LIMIT.maxMessages,
+    perMs: PANEL_CONTROL_RATE_LIMIT.perMs
+  })
 }
 
 const textEncoder = new TextEncoder()

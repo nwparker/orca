@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   PLUGIN_KILL_LIST_ENTRY_LIMIT,
+  PLUGIN_KILL_LIST_FUTURE_SKEW_MS,
   findKilledPlugin,
   killedPluginKeys,
   pluginKillListSchema
@@ -55,6 +56,33 @@ describe('pluginKillListSchema', () => {
     }
   ])('rejects malformed or untrusted fields', (killList) => {
     expect(pluginKillListSchema.safeParse(killList).success).toBe(false)
+  })
+
+  it('rejects a far-future generatedAt that would freeze out later revocations', () => {
+    const parsed = pluginKillListSchema.safeParse({
+      version: 1,
+      generatedAt: '9999-12-31T23:59:59Z',
+      plugins: [entry()]
+    })
+
+    expect(parsed.success).toBe(false)
+    if (!parsed.success) {
+      expect(parsed.error.issues).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ message: 'generatedAt is too far in the future' })
+        ])
+      )
+    }
+  })
+
+  it('accepts a generatedAt inside the allowed clock-skew window', () => {
+    expect(
+      pluginKillListSchema.safeParse({
+        version: 1,
+        generatedAt: new Date(Date.now() + PLUGIN_KILL_LIST_FUTURE_SKEW_MS - 60_000).toISOString(),
+        plugins: [entry()]
+      }).success
+    ).toBe(true)
   })
 
   it('rejects duplicate killed plugin identities', () => {

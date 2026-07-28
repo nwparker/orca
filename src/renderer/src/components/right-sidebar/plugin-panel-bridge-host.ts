@@ -1,12 +1,14 @@
 import {
   PANEL_ACTION_RESULT_TYPE,
   looksLikePanelActionRequest,
+  looksLikePanelControlFrame,
   looksLikePanelPong,
   parsePanelActionRequest,
   type PluginPanelActionOutcome,
   type PluginPanelActionResultMessage
 } from '../../../../shared/plugins/plugin-panel-bridge'
 import {
+  createPanelControlMessageBudget,
   createPanelMessageBudget,
   structuredCloneMessageBytes,
   type PanelMessageBudget
@@ -39,6 +41,8 @@ export type PanelBridgeHostOptions = {
   onPong?: (pingId: number) => void
   /** Injectable for tests; defaults to the shared per-plugin budget. */
   budget?: PanelMessageBudget
+  /** Reserved liveness budget; defaults to the shared control-frame budget. */
+  controlBudget?: PanelMessageBudget
   now?: () => number
 }
 
@@ -65,6 +69,7 @@ export function createPanelBridgeMessageHandler(
   options: PanelBridgeHostOptions
 ): (event: MessageEvent) => void {
   const budget = options.budget ?? createPanelMessageBudget()
+  const controlBudget = options.controlBudget ?? createPanelControlMessageBudget()
   const now = options.now ?? (() => Date.now())
   return (event: MessageEvent): void => {
     const panelWindow = options.getPanelWindow()
@@ -82,6 +87,18 @@ export function createPanelBridgeMessageHandler(
       // Why: targetOrigin must be '*' — an opaque origin never matches a
       // concrete origin, so anything stricter would silently drop the reply.
       requestingWindow.postMessage(message, '*')
+    }
+    // Liveness is charged to its own reserved budget: a panel saturating its
+    // action allowance must still be able to prove it is alive.
+    if (looksLikePanelControlFrame(event.data)) {
+      const controlRefusal = controlBudget.admit(
+        now(),
+        structuredCloneMessageBytes(event.data, controlBudget.maxBytes)
+      )
+      if (!controlRefusal && looksLikePanelPong(event.data)) {
+        options.onPong?.((event.data as { pingId: number }).pingId)
+      }
+      return
     }
     // Budgets run before parsing: a flood of malformed junk must not buy
     // free schema-validation CPU either.
@@ -109,10 +126,6 @@ export function createPanelBridgeMessageHandler(
                 )
         })
       }
-      return
-    }
-    if (looksLikePanelPong(event.data)) {
-      options.onPong?.((event.data as { pingId: number }).pingId)
       return
     }
     if (!looksLikePanelActionRequest(event.data)) {
