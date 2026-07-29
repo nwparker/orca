@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { SkillDiscoveryResult } from '../../../shared/skills'
+import type { SkillDiscoveryResult, SkillDiscoveryTarget } from '../../../shared/skills'
 import {
   discoverInstalledAgentSkills,
   getSkillDiscoveryTargetKey,
@@ -41,16 +41,22 @@ describe('installed agent skill discovery lifecycle', () => {
     const freshRequest = discoverInstalledAgentSkills(false, target)
     expect(discover).toHaveBeenCalledTimes(2)
 
-    staleScan.resolve(result(1))
+    // Why: the stale scan must settle LAST — that is the only ordering where a
+    // missing generation guard would overwrite the post-install result.
     freshScan.resolve(result(2))
-    await expect(staleRequest).resolves.toEqual(result(1))
     await expect(freshRequest).resolves.toEqual(result(2))
+    staleScan.resolve(result(1))
+    await expect(staleRequest).resolves.toEqual(result(1))
+
     await expect(discoverInstalledAgentSkills(false, target)).resolves.toEqual(result(2))
     expect(discover).toHaveBeenCalledTimes(2)
   })
 
   it('does not share results across remote runtime hosts', async () => {
-    const discover = vi.fn().mockResolvedValueOnce(result(1)).mockResolvedValueOnce(result(2))
+    const discover = vi
+      .fn<(target?: SkillDiscoveryTarget) => Promise<SkillDiscoveryResult>>()
+      .mockResolvedValueOnce(result(1))
+      .mockResolvedValueOnce(result(2))
     vi.stubGlobal('window', { api: { skills: { discover } } })
 
     await expect(
@@ -63,6 +69,25 @@ describe('installed agent skill discovery lifecycle', () => {
       discoverInstalledAgentSkills(false, { executionHostId: 'ssh:one' })
     ).resolves.toEqual(result(1))
     expect(discover).toHaveBeenCalledTimes(2)
+    // Why: the host id partitions the renderer cache only — the main process
+    // resolves the runtime itself and must not receive it.
+    expect(discover).toHaveBeenNthCalledWith(1, undefined)
+    expect(discover).toHaveBeenNthCalledWith(2, undefined)
+  })
+
+  it('keeps the host id out of a WSL target sent to discovery', async () => {
+    const discover = vi
+      .fn<(target?: SkillDiscoveryTarget) => Promise<SkillDiscoveryResult>>()
+      .mockResolvedValue(result(1))
+    vi.stubGlobal('window', { api: { skills: { discover } } })
+
+    await discoverInstalledAgentSkills(false, {
+      executionHostId: 'ssh:one',
+      runtime: 'wsl',
+      wslDistro: 'Ubuntu'
+    })
+
+    expect(discover).toHaveBeenCalledWith({ runtime: 'wsl', wslDistro: 'Ubuntu' })
   })
 
   it('includes runtime host identity in generic and project cache keys', () => {
@@ -77,11 +102,10 @@ describe('installed agent skill discovery lifecycle', () => {
       }
     }
 
-    expect(getSkillDiscoveryTargetKey({ executionHostId: 'ssh:one' })).toBe(
-      'ssh%3Aone::host'
+    expect(getSkillDiscoveryTargetKey(undefined)).toBe('::host')
+    expect(getSkillDiscoveryTargetKey({ executionHostId: 'ssh:one' })).toBe('ssh%3Aone::host')
+    expect(getSkillDiscoveryTargetKey({ executionHostId: 'ssh:two', projectRuntime })).toBe(
+      'ssh%3Atwo::repo-1:windows-host'
     )
-    expect(
-      getSkillDiscoveryTargetKey({ executionHostId: 'ssh:two', projectRuntime })
-    ).toBe('ssh%3Atwo::repo-1:windows-host')
   })
 })

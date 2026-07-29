@@ -50,7 +50,8 @@ export async function discoverInstalledAgentSkills(
 }
 
 export function getSkillDiscoveryTargetKey(target: SkillDiscoveryTarget | undefined): string {
-  const executionHostKey = encodeURIComponent(target?.executionHostId?.trim() || 'local')
+  // Why: empty means the local runtime — a sentinel word could alias a real id.
+  const executionHostKey = encodeURIComponent(target?.executionHostId?.trim() || '')
   if (target?.projectRuntime) {
     const runtimeKey =
       target.projectRuntime.status === 'resolved'
