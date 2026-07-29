@@ -9,6 +9,11 @@ const CASES: unknown[] = [
   { type: PANEL_PONG_TYPE, pingId: 0 },
   { type: PANEL_PONG_TYPE, pingId: 7 },
   { type: PANEL_PONG_TYPE, pingId: Number.MAX_SAFE_INTEGER },
+  // Above the safe range zod's .int() refuses, though Number.isInteger accepts.
+  { type: PANEL_PONG_TYPE, pingId: Number.MAX_SAFE_INTEGER + 1 },
+  { type: PANEL_PONG_TYPE, pingId: 2 ** 60 },
+  { type: PANEL_PONG_TYPE, pingId: 1e100 },
+  { type: PANEL_PONG_TYPE, pingId: Number.MAX_VALUE },
   { type: PANEL_PONG_TYPE, pingId: 7, extra: 'ignored' },
   { type: PANEL_PONG_TYPE, pingId: -1 },
   { type: PANEL_PONG_TYPE, pingId: 1.5 },

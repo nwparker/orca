@@ -146,7 +146,9 @@ export function readPanelPongId(data: unknown): number | null {
   if (frame.type !== PANEL_PONG_TYPE || typeof frame.pingId !== 'number') {
     return null
   }
-  return Number.isInteger(frame.pingId) && frame.pingId >= 0 ? frame.pingId : null
+  // isSafeInteger, not isInteger: zod's .int() rejects 2**53 and above, and a
+  // wider reader would admit ids the watchdog can never have issued.
+  return Number.isSafeInteger(frame.pingId) && frame.pingId >= 0 ? frame.pingId : null
 }
 
 /** Validates action params against the host API spec (shared with workers). */
