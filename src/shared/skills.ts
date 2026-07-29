@@ -94,7 +94,11 @@ const RepairProjectRuntimeSchema = z.object({
   })
 })
 
-/** Both desktop IPC and runtime RPC parse the complete discovery target here. */
+/**
+ * Both desktop IPC and runtime RPC parse the wire-bound discovery target here.
+ * `executionHostId` is deliberately absent: it scopes the renderer cache only,
+ * and the runtime that answers a scan is resolved on the receiving side.
+ */
 export const SkillDiscoveryTargetSchema: z.ZodType<SkillDiscoveryTarget> = z.object({
   runtime: z.enum(['host', 'wsl']).optional(),
   wslDistro: z.string().nullable().optional(),

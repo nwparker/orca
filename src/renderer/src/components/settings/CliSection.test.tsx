@@ -83,7 +83,8 @@ describe('CliSection project runtime defaults', () => {
         settings={{
           ...getDefaultSettings('/tmp'),
           localAgentRuntime: 'host',
-          localWindowsRuntimeDefault: { kind: 'wsl', distro: 'Ubuntu' }
+          localWindowsRuntimeDefault: { kind: 'wsl', distro: 'Ubuntu' },
+          activeRuntimeEnvironmentId: 'env-remote-1'
         }}
         wslSupportedPlatform
         wslAvailable
@@ -97,7 +98,11 @@ describe('CliSection project runtime defaults', () => {
     expect(capturedPanel.useInstalledAgentSkill).toHaveBeenCalledWith(
       'orca-cli',
       expect.objectContaining({
-        discoveryTarget: { runtime: 'wsl', wslDistro: 'Ubuntu' },
+        discoveryTarget: {
+          runtime: 'wsl',
+          wslDistro: 'Ubuntu',
+          executionHostId: 'env-remote-1'
+        },
         sourceKinds: ['global']
       })
     )

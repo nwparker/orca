@@ -110,10 +110,14 @@ export function useInstalledAgentSkillNames(
   const discoveryTargetKey = getSkillDiscoveryTargetKey(discoveryTarget)
   // Why: callers derive the target inside a store-backed useMemo, so unrelated
   // store writes hand us a new object with the same key. Two targets with the
-  // same key resolve to the same scan, so reuse the object and keep `refresh`
-  // — and the discovery effect it drives — stable across those writes.
-  // oxlint-disable-next-line react-hooks/exhaustive-deps
-  const stableDiscoveryTarget = useMemo(() => discoveryTarget, [discoveryTargetKey])
+  // same key resolve to the same scan, so latch the object until the key moves
+  // and keep `refresh` — and the discovery effect it drives — stable. A useMemo
+  // would not do: React may discard it, which silently restores the rescan.
+  const latchedDiscoveryTargetRef = useRef({ key: discoveryTargetKey, target: discoveryTarget })
+  if (latchedDiscoveryTargetRef.current.key !== discoveryTargetKey) {
+    latchedDiscoveryTargetRef.current = { key: discoveryTargetKey, target: discoveryTarget }
+  }
+  const stableDiscoveryTarget = latchedDiscoveryTargetRef.current.target
   const cachedDiscovery = peekInstalledAgentSkillDiscoveryCache(discoveryTargetKey)
   const [result, setResult] = useState<SkillDiscoveryResult | null>(cachedDiscovery)
   const [loading, setLoading] = useState(enabled && !cachedDiscovery)

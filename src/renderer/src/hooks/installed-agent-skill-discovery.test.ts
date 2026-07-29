@@ -52,6 +52,25 @@ describe('installed agent skill discovery lifecycle', () => {
     expect(discover).toHaveBeenCalledTimes(2)
   })
 
+  it('serves a warm cache unforced and rescans when forced', async () => {
+    // Why: the focus listener and every "re-check" action force a refresh so a
+    // skill installed outside Orca is detected; a warm cache must not short it.
+    const discover = vi
+      .fn<() => Promise<SkillDiscoveryResult>>()
+      .mockResolvedValueOnce(result(1))
+      .mockResolvedValueOnce(result(2))
+    vi.stubGlobal('window', { api: { skills: { discover } } })
+
+    await expect(discoverInstalledAgentSkills(false, undefined)).resolves.toEqual(result(1))
+    await expect(discoverInstalledAgentSkills(false, undefined)).resolves.toEqual(result(1))
+    expect(discover).toHaveBeenCalledTimes(1)
+
+    await expect(discoverInstalledAgentSkills(true, undefined)).resolves.toEqual(result(2))
+    expect(discover).toHaveBeenCalledTimes(2)
+    await expect(discoverInstalledAgentSkills(false, undefined)).resolves.toEqual(result(2))
+    expect(discover).toHaveBeenCalledTimes(2)
+  })
+
   it('lets a superseded scan settle without evicting the newer pending scan', async () => {
     // Why: invalidation clears the pending map mid-flight, so the pre-install
     // scan must not tear down the post-install scan's dedup entry when it lands.

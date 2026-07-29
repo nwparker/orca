@@ -24,9 +24,13 @@ export async function discoverInstalledAgentSkills(
   target?: SkillDiscoveryTarget
 ): Promise<SkillDiscoveryResult> {
   const key = getSkillDiscoveryTargetKey(target)
-  const cachedDiscovery = readInstalledAgentSkillDiscoveryCache(key)
-  if (!force && cachedDiscovery) {
-    return cachedDiscovery
+  if (!force) {
+    // Why: only a cache-serving read should refresh recency — a forced refresh
+    // discards the entry it would otherwise promote.
+    const cachedDiscovery = readInstalledAgentSkillDiscoveryCache(key)
+    if (cachedDiscovery) {
+      return cachedDiscovery
+    }
   }
 
   const inFlightDiscovery = pendingDiscoveryByTarget.get(key)

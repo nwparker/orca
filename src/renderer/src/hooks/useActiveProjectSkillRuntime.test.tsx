@@ -38,12 +38,15 @@ async function renderProbe(): Promise<void> {
   })
 }
 
+let platform: NodeJS.Platform = 'darwin'
+
 beforeEach(() => {
-  // Why: non-win32 resolves no project runtime, so this exercises the branch that
-  // carries the runtime-host cache scope on its own.
+  // Why: non-win32 resolves no project runtime, so darwin exercises the branch
+  // that carries the runtime-host cache scope on its own.
+  platform = 'darwin'
   Object.defineProperty(window, 'api', {
     configurable: true,
-    value: { platform: { get: () => ({ platform: 'darwin' }) } }
+    value: { platform: { get: () => ({ platform }) } }
   })
   container = document.createElement('div')
   document.body.appendChild(container)
@@ -82,6 +85,35 @@ describe('useActiveProjectSkillRuntime', () => {
     await renderProbe()
 
     expect(latestTarget).toBeUndefined()
+  })
+
+  it('scopes a resolved Windows project runtime by the runtime environment', async () => {
+    platform = 'win32'
+    storeState = {
+      activeRepoId: 'repo-1',
+      activeWorktreeId: 'worktree-1',
+      repos: [{ id: 'repo-1', path: 'C:\\src\\repo-1' }],
+      worktreesByRepo: {
+        'repo-1': [{ id: 'worktree-1', repoId: 'repo-1', path: 'C:\\src\\repo-1' }]
+      },
+      settings: {
+        activeRuntimeEnvironmentId: 'env-remote-1',
+        terminalWindowsShell: 'powershell.exe'
+      }
+    }
+    await renderProbe()
+
+    expect(latestTarget?.executionHostId).toBe('env-remote-1')
+    expect(latestTarget?.projectRuntime).toEqual({
+      status: 'resolved',
+      runtime: {
+        kind: 'windows-host',
+        hostPlatform: 'win32',
+        projectId: 'repo-1',
+        reason: 'global-default',
+        cacheKey: 'repo-1:windows-host'
+      }
+    })
   })
 
   it('re-scopes the target when the active runtime environment changes', async () => {
