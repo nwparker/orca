@@ -47,13 +47,8 @@ export function LinearAgentSkillInstallCta({
     [remote, settings]
   )
   const skillDiscoveryTarget = useMemo(
-    () =>
-      getLinearPromptSkillDiscoveryTarget(
-        agentRuntime,
-        undefined,
-        settings?.activeRuntimeEnvironmentId
-      ),
-    [agentRuntime, settings?.activeRuntimeEnvironmentId]
+    () => getLinearPromptSkillDiscoveryTarget(agentRuntime),
+    [agentRuntime]
   )
   const skill = useInstalledAgentSkillNames(LINEAR_AGENT_SKILL_NAMES, {
     discoveryTarget: skillDiscoveryTarget,

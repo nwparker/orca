@@ -40,7 +40,6 @@ export function useActiveProjectSkillRuntime(): ActiveProjectSkillRuntime {
   const windowsCapabilities = useWindowsTerminalCapabilities(currentPlatform === 'win32')
 
   return useMemo(() => {
-    const executionHostId = runtimeState.settings?.activeRuntimeEnvironmentId?.trim() || null
     const projectRuntime = getLocalProjectExecutionRuntimeContext(
       runtimeState,
       undefined,
@@ -51,18 +50,13 @@ export function useActiveProjectSkillRuntime(): ActiveProjectSkillRuntime {
       }
     )
     if (!projectRuntime) {
-      return executionHostId
-        ? {
-            ...EMPTY_ACTIVE_PROJECT_SKILL_RUNTIME,
-            discoveryTarget: getProjectSkillDiscoveryTarget(undefined, executionHostId)
-          }
-        : EMPTY_ACTIVE_PROJECT_SKILL_RUNTIME
+      return EMPTY_ACTIVE_PROJECT_SKILL_RUNTIME
     }
 
     const agentRuntime = getProjectAgentSkillRuntime(projectRuntime, currentPlatform)
     return {
       projectRuntime,
-      discoveryTarget: getProjectSkillDiscoveryTarget(projectRuntime, executionHostId),
+      discoveryTarget: getProjectSkillDiscoveryTarget(projectRuntime),
       agentRuntime,
       terminalShellOverride: getProjectAgentSkillTerminalShellOverride(
         currentPlatform,

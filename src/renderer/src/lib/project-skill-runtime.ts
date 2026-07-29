@@ -10,16 +10,9 @@ export type ProjectAgentSkillRuntime = {
 }
 
 export function getProjectSkillDiscoveryTarget(
-  projectRuntime: ProjectExecutionRuntimeResolution | undefined,
-  executionHostId?: string | null
+  projectRuntime: ProjectExecutionRuntimeResolution | undefined
 ): SkillDiscoveryTarget | undefined {
-  const normalizedHostId = executionHostId?.trim() || null
-  if (projectRuntime) {
-    return normalizedHostId
-      ? { projectRuntime, executionHostId: normalizedHostId }
-      : { projectRuntime }
-  }
-  return normalizedHostId ? { executionHostId: normalizedHostId } : undefined
+  return projectRuntime ? { projectRuntime } : undefined
 }
 
 export function getProjectAgentSkillRuntime(

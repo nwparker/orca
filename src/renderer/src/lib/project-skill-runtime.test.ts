@@ -44,13 +44,6 @@ const repairRuntime: ProjectExecutionRuntimeResolution = {
 describe('project skill runtime helpers', () => {
   it('passes the resolved project runtime through the discovery target', () => {
     expect(getProjectSkillDiscoveryTarget(wslRuntime)).toEqual({ projectRuntime: wslRuntime })
-    expect(getProjectSkillDiscoveryTarget(wslRuntime, 'ssh:build-host')).toEqual({
-      projectRuntime: wslRuntime,
-      executionHostId: 'ssh:build-host'
-    })
-    expect(getProjectSkillDiscoveryTarget(undefined, 'ssh:build-host')).toEqual({
-      executionHostId: 'ssh:build-host'
-    })
     expect(getProjectSkillDiscoveryTarget(undefined)).toBeUndefined()
   })
 

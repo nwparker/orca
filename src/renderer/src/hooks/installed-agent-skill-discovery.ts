@@ -54,19 +54,13 @@ export async function discoverInstalledAgentSkills(
 }
 
 export function getSkillDiscoveryTargetKey(target: SkillDiscoveryTarget | undefined): string {
-  // Why: empty means the local runtime — a sentinel word could alias a real id.
-  const executionHostKey = encodeURIComponent(target?.executionHostId?.trim() || '')
   if (target?.projectRuntime) {
-    const runtimeKey =
-      target.projectRuntime.status === 'resolved'
-        ? target.projectRuntime.runtime.cacheKey
-        : target.projectRuntime.repair.cacheKey
-    return `${executionHostKey}::${runtimeKey}`
+    return target.projectRuntime.status === 'resolved'
+      ? target.projectRuntime.runtime.cacheKey
+      : target.projectRuntime.repair.cacheKey
   }
   const normalizedTarget = normalizeSkillDiscoveryTarget(target)
-  const runtimeKey =
-    normalizedTarget?.runtime === 'wsl' ? `wsl:${normalizedTarget.wslDistro ?? ''}` : 'host'
-  return `${executionHostKey}::${runtimeKey}`
+  return normalizedTarget?.runtime === 'wsl' ? `wsl:${normalizedTarget.wslDistro ?? ''}` : 'host'
 }
 
 export function resetInstalledAgentSkillDiscoveryForTests(): void {

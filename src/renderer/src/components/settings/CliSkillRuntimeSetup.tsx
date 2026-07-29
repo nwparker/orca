@@ -1,5 +1,4 @@
 import type { GlobalSettings } from '../../../../shared/types'
-import type { SkillDiscoveryTarget } from '../../../../shared/skills'
 import {
   deriveGlobalWindowsRuntimeDefaultFromLegacySettings,
   normalizeGlobalWindowsRuntimeDefault
@@ -150,18 +149,11 @@ export function buildSkillInstallCommandForRuntime(
 }
 
 export function getSkillDiscoveryTargetForRuntime(
-  runtime: LocalAgentRuntime,
-  executionHostId?: string | null
-): SkillDiscoveryTarget | undefined {
-  const normalizedHostId = executionHostId?.trim() || null
-  if (runtime.runtime === 'wsl') {
-    return {
-      runtime: 'wsl',
-      wslDistro: runtime.wslDistro ?? null,
-      ...(normalizedHostId ? { executionHostId: normalizedHostId } : {})
-    }
-  }
-  return normalizedHostId ? { executionHostId: normalizedHostId } : undefined
+  runtime: LocalAgentRuntime
+): { runtime: 'wsl'; wslDistro?: string | null } | undefined {
+  return runtime.runtime === 'wsl'
+    ? { runtime: 'wsl', wslDistro: runtime.wslDistro ?? null }
+    : undefined
 }
 
 export function getAgentSkillTerminalShellOverride(

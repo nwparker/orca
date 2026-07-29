@@ -68,7 +68,7 @@ describe('installed agent skill discovery lifecycle', () => {
       .mockReturnValueOnce(staleScan.promise)
       .mockReturnValueOnce(freshScan.promise)
     vi.stubGlobal('window', { api: { skills: { discover } } })
-    const target = { executionHostId: 'ssh:build-host' }
+    const target = { runtime: 'wsl' as const, wslDistro: 'Ubuntu' }
 
     const staleRequest = discoverInstalledAgentSkills(false, target)
     invalidateInstalledAgentSkillDiscovery()
@@ -169,65 +169,29 @@ describe('installed agent skill discovery lifecycle', () => {
     await expect(joinedRequest).resolves.toEqual(result(2))
   })
 
-  it('does not share results across remote runtime hosts', async () => {
-    const discover = vi
-      .fn<(target?: SkillDiscoveryTarget) => Promise<SkillDiscoveryResult>>()
-      .mockResolvedValueOnce(result(1))
-      .mockResolvedValueOnce(result(2))
-    vi.stubGlobal('window', { api: { skills: { discover } } })
-
-    await expect(
-      discoverInstalledAgentSkills(false, { executionHostId: 'ssh:one' })
-    ).resolves.toEqual(result(1))
-    await expect(
-      discoverInstalledAgentSkills(false, { executionHostId: 'ssh:two' })
-    ).resolves.toEqual(result(2))
-    await expect(
-      discoverInstalledAgentSkills(false, { executionHostId: 'ssh:one' })
-    ).resolves.toEqual(result(1))
-    expect(discover).toHaveBeenCalledTimes(2)
-    // Why: the host id partitions the renderer cache only — the main process
-    // resolves the runtime itself and must not receive it.
-    expect(discover).toHaveBeenNthCalledWith(1, undefined)
-    expect(discover).toHaveBeenNthCalledWith(2, undefined)
-  })
-
-  it('keeps the host id out of every target shape sent to discovery', async () => {
+  it('normalizes every target shape before it reaches discovery', async () => {
     const discover = vi
       .fn<(target?: SkillDiscoveryTarget) => Promise<SkillDiscoveryResult>>()
       .mockResolvedValue(result(1))
     vi.stubGlobal('window', { api: { skills: { discover } } })
 
-    await discoverInstalledAgentSkills(false, {
-      executionHostId: 'ssh:one',
-      runtime: 'wsl',
-      wslDistro: 'Ubuntu'
-    })
+    await discoverInstalledAgentSkills(false, { runtime: 'wsl', wslDistro: 'Ubuntu' })
     expect(discover).toHaveBeenLastCalledWith({ runtime: 'wsl', wslDistro: 'Ubuntu' })
 
-    await discoverInstalledAgentSkills(false, {
-      executionHostId: 'ssh:one',
-      projectRuntime: resolvedWslProjectRuntime
-    })
+    await discoverInstalledAgentSkills(false, { projectRuntime: resolvedWslProjectRuntime })
     expect(discover).toHaveBeenLastCalledWith({
       runtime: 'wsl',
       wslDistro: 'Ubuntu',
       projectRuntime: resolvedWslProjectRuntime
     })
 
-    await discoverInstalledAgentSkills(false, {
-      executionHostId: 'ssh:one',
-      projectRuntime: resolvedHostProjectRuntime
-    })
+    await discoverInstalledAgentSkills(false, { projectRuntime: resolvedHostProjectRuntime })
     expect(discover).toHaveBeenLastCalledWith({
       runtime: 'host',
       projectRuntime: resolvedHostProjectRuntime
     })
 
-    await discoverInstalledAgentSkills(false, {
-      executionHostId: 'ssh:one',
-      projectRuntime: repairProjectRuntime
-    })
+    await discoverInstalledAgentSkills(false, { projectRuntime: repairProjectRuntime })
     expect(discover).toHaveBeenLastCalledWith({ projectRuntime: repairProjectRuntime })
   })
 
@@ -250,22 +214,14 @@ describe('installed agent skill discovery lifecycle', () => {
     expect(discover).toHaveBeenCalledTimes(2)
   })
 
-  it('includes runtime host identity in generic and project cache keys', () => {
-    const projectRuntime = {
-      status: 'resolved' as const,
-      runtime: {
-        kind: 'windows-host' as const,
-        hostPlatform: 'win32' as const,
-        projectId: 'repo-1',
-        reason: 'project-override' as const,
-        cacheKey: 'repo-1:windows-host'
-      }
-    }
-
-    expect(getSkillDiscoveryTargetKey(undefined)).toBe('::host')
-    expect(getSkillDiscoveryTargetKey({ executionHostId: 'ssh:one' })).toBe('ssh%3Aone::host')
-    expect(getSkillDiscoveryTargetKey({ executionHostId: 'ssh:two', projectRuntime })).toBe(
-      'ssh%3Atwo::repo-1:windows-host'
+  it('keys targets by runtime and project identity', () => {
+    expect(getSkillDiscoveryTargetKey(undefined)).toBe('host')
+    expect(getSkillDiscoveryTargetKey({ runtime: 'wsl', wslDistro: 'Ubuntu' })).toBe('wsl:Ubuntu')
+    expect(getSkillDiscoveryTargetKey({ projectRuntime: resolvedHostProjectRuntime })).toBe(
+      'repo-1:windows-host'
+    )
+    expect(getSkillDiscoveryTargetKey({ projectRuntime: repairProjectRuntime })).toBe(
+      'repo-1:repair:wsl-distro-required:default'
     )
   })
 })

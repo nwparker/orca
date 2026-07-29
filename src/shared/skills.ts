@@ -43,8 +43,6 @@ export type SkillDiscoveryResult = {
 }
 
 export type SkillDiscoveryTarget = {
-  /** Renderer cache scope for the local or remote runtime that owns discovery. */
-  executionHostId?: string | null
   runtime?: 'host' | 'wsl'
   wslDistro?: string | null
   /** Workspace path whose local .agents/.claude skill roots should be scanned. */
@@ -94,21 +92,16 @@ const RepairProjectRuntimeSchema = z.object({
   })
 })
 
-/**
- * Both desktop IPC and runtime RPC parse the wire-bound discovery target here.
- * `executionHostId` is deliberately absent: it scopes the renderer cache only,
- * and the runtime that answers a scan is resolved on the receiving side.
- */
-export const SkillDiscoveryTargetSchema: z.ZodType<Omit<SkillDiscoveryTarget, 'executionHostId'>> =
-  z.object({
-    runtime: z.enum(['host', 'wsl']).optional(),
-    wslDistro: z.string().nullable().optional(),
-    cwd: z.string().nullable().optional(),
-    worktreeId: z.string().nullable().optional(),
-    projectRuntime: z
-      .discriminatedUnion('status', [ResolvedProjectRuntimeSchema, RepairProjectRuntimeSchema])
-      .optional()
-  })
+/** Both desktop IPC and runtime RPC parse the complete discovery target here. */
+export const SkillDiscoveryTargetSchema: z.ZodType<SkillDiscoveryTarget> = z.object({
+  runtime: z.enum(['host', 'wsl']).optional(),
+  wslDistro: z.string().nullable().optional(),
+  cwd: z.string().nullable().optional(),
+  worktreeId: z.string().nullable().optional(),
+  projectRuntime: z
+    .discriminatedUnion('status', [ResolvedProjectRuntimeSchema, RepairProjectRuntimeSchema])
+    .optional()
+})
 
 export type SkillFrontmatterSummary = {
   name: string | null
