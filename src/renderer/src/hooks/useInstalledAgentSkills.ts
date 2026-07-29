@@ -110,14 +110,21 @@ export function useInstalledAgentSkillNames(
   const discoveryTargetKey = getSkillDiscoveryTargetKey(discoveryTarget)
   // Why: callers derive the target inside a store-backed useMemo, so unrelated
   // store writes hand us a new object with the same key. Two targets with the
-  // same key resolve to the same scan, so latch the object until the key moves
-  // and keep `refresh` — and the discovery effect it drives — stable. A useMemo
-  // would not do: React may discard it, which silently restores the rescan.
-  const latchedDiscoveryTargetRef = useRef({ key: discoveryTargetKey, target: discoveryTarget })
-  if (latchedDiscoveryTargetRef.current.key !== discoveryTargetKey) {
-    latchedDiscoveryTargetRef.current = { key: discoveryTargetKey, target: discoveryTarget }
+  // same key resolve to the same scan, so hold one until the key moves and keep
+  // `refresh` — and the discovery effect it drives — stable. State, not a ref:
+  // React may discard a useMemo, and a render-phase ref write can leak from a
+  // render that never commits.
+  const [latchedDiscoveryTarget, setLatchedDiscoveryTarget] = useState({
+    key: discoveryTargetKey,
+    target: discoveryTarget
+  })
+  if (latchedDiscoveryTarget.key !== discoveryTargetKey) {
+    setLatchedDiscoveryTarget({ key: discoveryTargetKey, target: discoveryTarget })
   }
-  const stableDiscoveryTarget = latchedDiscoveryTargetRef.current.target
+  const stableDiscoveryTarget =
+    latchedDiscoveryTarget.key === discoveryTargetKey
+      ? latchedDiscoveryTarget.target
+      : discoveryTarget
   const cachedDiscovery = peekInstalledAgentSkillDiscoveryCache(discoveryTargetKey)
   const [result, setResult] = useState<SkillDiscoveryResult | null>(cachedDiscovery)
   const [loading, setLoading] = useState(enabled && !cachedDiscovery)
