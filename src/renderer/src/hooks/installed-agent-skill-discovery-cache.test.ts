@@ -1,10 +1,10 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import type { SkillDiscoveryResult } from '../../../shared/skills'
 import {
+  clearInstalledAgentSkillDiscoveryCache,
   getInstalledAgentSkillDiscoveryCacheSizeForTests,
   hasInstalledAgentSkillDiscoveryCacheEntryForTests,
   INSTALLED_AGENT_SKILL_DISCOVERY_CACHE_MAX,
-  INSTALLED_AGENT_SKILL_DISCOVERY_CACHE_TTL_MS,
   peekInstalledAgentSkillDiscoveryCache,
   readInstalledAgentSkillDiscoveryCache,
   resetInstalledAgentSkillDiscoveryCacheForTests,
@@ -17,12 +17,10 @@ function result(scannedAt: number): SkillDiscoveryResult {
 
 afterEach(() => {
   resetInstalledAgentSkillDiscoveryCacheForTests()
-  vi.useRealTimers()
 })
 
 describe('installed agent skill discovery cache', () => {
-  it('stays bounded through prolonged churn and refreshes LRU recency', () => {
-    vi.useFakeTimers()
+  it('stays bounded through prolonged churn and refreshes LRU recency on read', () => {
     for (let index = 0; index < INSTALLED_AGENT_SKILL_DISCOVERY_CACHE_MAX; index += 1) {
       writeInstalledAgentSkillDiscoveryCache(`target-${index}`, result(index))
     }
@@ -42,30 +40,38 @@ describe('installed agent skill discovery cache', () => {
     expect(getInstalledAgentSkillDiscoveryCacheSizeForTests()).toBe(
       INSTALLED_AGENT_SKILL_DISCOVERY_CACHE_MAX
     )
-    expect(hasInstalledAgentSkillDiscoveryCacheEntryForTests('target-9744')).toBe(true)
-    expect(hasInstalledAgentSkillDiscoveryCacheEntryForTests('target-9743')).toBe(false)
-    expect(vi.getTimerCount()).toBe(1)
+    expect(hasInstalledAgentSkillDiscoveryCacheEntryForTests('target-9999')).toBe(true)
+    expect(
+      hasInstalledAgentSkillDiscoveryCacheEntryForTests(
+        `target-${9999 - INSTALLED_AGENT_SKILL_DISCOVERY_CACHE_MAX}`
+      )
+    ).toBe(false)
   })
 
-  it('expires resolved results and releases the cleanup timer', async () => {
-    vi.useFakeTimers()
+  it('rewrites an existing key in place without growing the cache', () => {
     writeInstalledAgentSkillDiscoveryCache('target', result(1))
+    writeInstalledAgentSkillDiscoveryCache('target', result(2))
 
-    await vi.advanceTimersByTimeAsync(INSTALLED_AGENT_SKILL_DISCOVERY_CACHE_TTL_MS - 1)
-    expect(peekInstalledAgentSkillDiscoveryCache('target')).toEqual(result(1))
-    await vi.advanceTimersByTimeAsync(1)
+    expect(getInstalledAgentSkillDiscoveryCacheSizeForTests()).toBe(1)
+    expect(peekInstalledAgentSkillDiscoveryCache('target')).toEqual(result(2))
+  })
 
+  it('peeks without reordering recency so a render pass cannot evict the wrong entry', () => {
+    for (let index = 0; index < INSTALLED_AGENT_SKILL_DISCOVERY_CACHE_MAX; index += 1) {
+      writeInstalledAgentSkillDiscoveryCache(`target-${index}`, result(index))
+    }
+
+    expect(peekInstalledAgentSkillDiscoveryCache('target-0')).toEqual(result(0))
+    writeInstalledAgentSkillDiscoveryCache('overflow', result(-1))
+
+    expect(hasInstalledAgentSkillDiscoveryCacheEntryForTests('target-0')).toBe(false)
+  })
+
+  it('clears every retained result', () => {
+    writeInstalledAgentSkillDiscoveryCache('target', result(1))
+    clearInstalledAgentSkillDiscoveryCache()
+
+    expect(getInstalledAgentSkillDiscoveryCacheSizeForTests()).toBe(0)
     expect(peekInstalledAgentSkillDiscoveryCache('target')).toBeNull()
-    expect(getInstalledAgentSkillDiscoveryCacheSizeForTests()).toBe(0)
-    expect(vi.getTimerCount()).toBe(0)
-  })
-
-  it('clears retained results and the shared cleanup timer', () => {
-    vi.useFakeTimers()
-    writeInstalledAgentSkillDiscoveryCache('target', result(1))
-    resetInstalledAgentSkillDiscoveryCacheForTests()
-
-    expect(getInstalledAgentSkillDiscoveryCacheSizeForTests()).toBe(0)
-    expect(vi.getTimerCount()).toBe(0)
   })
 })

@@ -1,33 +1,25 @@
 import type { SkillDiscoveryResult } from '../../../shared/skills'
 
-type InstalledAgentSkillDiscoveryCacheEntry = {
-  expiresAt: number
-  result: SkillDiscoveryResult
-}
-
+// Why: project and runtime identity change across a long renderer session, so the
+// keyed results accumulate; keep the most recent targets instead of every target
+// the window has ever resolved.
 export const INSTALLED_AGENT_SKILL_DISCOVERY_CACHE_MAX = 256
-export const INSTALLED_AGENT_SKILL_DISCOVERY_CACHE_TTL_MS = 5 * 60_000
 
-let cachedDiscoveryByTarget = new Map<string, InstalledAgentSkillDiscoveryCacheEntry>()
-let expiryTimer: ReturnType<typeof setTimeout> | null = null
+let cachedDiscoveryByTarget = new Map<string, SkillDiscoveryResult>()
 
+// Why: render reads must not reorder recency — React can discard a render pass.
 export function peekInstalledAgentSkillDiscoveryCache(key: string): SkillDiscoveryResult | null {
-  const entry = cachedDiscoveryByTarget.get(key)
-  return entry && entry.expiresAt > Date.now() ? entry.result : null
+  return cachedDiscoveryByTarget.get(key) ?? null
 }
 
 export function readInstalledAgentSkillDiscoveryCache(key: string): SkillDiscoveryResult | null {
-  const entry = cachedDiscoveryByTarget.get(key)
-  if (!entry) {
-    return null
-  }
-  if (entry.expiresAt <= Date.now()) {
-    cachedDiscoveryByTarget.delete(key)
+  const result = cachedDiscoveryByTarget.get(key)
+  if (!result) {
     return null
   }
   cachedDiscoveryByTarget.delete(key)
-  cachedDiscoveryByTarget.set(key, entry)
-  return entry.result
+  cachedDiscoveryByTarget.set(key, result)
+  return result
 }
 
 export function writeInstalledAgentSkillDiscoveryCache(
@@ -35,25 +27,18 @@ export function writeInstalledAgentSkillDiscoveryCache(
   result: SkillDiscoveryResult
 ): void {
   cachedDiscoveryByTarget.delete(key)
-  cachedDiscoveryByTarget.set(key, {
-    expiresAt: Date.now() + INSTALLED_AGENT_SKILL_DISCOVERY_CACHE_TTL_MS,
-    result
-  })
-  // Why: project and runtime identities change during long renderer sessions;
-  // keep recent discovery results without retaining every target ever opened.
+  cachedDiscoveryByTarget.set(key, result)
   while (cachedDiscoveryByTarget.size > INSTALLED_AGENT_SKILL_DISCOVERY_CACHE_MAX) {
-    const oldest = cachedDiscoveryByTarget.keys().next().value
-    if (oldest === undefined) {
+    const oldestKey = cachedDiscoveryByTarget.keys().next().value
+    if (oldestKey === undefined) {
       break
     }
-    cachedDiscoveryByTarget.delete(oldest)
+    cachedDiscoveryByTarget.delete(oldestKey)
   }
-  scheduleExpiry()
 }
 
 export function clearInstalledAgentSkillDiscoveryCache(): void {
   cachedDiscoveryByTarget.clear()
-  clearExpiryTimer()
 }
 
 export function getInstalledAgentSkillDiscoveryCacheSizeForTests(): number {
@@ -65,38 +50,5 @@ export function hasInstalledAgentSkillDiscoveryCacheEntryForTests(key: string): 
 }
 
 export function resetInstalledAgentSkillDiscoveryCacheForTests(): void {
-  clearInstalledAgentSkillDiscoveryCache()
   cachedDiscoveryByTarget = new Map()
-}
-
-function clearExpiryTimer(): void {
-  if (expiryTimer !== null) {
-    clearTimeout(expiryTimer)
-    expiryTimer = null
-  }
-}
-
-function scheduleExpiry(): void {
-  if (expiryTimer !== null) {
-    return
-  }
-  let nextExpiryAt = Number.POSITIVE_INFINITY
-  for (const entry of cachedDiscoveryByTarget.values()) {
-    nextExpiryAt = Math.min(nextExpiryAt, entry.expiresAt)
-  }
-  if (!Number.isFinite(nextExpiryAt)) {
-    return
-  }
-  expiryTimer = setTimeout(expireIdleEntries, Math.max(0, nextExpiryAt - Date.now()))
-}
-
-function expireIdleEntries(): void {
-  expiryTimer = null
-  const now = Date.now()
-  for (const [key, entry] of cachedDiscoveryByTarget) {
-    if (entry.expiresAt <= now) {
-      cachedDiscoveryByTarget.delete(key)
-    }
-  }
-  scheduleExpiry()
 }
