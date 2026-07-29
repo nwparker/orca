@@ -27,10 +27,14 @@ export type AssertNoMissingValues<TType, TSchema> =
     ? true
     : { valueDomainTooNarrowFor: MissingValueKeys<TType, TSchema> }
 
-// `undefined` is stripped from both sides: optionality is the key guard's job,
-// and a schema field is always `| undefined` once `.optional()` is applied.
+// Only `undefined` is stripped: optionality is the key guard's job, and a schema
+// field is always `| undefined` once `.optional()` is applied. `null` must stay —
+// dropping `.nullable()` from a `| null` field is the same batch-rejecting drift.
 type MissingValueKeys<TType, TSchema> = {
-  [K in Extract<keyof TType, keyof TSchema>]: NonNullable<TType[K]> extends NonNullable<TSchema[K]>
+  [K in Extract<keyof TType, keyof TSchema>]: Exclude<TType[K], undefined> extends Exclude<
+    TSchema[K],
+    undefined
+  >
     ? never
     : K
 }[Extract<keyof TType, keyof TSchema>]

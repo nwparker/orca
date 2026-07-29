@@ -45,11 +45,17 @@ describe('createSshBackgroundStartupDelivery shell-ready fallback', () => {
     expect(write.mock.calls[0]?.[1]).toContain('codex "run the automation"')
   })
 
-  it('still delivers eventually when a shell can never emit the marker', () => {
+  it('still delivers eventually when a shell can never emit the marker, and not before 15s', () => {
     const { delivery, write } = createDelivery()
 
     delivery.armFallback('pty-1')
-    vi.advanceTimersByTime(20_000)
+    // Pin the boundary: asserting only eventual delivery would let the budget
+    // silently shrink back toward the short deadline this fix moved off.
+    vi.advanceTimersByTime(14_999)
+
+    expect(write).not.toHaveBeenCalled()
+
+    vi.advanceTimersByTime(1)
     vi.advanceTimersByTime(50)
 
     expect(write).toHaveBeenCalledTimes(1)
