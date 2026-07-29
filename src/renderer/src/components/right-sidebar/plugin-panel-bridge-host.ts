@@ -1,9 +1,9 @@
 import {
   PANEL_ACTION_RESULT_TYPE,
+  PANEL_CONTROL_MESSAGE_MAX_BYTES,
   looksLikePanelActionRequest,
-  looksLikePanelControlFrame,
-  looksLikePanelPong,
   parsePanelActionRequest,
+  readPanelPongId,
   type PluginPanelActionOutcome,
   type PluginPanelActionResultMessage
 } from '../../../../shared/plugins/plugin-panel-bridge'
@@ -88,15 +88,25 @@ export function createPanelBridgeMessageHandler(
       // concrete origin, so anything stricter would silently drop the reply.
       requestingWindow.postMessage(message, '*')
     }
-    // Liveness is charged to its own reserved budget: a panel saturating its
-    // action allowance must still be able to prove it is alive.
-    if (looksLikePanelControlFrame(event.data)) {
-      const controlRefusal = controlBudget.admit(
-        now(),
-        structuredCloneMessageBytes(event.data, controlBudget.maxBytes)
+    // A valid pong is the one frame the host must never lose: it takes a
+    // reserved lane so a panel saturating its data budget can still prove it
+    // is alive. Only schema-valid pongs qualify, so near-miss pong-shaped junk
+    // cannot drain the lane the real reply needs — it falls through to the
+    // data budget below like any other malformed frame.
+    const pongId = readPanelPongId(event.data)
+    if (pongId !== null) {
+      const timestamp = now()
+      // One walk, capped at the smaller lane bound, serves both budgets: a
+      // pong above that cap is refused here anyway.
+      const pongBytes = structuredCloneMessageBytes(
+        event.data,
+        controlBudget.maxBytes ?? PANEL_CONTROL_MESSAGE_MAX_BYTES
       )
-      if (!controlRefusal && looksLikePanelPong(event.data)) {
-        options.onPong?.((event.data as { pingId: number }).pingId)
+      // Charged to both: the data budget still meters this traffic, while a
+      // refusal there cannot by itself silence liveness.
+      budget.admit(timestamp, pongBytes)
+      if (!controlBudget.admit(timestamp, pongBytes)) {
+        options.onPong?.(pongId)
       }
       return
     }

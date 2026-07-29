@@ -22,10 +22,12 @@ export const PLUGIN_PANEL_FRAME_NAME_PREFIX = 'orca-plugin-panel:'
 export const PANEL_MESSAGE_MAX_BYTES = 64 * 1024
 export const PANEL_MESSAGE_RATE_LIMIT = { maxMessages: 30, perMs: 10_000 }
 
-/** Liveness frames get a reserved budget sized for the ping cadence: a panel
- *  saturating its action budget must still be able to prove it is alive. */
+/** Size cap for the reserved liveness lane. Deliberately size-only: any
+ *  per-window count on this lane can be spent by the panel's own pongs and
+ *  would drop the next genuine reply, which is the starvation this reserved
+ *  lane exists to prevent. Aggregate cost stays bounded because pongs are also
+ *  charged to the data budget and cost O(1) plus a walk capped here. */
 export const PANEL_CONTROL_MESSAGE_MAX_BYTES = 1024
-export const PANEL_CONTROL_RATE_LIMIT = { maxMessages: 4, perMs: 10_000 }
 
 /** Watchdog cadence: a panel that misses a pong deadline is demoted to an
  *  errored badge. Busy-loop detection is valid only while the runtime frame-
@@ -132,18 +134,19 @@ export function looksLikePanelActionRequest(data: unknown): boolean {
   )
 }
 
-/** Cheap routing check (no schema work) for liveness frames, so the reserved
- *  control budget — not the data budget — pays for pong-shaped traffic. */
-export function looksLikePanelControlFrame(data: unknown): boolean {
-  return (
-    typeof data === 'object' &&
-    data !== null &&
-    (data as { type?: unknown }).type === PANEL_PONG_TYPE
-  )
-}
-
-export function looksLikePanelPong(data: unknown): boolean {
-  return panelPongSchema.safeParse(data).success
+/** Reads a valid pong's pingId, or null. Hand-rolled rather than
+ *  `panelPongSchema.safeParse` because a rejected parse allocates an issue
+ *  list, which is ~90x the accepted-path cost — free CPU for a panel spamming
+ *  near-miss pongs. The schema stays the contract; this mirrors it exactly. */
+export function readPanelPongId(data: unknown): number | null {
+  if (typeof data !== 'object' || data === null) {
+    return null
+  }
+  const frame = data as { type?: unknown; pingId?: unknown }
+  if (frame.type !== PANEL_PONG_TYPE || typeof frame.pingId !== 'number') {
+    return null
+  }
+  return Number.isInteger(frame.pingId) && frame.pingId >= 0 ? frame.pingId : null
 }
 
 /** Validates action params against the host API spec (shared with workers). */

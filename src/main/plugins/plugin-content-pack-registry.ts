@@ -63,8 +63,13 @@ export class PluginContentPackRegistry {
     )
 
     while (true) {
+      // `approvedKeys` is a snapshot from before the awaited verification
+      // above, so a kill list arriving during that wait would otherwise still
+      // publish. Re-read revocation here, the last gate before publication.
       const approveAtomically = (plugin: ValidDiscoveredPlugin): boolean =>
-        approvedKeys.has(plugin.pluginKey) && !excluded.has(plugin.pluginKey)
+        approvedKeys.has(plugin.pluginKey) &&
+        !excluded.has(plugin.pluginKey) &&
+        !this.isKilled(plugin.pluginKey)
       const languagePacks = this.languagePacks.reconcile(discovered, approveAtomically)
       const vmRecipes = this.vmRecipes.reconcile(discovered, approveAtomically)
       this.commands.reconcile(discovered, approveAtomically, keybindings)

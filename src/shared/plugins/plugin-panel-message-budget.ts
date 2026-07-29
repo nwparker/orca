@@ -1,6 +1,5 @@
 import {
   PANEL_CONTROL_MESSAGE_MAX_BYTES,
-  PANEL_CONTROL_RATE_LIMIT,
   PANEL_MESSAGE_MAX_BYTES,
   PANEL_MESSAGE_RATE_LIMIT
 } from './plugin-panel-bridge'
@@ -45,14 +44,18 @@ export function createPanelMessageBudget(
   }
 }
 
-/** Reserved liveness budget, separate from the data budget so a panel that
- *  saturates its action allowance can still answer the watchdog. */
+/**
+ * Reserved liveness lane, size-bounded only. A per-window count here would be
+ * spent by the panel's own pongs and would then drop the next genuine reply —
+ * the exact starvation this lane exists to prevent. Rate is still bounded
+ * because the caller also charges every pong to the data budget.
+ */
 export function createPanelControlMessageBudget(): PanelMessageBudget {
-  return createPanelMessageBudget({
+  return {
     maxBytes: PANEL_CONTROL_MESSAGE_MAX_BYTES,
-    maxMessages: PANEL_CONTROL_RATE_LIMIT.maxMessages,
-    perMs: PANEL_CONTROL_RATE_LIMIT.perMs
-  })
+    admit: (_now, messageBytes) =>
+      messageBytes > PANEL_CONTROL_MESSAGE_MAX_BYTES ? 'oversized' : null
+  }
 }
 
 const textEncoder = new TextEncoder()

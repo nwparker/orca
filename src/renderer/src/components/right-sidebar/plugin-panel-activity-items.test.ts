@@ -1,4 +1,4 @@
-import { Plug } from 'lucide-react'
+import { FileText, Plug } from 'lucide-react'
 import { describe, expect, it } from 'vitest'
 import type { ActivePluginPanel } from '@/store/plugin-panels'
 import { getPluginPanelActivityItems, resolvePluginPanelIcon } from './plugin-panel-activity-items'
@@ -12,8 +12,11 @@ const panel: ActivePluginPanel = {
 }
 
 describe('resolvePluginPanelIcon', () => {
-  it('resolves a curated icon name', () => {
-    expect(resolvePluginPanelIcon('file-text')).toBe(resolvePluginPanelIcon('FileText'))
+  it('resolves a curated icon name in both lucide naming styles', () => {
+    const dashed = resolvePluginPanelIcon('file-text')
+    // Without this, the equality below also passes when both sides fall back.
+    expect(dashed).toBe(FileText)
+    expect(resolvePluginPanelIcon('FileText')).toBe(dashed)
   })
 
   it.each(['constructor', '__proto__', 'toString', 'hasOwnProperty'])(
