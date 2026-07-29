@@ -72,9 +72,7 @@ function renderSlot(): void {
         startupCwd={undefined}
         groupId={GROUP_ID}
         isWorktreeActive
-        isWorktreePresented
         isVisible
-        isPresented
         isActive
         activityTerminalPortal={null}
         onFocusOwningGroup={vi.fn()}
