@@ -99,15 +99,16 @@ const RepairProjectRuntimeSchema = z.object({
  * `executionHostId` is deliberately absent: it scopes the renderer cache only,
  * and the runtime that answers a scan is resolved on the receiving side.
  */
-export const SkillDiscoveryTargetSchema: z.ZodType<SkillDiscoveryTarget> = z.object({
-  runtime: z.enum(['host', 'wsl']).optional(),
-  wslDistro: z.string().nullable().optional(),
-  cwd: z.string().nullable().optional(),
-  worktreeId: z.string().nullable().optional(),
-  projectRuntime: z
-    .discriminatedUnion('status', [ResolvedProjectRuntimeSchema, RepairProjectRuntimeSchema])
-    .optional()
-})
+export const SkillDiscoveryTargetSchema: z.ZodType<Omit<SkillDiscoveryTarget, 'executionHostId'>> =
+  z.object({
+    runtime: z.enum(['host', 'wsl']).optional(),
+    wslDistro: z.string().nullable().optional(),
+    cwd: z.string().nullable().optional(),
+    worktreeId: z.string().nullable().optional(),
+    projectRuntime: z
+      .discriminatedUnion('status', [ResolvedProjectRuntimeSchema, RepairProjectRuntimeSchema])
+      .optional()
+  })
 
 export type SkillFrontmatterSummary = {
   name: string | null

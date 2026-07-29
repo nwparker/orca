@@ -105,6 +105,40 @@ describe('installed agent skill discovery lifecycle', () => {
     expect(discover).toHaveBeenCalledTimes(2)
   })
 
+  it('releases the pending slot so later forced refreshes rescan', async () => {
+    // Why: without the settle-time cleanup the pending map grows forever and
+    // every later forced refresh resolves the first, already-settled scan.
+    const discover = vi
+      .fn<() => Promise<SkillDiscoveryResult>>()
+      .mockResolvedValueOnce(result(1))
+      .mockResolvedValueOnce(result(2))
+      .mockResolvedValueOnce(result(3))
+    vi.stubGlobal('window', { api: { skills: { discover } } })
+
+    await expect(discoverInstalledAgentSkills(true, undefined)).resolves.toEqual(result(1))
+    await expect(discoverInstalledAgentSkills(true, undefined)).resolves.toEqual(result(2))
+    await expect(discoverInstalledAgentSkills(true, undefined)).resolves.toEqual(result(3))
+    expect(discover).toHaveBeenCalledTimes(3)
+  })
+
+  it('collapses concurrent forced refreshes onto one scan', async () => {
+    // Why: an install notification fans out to every mounted skill surface at
+    // once; each forces a refresh and they must not serialize into N scans.
+    const scan = deferred<SkillDiscoveryResult>()
+    const discover = vi.fn<() => Promise<SkillDiscoveryResult>>().mockReturnValue(scan.promise)
+    vi.stubGlobal('window', { api: { skills: { discover } } })
+
+    const requests = [
+      discoverInstalledAgentSkills(true, undefined),
+      discoverInstalledAgentSkills(true, undefined),
+      discoverInstalledAgentSkills(true, undefined)
+    ]
+    scan.resolve(result(1))
+
+    await expect(Promise.all(requests)).resolves.toEqual([result(1), result(1), result(1)])
+    expect(discover).toHaveBeenCalledTimes(1)
+  })
+
   it('lets a superseded scan settle without evicting the newer pending scan', async () => {
     // Why: invalidation clears the pending map mid-flight, so the pre-install
     // scan must not tear down the post-install scan's dedup entry when it lands.

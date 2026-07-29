@@ -280,6 +280,62 @@ describe('useInstalledAgentSkill', () => {
     expect(renderedStates[0]?.installed).toBe(true)
   })
 
+  it('hydrates from the warm cache when the discovery target changes', async () => {
+    // Why: switching project or runtime environment must not blank an already
+    // scanned target back to loading.
+    const discover = vi
+      .fn<(target?: SkillDiscoveryTarget) => Promise<SkillDiscoveryResult>>()
+      .mockResolvedValue(discoveryResult([skill({ name: 'linear-tickets' })]))
+    Object.defineProperty(window, 'api', {
+      configurable: true,
+      value: { skills: { discover } }
+    })
+
+    await renderProbe({ runtime: 'wsl', wslDistro: 'Ubuntu' })
+    await act(async () => {
+      await Promise.resolve()
+    })
+    await renderProbe()
+    await act(async () => {
+      await Promise.resolve()
+    })
+    renderedStates.length = 0
+
+    await renderProbe({ runtime: 'wsl', wslDistro: 'Ubuntu' })
+
+    expect(renderedStates[0]?.loading).toBe(false)
+    expect(renderedStates[0]?.installed).toBe(true)
+  })
+
+  it('notifies mounted surfaces when installed skills change', async () => {
+    // Why: the cache clear alone is inert — the DOM event is what makes every
+    // mounted surface re-check after an install completes in a terminal.
+    const discover = vi
+      .fn<(target?: SkillDiscoveryTarget) => Promise<SkillDiscoveryResult>>()
+      .mockResolvedValueOnce(discoveryResult([]))
+      .mockResolvedValue(discoveryResult([skill({ name: 'linear-tickets' })]))
+    Object.defineProperty(window, 'api', {
+      configurable: true,
+      value: { skills: { discover } }
+    })
+
+    await renderProbe()
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(latestState?.installed).toBe(false)
+
+    await act(async () => {
+      notifyInstalledAgentSkillsChanged()
+      await Promise.resolve()
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(latestState?.installed).toBe(true)
+  })
+
   it('empties the discovery cache when an install notification fires', async () => {
     // Why: notifyInstalledAgentSkillsChanged is the only wire from every install,
     // uninstall and update call site into the cache. Assert the cache directly —
