@@ -2696,6 +2696,12 @@
                     "action": "打开设置"
                   }
                 }
+              },
+              "failed": {
+                "toast": {
+                  "62a0af2cb4": "无法确认终端剪贴板复制",
+                  "fdd3e7e977": "终端应用请求了复制，但 Orca 无法确认内容已写入系统剪贴板。"
+                }
               }
             }
           },
@@ -3757,17 +3763,17 @@
           "b088e0785d": "测试版",
           "f43ad6edf3": "技能",
           "7e828fb2c6": "返回",
-          "ea72d6185b": "无法扫描本地技能",
+          "ea72d6185b": "无法扫描技能",
           "dc4c3328ee": "显示文件",
           "9963dff6d3": "没有找到描述。",
           "995fde8337": "无法显示技能文件",
-          "ab5b777350": "检查本地主目录、存储库、捆绑和插件技能文件夹。",
+          "ab5b777350": "检查主目录、存储库、捆绑和插件技能文件夹。",
           "08a321a984": "调整搜索或筛选条件。",
-          "4acd6d68ec": "未找到本地技能",
+          "4acd6d68ec": "未找到技能",
           "6a62a0168c": "没有匹配项",
           "cd7893fbc1": "正在扫描技能",
           "35b9a724a0": "可用的",
-          "0c74e7ff34": "当地的"
+          "0c74e7ff34": "已安装"
         },
         "SkillFreshnessNudge": {
           "titleOne": "已安装的 Orca 技能已过期",
@@ -3857,7 +3863,7 @@
           "upToDate": "已是最新",
           "installed": "已安装",
           "details": "Details",
-          "needsAttention": "Needs attention"
+          "needsAttention": "Review skill"
         },
         "SkillUpdateResultRows": {
           "stillOutdated": "Still out of date after the update ran."
@@ -7628,6 +7634,12 @@
             "8dd4805991": "文件",
             "68d1db8929": "markdown",
             "90425d313c": "转移",
+            "linkRoutingModifier": {
+              "routing": "路由",
+              "modifier": "修饰键",
+              "invert": "反转",
+              "opposite": "相反"
+            },
             "72c58f7792": "网页视图",
             "82ba1c80ea": "本地主机",
             "bea27bac4b": "链接",
@@ -9543,6 +9555,12 @@
           "serviceManagerHelp": "Update Orca through the service manager that starts this server.",
           "unpackedHelp": "Development builds must be updated from their source checkout.",
           "legacyHelp": "Update this server manually once to enable remote updates."
+        },
+        "BrowserLinkRoutingModifierSetting": {
+          "titleSystem": "Hold Shift to open in your web browser",
+          "titleOrca": "Hold Shift to open in Orca",
+          "descriptionSystem": "Links open in Orca, so {{chord}}+click sends one to your system browser instead.",
+          "descriptionOrca": "Links open in your system browser. When enabled, {{chord}}+click opens one in Orca's built-in browser instead."
         },
         "PluginConsentDialog": {
           "workerTrust": "后台工作进程 — 运行自己的进程",

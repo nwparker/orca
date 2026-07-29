@@ -2696,6 +2696,12 @@
                     "action": "Abrir ajuste"
                   }
                 }
+              },
+              "failed": {
+                "toast": {
+                  "62a0af2cb4": "No se pudo confirmar la copia del portapapeles del terminal",
+                  "fdd3e7e977": "La app del terminal solicitó una copia, pero Orca no pudo confirmar que llegara al portapapeles del sistema."
+                }
               }
             }
           },
@@ -3757,17 +3763,17 @@
           "b088e0785d": "Beta",
           "f43ad6edf3": "Skills",
           "7e828fb2c6": "Volver",
-          "ea72d6185b": "No se pudieron escanear los skills locales",
+          "ea72d6185b": "No se pudieron escanear los skills",
           "dc4c3328ee": "Mostrar archivo",
           "9963dff6d3": "No se encontró ninguna descripción.",
           "995fde8337": "No se pudo mostrar el archivo del skill",
-          "ab5b777350": "Se comprobaron las carpetas de skills locales, del repositorio, incluidas y de plugins.",
+          "ab5b777350": "Se comprobaron las carpetas de skills del home, del repositorio, incluidas y de plugins.",
           "08a321a984": "Ajusta la búsqueda o los filtros.",
-          "4acd6d68ec": "No se encontraron skills locales",
+          "4acd6d68ec": "No se encontraron skills",
           "6a62a0168c": "No hay coincidencias",
           "cd7893fbc1": "Escaneando skills",
           "35b9a724a0": "Disponible",
-          "0c74e7ff34": "Local"
+          "0c74e7ff34": "Instalado"
         },
         "SkillFreshnessNudge": {
           "titleOne": "Una skill de Orca instalada está desactualizada",
@@ -3857,7 +3863,7 @@
           "upToDate": "Actualizado",
           "installed": "Instalado",
           "details": "Details",
-          "needsAttention": "Needs attention"
+          "needsAttention": "Review skill"
         },
         "SkillUpdateResultRows": {
           "stillOutdated": "Still out of date after the update ran."
@@ -7643,6 +7649,12 @@
             "8dd4805991": "archivo",
             "68d1db8929": "markdown",
             "90425d313c": "cambio",
+            "linkRoutingModifier": {
+              "routing": "enrutamiento",
+              "modifier": "modificador",
+              "invert": "invertir",
+              "opposite": "opuesto"
+            },
             "72c58f7792": "vista web",
             "82ba1c80ea": "localhost",
             "bea27bac4b": "enlaces",
@@ -9543,6 +9555,12 @@
           "serviceManagerHelp": "Update Orca through the service manager that starts this server.",
           "unpackedHelp": "Development builds must be updated from their source checkout.",
           "legacyHelp": "Update this server manually once to enable remote updates."
+        },
+        "BrowserLinkRoutingModifierSetting": {
+          "titleSystem": "Hold Shift to open in your web browser",
+          "titleOrca": "Hold Shift to open in Orca",
+          "descriptionSystem": "Links open in Orca, so {{chord}}+click sends one to your system browser instead.",
+          "descriptionOrca": "Links open in your system browser. When enabled, {{chord}}+click opens one in Orca's built-in browser instead."
         },
         "PluginConsentDialog": {
           "workerTrust": "Proceso en segundo plano — se ejecuta en su propio proceso",

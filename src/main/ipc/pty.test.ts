@@ -3599,6 +3599,64 @@ describe('registerPtyHandlers', () => {
         })
       })
 
+      it('resolves default WSL authority before daemon host env and spawn metadata', async () => {
+        await withWin32Platform(async () => {
+          _setWslCachesForTests({ available: true, distros: ['Ubuntu'] })
+          const daemonSpawn = setupDaemonAdapter()
+          const runtime = {
+            setPtyController: vi.fn(),
+            registerPty: vi.fn(),
+            onPtySpawned: vi.fn(),
+            onPtyExit: vi.fn(),
+            onPtyData: vi.fn(),
+            preparePtyExecutionContext: vi.fn().mockReturnValue(true),
+            getOrchestrationCompatibilityHostId: vi.fn(() => 'compat-host')
+          }
+          const settings = {
+            terminalWindowsShell: 'wsl.exe',
+            terminalWindowsWslDistro: null,
+            terminalWindowsPowerShellImplementation: 'auto'
+          }
+          handlers.clear()
+          registerPtyHandlers(
+            mainWindow as never,
+            runtime as never,
+            undefined,
+            (() => settings) as never
+          )
+          const controller = runtime.setPtyController.mock.calls[0]?.[0] as {
+            spawn(args: {
+              cols: number
+              rows: number
+              cwd?: string
+              worktreeId?: string
+              env?: Record<string, string>
+            }): Promise<{ id: string }>
+          }
+
+          await controller.spawn({
+            cols: 80,
+            rows: 24,
+            cwd: 'C:\\repo',
+            worktreeId: 'repo-1::C:\\repo',
+            env: {}
+          })
+
+          const spawnOptions = daemonSpawn.mock.calls.at(-1)?.[0] as DaemonSpawnCall
+          expect(spawnOptions.terminalWindowsWslDistro).toBe('Ubuntu')
+          expect(spawnOptions.env).toMatchObject({
+            ORCA_ORCHESTRATION_COMPATIBILITY_HOST_KIND: 'wsl',
+            ORCA_ORCHESTRATION_COMPATIBILITY_HOST_ID: 'compat-host',
+            ORCA_ORCHESTRATION_COMPATIBILITY_HOST_INCARNATION: 'Ubuntu'
+          })
+          expect(runtime.preparePtyExecutionContext).toHaveBeenCalledWith(
+            expect.any(String),
+            'Ubuntu',
+            expect.objectContaining({ resetIncarnation: true })
+          )
+        })
+      })
+
       it('distinguishes an attached native context from an older daemon fallback', async () => {
         await withWin32Platform(async () => {
           _setWslCachesForTests({ available: true, distros: ['Ubuntu'] })
@@ -5372,6 +5430,37 @@ describe('registerPtyHandlers', () => {
     expect(controller.hasPty('missing-pty')).toBe(false)
     expect(hasPty).toHaveBeenCalledTimes(2)
     expect(listProcesses).not.toHaveBeenCalled()
+  })
+
+  it('scopes runtime inventories to the requested provider', async () => {
+    const localList = vi
+      .spyOn(getLocalPtyProvider(), 'listProcesses')
+      .mockResolvedValue([{ id: 'local-pty', title: 'Local', cwd: '/local' }])
+    const sshAList = vi.fn(async () => [{ id: 'ssh-a-pty' }])
+    const sshBList = vi.fn(async () => {
+      throw new Error('ssh-b unavailable')
+    })
+    registerSshPtyProvider('ssh-a', { listProcesses: sshAList } as never)
+    registerSshPtyProvider('ssh-b', { listProcesses: sshBList } as never)
+    const runtime = { setPtyController: vi.fn() }
+    handlers.clear()
+    registerPtyHandlers(mainWindow as never, runtime as never)
+    const controller = runtime.setPtyController.mock.calls[0]?.[0] as {
+      listProcesses(connectionId?: string | null): Promise<{ id: string }[]>
+    }
+
+    await expect(controller.listProcesses(null)).resolves.toEqual([
+      { id: 'local-pty', title: 'Local', cwd: '/local' }
+    ])
+    expect(localList).toHaveBeenCalledOnce()
+    expect(sshAList).not.toHaveBeenCalled()
+    expect(sshBList).not.toHaveBeenCalled()
+
+    await expect(controller.listProcesses('ssh-a')).resolves.toEqual([{ id: 'ssh-a-pty' }])
+    expect(sshAList).toHaveBeenCalledOnce()
+    expect(sshBList).not.toHaveBeenCalled()
+
+    await expect(controller.listProcesses()).rejects.toThrow('ssh-b unavailable')
   })
 
   it('returns unavailable runtime confirmation for unsupported or missing providers', async () => {
@@ -14458,6 +14547,45 @@ describe('registerPtyHandlers', () => {
       'legacy history\r\n',
       undefined,
       { cwd: '/projects/legacy', oscLinks: undefined, preferProviderIfExisting: true }
+    )
+  })
+
+  it('seeds the headless emulator from an SSH relay reattach replay', async () => {
+    setLocalPtyProvider({
+      spawn: vi.fn(async () => ({
+        id: 'pty-ssh-reattach',
+        isReattach: true,
+        replay: 'relay history\r\n'
+      })),
+      write: vi.fn(),
+      resize: vi.fn(),
+      kill: vi.fn(),
+      shutdown: vi.fn(),
+      onData: vi.fn(() => vi.fn()),
+      onExit: vi.fn(() => vi.fn()),
+      listProcesses: vi.fn(async () => []),
+      getForegroundProcess: vi.fn(async () => null)
+    } as never)
+    const runtime = {
+      setPtyController: vi.fn(),
+      noteTerminalSpawnCommand: vi.fn(),
+      seedHeadlessTerminal: vi.fn(),
+      onPtySpawned: vi.fn(),
+      onPtyData: vi.fn(),
+      onPtyExit: vi.fn(),
+      createPreAllocatedTerminalHandle: vi.fn(() => 'handle-ssh-reattach'),
+      registerPreAllocatedHandleForPty: vi.fn(),
+      preAllocateHandleForPty: vi.fn()
+    }
+    registerPtyHandlers(mainWindow as never, runtime as never)
+
+    await handlers.get('pty:spawn')!(null, { cols: 80, rows: 24 })
+
+    // Why: without this seed main's model would be a strict suffix of what the renderer painted, and a later park-reveal would restore the fragment.
+    expect(runtime.seedHeadlessTerminal).toHaveBeenCalledTimes(1)
+    expect(runtime.seedHeadlessTerminal).toHaveBeenCalledWith(
+      'pty-ssh-reattach',
+      'relay history\r\n'
     )
   })
 

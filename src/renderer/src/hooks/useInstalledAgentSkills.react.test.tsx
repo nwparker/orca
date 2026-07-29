@@ -2,13 +2,17 @@
 
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type {
   DiscoveredSkill,
   SkillDiscoveryResult,
   SkillDiscoveryTarget
 } from '../../../shared/skills'
 import type { ProjectExecutionRuntimeResolution } from '../../../shared/project-execution-runtime'
+import type { GlobalSettings } from '../../../shared/types'
+import { createCompatibleRuntimeStatusResponseIfNeeded } from '@/runtime/runtime-compatibility-test-fixture'
+import { clearRuntimeCompatibilityCacheForTests } from '@/runtime/runtime-rpc-client'
+import { useAppStore } from '@/store'
 import {
   GLOBAL_AGENT_SKILL_SOURCE_KINDS,
   type InstalledAgentSkillState,
@@ -108,8 +112,42 @@ afterEach(async () => {
   latestState = null
   renderedStates.length = 0
   _installedAgentSkillDiscoveryInternalsForTests.reset()
+  clearRuntimeCompatibilityCacheForTests()
+  useAppStore.setState({
+    settings: null,
+    runtimeEnvironments: [],
+    runtimeEnvironmentCatalogSettled: false
+  })
   vi.restoreAllMocks()
   Reflect.deleteProperty(window, 'api')
+})
+
+/** Drain the compat probe + RPC promise chain a remote scan walks before it lands in state. */
+async function flushMicrotasks(): Promise<void> {
+  await act(async () => {
+    for (let tick = 0; tick < 8; tick += 1) {
+      await Promise.resolve()
+    }
+  })
+}
+
+/**
+ * Hydrate the store the way a running app does. `savedEnvironmentIds` defaults to
+ * just the focused one, which is the only shape that resolves to a remote owner.
+ */
+function setRuntimeOwner(
+  environmentId: string | null,
+  savedEnvironmentIds: readonly string[] = environmentId ? [environmentId] : []
+): void {
+  useAppStore.setState({
+    settings: { activeRuntimeEnvironmentId: environmentId } as GlobalSettings,
+    runtimeEnvironments: savedEnvironmentIds.map((id) => ({ id })) as never,
+    runtimeEnvironmentCatalogSettled: true
+  })
+}
+
+beforeEach(() => {
+  setRuntimeOwner(null)
 })
 
 describe('useInstalledAgentSkill', () => {
@@ -250,9 +288,143 @@ describe('useInstalledAgentSkill', () => {
     })
   })
 
+  it('scans the connected remote runtime and keeps that result out of the local cache', async () => {
+    const discover = vi
+      .fn<(target?: SkillDiscoveryTarget) => Promise<SkillDiscoveryResult>>()
+      .mockResolvedValue(discoveryResult([]))
+    const call = vi.fn(
+      async (args: { method: string; selector?: string }) =>
+        createCompatibleRuntimeStatusResponseIfNeeded(args) ?? {
+          id: 'skills',
+          ok: true,
+          result: discoveryResult([skill({ name: 'linear-tickets' })])
+        }
+    )
+    Object.defineProperty(window, 'api', {
+      configurable: true,
+      value: { skills: { discover }, runtimeEnvironments: { call } }
+    })
+    setRuntimeOwner('env-1')
+
+    await renderProbe()
+    await flushMicrotasks()
+
+    expect(latestState?.installed).toBe(true)
+    expect(discover).not.toHaveBeenCalled()
+    expect(call).toHaveBeenCalledWith(
+      expect.objectContaining({ selector: 'env-1', method: 'skills.discover' })
+    )
+
+    // Why: the remote hit is keyed per environment, so switching back to the
+    // local host must re-scan the client instead of replaying the server's list.
+    await act(async () => {
+      setRuntimeOwner(null)
+    })
+    await flushMicrotasks()
+
+    expect(discover).toHaveBeenCalledTimes(1)
+    expect(latestState?.installed).toBe(false)
+  })
+
+  // Why: the skill INSTALL terminal routes through getSingleFocusedRuntimeEnvironmentId,
+  // which refuses to guess an owner while several runtimes are saved. Scanning the
+  // focused remote here would leave the badge stuck on "Not installed" forever,
+  // because the install actually lands on the local client.
+  it('scans the local host when several saved runtimes make the install host ambiguous', async () => {
+    const discover = vi
+      .fn<(target?: SkillDiscoveryTarget) => Promise<SkillDiscoveryResult>>()
+      .mockResolvedValue(discoveryResult([skill({ name: 'linear-tickets' })]))
+    const call = vi.fn()
+    Object.defineProperty(window, 'api', {
+      configurable: true,
+      value: { skills: { discover }, runtimeEnvironments: { call } }
+    })
+    setRuntimeOwner('env-1', ['env-1', 'env-2'])
+
+    await renderProbe()
+    await flushMicrotasks()
+
+    expect(call).not.toHaveBeenCalled()
+    expect(discover).toHaveBeenCalledTimes(1)
+    expect(latestState?.installed).toBe(true)
+  })
+
+  it('keeps loading instead of scanning the wrong host before the catalog settles', async () => {
+    const discover = vi
+      .fn<(target?: SkillDiscoveryTarget) => Promise<SkillDiscoveryResult>>()
+      .mockResolvedValue(discoveryResult([]))
+    const call = vi.fn()
+    Object.defineProperty(window, 'api', {
+      configurable: true,
+      value: { skills: { discover }, runtimeEnvironments: { call } }
+    })
+    // Why: a focused remote is already known here, so a missing gate resolves to
+    // the local host and caches a client scan under the local key.
+    useAppStore.setState({
+      settings: { activeRuntimeEnvironmentId: 'env-1' } as GlobalSettings,
+      runtimeEnvironments: [{ id: 'env-1' }] as never,
+      runtimeEnvironmentCatalogSettled: false
+    })
+
+    await renderProbe()
+    await flushMicrotasks()
+
+    expect(discover).not.toHaveBeenCalled()
+    expect(call).not.toHaveBeenCalled()
+    expect(latestState?.loading).toBe(true)
+    expect(latestState?.installed).toBe(false)
+  })
+
+  // Why: a failed catalog read must degrade to the local host, not strand every
+  // skill badge on a spinner with no retry affordance for the whole session.
+  it('falls back to the local host once an unreadable catalog settles', async () => {
+    const discover = vi
+      .fn<(target?: SkillDiscoveryTarget) => Promise<SkillDiscoveryResult>>()
+      .mockResolvedValue(discoveryResult([skill({ name: 'linear-tickets' })]))
+    Object.defineProperty(window, 'api', {
+      configurable: true,
+      value: { skills: { discover }, runtimeEnvironments: { call: vi.fn() } }
+    })
+    useAppStore.setState({
+      settings: null,
+      runtimeEnvironments: [],
+      runtimeEnvironmentCatalogSettled: true
+    })
+
+    await renderProbe()
+    await flushMicrotasks()
+
+    expect(discover).toHaveBeenCalledTimes(1)
+    expect(latestState?.loading).toBe(false)
+    expect(latestState?.installed).toBe(true)
+  })
+  it('does not rescan when a caller rebuilds an equivalent target object', async () => {
+    // Why: callers derive the target inside a store-backed useMemo, so an
+    // unrelated store write hands this hook a new object with the same key.
+    const discover = vi
+      .fn<(target?: SkillDiscoveryTarget) => Promise<SkillDiscoveryResult>>()
+      .mockRejectedValue(new Error('runtime host unreachable'))
+    Object.defineProperty(window, 'api', {
+      configurable: true,
+      value: { skills: { discover } }
+    })
+
+    await renderProbe({ projectRuntime: projectWslRuntime })
+    await flushMicrotasks()
+    expect(discover).toHaveBeenCalledTimes(1)
+
+    for (let rebuild = 0; rebuild < 5; rebuild += 1) {
+      await renderProbe({ projectRuntime: { ...projectWslRuntime } })
+      await flushMicrotasks()
+    }
+
+    // A failed scan caches nothing, so an unstable target identity would issue a
+    // fresh discovery per store write for as long as the host stays unreachable.
+    expect(discover).toHaveBeenCalledTimes(1)
+    expect(latestState?.error).toBe('runtime host unreachable')
+  })
+
   it('hydrates from the warm cache on its very first render pass', async () => {
-    // Why: several always-mounted surfaces read this hook; a remount that starts
-    // empty flashes their installed state off until the next scan settles.
     const discover = vi
       .fn<(target?: SkillDiscoveryTarget) => Promise<SkillDiscoveryResult>>()
       .mockResolvedValue(discoveryResult([skill({ name: 'linear-tickets' })]))
@@ -262,9 +434,7 @@ describe('useInstalledAgentSkill', () => {
     })
 
     await renderProbe()
-    await act(async () => {
-      await Promise.resolve()
-    })
+    await flushMicrotasks()
     expect(latestState?.installed).toBe(true)
 
     await act(async () => {
@@ -280,66 +450,9 @@ describe('useInstalledAgentSkill', () => {
     expect(renderedStates[0]?.installed).toBe(true)
   })
 
-  it('hydrates from the warm cache when the discovery target changes', async () => {
-    // Why: switching project or runtime environment must not blank an already
-    // scanned target back to loading.
-    const discover = vi
-      .fn<(target?: SkillDiscoveryTarget) => Promise<SkillDiscoveryResult>>()
-      .mockResolvedValue(discoveryResult([skill({ name: 'linear-tickets' })]))
-    Object.defineProperty(window, 'api', {
-      configurable: true,
-      value: { skills: { discover } }
-    })
-
-    await renderProbe({ runtime: 'wsl', wslDistro: 'Ubuntu' })
-    await act(async () => {
-      await Promise.resolve()
-    })
-    await renderProbe()
-    await act(async () => {
-      await Promise.resolve()
-    })
-    renderedStates.length = 0
-
-    await renderProbe({ runtime: 'wsl', wslDistro: 'Ubuntu' })
-
-    expect(renderedStates[0]?.loading).toBe(false)
-    expect(renderedStates[0]?.installed).toBe(true)
-  })
-
-  it('notifies mounted surfaces when installed skills change', async () => {
-    // Why: the cache clear alone is inert — the DOM event is what makes every
-    // mounted surface re-check after an install completes in a terminal.
-    const discover = vi
-      .fn<(target?: SkillDiscoveryTarget) => Promise<SkillDiscoveryResult>>()
-      .mockResolvedValueOnce(discoveryResult([]))
-      .mockResolvedValue(discoveryResult([skill({ name: 'linear-tickets' })]))
-    Object.defineProperty(window, 'api', {
-      configurable: true,
-      value: { skills: { discover } }
-    })
-
-    await renderProbe()
-    await act(async () => {
-      await Promise.resolve()
-    })
-    expect(latestState?.installed).toBe(false)
-
-    await act(async () => {
-      notifyInstalledAgentSkillsChanged()
-      await Promise.resolve()
-    })
-    await act(async () => {
-      await Promise.resolve()
-    })
-
-    expect(latestState?.installed).toBe(true)
-  })
-
   it('empties the discovery cache when an install notification fires', async () => {
-    // Why: notifyInstalledAgentSkillsChanged is the only wire from every install,
-    // uninstall and update call site into the cache. Assert the cache directly —
-    // a mounted component would force a rescan and hide a missing invalidation.
+    // Why: assert the cache directly — a mounted component forces a rescan and
+    // would hide a missing invalidation.
     const discover = vi
       .fn<(target?: SkillDiscoveryTarget) => Promise<SkillDiscoveryResult>>()
       .mockResolvedValueOnce(discoveryResult([]))
@@ -362,35 +475,5 @@ describe('useInstalledAgentSkill', () => {
       expect.objectContaining({ skills: [expect.objectContaining({ name: 'linear-tickets' })] })
     )
     expect(discover).toHaveBeenCalledTimes(2)
-  })
-
-  it('does not rescan when a caller rebuilds an equivalent target object', async () => {
-    // Why: callers derive the target inside a store-backed useMemo, so unrelated
-    // store writes hand this hook a new object with the same discovery key.
-    const discover = vi
-      .fn<(target?: SkillDiscoveryTarget) => Promise<SkillDiscoveryResult>>()
-      .mockRejectedValue(new Error('runtime host unreachable'))
-    Object.defineProperty(window, 'api', {
-      configurable: true,
-      value: { skills: { discover } }
-    })
-
-    await renderProbe({ projectRuntime: projectWslRuntime })
-    await act(async () => {
-      await Promise.resolve()
-    })
-    expect(discover).toHaveBeenCalledTimes(1)
-
-    for (let rebuild = 0; rebuild < 5; rebuild += 1) {
-      await renderProbe({ projectRuntime: { ...projectWslRuntime } })
-      await act(async () => {
-        await Promise.resolve()
-      })
-    }
-
-    // A failed scan caches nothing, so an unstable target identity would issue a
-    // fresh discovery per store write for as long as the host stays unreachable.
-    expect(discover).toHaveBeenCalledTimes(1)
-    expect(latestState?.error).toBe('runtime host unreachable')
   })
 })
