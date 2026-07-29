@@ -34,13 +34,19 @@ function mountTerminalWithSelection(selectionText: string): HTMLElement {
 }
 
 /** Stands in for execCommand('copy'): dispatches from the DOM selection's anchor. */
-function stubExecCommand(source: HTMLElement, clipboardData: ClipboardDataStub): void {
+function stubExecCommand(
+  source: HTMLElement,
+  clipboardData: ClipboardDataStub,
+  // Runs once the fallback has registered, so a handler added here is ordered after it.
+  beforeDispatch?: () => void
+): void {
   ;(document as unknown as { execCommand: (command: string) => boolean }).execCommand = (
     command
   ) => {
     if (command !== 'copy') {
       return false
     }
+    beforeDispatch?.()
     const event = new Event('copy', { bubbles: true, cancelable: true })
     Object.defineProperty(event, 'clipboardData', { value: clipboardData })
     source.dispatchEvent(event)
@@ -62,6 +68,26 @@ describe('web copy fallback vs. the terminal selection', () => {
 
     expect(copyClipboardTextViaExecCommand('/Users/me/repo/src/index.ts', document)).toBe(true)
     expect(clipboardData.getData('text/plain')).toBe('/Users/me/repo/src/index.ts')
+  })
+
+  it('wins over a later document-level copy handler', () => {
+    // Same target as the fallback's own listener, so only stopImmediatePropagation
+    // suppresses it — stopPropagation would still let it run and clobber text/plain.
+    const source = document.createElement('div')
+    document.body.appendChild(source)
+    const clipboardData = createClipboardDataStub()
+    const clobber = (event: Event): void => {
+      const data = (event as unknown as { clipboardData?: ClipboardDataStub }).clipboardData
+      data?.setData('text/plain', 'later document handler')
+    }
+    stubExecCommand(source, clipboardData, () => document.addEventListener('copy', clobber))
+
+    try {
+      expect(copyClipboardTextViaExecCommand('pane-42', document)).toBe(true)
+      expect(clipboardData.getData('text/plain')).toBe('pane-42')
+    } finally {
+      document.removeEventListener('copy', clobber)
+    }
   })
 
   it('wins over a copy handler that still runs after the document', () => {
