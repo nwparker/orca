@@ -115,7 +115,12 @@ export function useInstalledAgentSkillNames(
   const currentDiscoveryTargetKeyRef = useRef(discoveryTargetKey)
   const refreshGenerationRef = useRef(0)
   const stateResetInputRef = useRef({ discoveryTargetKey, enabled })
+  // Why: callers rebuild the target object on unrelated store writes. Two targets
+  // with the same key resolve to the same scan, so keep the object out of
+  // `refresh`'s deps or every store write re-fires the discovery effect.
+  const discoveryTargetRef = useRef(discoveryTarget)
   currentDiscoveryTargetKeyRef.current = discoveryTargetKey
+  discoveryTargetRef.current = discoveryTarget
   // Why: skill scans can outlive transient settings/onboarding panels; keep
   // the module cache update but skip React state writes after unmount.
   const mountedRef = useMountedRef()
@@ -162,7 +167,7 @@ export function useInstalledAgentSkillNames(
       })
       let installedAfterRefresh = false
       try {
-        const next = await discoverInstalledAgentSkills(force, discoveryTarget)
+        const next = await discoverInstalledAgentSkills(force, discoveryTargetRef.current)
         installedAfterRefresh = hasInstalledAgentSkillNamed(next.skills, candidateSkillNames, {
           sourceKinds
         })
@@ -185,7 +190,7 @@ export function useInstalledAgentSkillNames(
       }
       return installedAfterRefresh
     },
-    [candidateSkillNames, discoveryTarget, discoveryTargetKey, enabled, mountedRef, sourceKinds]
+    [candidateSkillNames, discoveryTargetKey, enabled, mountedRef, sourceKinds]
   )
 
   useEffect(() => {
