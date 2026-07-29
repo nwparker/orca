@@ -159,10 +159,7 @@ describe('CliSkillRuntimeSetup runtime helpers', () => {
       })
     ).toEqual({ runtime: 'wsl', wslDistro: 'Ubuntu' })
     expect(
-      getSkillDiscoveryTargetForRuntime(
-        { runtime: 'host', label: 'Remote host' },
-        'ssh:build-host'
-      )
+      getSkillDiscoveryTargetForRuntime({ runtime: 'host', label: 'Remote host' }, 'ssh:build-host')
     ).toEqual({ executionHostId: 'ssh:build-host' })
   })
 

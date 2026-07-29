@@ -108,6 +108,12 @@ export function useInstalledAgentSkillNames(
   const skillNamesKey = skillNames.map(normalizeSkillName).join('\n')
   const candidateSkillNames = useMemo(() => skillNamesKey.split('\n'), [skillNamesKey])
   const discoveryTargetKey = getSkillDiscoveryTargetKey(discoveryTarget)
+  // Why: callers derive the target inside a store-backed useMemo, so unrelated
+  // store writes hand us a new object with the same key. Two targets with the
+  // same key resolve to the same scan, so reuse the object and keep `refresh`
+  // — and the discovery effect it drives — stable across those writes.
+  // oxlint-disable-next-line react-hooks/exhaustive-deps
+  const stableDiscoveryTarget = useMemo(() => discoveryTarget, [discoveryTargetKey])
   const cachedDiscovery = peekInstalledAgentSkillDiscoveryCache(discoveryTargetKey)
   const [result, setResult] = useState<SkillDiscoveryResult | null>(cachedDiscovery)
   const [loading, setLoading] = useState(enabled && !cachedDiscovery)
@@ -115,12 +121,7 @@ export function useInstalledAgentSkillNames(
   const currentDiscoveryTargetKeyRef = useRef(discoveryTargetKey)
   const refreshGenerationRef = useRef(0)
   const stateResetInputRef = useRef({ discoveryTargetKey, enabled })
-  // Why: callers rebuild the target object on unrelated store writes. Two targets
-  // with the same key resolve to the same scan, so keep the object out of
-  // `refresh`'s deps or every store write re-fires the discovery effect.
-  const discoveryTargetRef = useRef(discoveryTarget)
   currentDiscoveryTargetKeyRef.current = discoveryTargetKey
-  discoveryTargetRef.current = discoveryTarget
   // Why: skill scans can outlive transient settings/onboarding panels; keep
   // the module cache update but skip React state writes after unmount.
   const mountedRef = useMountedRef()
@@ -167,7 +168,7 @@ export function useInstalledAgentSkillNames(
       })
       let installedAfterRefresh = false
       try {
-        const next = await discoverInstalledAgentSkills(force, discoveryTargetRef.current)
+        const next = await discoverInstalledAgentSkills(force, stableDiscoveryTarget)
         installedAfterRefresh = hasInstalledAgentSkillNamed(next.skills, candidateSkillNames, {
           sourceKinds
         })
@@ -190,7 +191,14 @@ export function useInstalledAgentSkillNames(
       }
       return installedAfterRefresh
     },
-    [candidateSkillNames, discoveryTargetKey, enabled, mountedRef, sourceKinds]
+    [
+      candidateSkillNames,
+      discoveryTargetKey,
+      enabled,
+      mountedRef,
+      sourceKinds,
+      stableDiscoveryTarget
+    ]
   )
 
   useEffect(() => {

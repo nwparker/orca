@@ -10,7 +10,6 @@ import {
   GLOBAL_AGENT_SKILL_SOURCE_KINDS,
   useInstalledAgentSkill
 } from '@/hooks/useInstalledAgentSkills'
-import { useActiveProjectSkillRuntime } from '@/hooks/useActiveProjectSkillRuntime'
 import { useMountedRef } from '@/hooks/useMountedRef'
 import { getMobileEmulatorCliPathNeedsAttention } from './mobile-emulator-agent-setup-cli-state'
 import { translate } from '@/i18n/i18n'
@@ -65,7 +64,6 @@ export function useMobileEmulatorAgentSetupState(enabled = true): {
   const [cliBusy, setCliBusy] = useState(false)
   const [setupRechecking, setSetupRechecking] = useState(false)
   const mountedRef = useMountedRef()
-  const activeSkillRuntime = useActiveProjectSkillRuntime()
   const {
     installed: cliSkillInstalled,
     loading: cliSkillLoading,
@@ -73,7 +71,6 @@ export function useMobileEmulatorAgentSetupState(enabled = true): {
     refresh: refreshCliSkill
   } = useInstalledAgentSkill(ORCA_CLI_SKILL_NAME, {
     enabled,
-    discoveryTarget: activeSkillRuntime.discoveryTarget,
     sourceKinds: GLOBAL_AGENT_SKILL_SOURCE_KINDS
   })
 

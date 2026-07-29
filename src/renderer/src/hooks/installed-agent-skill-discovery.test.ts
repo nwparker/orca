@@ -52,6 +52,36 @@ describe('installed agent skill discovery lifecycle', () => {
     expect(discover).toHaveBeenCalledTimes(2)
   })
 
+  it('lets a superseded scan settle without evicting the newer pending scan', async () => {
+    // Why: invalidation clears the pending map mid-flight, so the pre-install
+    // scan must not tear down the post-install scan's dedup entry when it lands.
+    const staleScan = deferred<SkillDiscoveryResult>()
+    const freshScan = deferred<SkillDiscoveryResult>()
+    const lateScan = deferred<SkillDiscoveryResult>()
+    const discover = vi
+      .fn<() => Promise<SkillDiscoveryResult>>()
+      .mockReturnValueOnce(staleScan.promise)
+      .mockReturnValueOnce(freshScan.promise)
+      .mockReturnValueOnce(lateScan.promise)
+    vi.stubGlobal('window', { api: { skills: { discover } } })
+
+    const staleRequest = discoverInstalledAgentSkills(false, undefined)
+    invalidateInstalledAgentSkillDiscovery()
+    const freshRequest = discoverInstalledAgentSkills(false, undefined)
+
+    staleScan.resolve(result(1))
+    await expect(staleRequest).resolves.toEqual(result(1))
+
+    // The post-install scan is still in flight, so this must dedupe onto it
+    // rather than start a third scan.
+    const joinedRequest = discoverInstalledAgentSkills(false, undefined)
+    expect(discover).toHaveBeenCalledTimes(2)
+
+    freshScan.resolve(result(2))
+    await expect(freshRequest).resolves.toEqual(result(2))
+    await expect(joinedRequest).resolves.toEqual(result(2))
+  })
+
   it('does not share results across remote runtime hosts', async () => {
     const discover = vi
       .fn<(target?: SkillDiscoveryTarget) => Promise<SkillDiscoveryResult>>()

@@ -56,6 +56,21 @@ describe('installed agent skill discovery cache', () => {
     expect(peekInstalledAgentSkillDiscoveryCache('target')).toEqual(result(2))
   })
 
+  it('promotes a rewritten key to most-recent so a rescanned target is not evicted first', () => {
+    // Why: Map.set on an existing key keeps its original insertion order, so a
+    // target rescanned on every focus event would still evict ahead of colder ones.
+    writeInstalledAgentSkillDiscoveryCache('hot', result(0))
+    for (let index = 1; index < INSTALLED_AGENT_SKILL_DISCOVERY_CACHE_MAX; index += 1) {
+      writeInstalledAgentSkillDiscoveryCache(`target-${index}`, result(index))
+    }
+
+    writeInstalledAgentSkillDiscoveryCache('hot', result(1))
+    writeInstalledAgentSkillDiscoveryCache('overflow', result(-1))
+
+    expect(hasInstalledAgentSkillDiscoveryCacheEntryForTests('hot')).toBe(true)
+    expect(hasInstalledAgentSkillDiscoveryCacheEntryForTests('target-1')).toBe(false)
+  })
+
   it('peeks without reordering recency so a render pass cannot evict the wrong entry', () => {
     for (let index = 0; index < INSTALLED_AGENT_SKILL_DISCOVERY_CACHE_MAX; index += 1) {
       writeInstalledAgentSkillDiscoveryCache(`target-${index}`, result(index))
