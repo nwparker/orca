@@ -1,3 +1,4 @@
+/* eslint-disable no-control-regex -- ANSI SGR sequences are raw PTY input. */
 /**
  * Chunk-boundary-safe GitHub PR URL scan over PTY output.
  *
@@ -11,6 +12,9 @@ import type { RepoSlug } from './github-links'
 import { parseGitHubIssueOrPRLink } from './github-links'
 
 const GITHUB_PR_PATH_MARKER = '/pull/'
+const TERMINAL_SGR_PATTERN = /\x1b\[[0-?]*[ -/]*m/g
+const TERMINAL_CURSOR_CONTROL_PATTERN = /[\x08\x0b\x0c]/g
+const TERMINAL_CONTROL_GUARD = '\ufffd'
 const HTTP_SCHEME_PREFIXES = ['https://', 'http://'] as const
 const TRAILING_TERMINAL_PUNCTUATION_RE = /[),.;\]}]+$/
 const MAX_CARRY_LENGTH = 512
@@ -27,6 +31,9 @@ function trimTerminalUrl(candidate: string): string {
 }
 
 function parseTerminalGitHubPRUrl(candidate: string): TerminalGitHubPRLink | null {
+  if (candidate.includes('\x1b') || candidate.includes(TERMINAL_CONTROL_GUARD)) {
+    return null
+  }
   const url = trimTerminalUrl(candidate)
   const parsed = parseGitHubIssueOrPRLink(url)
   if (!parsed || parsed.type !== 'pr') {
@@ -46,19 +53,38 @@ function endsWithHttpSchemePrefixFragment(value: string): string {
   return ''
 }
 
-function getPotentialGitHubPRCarry(value: string): string {
-  const schemeIndex = Math.max(...HTTP_SCHEME_PREFIXES.map((prefix) => value.lastIndexOf(prefix)))
-  if (schemeIndex !== -1) {
-    const tailLength = value.length - schemeIndex
-    if (tailLength > MAX_CARRY_LENGTH) {
-      return ''
+function lastIndexOfHttpScheme(value: string, fromIndex?: number): number {
+  let lastIndex = -1
+  for (const prefix of HTTP_SCHEME_PREFIXES) {
+    const candidate =
+      fromIndex === undefined ? value.lastIndexOf(prefix) : value.lastIndexOf(prefix, fromIndex)
+    if (candidate > lastIndex) {
+      lastIndex = candidate
     }
+  }
+  return lastIndex
+}
+
+function getPotentialGitHubPRCarry(value: string): string {
+  // Why bounded: carry is always a suffix of at most MAX_CARRY_LENGTH, so a scheme
+  // further back can only ever be dropped — scanning to it is O(chunk) per PTY write.
+  const windowStart = value.length > MAX_CARRY_LENGTH ? value.length - MAX_CARRY_LENGTH : 0
+  const tailWindow = windowStart === 0 ? value : value.slice(windowStart)
+  const schemeIndexInWindow = lastIndexOfHttpScheme(tailWindow)
+  if (schemeIndexInWindow !== -1) {
+    const schemeIndex = windowStart + schemeIndexInWindow
     return hasTerminalUrlWhitespace(value, schemeIndex, value.length)
       ? ''
       : value.slice(schemeIndex)
   }
 
-  return endsWithHttpSchemePrefixFragment(value)
+  const fragment = endsWithHttpSchemePrefixFragment(tailWindow)
+  if (fragment === '' || windowStart === 0) {
+    return fragment
+  }
+  // Why look behind: an older scheme means the URL already overran the cap, so the
+  // carry is abandoned rather than restarted from this fragment.
+  return lastIndexOfHttpScheme(value, windowStart - 1) === -1 ? fragment : ''
 }
 
 function hasTerminalUrlWhitespace(value: string, start: number, end: number): boolean {
@@ -128,12 +154,19 @@ export function createTerminalGitHubPRLinkDetector(): (data: string) => Terminal
   const seenUrls = new Set<string>()
 
   return (data: string): TerminalGitHubPRLink[] => {
-    const combined = carry ? carry + data : data
+    const rawCombined = carry ? carry + data : data
 
-    if (!combined.includes(GITHUB_PR_PATH_MARKER)) {
-      carry = getPotentialGitHubPRCarry(combined)
+    // Why: PTY output is a hot path; avoid multi-pass ANSI normalization for
+    // chunks that cannot contain a GitHub pull-request URL.
+    if (!rawCombined.includes(GITHUB_PR_PATH_MARKER)) {
+      carry = getPotentialGitHubPRCarry(rawCombined)
       return []
     }
+    // Why: SGR styling has no screen width, so removing it is safe. Cursor
+    // controls get a guard; other escape sequences remain URL-invalid.
+    const combined = rawCombined
+      .replace(TERMINAL_SGR_PATTERN, '')
+      .replace(TERMINAL_CURSOR_CONTROL_PATTERN, TERMINAL_CONTROL_GUARD)
 
     const links: TerminalGitHubPRLink[] = []
     // Why: PTY data may echo a huge pasted line. Scan URL candidates directly
@@ -154,7 +187,7 @@ export function createTerminalGitHubPRLinkDetector(): (data: string) => Terminal
       links.push(parsed)
     }
 
-    carry = getPotentialGitHubPRCarry(combined)
+    carry = getPotentialGitHubPRCarry(rawCombined)
     return links
   }
 }

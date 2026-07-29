@@ -25,6 +25,7 @@ import type { TaskSourceContext, WorkspaceRunContext } from '../../../shared/tas
 import type { AgentStartedTelemetry } from '@/lib/worktree-activation'
 import { getRepoExecutionHostId, parseExecutionHostId } from '../../../shared/execution-host'
 import { projectHostSetupProjectionFromRepos } from '../../../shared/project-host-setup-projection'
+import { resolveLocalWindowsAgentStartupShell } from '../../../shared/windows-terminal-shell'
 
 export type GitHubWorkItemBackgroundStoreSnapshot = {
   repos: readonly Repo[]
@@ -43,6 +44,7 @@ export type GitHubWorkItemBackgroundStoreSnapshot = {
           | 'agentCmdOverrides'
           | 'agentDefaultArgs'
           | 'agentDefaultEnv'
+          | 'terminalWindowsShell'
         >
       >
     | null
@@ -172,11 +174,14 @@ export function buildGitHubWorkItemStartupPlan(args: {
 }): {
   startupPlan: AgentStartupPlan | null
   quickPrompt: string
+  /** Draft context (issue link) that reaches only the TUI input; callers thread
+   *  it onto the creation request so completion can seed the chat composer. */
+  launchDraftPrompt: string | null
   quickTelemetry: AgentStartedTelemetry | null
 } {
   const { agent, item, repo, store } = args
   if (!agent) {
-    return { startupPlan: null, quickPrompt: '', quickTelemetry: null }
+    return { startupPlan: null, quickPrompt: '', launchDraftPrompt: null, quickTelemetry: null }
   }
   const { prompt: quickPrompt, draftPrompt } = resolveGitHubWorkItemPrompt(item)
   // Why: runtime-owned repos launch on their owner host, not on the client
@@ -185,6 +190,11 @@ export function buildGitHubWorkItemStartupPlan(args: {
   // Why: SSH remotes deploy the CLI shim as plain `orca`, so the Linux-only
   // `orca-ide` rename must not be applied for remote launches.
   const isRemote = repoIsRemote(repo)
+  const shell = resolveLocalWindowsAgentStartupShell({
+    platform,
+    isRemote,
+    terminalWindowsShell: store.settings?.terminalWindowsShell
+  })
   const draftLaunchPlan = draftPrompt
     ? buildAgentDraftLaunchPlan({
         agent,
@@ -193,6 +203,7 @@ export function buildGitHubWorkItemStartupPlan(args: {
         agentArgs: resolveTuiAgentLaunchArgs(agent, store.settings?.agentDefaultArgs),
         agentEnv: resolveTuiAgentLaunchEnv(agent, store.settings?.agentDefaultEnv),
         platform,
+        shell,
         isRemote
       })
     : null
@@ -215,6 +226,7 @@ export function buildGitHubWorkItemStartupPlan(args: {
         agentArgs: resolveTuiAgentLaunchArgs(agent, store.settings?.agentDefaultArgs),
         agentEnv: resolveTuiAgentLaunchEnv(agent, store.settings?.agentDefaultEnv),
         platform,
+        shell,
         isRemote,
         allowEmptyPromptLaunch: true
       })
@@ -224,6 +236,7 @@ export function buildGitHubWorkItemStartupPlan(args: {
   return {
     startupPlan,
     quickPrompt,
+    launchDraftPrompt: draftPrompt || null,
     quickTelemetry: {
       agent_kind: tuiAgentToAgentKind(agent),
       launch_source: 'new_workspace_composer',

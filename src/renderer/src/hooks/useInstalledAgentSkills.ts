@@ -7,6 +7,7 @@ import type {
 } from '../../../shared/skills'
 import { ORCHESTRATION_SKILL_NAME } from '@/lib/agent-feature-install-commands'
 import { markOrchestrationSetupComplete } from '@/lib/orchestration-setup-state'
+import { INSTALLED_AGENT_SKILLS_CHANGED_EVENT } from './installed-agent-skills-change-event'
 import { peekInstalledAgentSkillDiscoveryCache } from './installed-agent-skill-discovery-cache'
 import {
   discoverInstalledAgentSkills,
@@ -16,7 +17,6 @@ import {
 } from './installed-agent-skill-discovery'
 import { useMountedRef } from './useMountedRef'
 
-const INSTALLED_AGENT_SKILLS_CHANGED_EVENT = 'orca:installed-agent-skills-changed'
 export const GLOBAL_AGENT_SKILL_SOURCE_KINDS = [
   'home'
 ] as const satisfies readonly SkillSourceKind[]
