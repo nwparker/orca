@@ -13,12 +13,14 @@ import {
   GLOBAL_AGENT_SKILL_SOURCE_KINDS,
   type InstalledAgentSkillState,
   _installedAgentSkillDiscoveryInternalsForTests,
+  notifyInstalledAgentSkillsChanged,
   useInstalledAgentSkillNames
 } from './useInstalledAgentSkills'
 
 let root: Root | null = null
 let container: HTMLDivElement | null = null
 let latestState: InstalledAgentSkillState | null = null
+const renderedStates: InstalledAgentSkillState[] = []
 
 function skill(overrides: Partial<DiscoveredSkill>): DiscoveredSkill {
   return {
@@ -79,6 +81,7 @@ function Probe({ discoveryTarget }: { discoveryTarget?: SkillDiscoveryTarget }):
     discoveryTarget,
     sourceKinds: GLOBAL_AGENT_SKILL_SOURCE_KINDS
   })
+  renderedStates.push(latestState)
   return null
 }
 
@@ -103,6 +106,7 @@ afterEach(async () => {
   container?.remove()
   container = null
   latestState = null
+  renderedStates.length = 0
   _installedAgentSkillDiscoveryInternalsForTests.reset()
   vi.restoreAllMocks()
   Reflect.deleteProperty(window, 'api')
@@ -244,6 +248,64 @@ describe('useInstalledAgentSkill', () => {
       wslDistro: 'Ubuntu',
       projectRuntime: projectWslRuntime
     })
+  })
+
+  it('hydrates from the warm cache on its very first render pass', async () => {
+    // Why: several always-mounted surfaces read this hook; a remount that starts
+    // empty flashes their installed state off until the next scan settles.
+    const discover = vi
+      .fn<(target?: SkillDiscoveryTarget) => Promise<SkillDiscoveryResult>>()
+      .mockResolvedValue(discoveryResult([skill({ name: 'linear-tickets' })]))
+    Object.defineProperty(window, 'api', {
+      configurable: true,
+      value: { skills: { discover } }
+    })
+
+    await renderProbe()
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(latestState?.installed).toBe(true)
+
+    await act(async () => {
+      root?.unmount()
+    })
+    root = null
+    container = null
+    renderedStates.length = 0
+    await renderProbe()
+
+    // The first render pass, before any effect runs, must already be settled.
+    expect(renderedStates[0]?.loading).toBe(false)
+    expect(renderedStates[0]?.installed).toBe(true)
+  })
+
+  it('empties the discovery cache when an install notification fires', async () => {
+    // Why: notifyInstalledAgentSkillsChanged is the only wire from every install,
+    // uninstall and update call site into the cache. Assert the cache directly —
+    // a mounted component would force a rescan and hide a missing invalidation.
+    const discover = vi
+      .fn<(target?: SkillDiscoveryTarget) => Promise<SkillDiscoveryResult>>()
+      .mockResolvedValueOnce(discoveryResult([]))
+      .mockResolvedValue(discoveryResult([skill({ name: 'linear-tickets' })]))
+    Object.defineProperty(window, 'api', {
+      configurable: true,
+      value: { skills: { discover } }
+    })
+
+    const { discoverInstalledAgentSkills } = _installedAgentSkillDiscoveryInternalsForTests
+    await discoverInstalledAgentSkills(false, undefined)
+    await expect(discoverInstalledAgentSkills(false, undefined)).resolves.toEqual(
+      expect.objectContaining({ skills: [] })
+    )
+    expect(discover).toHaveBeenCalledTimes(1)
+
+    notifyInstalledAgentSkillsChanged()
+
+    await expect(discoverInstalledAgentSkills(false, undefined)).resolves.toEqual(
+      expect.objectContaining({ skills: [expect.objectContaining({ name: 'linear-tickets' })] })
+    )
+    expect(discover).toHaveBeenCalledTimes(2)
   })
 
   it('does not rescan when a caller rebuilds an equivalent target object', async () => {

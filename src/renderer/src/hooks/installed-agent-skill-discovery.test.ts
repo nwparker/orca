@@ -19,6 +19,40 @@ function result(scannedAt: number): SkillDiscoveryResult {
   return { skills: [], sources: [], scannedAt }
 }
 
+const resolvedWslProjectRuntime = {
+  status: 'resolved' as const,
+  runtime: {
+    kind: 'wsl' as const,
+    hostPlatform: 'wsl' as const,
+    projectId: 'repo-1',
+    distro: 'Ubuntu',
+    reason: 'project-override' as const,
+    cacheKey: 'repo-1:wsl:Ubuntu'
+  }
+}
+
+const resolvedHostProjectRuntime = {
+  status: 'resolved' as const,
+  runtime: {
+    kind: 'windows-host' as const,
+    hostPlatform: 'win32' as const,
+    projectId: 'repo-1',
+    reason: 'project-override' as const,
+    cacheKey: 'repo-1:windows-host'
+  }
+}
+
+const repairProjectRuntime = {
+  status: 'repair-required' as const,
+  repair: {
+    projectId: 'repo-1',
+    preferredRuntime: { kind: 'wsl' as const, distro: null },
+    reason: 'wsl-distro-required' as const,
+    source: 'project-override' as const,
+    cacheKey: 'repo-1:repair:wsl-distro-required:default'
+  }
+}
+
 afterEach(() => {
   resetInstalledAgentSkillDiscoveryForTests()
   vi.restoreAllMocks()
@@ -124,7 +158,7 @@ describe('installed agent skill discovery lifecycle', () => {
     expect(discover).toHaveBeenNthCalledWith(2, undefined)
   })
 
-  it('keeps the host id out of a WSL target sent to discovery', async () => {
+  it('keeps the host id out of every target shape sent to discovery', async () => {
     const discover = vi
       .fn<(target?: SkillDiscoveryTarget) => Promise<SkillDiscoveryResult>>()
       .mockResolvedValue(result(1))
@@ -135,8 +169,51 @@ describe('installed agent skill discovery lifecycle', () => {
       runtime: 'wsl',
       wslDistro: 'Ubuntu'
     })
+    expect(discover).toHaveBeenLastCalledWith({ runtime: 'wsl', wslDistro: 'Ubuntu' })
 
-    expect(discover).toHaveBeenCalledWith({ runtime: 'wsl', wslDistro: 'Ubuntu' })
+    await discoverInstalledAgentSkills(false, {
+      executionHostId: 'ssh:one',
+      projectRuntime: resolvedWslProjectRuntime
+    })
+    expect(discover).toHaveBeenLastCalledWith({
+      runtime: 'wsl',
+      wslDistro: 'Ubuntu',
+      projectRuntime: resolvedWslProjectRuntime
+    })
+
+    await discoverInstalledAgentSkills(false, {
+      executionHostId: 'ssh:one',
+      projectRuntime: resolvedHostProjectRuntime
+    })
+    expect(discover).toHaveBeenLastCalledWith({
+      runtime: 'host',
+      projectRuntime: resolvedHostProjectRuntime
+    })
+
+    await discoverInstalledAgentSkills(false, {
+      executionHostId: 'ssh:one',
+      projectRuntime: repairProjectRuntime
+    })
+    expect(discover).toHaveBeenLastCalledWith({ projectRuntime: repairProjectRuntime })
+  })
+
+  it('keys WSL targets by distro so two distros do not share one entry', async () => {
+    const discover = vi
+      .fn<(target?: SkillDiscoveryTarget) => Promise<SkillDiscoveryResult>>()
+      .mockResolvedValueOnce(result(1))
+      .mockResolvedValueOnce(result(2))
+    vi.stubGlobal('window', { api: { skills: { discover } } })
+
+    await expect(
+      discoverInstalledAgentSkills(false, { runtime: 'wsl', wslDistro: 'Ubuntu' })
+    ).resolves.toEqual(result(1))
+    await expect(
+      discoverInstalledAgentSkills(false, { runtime: 'wsl', wslDistro: 'Debian' })
+    ).resolves.toEqual(result(2))
+    await expect(
+      discoverInstalledAgentSkills(false, { runtime: 'wsl', wslDistro: 'Ubuntu' })
+    ).resolves.toEqual(result(1))
+    expect(discover).toHaveBeenCalledTimes(2)
   })
 
   it('includes runtime host identity in generic and project cache keys', () => {
