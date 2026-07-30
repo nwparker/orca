@@ -11,12 +11,31 @@ import {
   resetComputerSidecarForTest
 } from './sidecar-client'
 
-const { forkMock } = vi.hoisted(() => ({
-  forkMock: vi.fn()
-}))
+const { forkMock, supervisorHandleMock, supervisorSenderState, supervisorShutdownMock } =
+  vi.hoisted(() => ({
+    forkMock: vi.fn(),
+    supervisorHandleMock: vi.fn(() => false),
+    supervisorSenderState: {
+      current: null as null | ((message: Record<string, unknown>) => void)
+    },
+    supervisorShutdownMock: vi.fn()
+  }))
 
 vi.mock('child_process', () => ({
   fork: forkMock
+}))
+
+vi.mock('./computer-provider-supervisor-host', () => ({
+  ComputerProviderSupervisorHost: class {
+    attach(sender: (message: Record<string, unknown>) => void): void {
+      supervisorSenderState.current = sender
+    }
+    handle = supervisorHandleMock
+    shutdown(): void {
+      supervisorSenderState.current = null
+      supervisorShutdownMock()
+    }
+  }
 }))
 
 type SentRequest = {
@@ -60,6 +79,8 @@ describe('computer sidecar client', () => {
     vi.useFakeTimers()
     children.length = 0
     deferNextSendCallback = false
+    supervisorSenderState.current = null
+    supervisorHandleMock.mockReturnValue(false)
     forkMock.mockImplementation(() => {
       const child = new FakeChildProcess()
       child.deferSendCallback = deferNextSendCallback
@@ -72,6 +93,8 @@ describe('computer sidecar client', () => {
   afterEach(() => {
     resetComputerSidecarForTest()
     forkMock.mockReset()
+    supervisorHandleMock.mockReset()
+    supervisorShutdownMock.mockReset()
     vi.useRealTimers()
   })
 
@@ -361,5 +384,25 @@ describe('computer sidecar client', () => {
     expect(children[0]!.listenerCount('message')).toBe(0)
     expect(children[0]!.listenerCount('exit')).toBe(0)
     expect(children[0]!.listenerCount('error')).toBe(1)
+  })
+
+  it('reaps the sidecar when a supervisor response cannot be delivered', async () => {
+    const call = callComputerSidecarCapabilities()
+    const rejection = expect(call).rejects.toThrow('supervisor response failed')
+    const child = children[0]!
+    child.deferSendCallback = true
+
+    supervisorSenderState.current?.({
+      channel: 'orca:computer-provider-supervisor',
+      kind: 'response',
+      id: 99,
+      ok: true,
+      result: {}
+    })
+    child.flushSendCallback(new Error('supervisor response failed'))
+
+    await rejection
+    expect(child.killed).toBe(true)
+    expect(supervisorShutdownMock).toHaveBeenCalled()
   })
 })
