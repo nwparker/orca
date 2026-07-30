@@ -11,7 +11,8 @@ import {
 import { resolveMacOSComputerUseExecutablePath } from './macos-native-provider-paths'
 import { RuntimeClientError } from './runtime-client-error'
 
-export const MACOS_HELPER_CLAIM_TIMEOUT_MS = 10_000
+// Why: the parent deadline must outlast the 10-second connect budget and claim IPC.
+export const MACOS_HELPER_CLAIM_TIMEOUT_MS = 20_000
 export const MACOS_HELPER_FORCE_KILL_GRACE_MS = 1_000
 
 type SupervisedMacOSProviderSession = {
