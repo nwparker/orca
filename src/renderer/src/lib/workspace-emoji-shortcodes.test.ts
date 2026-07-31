@@ -11,6 +11,19 @@ describe('workspace emoji shortcodes', () => {
     expect(searchWorkspaceEmojiShortcodes('wink', 1)).toEqual([{ emoji: '😉', shortcode: 'wink' }])
   })
 
+  it('finds Slack flag aliases', () => {
+    expect(searchWorkspaceEmojiShortcodes('kr', 1)).toEqual([{ emoji: '🇰🇷', shortcode: 'kr' }])
+    expect(searchWorkspaceEmojiShortcodes('flag-kr', 1)).toEqual([
+      { emoji: '🇰🇷', shortcode: 'flag-kr' }
+    ])
+  })
+
+  it('finds Slack aliases absent from the GitHub catalog', () => {
+    expect(searchWorkspaceEmojiShortcodes('mostly_sunny', 1)).toEqual([
+      { emoji: '🌤', shortcode: 'mostly_sunny' }
+    ])
+  })
+
   it('ranks an exact shortcode before longer aliases', () => {
     expect(searchWorkspaceEmojiShortcodes('heart', 3)[0]).toMatchObject({
       shortcode: 'heart'
@@ -36,6 +49,27 @@ describe('workspace emoji shortcodes', () => {
     expect(replaceCompletedWorkspaceEmojiShortcode('Ship :wink: today', 11)).toEqual({
       value: 'Ship 😉 today',
       cursor: 7
+    })
+  })
+
+  it('replaces a completed Slack-only flag alias', () => {
+    expect(replaceCompletedWorkspaceEmojiShortcode('Ship :flag-kr:', 14)).toEqual({
+      value: 'Ship 🇰🇷',
+      cursor: 9
+    })
+  })
+
+  it('supports the longest Slack aliases', () => {
+    const shortcode = 'smiling_face_with_smiling_eyes_and_hand_covering_mouth'
+    const completed = `:${shortcode}:`
+    expect(getActiveWorkspaceEmojiShortcode(`:${shortcode}`, shortcode.length + 1)).toEqual({
+      start: 0,
+      end: shortcode.length + 1,
+      query: shortcode
+    })
+    expect(replaceCompletedWorkspaceEmojiShortcode(completed, completed.length)).toEqual({
+      value: '🤭',
+      cursor: 2
     })
   })
 
