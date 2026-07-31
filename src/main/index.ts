@@ -903,9 +903,9 @@ function prepareCodexRuntimeHomeForLaunch(
   let realHomeHooksPrepared = ensureRealHomeHooksIfSelected()
   let runtimeHomePath = codexRuntimeHome!.prepareForCodexLaunch(target, launchEnv)
   if (runtimeHomePath === null && !realHomeHooksPrepared) {
-    // Why: a managed home can lose auth during launch prep, which clears its
-    // selection and falls through to real home. Establish hook capability for
-    // that newly selected lane, then re-resolve if the capability gate rejects it.
+    // Why: launch prep can reject an untrusted managed home and clear its
+    // selection. Establish hook capability for that newly selected lane, then
+    // re-resolve if the capability gate rejects it.
     realHomeHooksPrepared = ensureRealHomeHooksIfSelected()
     if (realHomeHooksPrepared) {
       runtimeHomePath = codexRuntimeHome!.prepareForCodexLaunch(target, launchEnv)

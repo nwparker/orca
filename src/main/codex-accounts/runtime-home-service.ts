@@ -169,8 +169,8 @@ export class CodexRuntimeHomeService {
       if (perAccountHome) {
         return perAccountHome
       }
-      // Why: the account's home lost its auth.json, so the selection was just
-      // dropped. Fall through and resolve this launch as the system default.
+      // Why: only an untrusted home clears the selection; fall through to the
+      // system default without injecting a path Orca cannot prove it owns.
     }
     if (this.isHostSystemDefaultRealHome(launchEnv)) {
       // Why (flag ON, system default): run Codex on the user's own ~/.codex.
@@ -237,9 +237,7 @@ export class CodexRuntimeHomeService {
 
   private prepareSelfContainedManagedHomeForLaunch(account: CodexManagedAccount): string | null {
     const perAccountHome = this.getTrustedSelfContainedManagedHomePath(account)
-    if (!perAccountHome || !existsSync(join(perAccountHome, 'auth.json'))) {
-      // Why: drop the selection so this and future launches resolve to the
-      // system default rather than a home codex cannot authenticate against.
+    if (!perAccountHome) {
       this.clearSelfContainedManagedSelection(account)
       return null
     }
@@ -282,11 +280,11 @@ export class CodexRuntimeHomeService {
 
   // Why: the per-account home is both the launch CODEX_HOME and the credential
   // store, so codex reads/refreshes auth.json in place — there is no shared-home
-  // hot-swap or token read-back to reconcile. Only validate the credential
-  // survives; a vanished auth.json drops the selection to the system default.
+  // hot-swap or token read-back to reconcile. A trusted home remains selected
+  // while Codex atomically replaces auth.json.
   private syncSelfContainedManagedSelection(account: CodexManagedAccount): void {
     const perAccountHome = this.getTrustedSelfContainedManagedHomePath(account)
-    if (perAccountHome && existsSync(join(perAccountHome, 'auth.json'))) {
+    if (perAccountHome) {
       this.lastSyncedAccountId = account.id
       this.lastHostAccountUsedSelfContainedHome = true
       // Why: selection runs well before the user restarts a pane, so history is
@@ -315,9 +313,7 @@ export class CodexRuntimeHomeService {
   }
 
   private clearSelfContainedManagedSelection(account: CodexManagedAccount): void {
-    console.warn(
-      '[codex-runtime-home] Active managed account home is invalid or missing auth.json, clearing selection'
-    )
+    console.warn('[codex-runtime-home] Active managed account home is invalid, clearing selection')
     const settings = this.store.getSettings()
     if (normalizeCodexRuntimeSelection(settings).host !== account.id) {
       return
@@ -513,14 +509,10 @@ export class CodexRuntimeHomeService {
     const selfContainedHome = selfContainedAccount
       ? this.getTrustedSelfContainedManagedHomePath(selfContainedAccount)
       : null
-    if (
-      selfContainedAccount &&
-      selfContainedHome &&
-      existsSync(join(selfContainedHome, 'auth.json'))
-    ) {
+    if (selfContainedAccount && selfContainedHome) {
       // Why: the quota fetch reads the account's own auth.json in place; no
       // shared-home hot-swap, and no per-poll resource relink (that is launch
-      // prep). Config was mirrored on add/select and refreshed at launch.
+      // prep). Its auth-presence gate suppresses probes during replacement.
       return selfContainedHome
     }
     if (selfContainedAccount) {

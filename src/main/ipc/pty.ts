@@ -187,6 +187,7 @@ import { setTerminalViewAttributes } from '../runtime/terminal-view-attribute-st
 import { validateTerminalViewAttributes } from '../../shared/terminal-view-attributes'
 import type { PtyModelRestoreReason } from '../../shared/pty-model-restore-marker'
 import type { CodexAccountSelectionTarget } from '../codex-accounts/runtime-selection'
+import { waitForManagedCodexAuthReady } from '../codex-accounts/managed-codex-auth-readiness'
 import {
   forgetCodexPaneAccount,
   recordCodexPaneAccount
@@ -3775,7 +3776,7 @@ export function registerPtyHandlers(
       if (args.preAllocatedHandle) {
         env = { ...env, ORCA_TERMINAL_HANDLE: args.preAllocatedHandle }
       }
-      const selectedCodexHomePath = isDaemonHostSpawn
+      const selectedCodexHomePath = !args.connectionId
         ? getCompatibleSelectedCodexHomePath(
             codexSelectionTarget,
             codexResumeHome
@@ -3786,6 +3787,14 @@ export function registerPtyHandlers(
                 }) ?? null)
           )
         : null
+      const codexAuthReadiness = waitForManagedCodexAuthReady({
+        codexHomePath: selectedCodexHomePath,
+        settings: getSettings?.(),
+        target: codexSelectionTarget
+      })
+      if (codexAuthReadiness) {
+        await codexAuthReadiness
+      }
       const skipCodexHomeEnv =
         isDaemonHostSpawn &&
         shouldSkipCodexHomeEnvForWindowsShell(daemonShellOverride, cwd) &&
@@ -3836,8 +3845,8 @@ export function registerPtyHandlers(
         env,
         ...(isMintedSessionId ? { isNewSession: true } : {})
       }
-      if (!isDaemonHostSpawn && codexResumeHome) {
-        spawnOptions.codexHomePathOverride = { value: codexResumeHome.codexHomePath }
+      if (!args.connectionId && !isDaemonHostSpawn) {
+        spawnOptions.codexHomePathOverride = { value: selectedCodexHomePath }
       }
       const startupTerminalColorQueryReplyColors = getStartupTerminalColorQueryReplyColors(args)
       if (startupTerminalColorQueryReplyColors) {
@@ -4953,7 +4962,7 @@ export function registerPtyHandlers(
       // Why: declared after the strip so a local-provider spawn cannot capture the
       // pre-strip env — only the daemon branch below re-derives this from baseEnv.
       let env: Record<string, string> | undefined = baseEnv
-      const selectedCodexHomePath = isDaemonHostSpawn
+      const selectedCodexHomePath = !args.connectionId
         ? getCompatibleSelectedCodexHomePath(
             codexSelectionTarget,
             codexResumeHome
@@ -4964,6 +4973,14 @@ export function registerPtyHandlers(
                 }) ?? null)
           )
         : null
+      const codexAuthReadiness = waitForManagedCodexAuthReady({
+        codexHomePath: selectedCodexHomePath,
+        settings: getSettings?.(),
+        target: codexSelectionTarget
+      })
+      if (codexAuthReadiness) {
+        await codexAuthReadiness
+      }
       const skipCodexHomeEnv =
         isDaemonHostSpawn &&
         shouldSkipCodexHomeEnvForWindowsShell(effectiveShellOverride, cwd) &&
@@ -5050,8 +5067,8 @@ export function registerPtyHandlers(
         env: spawnEnv,
         ...(isMintedSessionId ? { isNewSession: true } : {})
       }
-      if (!isDaemonHostSpawn && codexResumeHome) {
-        spawnOptions.codexHomePathOverride = { value: codexResumeHome.codexHomePath }
+      if (!args.connectionId && !isDaemonHostSpawn) {
+        spawnOptions.codexHomePathOverride = { value: selectedCodexHomePath }
       }
       if (combinedEnvToDelete) {
         spawnOptions.envToDelete = combinedEnvToDelete
