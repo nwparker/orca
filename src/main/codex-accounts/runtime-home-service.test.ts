@@ -267,7 +267,9 @@ function createCodexAuthJson(
   ].join('.')
 
   return `${JSON.stringify({
+    auth_mode: 'chatgpt',
     tokens: {
+      access_token: `access-${accountId}`,
       id_token: idToken,
       account_id: accountId,
       ...(expiresAt === undefined ? {} : { expires_at: expiresAt }),
@@ -1189,6 +1191,12 @@ describe('CodexRuntimeHomeService', () => {
     settings.activeCodexManagedAccountId = 'account-2'
     settings.activeCodexManagedAccountIdsByRuntime = { host: 'account-2', wsl: {} }
     expect(service.prepareForCodexLaunch()).toBe(home2)
+    expect(
+      service.prepareForCodexLaunch(undefined, undefined, {
+        unavailableManagedHomePath: home1
+      })
+    ).toBe(home2)
+    expect(store.updateSettings).not.toHaveBeenCalled()
 
     // Nothing is hot-swapped, so the still-running account-1 pane keeps seeing
     // account-1's credentials — the single-auth.json race (GAP-5) is gone.
@@ -1643,6 +1651,11 @@ describe('CodexRuntimeHomeService', () => {
     const account1Refreshed = createCodexAuthJson('one@example.com', 'acct-1', 'one-refreshed', 2)
     writeFileSync(getSystemCodexAuthPath(), systemAuth, 'utf-8')
     const managedHomePath1 = createManagedAuth(testState.userDataDir, 'account-1', account1Auth)
+    const wslManagedHomePath = createManagedAuth(
+      testState.userDataDir,
+      'wsl-account',
+      createCodexAuthJson('wsl@example.com', 'acct-wsl', 'wsl')
+    )
     const settings = createSettings({
       codexSystemDefaultRealHomeEnabled: true,
       codexManagedAccounts: [
@@ -1656,10 +1669,24 @@ describe('CodexRuntimeHomeService', () => {
           createdAt: 1,
           updatedAt: 1,
           lastAuthenticatedAt: 1
+        },
+        {
+          id: 'wsl-account',
+          email: 'wsl@example.com',
+          managedHomePath: wslManagedHomePath,
+          managedHomeRuntime: 'wsl',
+          wslDistro: 'Ubuntu',
+          wslLinuxHomePath: '/home/alice/.local/share/orca/codex-accounts/wsl-account/home',
+          createdAt: 2,
+          updatedAt: 2,
+          lastAuthenticatedAt: 2
         }
       ],
       activeCodexManagedAccountId: 'account-1',
-      activeCodexManagedAccountIdsByRuntime: { host: 'account-1', wsl: {} }
+      activeCodexManagedAccountIdsByRuntime: {
+        host: 'account-1',
+        wsl: { Ubuntu: 'wsl-account' }
+      }
     })
     const store = createStore(settings)
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
@@ -1685,6 +1712,33 @@ describe('CodexRuntimeHomeService', () => {
     expect(service.prepareForRateLimitFetch()).toBe(managedHomePath1)
     expect(service.prepareForCodexLaunch()).toBe(managedHomePath1)
     expect(existsSync(join(managedHomePath1, 'auth.json'))).toBe(false)
+
+    writeFileSync(join(managedHomePath1, 'auth.json'), account1Auth, 'utf-8')
+    expect(
+      service.prepareForCodexLaunch(undefined, undefined, {
+        unavailableManagedHomePath: managedHomePath1
+      })
+    ).toBe(managedHomePath1)
+    expect(store.updateSettings).not.toHaveBeenCalled()
+
+    rmSync(join(managedHomePath1, 'auth.json'), { force: true })
+    expect(
+      service.prepareForCodexLaunch(undefined, undefined, {
+        unavailableManagedHomePath: managedHomePath1
+      })
+    ).toBeNull()
+    expect(store.getSettings().activeCodexManagedAccountId).toBeNull()
+    expect(store.getSettings().activeCodexManagedAccountIdsByRuntime).toEqual({
+      host: null,
+      wsl: { Ubuntu: 'wsl-account' }
+    })
+    expect(store.getSettings().codexManagedAccounts).toHaveLength(2)
+    expect(store.updateSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ activeCodexManagedAccountId: null })
+    )
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[codex-runtime-home] Active managed account credential remained unavailable, clearing selection'
+    )
   })
 
   it('ignores mismatched runtime auth when the active managed auth is missing', async () => {

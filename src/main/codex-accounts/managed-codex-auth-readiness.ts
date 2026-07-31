@@ -12,47 +12,63 @@ type StoredCodexAuth = {
   auth_mode?: unknown
   OPENAI_API_KEY?: unknown
   agent_identity?: unknown
+  personal_access_token?: unknown
+  bedrock_api_key?: unknown
   last_refresh?: unknown
-  tokens?: {
-    access_token?: unknown
-    id_token?: unknown
-    refresh_token?: unknown
-    account_id?: unknown
-  } | null
+  tokens?: unknown
 }
+
+const KNOWN_CREDENTIAL_KEYS = [
+  'OPENAI_API_KEY',
+  'tokens',
+  'agent_identity',
+  'personal_access_token',
+  'bedrock_api_key'
+] as const
+const KNOWN_AGENT_IDENTITY_RECORD_KEYS = [
+  'agent_runtime_id',
+  'agent_private_key',
+  'plan_type',
+  'task_id'
+] as const
 
 export function waitForManagedCodexAuthReady(args: {
   codexHomePath: string | null
   settings: GlobalSettings | undefined
   target: CodexAccountSelectionTarget
-}): Promise<void> | undefined {
-  if (
-    args.target.runtime !== 'host' ||
-    !args.codexHomePath ||
-    !isManagedHostCodexHome(args.codexHomePath, args.settings)
-  ) {
+}): Promise<boolean> | undefined {
+  if (isCodexHomeAuthReadyForLaunch(args)) {
     return
   }
-
-  const authPath = join(args.codexHomePath, 'auth.json')
-  if (hasStoredCodexCredential(authPath)) {
-    return
-  }
-  return waitForStoredCodexCredential(authPath)
+  return waitForStoredCodexCredential(join(args.codexHomePath!, 'auth.json'))
 }
 
-async function waitForStoredCodexCredential(authPath: string): Promise<void> {
+export function isCodexHomeAuthReadyForLaunch(args: {
+  codexHomePath: string | null
+  settings: GlobalSettings | undefined
+  target: CodexAccountSelectionTarget
+}): boolean {
+  return (
+    args.target.runtime !== 'host' ||
+    !args.codexHomePath ||
+    !isManagedHostCodexHome(args.codexHomePath, args.settings) ||
+    hasStoredCodexCredential(join(args.codexHomePath, 'auth.json'))
+  )
+}
+
+async function waitForStoredCodexCredential(authPath: string): Promise<boolean> {
   const deadline = Date.now() + AUTH_READY_TIMEOUT_MS
   do {
     await delay(AUTH_READY_RETRY_MS)
     if (hasStoredCodexCredential(authPath)) {
-      return
+      return true
     }
   } while (Date.now() < deadline)
 
-  throw new Error(
-    'The selected Codex account credentials are temporarily unavailable. Try opening the terminal again.'
+  console.warn(
+    `[codex-auth-readiness] Managed credential remained unavailable after ${AUTH_READY_TIMEOUT_MS}ms`
   )
+  return false
 }
 
 function isManagedHostCodexHome(
@@ -69,72 +85,89 @@ function isManagedHostCodexHome(
   )
 }
 
-function hasStoredCodexCredential(authPath: string): boolean {
+export function hasStoredCodexCredential(authPath: string): boolean {
   try {
-    const auth = JSON.parse(readFileSync(authPath, 'utf8')) as StoredCodexAuth
-    if (!hasValidStoredAuthShape(auth)) {
+    const parsed: unknown = JSON.parse(readFileSync(authPath, 'utf8'))
+    if (!isRecord(parsed) || Object.keys(parsed).length === 0) {
       return false
     }
-    if (auth.auth_mode === 'apikey' || (!auth.auth_mode && auth.OPENAI_API_KEY != null)) {
-      return isNonEmptyString(auth.OPENAI_API_KEY)
-    }
-    if (auth.auth_mode === 'agentIdentity') {
-      return isNonEmptyString(auth.agent_identity)
-    }
-    return hasChatGptCredential(auth)
+    const auth = parsed as StoredCodexAuth
+    return auth.auth_mode == null
+      ? hasCredentialWithoutDeclaredMode(auth)
+      : hasCredentialForDeclaredMode(auth)
   } catch {
     return false
   }
 }
 
-function hasValidStoredAuthShape(auth: StoredCodexAuth): boolean {
-  if (!auth || typeof auth !== 'object' || Array.isArray(auth)) {
+function hasCredentialForDeclaredMode(auth: StoredCodexAuth): boolean {
+  if (!isNonEmptyString(auth.auth_mode)) {
     return false
   }
-  if (
-    !isOptionalString(auth.OPENAI_API_KEY) ||
-    !isOptionalString(auth.agent_identity) ||
-    !isOptionalString(auth.last_refresh) ||
-    !isValidAuthMode(auth.auth_mode)
-  ) {
-    return false
+  switch (auth.auth_mode) {
+    case 'apikey':
+      return isNonEmptyString(auth.OPENAI_API_KEY)
+    case 'chatgpt':
+    case 'chatgptAuthTokens':
+      return hasChatGptCredential(auth.tokens)
+    case 'agentIdentity':
+      return hasAgentIdentityCredential(auth.agent_identity)
+    case 'personalAccessToken':
+      return isNonEmptyString(auth.personal_access_token)
+    case 'bedrockApiKey':
+      return hasBedrockApiKey(auth.bedrock_api_key)
+    default:
+      return true
   }
-  const tokens = auth.tokens
-  return (
-    tokens == null ||
-    (typeof tokens === 'object' &&
-      !Array.isArray(tokens) &&
-      typeof tokens.access_token === 'string' &&
-      typeof tokens.id_token === 'string' &&
-      typeof tokens.refresh_token === 'string' &&
-      isOptionalString(tokens.account_id))
-  )
 }
 
-function isValidAuthMode(value: unknown): boolean {
-  return (
-    value == null ||
-    value === 'apikey' ||
-    value === 'chatgpt' ||
-    value === 'chatgptAuthTokens' ||
-    value === 'agentIdentity'
-  )
-}
-
-function hasChatGptCredential(auth: StoredCodexAuth): boolean {
-  return (
-    isNonEmptyString(auth.tokens?.access_token) &&
-    isNonEmptyString(auth.tokens?.id_token) &&
-    isNonEmptyString(auth.tokens?.refresh_token)
-  )
-}
-
-function isOptionalString(value: unknown): boolean {
-  return value == null || typeof value === 'string'
+function hasCredentialWithoutDeclaredMode(auth: StoredCodexAuth): boolean {
+  const knownCredentialPresent = KNOWN_CREDENTIAL_KEYS.some((key) => key in auth)
+  if (knownCredentialPresent) {
+    return (
+      isNonEmptyString(auth.OPENAI_API_KEY) ||
+      hasChatGptCredential(auth.tokens) ||
+      hasAgentIdentityCredential(auth.agent_identity) ||
+      isNonEmptyString(auth.personal_access_token) ||
+      hasBedrockApiKey(auth.bedrock_api_key)
+    )
+  }
+  return Object.keys(auth).some((key) => key !== 'auth_mode' && key !== 'last_refresh')
 }
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0
+}
+
+function hasChatGptCredential(tokens: unknown): boolean {
+  if (!isRecord(tokens)) {
+    return false
+  }
+  return (
+    isNonEmptyString(tokens.access_token) &&
+    isNonEmptyString(tokens.id_token) &&
+    isNonEmptyString(tokens.refresh_token)
+  )
+}
+
+function hasAgentIdentityCredential(value: unknown): boolean {
+  if (isNonEmptyString(value)) {
+    return true
+  }
+  if (!isRecord(value) || Object.keys(value).length === 0) {
+    return false
+  }
+  return KNOWN_AGENT_IDENTITY_RECORD_KEYS.some((key) => key in value)
+    ? isNonEmptyString(value.agent_runtime_id) && isNonEmptyString(value.agent_private_key)
+    : true
+}
+
+function hasBedrockApiKey(value: unknown): boolean {
+  return isRecord(value) && isNonEmptyString(value.api_key)
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
 }
 
 function delay(ms: number): Promise<void> {

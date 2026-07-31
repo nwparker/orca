@@ -29,6 +29,7 @@ import {
 } from 'node:path'
 import { app } from 'electron'
 import type { CodexManagedAccount } from '../../shared/types'
+import { normalizeRuntimePathForComparison } from '../../shared/cross-platform-path'
 import type { Store } from '../persistence'
 import { WSL_CODEX_RUNTIME_HOME_SEGMENTS } from '../pty/codex-home-wsl-env'
 import { writeFileAtomically } from './fs-utils'
@@ -72,6 +73,7 @@ import {
   codexAuthMatchesSystemDefaultIdentity
 } from './codex-auth-identity'
 import { migrateLegacySharedAuthToPerAccountHome } from './legacy-shared-auth-migration'
+import { hasStoredCodexCredential } from './managed-codex-auth-readiness'
 
 type CodexSystemDefaultSnapshot = {
   authJson: string | null
@@ -153,7 +155,8 @@ export class CodexRuntimeHomeService {
    */
   prepareForCodexLaunch(
     target?: CodexAccountSelectionTarget,
-    launchEnv?: NodeJS.ProcessEnv
+    launchEnv?: NodeJS.ProcessEnv,
+    options?: { unavailableManagedHomePath?: string }
   ): string | null {
     if (target?.runtime === 'wsl') {
       const wslTarget = this.resolveWslDefaultTarget(target)
@@ -165,7 +168,10 @@ export class CodexRuntimeHomeService {
     }
     const selfContainedAccount = this.getSelfContainedManagedHostAccount()
     if (selfContainedAccount) {
-      const perAccountHome = this.prepareSelfContainedManagedHomeForLaunch(selfContainedAccount)
+      const perAccountHome = this.prepareSelfContainedManagedHomeForLaunch(
+        selfContainedAccount,
+        options?.unavailableManagedHomePath
+      )
       if (perAccountHome) {
         return perAccountHome
       }
@@ -235,10 +241,22 @@ export class CodexRuntimeHomeService {
     return homes
   }
 
-  private prepareSelfContainedManagedHomeForLaunch(account: CodexManagedAccount): string | null {
+  private prepareSelfContainedManagedHomeForLaunch(
+    account: CodexManagedAccount,
+    unavailableManagedHomePath?: string
+  ): string | null {
     const perAccountHome = this.getTrustedSelfContainedManagedHomePath(account)
     if (!perAccountHome) {
       this.clearSelfContainedManagedSelection(account)
+      return null
+    }
+    if (
+      unavailableManagedHomePath &&
+      normalizeRuntimePathForComparison(unavailableManagedHomePath) ===
+        normalizeRuntimePathForComparison(perAccountHome) &&
+      !hasStoredCodexCredential(join(perAccountHome, 'auth.json'))
+    ) {
+      this.clearSelfContainedManagedSelection(account, 'credential remained unavailable')
       return null
     }
     // Why: link the user's real ~/.codex resources and mirror config into THIS
@@ -312,8 +330,11 @@ export class CodexRuntimeHomeService {
     }
   }
 
-  private clearSelfContainedManagedSelection(account: CodexManagedAccount): void {
-    console.warn('[codex-runtime-home] Active managed account home is invalid, clearing selection')
+  private clearSelfContainedManagedSelection(
+    account: CodexManagedAccount,
+    reason = 'home is invalid'
+  ): void {
+    console.warn(`[codex-runtime-home] Active managed account ${reason}, clearing selection`)
     const settings = this.store.getSettings()
     if (normalizeCodexRuntimeSelection(settings).host !== account.id) {
       return
@@ -511,8 +532,7 @@ export class CodexRuntimeHomeService {
       : null
     if (selfContainedAccount && selfContainedHome) {
       // Why: the quota fetch reads the account's own auth.json in place; no
-      // shared-home hot-swap, and no per-poll resource relink (that is launch
-      // prep). Its auth-presence gate suppresses probes during replacement.
+      // shared-home hot-swap or per-poll resource relink (that is launch prep).
       return selfContainedHome
     }
     if (selfContainedAccount) {
