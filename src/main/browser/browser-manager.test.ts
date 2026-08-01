@@ -1289,23 +1289,6 @@ describe('browserManager', () => {
     )
   })
 
-  it('leaves explicitly allowed CLI guests without the close guard', () => {
-    const guest = {
-      id: 308,
-      isDestroyed: vi.fn(() => false),
-      getType: vi.fn(() => 'webview'),
-      setBackgroundThrottling: guestSetBackgroundThrottlingMock,
-      setWindowOpenHandler: guestSetWindowOpenHandlerMock,
-      on: guestOnMock,
-      off: guestOffMock,
-      openDevTools: guestOpenDevToolsMock
-    }
-
-    browserManager.attachGuestPolicies(guest as never, null, { allowWindowClose: true })
-
-    expect(guestOnMock.mock.calls.filter(([event]) => event === 'dom-ready')).toHaveLength(1)
-  })
-
   it('attaches guest policies to created popup child windows', () => {
     const rendererSendMock = vi.fn()
     const childSetBackgroundThrottlingMock = vi.fn()

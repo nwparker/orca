@@ -36,7 +36,6 @@ import {
   setupGuestShortcutForwarding
 } from './browser-guest-ui'
 import { ANTI_DETECTION_SCRIPT } from './anti-detection'
-import { BROWSER_WINDOW_CLOSE_GUARD_SCRIPT } from './browser-window-close-guard'
 import { openPopupWithOriginBar, type PopupChildWindowOptions } from './popup-origin-bar-window'
 import {
   BROWSER_CLICKED_LINK_ROUTING_WORLD_ID,
@@ -285,7 +284,7 @@ export class BrowserManager {
   }
 
   // Why: addScriptToEvaluateOnNewDocument (CDP) is the only reliable pre-page-script hook per nav; executeJavaScript ran on the old page context.
-  private injectAntiDetection(guest: Electron.WebContents, extraSource = ''): () => void {
+  private injectAntiDetection(guest: Electron.WebContents): () => void {
     let disposed = false
     let reattachTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -301,9 +300,7 @@ export class BrowserManager {
           .sendCommand('Page.enable', {})
           .then(() =>
             guest.debugger.sendCommand('Page.addScriptToEvaluateOnNewDocument', {
-              source: extraSource
-                ? `${ANTI_DETECTION_SCRIPT}\n${extraSource}`
-                : ANTI_DETECTION_SCRIPT
+              source: ANTI_DETECTION_SCRIPT
             })
           )
           .catch(() => {})
@@ -623,8 +620,7 @@ export class BrowserManager {
 
   attachGuestPolicies(
     guest: Electron.WebContents,
-    inheritedOwnerContext: PopupOwnerContext | null = null,
-    options: { allowWindowClose?: boolean } = {}
+    inheritedOwnerContext: PopupOwnerContext | null = null
   ): void {
     if (this.policyAttachedGuestIds.has(guest.id)) {
       return
@@ -643,24 +639,7 @@ export class BrowserManager {
     let clickedLinkRoutingActive = Boolean(clickedLinkFrameName)
 
     // Why: bot detectors probe APIs that differ in Electron webviews; inject overrides each load so manual browsing passes.
-    const shouldGuardWindowClose =
-      inheritedOwnerContext === null &&
-      guest.getType() === 'webview' &&
-      options.allowWindowClose !== true
-    const disposeAntiDetection = this.injectAntiDetection(
-      guest,
-      shouldGuardWindowClose ? BROWSER_WINDOW_CLOSE_GUARD_SCRIPT : ''
-    )
-    const installWindowCloseGuard = (): void => {
-      if (!shouldGuardWindowClose || guest.isDestroyed()) {
-        return
-      }
-      try {
-        void guest.executeJavaScript(BROWSER_WINDOW_CLOSE_GUARD_SCRIPT).catch(() => {})
-      } catch {
-        // Guest may detach between dom-ready and script evaluation.
-      }
-    }
+    const disposeAntiDetection = this.injectAntiDetection(guest)
     // Why: disable throttling so background screenshots still get frames; else the compositor stalls and capture returns empty.
     guest.setBackgroundThrottling(false)
     const installClickedLinkRouting = (): void => {
@@ -686,9 +665,6 @@ export class BrowserManager {
     }
     if (clickedLinkFrameName) {
       guest.on('dom-ready', installClickedLinkRouting)
-    }
-    if (shouldGuardWindowClose) {
-      guest.on('dom-ready', installWindowCloseGuard)
     }
     const pendingIframeRoutingInstalls = new Map<Electron.WebFrameMain, () => void>()
     const iframeFrameNameByFrame = new Map<Electron.WebFrameMain, string>()
@@ -908,9 +884,6 @@ export class BrowserManager {
       try {
         guest.off('destroyed', handleDestroyed)
         guest.off('did-create-window', handleDidCreateWindow)
-        if (shouldGuardWindowClose) {
-          guest.off('dom-ready', installWindowCloseGuard)
-        }
         if (clickedLinkFrameName) {
           clickedLinkRoutingActive = false
           guest.off('dom-ready', installClickedLinkRouting)
@@ -966,7 +939,6 @@ export class BrowserManager {
   private retireStaleGuestWebContents(previousWebContentsId: number): void {
     // Why: after a renderer-process swap, stop the dead guest id resolving to the live page so stale callbacks don't hit the wrong session.
     this.cleanupGuestPolicyAttachment(previousWebContentsId)
-    this.tabIdByWebContentsId.delete(previousWebContentsId)
   }
 
   private cleanupGuestPolicyAttachment(guestWebContentsId: number): void {

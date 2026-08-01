@@ -249,6 +249,7 @@ describe('createMainWindow', () => {
     expect(allowBlankPrefs).toMatchObject({
       disableHtmlFullscreenWindowResize: true,
       partition: 'persist:orca-browser',
+      preload: expect.stringMatching(/browser-window-close-preload\.js$/),
       sandbox: true
     })
 
@@ -269,19 +270,19 @@ describe('createMainWindow', () => {
       src: 'data:text/html,',
       preload: BROWSER_WINDOW_CLOSE_ALLOWED_PRELOAD
     }
+    const allowWindowClosePrefs = { partition: 'persist:orca-browser' }
     windowHandlers['will-attach-webview'](
       allowWindowCloseEvent as never,
-      { partition: 'persist:orca-browser' } as never,
+      allowWindowClosePrefs as never,
       allowWindowCloseParams as never
     )
     expect(allowWindowCloseEvent.preventDefault).not.toHaveBeenCalled()
     expect(allowWindowCloseParams.preload).toBeUndefined()
+    expect(allowWindowClosePrefs).not.toHaveProperty('preload')
 
     const cliGuest = { marker: 'cli-guest' }
     windowHandlers['did-attach-webview']({} as never, cliGuest as never)
-    expect(attachGuestPoliciesMock).toHaveBeenLastCalledWith(cliGuest, null, {
-      allowWindowClose: true
-    })
+    expect(attachGuestPoliciesMock).toHaveBeenLastCalledWith(cliGuest)
   })
 
   it('sets platform-specific titlebar and frame options for every desktop platform', () => {

@@ -225,13 +225,11 @@ async function startBrowserWindowCloseServer(): Promise<{
         <body>
           <p id="s">Attempting close…</p>
           <script>
+            window.close()
             setTimeout(() => {
-              window.close()
-              setTimeout(() => {
-                document.getElementById('s').textContent =
-                  'window.close() was blocked (expected).'
-              }, 200)
-            }, 300)
+              document.getElementById('s').textContent =
+                'window.close() was blocked (expected).'
+            }, 200)
           </script>
         </body>
       </html>
@@ -786,10 +784,6 @@ test.describe('Browser Tab', () => {
           return closeTabId
         })
         .not.toBeNull()
-
-      await expect
-        .poll(() => readBrowserWindowCloseStatus(orcaPage, closeTabId!), { timeout: 10_000 })
-        .toContain('Attempting close')
 
       await orcaPage.locator(`[data-tab-id="${neighboringTab!.id}"]`).click()
       await expect.poll(async () => getActiveTabType(orcaPage), { timeout: 5_000 }).toBe('browser')

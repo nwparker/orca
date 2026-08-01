@@ -442,8 +442,7 @@ export function createMainWindow(
   // so register it with the window's other navigation policy.
   registerPluginPanelNavigationGuard(mainWindow.webContents)
 
-  // Why: will-attach-webview carries the page's close policy before did-attach-webview exposes the guest.
-  const pendingGuestWindowClosePolicies: boolean[] = []
+  const browserWindowClosePreload = join(__dirname, 'browser-window-close-preload.js')
   mainWindow.webContents.on('will-attach-webview', (event, webPreferences, params) => {
     const src = typeof params.src === 'string' ? params.src : ''
     const normalizedSrc = normalizeBrowserNavigationUrl(src)
@@ -457,9 +456,13 @@ export function createMainWindow(
 
     const requestedPreload = params.preload ?? webPreferences.preload
     const allowWindowClose = requestedPreload === BROWSER_WINDOW_CLOSE_ALLOWED_PRELOAD
-    pendingGuestWindowClosePolicies.push(allowWindowClose)
     delete params.preload
-    delete webPreferences.preload
+    if (allowWindowClose) {
+      delete webPreferences.preload
+    } else {
+      // Why: preload runs in the page's main world before inline scripts can call window.close().
+      webPreferences.preload = browserWindowClosePreload
+    }
     // Why: older Electron builds expose preloadURL alongside preload; delete both so the guest can't inherit the main preload bridge.
     delete (webPreferences as Record<string, unknown>).preloadURL
     webPreferences.nodeIntegration = false
@@ -478,11 +481,6 @@ export function createMainWindow(
 
   mainWindow.webContents.on('did-attach-webview', (_event, guest) => {
     // Why: attach guest popup/nav policy at creation; waiting for renderer registration races target=_blank/early redirects past it.
-    const allowWindowClose = pendingGuestWindowClosePolicies.shift() === true
-    if (allowWindowClose) {
-      browserManager.attachGuestPolicies(guest, null, { allowWindowClose: true })
-      return
-    }
     browserManager.attachGuestPolicies(guest)
   })
 
