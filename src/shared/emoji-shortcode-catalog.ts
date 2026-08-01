@@ -1,39 +1,24 @@
-import githubEmojiShortcodes from 'emojibase-data/en/shortcodes/github.json'
-import slackEmojiShortcodes from 'emojibase-data/en/shortcodes/iamcal.json'
+import emojiShortcodes from 'emojibase-data/en/shortcodes/github.json'
 
 export type StandardEmojiShortcodeEntry = {
   emoji: string
   shortcode: string
 }
 
-const GITHUB_EMOJI_SHORTCODE_ENTRIES = toEmojiShortcodeEntries(githubEmojiShortcodes)
-const GITHUB_SHORTCODES = new Set(GITHUB_EMOJI_SHORTCODE_ENTRIES.map(({ shortcode }) => shortcode))
-
-// Emojibase's iamcal preset backs its Slack shortcode catalog.
-const SLACK_EMOJI_SHORTCODE_ENTRIES = toEmojiShortcodeEntries(slackEmojiShortcodes)
-
-export const STANDARD_EMOJI_SHORTCODE_ENTRIES: readonly StandardEmojiShortcodeEntry[] = [
-  ...GITHUB_EMOJI_SHORTCODE_ENTRIES,
-  ...SLACK_EMOJI_SHORTCODE_ENTRIES.filter(({ shortcode }) => !GITHUB_SHORTCODES.has(shortcode))
-]
+export const STANDARD_EMOJI_SHORTCODE_ENTRIES: readonly StandardEmojiShortcodeEntry[] =
+  Object.entries(emojiShortcodes).flatMap(([hexcode, value]) => {
+    const shortcodes = typeof value === 'string' ? [value] : value
+    const emoji = hexcodeToEmoji(hexcode)
+    return shortcodes.map((shortcode) => ({ emoji, shortcode }))
+  })
 
 const PRIMARY_SHORTCODE_BY_EMOJI = new Map(
-  Object.entries(githubEmojiShortcodes).map(([hexcode, value]) => {
+  Object.entries(emojiShortcodes).map(([hexcode, value]) => {
     const shortcodes = typeof value === 'string' ? [value] : value
     const shortcode = shortcodes.find((candidate) => /^[a-z]/i.test(candidate)) ?? shortcodes[0]
     return [normalizeEmojiLookup(hexcodeToEmoji(hexcode)), shortcode]
   })
 )
-
-function toEmojiShortcodeEntries(
-  catalog: Record<string, string | string[]>
-): StandardEmojiShortcodeEntry[] {
-  return Object.entries(catalog).flatMap(([hexcode, value]) => {
-    const shortcodes = typeof value === 'string' ? [value] : value
-    const emoji = hexcodeToEmoji(hexcode)
-    return shortcodes.map((shortcode) => ({ emoji, shortcode }))
-  })
-}
 
 const EMOJI_SEGMENTER = new Intl.Segmenter('en', { granularity: 'grapheme' })
 

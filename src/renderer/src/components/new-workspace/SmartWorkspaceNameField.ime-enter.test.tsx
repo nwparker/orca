@@ -269,13 +269,13 @@ describe('SmartWorkspaceNameField emoji shortcodes', () => {
     act(() => {
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(
         input,
-        'Launch :flag-kr: experiment'
+        'Launch :wink: experiment'
       )
-      input.setSelectionRange(16, 16)
+      input.setSelectionRange(13, 13)
       input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }))
     })
 
-    expect(onValueChange).toHaveBeenCalledWith('Launch 🇰🇷 experiment')
+    expect(onValueChange).toHaveBeenCalledWith('Launch 😉 experiment')
   })
 
   it('accepts the highlighted shortcode suggestion with Enter', () => {

@@ -17,15 +17,6 @@ export type WorkspaceEmojiReplacement = {
 }
 
 const SHORTCODE_ENTRIES = STANDARD_EMOJI_SHORTCODE_ENTRIES
-const MAX_SHORTCODE_LENGTH = 64
-const ACTIVE_SHORTCODE_PATTERN = new RegExp(
-  `(^|\\s):([a-z0-9_+-]{1,${MAX_SHORTCODE_LENGTH}})$`,
-  'i'
-)
-const COMPLETED_SHORTCODE_PATTERN = new RegExp(
-  `(^|\\s):([a-z0-9_+-]{1,${MAX_SHORTCODE_LENGTH}}):$`,
-  'i'
-)
 
 const EXACT_SHORTCODE = new Map(
   SHORTCODE_ENTRIES.map(({ emoji, shortcode }) => [shortcode, { emoji, shortcode }])
@@ -70,7 +61,7 @@ export function getActiveWorkspaceEmojiShortcode(
   if (cursor === null || cursor < 0 || cursor > value.length) {
     return null
   }
-  const match = value.slice(0, cursor).match(ACTIVE_SHORTCODE_PATTERN)
+  const match = value.slice(0, cursor).match(/(^|\s):([a-z0-9_+-]{1,40})$/i)
   if (!match) {
     return null
   }
@@ -88,7 +79,7 @@ export function replaceCompletedWorkspaceEmojiShortcode(
   if (cursor === null || cursor < 0 || cursor > value.length) {
     return null
   }
-  const match = value.slice(0, cursor).match(COMPLETED_SHORTCODE_PATTERN)
+  const match = value.slice(0, cursor).match(/(^|\s):([a-z0-9_+-]{1,40}):$/i)
   if (!match) {
     return null
   }
