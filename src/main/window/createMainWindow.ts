@@ -10,6 +10,7 @@ import {
   screen
 } from 'electron'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { is } from '@electron-toolkit/utils'
 import type { Store } from '../persistence'
 import { getAppIconPath } from '../app-icon'
@@ -443,6 +444,7 @@ export function createMainWindow(
   registerPluginPanelNavigationGuard(mainWindow.webContents)
 
   const browserWindowClosePreload = join(__dirname, 'browser-window-close-preload.js')
+  const browserWindowCloseAllowedPreloadPath = fileURLToPath(BROWSER_WINDOW_CLOSE_ALLOWED_PRELOAD)
   mainWindow.webContents.on('will-attach-webview', (event, webPreferences, params) => {
     const src = typeof params.src === 'string' ? params.src : ''
     const normalizedSrc = normalizeBrowserNavigationUrl(src)
@@ -454,8 +456,11 @@ export function createMainWindow(
       return
     }
 
-    const requestedPreload = params.preload ?? webPreferences.preload
-    const allowWindowClose = requestedPreload === BROWSER_WINDOW_CLOSE_ALLOWED_PRELOAD
+    const allowWindowClose = [params.preload, webPreferences.preload].some(
+      (preload) =>
+        preload === BROWSER_WINDOW_CLOSE_ALLOWED_PRELOAD ||
+        preload === browserWindowCloseAllowedPreloadPath
+    )
     delete params.preload
     if (allowWindowClose) {
       delete webPreferences.preload

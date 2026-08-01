@@ -29,10 +29,11 @@ async function createBrowserTab(
   page: Parameters<typeof getActiveWorktreeId>[0],
   worktreeId: string,
   url?: string,
-  title = 'New Browser Tab'
+  title = 'New Browser Tab',
+  allowWindowClose?: boolean
 ): Promise<CreatedBrowserTab | null> {
   return page.evaluate(
-    ({ targetWorktreeId, targetUrl, targetTitle }) => {
+    ({ targetWorktreeId, targetUrl, targetTitle, allowClose }) => {
       const store = window.__store
       if (!store) {
         return null
@@ -44,12 +45,18 @@ async function createBrowserTab(
         targetUrl ?? state.browserDefaultUrl ?? 'about:blank',
         {
           title: targetTitle,
-          activate: true
+          activate: true,
+          allowWindowClose: allowClose
         }
       )
       return { id: tab.id, pageId: tab.activePageId ?? null }
     },
-    { targetWorktreeId: worktreeId, targetUrl: url, targetTitle: title }
+    {
+      targetWorktreeId: worktreeId,
+      targetUrl: url,
+      targetTitle: title,
+      allowClose: allowWindowClose
+    }
   )
 }
 
@@ -790,6 +797,47 @@ test.describe('Browser Tab', () => {
       await expect
         .poll(() => readBrowserWindowCloseStatus(orcaPage, closeTabId!), { timeout: 5_000 })
         .toContain('window.close() was blocked')
+    } finally {
+      await closeServer.close()
+    }
+  })
+
+  test('explicitly allowed browser tabs retain replaceable window.close', async ({ orcaPage }) => {
+    const closeServer = await startBrowserWindowCloseServer()
+    try {
+      const worktreeId = (await getActiveWorktreeId(orcaPage))!
+      const allowedTab = await createBrowserTab(
+        orcaPage,
+        worktreeId,
+        closeServer.sourceUrl,
+        'Allowed close tab',
+        true
+      )
+      expect(allowedTab?.id).toBeTruthy()
+
+      await expect
+        .poll(
+          () =>
+            orcaPage.evaluate(async (targetBrowserTabId) => {
+              const slot = document.querySelector(
+                `[data-browser-overlay-tab-id="${targetBrowserTabId}"]`
+              )
+              const webview = slot?.querySelector('webview') as Electron.WebviewTag | null
+              if (!webview) {
+                return 'webview missing'
+              }
+              try {
+                return (await webview.executeJavaScript(`(() => {
+                  window.close = () => 'replacement-called'
+                  return window.close() === 'replacement-called' ? 'replacement-called' : 'blocked'
+                })()`)) as string
+              } catch {
+                return 'guest unavailable'
+              }
+            }, allowedTab!.id),
+          { timeout: 5_000 }
+        )
+        .toBe('replacement-called')
     } finally {
       await closeServer.close()
     }

@@ -120,5 +120,6 @@ describe('BrowserPane webview preferences', () => {
     expect(ensuredWebview?.webview.getAttribute('preload')).toBe(
       BROWSER_WINDOW_CLOSE_ALLOWED_PRELOAD
     )
+    expect(BROWSER_WINDOW_CLOSE_ALLOWED_PRELOAD).toMatch(/^file:/)
   })
 })
