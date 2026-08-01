@@ -17,7 +17,7 @@ export type WorkspaceEmojiReplacement = {
 }
 
 const WORKSPACE_EMOJI_SHORTCODE_ADDITIONS: readonly WorkspaceEmojiSuggestion[] = [
-  { emoji: '🇰🇷', shortcode: 'flag_kr' }
+  { emoji: '🇰🇷', shortcode: 'kr' }
 ]
 
 const SHORTCODE_ENTRIES = [
