@@ -74,6 +74,7 @@ import {
 } from './createMainWindow'
 import { ipcMain } from 'electron'
 import { shouldRecoverRendererAfterProcessGone } from '../crash-reporting/process-gone-classification'
+import { BROWSER_WINDOW_CLOSE_ALLOWED_PRELOAD } from '../../shared/browser-window-close-policy'
 
 function withPlatform<T>(platform: NodeJS.Platform, run: () => T): T {
   const original = process.platform
@@ -262,6 +263,25 @@ describe('createMainWindow', () => {
     const guest = { marker: 'guest' }
     windowHandlers['did-attach-webview']({} as never, guest as never)
     expect(attachGuestPoliciesMock).toHaveBeenCalledWith(guest)
+
+    const allowWindowCloseEvent = { preventDefault: vi.fn() }
+    const allowWindowCloseParams = {
+      src: 'data:text/html,',
+      preload: BROWSER_WINDOW_CLOSE_ALLOWED_PRELOAD
+    }
+    windowHandlers['will-attach-webview'](
+      allowWindowCloseEvent as never,
+      { partition: 'persist:orca-browser' } as never,
+      allowWindowCloseParams as never
+    )
+    expect(allowWindowCloseEvent.preventDefault).not.toHaveBeenCalled()
+    expect(allowWindowCloseParams.preload).toBeUndefined()
+
+    const cliGuest = { marker: 'cli-guest' }
+    windowHandlers['did-attach-webview']({} as never, cliGuest as never)
+    expect(attachGuestPoliciesMock).toHaveBeenLastCalledWith(cliGuest, null, {
+      allowWindowClose: true
+    })
   })
 
   it('sets platform-specific titlebar and frame options for every desktop platform', () => {

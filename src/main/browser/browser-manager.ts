@@ -36,6 +36,7 @@ import {
   setupGuestShortcutForwarding
 } from './browser-guest-ui'
 import { ANTI_DETECTION_SCRIPT } from './anti-detection'
+import { BROWSER_WINDOW_CLOSE_GUARD_SCRIPT } from './browser-window-close-guard'
 import { openPopupWithOriginBar, type PopupChildWindowOptions } from './popup-origin-bar-window'
 import {
   BROWSER_CLICKED_LINK_ROUTING_WORLD_ID,
@@ -284,7 +285,7 @@ export class BrowserManager {
   }
 
   // Why: addScriptToEvaluateOnNewDocument (CDP) is the only reliable pre-page-script hook per nav; executeJavaScript ran on the old page context.
-  private injectAntiDetection(guest: Electron.WebContents): () => void {
+  private injectAntiDetection(guest: Electron.WebContents, extraSource = ''): () => void {
     let disposed = false
     let reattachTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -300,7 +301,9 @@ export class BrowserManager {
           .sendCommand('Page.enable', {})
           .then(() =>
             guest.debugger.sendCommand('Page.addScriptToEvaluateOnNewDocument', {
-              source: ANTI_DETECTION_SCRIPT
+              source: extraSource
+                ? `${ANTI_DETECTION_SCRIPT}\n${extraSource}`
+                : ANTI_DETECTION_SCRIPT
             })
           )
           .catch(() => {})
@@ -620,7 +623,8 @@ export class BrowserManager {
 
   attachGuestPolicies(
     guest: Electron.WebContents,
-    inheritedOwnerContext: PopupOwnerContext | null = null
+    inheritedOwnerContext: PopupOwnerContext | null = null,
+    options: { allowWindowClose?: boolean } = {}
   ): void {
     if (this.policyAttachedGuestIds.has(guest.id)) {
       return
@@ -639,8 +643,24 @@ export class BrowserManager {
     let clickedLinkRoutingActive = Boolean(clickedLinkFrameName)
 
     // Why: bot detectors probe APIs that differ in Electron webviews; inject overrides each load so manual browsing passes.
-    const disposeAntiDetection = this.injectAntiDetection(guest)
-
+    const shouldGuardWindowClose =
+      inheritedOwnerContext === null &&
+      guest.getType() === 'webview' &&
+      options.allowWindowClose !== true
+    const disposeAntiDetection = this.injectAntiDetection(
+      guest,
+      shouldGuardWindowClose ? BROWSER_WINDOW_CLOSE_GUARD_SCRIPT : ''
+    )
+    const installWindowCloseGuard = (): void => {
+      if (!shouldGuardWindowClose || guest.isDestroyed()) {
+        return
+      }
+      try {
+        void guest.executeJavaScript(BROWSER_WINDOW_CLOSE_GUARD_SCRIPT).catch(() => {})
+      } catch {
+        // Guest may detach between dom-ready and script evaluation.
+      }
+    }
     // Why: disable throttling so background screenshots still get frames; else the compositor stalls and capture returns empty.
     guest.setBackgroundThrottling(false)
     const installClickedLinkRouting = (): void => {
@@ -666,6 +686,9 @@ export class BrowserManager {
     }
     if (clickedLinkFrameName) {
       guest.on('dom-ready', installClickedLinkRouting)
+    }
+    if (shouldGuardWindowClose) {
+      guest.on('dom-ready', installWindowCloseGuard)
     }
     const pendingIframeRoutingInstalls = new Map<Electron.WebFrameMain, () => void>()
     const iframeFrameNameByFrame = new Map<Electron.WebFrameMain, string>()
@@ -885,6 +908,9 @@ export class BrowserManager {
       try {
         guest.off('destroyed', handleDestroyed)
         guest.off('did-create-window', handleDidCreateWindow)
+        if (shouldGuardWindowClose) {
+          guest.off('dom-ready', installWindowCloseGuard)
+        }
         if (clickedLinkFrameName) {
           clickedLinkRoutingActive = false
           guest.off('dom-ready', installClickedLinkRouting)
@@ -944,7 +970,12 @@ export class BrowserManager {
   }
 
   private cleanupGuestPolicyAttachment(guestWebContentsId: number): void {
-    const isPrimaryGuest = this.tabIdByWebContentsId.has(guestWebContentsId)
+    const browserTabId = this.tabIdByWebContentsId.get(guestWebContentsId)
+    const isPrimaryGuest = browserTabId !== undefined
+    if (browserTabId && this.webContentsIdByTabId.get(browserTabId) === guestWebContentsId) {
+      this.webContentsIdByTabId.delete(browserTabId)
+    }
+    this.tabIdByWebContentsId.delete(guestWebContentsId)
     this.certificateTrustController?.onGuestRetired(guestWebContentsId)
     const policyCleanup = this.policyCleanupByGuestId.get(guestWebContentsId)
     if (policyCleanup) {
