@@ -60,6 +60,7 @@ async function injectQueuedWriteAndRefocus(
         throw new Error('Hidden terminal pane unavailable')
       }
       const terminal = pane.terminal
+      // Why: fail loudly if xterm moves the private buffer path that models this wobble.
       const bufferService = (
         terminal as typeof terminal & {
           _core?: {
@@ -97,6 +98,7 @@ async function injectQueuedWriteAndRefocus(
       if (!injector?.inject(paneKey, `${rows}REFOCUS_STREAM_DONE\n`)) {
         throw new Error('PTY data injector unavailable')
       }
+      // Why: focus recovery must flush through terminal.write in this synchronous dispatch.
       window.dispatchEvent(new Event('focus'))
       if (!wobbleApplied) {
         throw new Error('refocus did not flush the queued xterm write')
@@ -176,8 +178,10 @@ test.describe('terminal streaming refocus viewport', () => {
     const tabId = await activeTerminalTabId(orcaPage)
     const { paneKey } = await waitForActivePaneHookDescriptor(orcaPage)
     await waitForTerminalPtyDataInjector(orcaPage, paneKey)
-    await execInTerminal(orcaPage, ptyId, `node "${STREAMING_FIXTURE_PATH}"`)
-    await expect.poll(() => getTerminalContent(orcaPage, 30_000)).toContain('STREAM_PHASE1_DONE')
+    await execInTerminal(orcaPage, ptyId, `node ${JSON.stringify(STREAMING_FIXTURE_PATH)}`)
+    await expect
+      .poll(() => getTerminalContent(orcaPage), { timeout: 30_000 })
+      .toContain('STREAM_PHASE1_DONE')
     await orcaPage.waitForTimeout(400)
 
     const framesPromise = sampleRevealFrames(orcaPage, tabId)
@@ -198,7 +202,7 @@ test.describe('terminal streaming refocus viewport', () => {
       frames.filter((frame) => (frame.maxThumbTop ?? 0) > 1 && (frame.thumbTop ?? 0) <= 1)
     ).toEqual([])
     await expect
-      .poll(() => getTerminalContent(orcaPage, 30_000), { timeout: 15_000 })
+      .poll(() => getTerminalContent(orcaPage), { timeout: 15_000 })
       .toContain('REFOCUS_STREAM_DONE')
     const visibleScrollbar = orcaPage.locator('.xterm-scrollbar.xterm-vertical:visible').first()
     await expect(visibleScrollbar).toBeVisible()
