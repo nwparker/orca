@@ -5,7 +5,6 @@ import {
 } from '@/lib/pane-manager/pane-manager-registry'
 import {
   scheduleImagePasteWebglAtlasRecovery,
-  scheduleTabRevealWebglAtlasRecovery,
   scheduleTerminalWebglAtlasRecovery,
   TERMINAL_OUTPUT_RECOVERY_QUIET_MS
 } from './terminal-webgl-atlas-recovery'
@@ -151,32 +150,6 @@ describe('terminal WebGL atlas recovery', () => {
     expect(manager.refreshAllPanes).not.toHaveBeenCalled()
   })
 
-  it('recovers immediately on a tab reveal, not through the streaming debounce', () => {
-    // Regression guard (STA-1365 review): reveal recovery must stay immediate so a
-    // background agent streaming in another pane cannot defer a revealed tab's
-    // atlas rebuild. It shares the paste path's immediate burst, not the debounce.
-    vi.useFakeTimers()
-    const rafCallbacks: FrameRequestCallback[] = []
-    vi.stubGlobal(
-      'requestAnimationFrame',
-      vi.fn((callback: FrameRequestCallback) => {
-        rafCallbacks.push(callback)
-        return rafCallbacks.length
-      })
-    )
-    const manager = registerManager()
-
-    scheduleTabRevealWebglAtlasRecovery()
-    // First burst leg fires on the next frame — no 200ms debounce wait.
-    rafCallbacks[0]?.(0)
-    expect(manager.resetWebglTextureAtlases).toHaveBeenCalledTimes(1)
-    expect(manager.refreshAllPanes).toHaveBeenCalledTimes(1)
-    vi.advanceTimersByTime(120)
-    vi.advanceTimersByTime(380)
-    expect(manager.resetWebglTextureAtlases).toHaveBeenCalledTimes(3)
-    expect(manager.refreshAllPanes).toHaveBeenCalledTimes(3)
-  })
-
   it('does not recover mid-stream while terminal output keeps arriving', () => {
     // Regression (STA-1365): an alternate-screen TUI requests atlas recovery on
     // every redraw frame. Recovering mid-stream clears the shared glyph atlas and
@@ -277,8 +250,8 @@ describe('terminal WebGL atlas recovery', () => {
     // (foreground and hidden-output PTY writes) funnel through
     // scheduleTerminalWebglAtlasRecovery and re-arm the one module-global debounce
     // timer, so a single continuous stream (even a hidden one) keeps the recovery
-    // deferred for everyone. Image paste and tab reveal use their own immediate
-    // burst and are not coupled to the shared debounce timer.
+    // deferred for everyone. Image paste uses its own immediate burst and is not
+    // coupled to the shared debounce timer.
     vi.useFakeTimers()
     const rafCallbacks: FrameRequestCallback[] = []
     vi.stubGlobal(

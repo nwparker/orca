@@ -370,6 +370,7 @@ describe('useTerminalPaneGlobalEffects', () => {
 
     manager.resumeRendering.mockClear()
     manager.resetWebglTextureAtlases.mockClear()
+    manager.scheduleRevealRepaint.mockClear()
     manager.refreshAllPanes.mockClear()
     manager.suspendRendering.mockClear()
     mocks.fitAndFocusPanes.mockClear()
@@ -399,10 +400,13 @@ describe('useTerminalPaneGlobalEffects', () => {
     expect(manager.resumeRendering).not.toHaveBeenCalled()
     expect(mocks.fitAndFocusPanes).not.toHaveBeenCalled()
     expect(mocks.fitPanes).not.toHaveBeenCalled()
-    expect(manager.resetWebglTextureAtlases).toHaveBeenCalledTimes(1)
-    expect(manager.refreshAllPanes).toHaveBeenCalledTimes(1)
+    expect(manager.scheduleRevealRepaint).toHaveBeenCalledTimes(1)
+    expect(manager.resetWebglTextureAtlases).not.toHaveBeenCalled()
+    expect(manager.refreshAllPanes).not.toHaveBeenCalled()
     expect(mocks.focusActivePane).toHaveBeenCalledWith(manager)
     vi.advanceTimersByTime(500)
+    expect(manager.resetWebglTextureAtlases).not.toHaveBeenCalled()
+    expect(manager.refreshAllPanes).not.toHaveBeenCalled()
   })
 
   it('keeps visible active-state updates on the light resume path', () => {
@@ -452,6 +456,7 @@ describe('useTerminalPaneGlobalEffects', () => {
 
     manager.resumeRendering.mockClear()
     manager.resetWebglTextureAtlases.mockClear()
+    manager.scheduleRevealRepaint.mockClear()
     manager.refreshAllPanes.mockClear()
     mocks.fitAndFocusPanes.mockClear()
     mocks.fitPanes.mockClear()
@@ -471,10 +476,13 @@ describe('useTerminalPaneGlobalEffects', () => {
     expect(manager.resumeRendering).not.toHaveBeenCalled()
     expect(mocks.fitAndFocusPanes).not.toHaveBeenCalled()
     expect(mocks.fitPanes).not.toHaveBeenCalled()
-    expect(manager.resetWebglTextureAtlases).toHaveBeenCalledTimes(1)
-    expect(manager.refreshAllPanes).toHaveBeenCalledTimes(1)
+    expect(manager.scheduleRevealRepaint).toHaveBeenCalledTimes(1)
+    expect(manager.resetWebglTextureAtlases).not.toHaveBeenCalled()
+    expect(manager.refreshAllPanes).not.toHaveBeenCalled()
     expect(mocks.focusActivePane).toHaveBeenCalledWith(manager)
     vi.advanceTimersByTime(500)
+    expect(manager.resetWebglTextureAtlases).not.toHaveBeenCalled()
+    expect(manager.refreshAllPanes).not.toHaveBeenCalled()
   })
 
   it('suspends rendering when a terminal tab first mounts hidden', () => {

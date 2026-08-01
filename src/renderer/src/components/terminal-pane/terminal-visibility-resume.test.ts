@@ -21,12 +21,6 @@ vi.mock('./pane-helpers', () => ({
   fitPanes: vi.fn(),
   focusActivePane: vi.fn()
 }))
-const scheduleTabRevealWebglAtlasRecovery = vi.fn()
-vi.mock('./terminal-webgl-atlas-recovery', () => ({
-  // Why: the light-tab reveal must recover the atlas immediately, decoupled from
-  // the terminal-output debounce (which a background stream could otherwise defer).
-  scheduleTabRevealWebglAtlasRecovery: () => scheduleTabRevealWebglAtlasRecovery()
-}))
 const resetTerminalLinkifierHoverState = vi.fn()
 const isTerminalLinkifierHoverActive = vi.fn((_terminal: unknown) => false)
 vi.mock('@/lib/pane-manager/terminal-linkifier-hover-reset', () => ({
@@ -72,7 +66,7 @@ describe('resumeTerminalVisibility reveal repaint', () => {
     vi.clearAllMocks()
   })
 
-  it('schedules a pane-scoped repaint on a light tab reveal', () => {
+  it('schedules one coordinated repaint on a light tab reveal', () => {
     // The light path is the "click the tab that was not open" gesture: it has
     // no rendering resume or fit, so without this repaint a hidden-while-
     // working pane keeps compositing pre-hide pixels.
@@ -81,9 +75,6 @@ describe('resumeTerminalVisibility reveal repaint', () => {
 
     expect(manager.scheduleRevealRepaint).toHaveBeenCalledTimes(1)
     expect(manager.resumeRendering).not.toHaveBeenCalled()
-    // Reveal recovery is immediate (not the terminal-output debounce), so a
-    // background stream in another pane cannot defer this tab's atlas rebuild.
-    expect(scheduleTabRevealWebglAtlasRecovery).toHaveBeenCalledTimes(1)
   })
 
   it('captures native trim movement before enforcing viewport intent', async () => {

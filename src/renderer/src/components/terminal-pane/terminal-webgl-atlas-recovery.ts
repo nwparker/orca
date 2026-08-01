@@ -41,12 +41,6 @@ export function scheduleImagePasteWebglAtlasRecovery(): void {
   scheduleAtlasRecoveryBurst()
 }
 
-export function scheduleTabRevealWebglAtlasRecovery(): void {
-  // Why: a tab reveal is one-shot, so recover immediately — decoupled from the
-  // streaming debounce so a background stream can't defer a revealed tab's rebuild.
-  scheduleAtlasRecoveryBurst()
-}
-
 export function scheduleTerminalWebglAtlasRecovery(): void {
   // Why: terminal-output recovery (foreground + hidden PTY writes). Trailing-edge
   // debounce so a clear only ever runs after 200ms of quiet — never mid-stream;
