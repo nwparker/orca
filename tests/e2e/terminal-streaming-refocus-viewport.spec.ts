@@ -10,6 +10,7 @@ import {
   waitForActiveTerminalManager
 } from './helpers/terminal'
 import { waitForTerminalPtyDataInjector } from './helpers/terminal-pty-injection'
+import { nodeTerminalCommand } from './terminal-node-command'
 
 const STREAMING_FIXTURE_PATH = path.join(
   process.cwd(),
@@ -32,20 +33,44 @@ async function closeFeatureTips(page: Page): Promise<void> {
   })
 }
 
-async function activeTerminalTabId(page: Page): Promise<string> {
-  const tabId = await page.evaluate(() => {
-    const state = window.__store?.getState()
-    const worktreeId = state?.activeWorktreeId
-    return state?.activeTabType === 'terminal'
-      ? (state.activeTabId ?? null)
-      : worktreeId
-        ? (state?.activeTabIdByWorktree?.[worktreeId] ?? null)
-        : null
-  })
-  if (!tabId) {
-    throw new Error('Active terminal tab unavailable')
-  }
-  return tabId
+async function waitForPhaseOneAtBottom(page: Page, tabId: string): Promise<void> {
+  await expect
+    .poll(
+      () =>
+        page.evaluate((targetTabId) => {
+          const pane = window.__paneManagers?.get(targetTabId)?.getPanes?.()[0]
+          const terminal = pane?.terminal
+          if (!terminal) {
+            return false
+          }
+          const buffer = terminal.buffer.active
+          let containsMarker = false
+          for (let line = buffer.baseY; line < buffer.baseY + terminal.rows; line += 1) {
+            if (buffer.getLine(line)?.translateToString(true).includes('STREAM_PHASE1_DONE')) {
+              containsMarker = true
+              break
+            }
+          }
+          const scrollbar = pane.container.querySelector<HTMLElement>(
+            '.xterm-scrollbar.xterm-vertical'
+          )
+          const thumb = scrollbar?.querySelector<HTMLElement>('.xterm-slider') ?? null
+          return Boolean(
+            buffer.baseY > 0 &&
+            buffer.viewportY === buffer.baseY &&
+            containsMarker &&
+            scrollbar &&
+            thumb &&
+            scrollbar.clientHeight - thumb.offsetHeight > 1 &&
+            Math.abs(scrollbar.clientHeight - thumb.offsetHeight - thumb.offsetTop) <= 2
+          )
+        }, tabId),
+      {
+        timeout: 30_000,
+        message: 'phase-one output did not render with the visible viewport at the bottom'
+      }
+    )
+    .toBe(true)
 }
 
 async function injectQueuedWriteAndRefocus(
@@ -175,14 +200,11 @@ test.describe('terminal streaming refocus viewport', () => {
     await ensureTerminalVisible(orcaPage)
     await waitForActiveTerminalManager(orcaPage, 30_000)
     const ptyId = await waitForActivePanePtyId(orcaPage)
-    const tabId = await activeTerminalTabId(orcaPage)
     const { paneKey } = await waitForActivePaneHookDescriptor(orcaPage)
+    const tabId = paneKey.slice(0, paneKey.indexOf(':'))
     await waitForTerminalPtyDataInjector(orcaPage, paneKey)
-    await execInTerminal(orcaPage, ptyId, `node ${JSON.stringify(STREAMING_FIXTURE_PATH)}`)
-    await expect
-      .poll(() => getTerminalContent(orcaPage), { timeout: 30_000 })
-      .toContain('STREAM_PHASE1_DONE')
-    await orcaPage.waitForTimeout(400)
+    await execInTerminal(orcaPage, ptyId, nodeTerminalCommand([STREAMING_FIXTURE_PATH]))
+    await waitForPhaseOneAtBottom(orcaPage, tabId)
 
     const framesPromise = sampleRevealFrames(orcaPage, tabId)
     await injectQueuedWriteAndRefocus(orcaPage, tabId, paneKey)

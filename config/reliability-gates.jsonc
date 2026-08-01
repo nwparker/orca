@@ -2971,6 +2971,105 @@
       "demotionRule": "Demote or quarantine if the unit gate flakes without a product bug or harness bug filed to the owner."
     },
     {
+      "id": "terminal-scroll.streaming-refocus-intent",
+      "title": "Streaming refocus preserves follow-output viewport intent",
+      "maturity": "experimental",
+      "protection": "partial",
+      "owner": "terminal-rendering",
+      "layer": "renderer-unit-and-electron-e2e",
+      "surfaces": [
+        "terminal lifecycle",
+        "window focus recovery",
+        "hidden-to-visible resume",
+        "xterm write backlog",
+        "scrollback"
+      ],
+      "platforms": ["macos", "linux", "windows"],
+      "providers": ["local", "daemon", "ssh", "wsl", "remote-runtime"],
+      "coveredPlatforms": ["macos"],
+      "coveredProviders": ["local", "daemon"],
+      "coverageNotes": "Unit coverage proves provider-independent ordering for any PaneManager. Live Electron coverage exercises a local PTY through the daemon on macOS; SSH, WSL, remote-runtime, Linux, and Windows remain unproved for this exact race.",
+      "motivatingLinks": [
+        "https://github.com/stablyai/orca/issues/11753",
+        "https://github.com/stablyai/orca/pull/11915"
+      ],
+      "invariant": "When output is queued during a focus or visibility transition, Orca records the pre-flush viewport intent before xterm parses backlog writes, so a follow-output terminal stays at the bottom and a pinned terminal keeps its prior position.",
+      "oracle": "Unit tests require exactly one intent sync before each queued-output flush. The Electron test injects a transient top-of-buffer xterm wobble during refocus and requires every presented scrollbar frame, including the final rendered output, to remain at the bottom.",
+      "commands": [
+        "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/components/terminal-pane/terminal-visibility-resume.test.ts",
+        "pnpm exec electron-vite build --mode e2e",
+        "SKIP_BUILD=1 pnpm exec playwright test tests/e2e/terminal-streaming-refocus-viewport.spec.ts --config tests/playwright.config.ts --project electron-headless --workers=1 --repeat-each=5"
+      ],
+      "testFiles": [
+        "src/renderer/src/components/terminal-pane/terminal-visibility-resume.test.ts",
+        "tests/e2e/terminal-streaming-refocus-viewport.spec.ts"
+      ],
+      "assertionRefs": [
+        {
+          "file": "src/renderer/src/components/terminal-pane/terminal-visibility-resume.test.ts",
+          "assertions": [
+            "window-wake recovery synchronizes viewport intent exactly once before flushing queued output",
+            "heavy visibility resume synchronizes intent exactly once before flushing queued output"
+          ]
+        },
+        {
+          "file": "tests/e2e/terminal-streaming-refocus-viewport.spec.ts",
+          "assertions": [
+            "phase-one scrollback is visibly ready at the bottom without a fixed sleep",
+            "no presented animation frame moves the scrollbar thumb away from the bottom during refocus",
+            "the final streamed marker renders with the visible scrollbar still at the bottom"
+          ]
+        }
+      ],
+      "evidenceRuns": [
+        {
+          "date": "2026-08-01",
+          "runner": "local",
+          "platform": "macos",
+          "command": "pnpm exec vitest run --config config/vitest.config.ts src/renderer/src/components/terminal-pane/terminal-visibility-resume.test.ts",
+          "result": "passed",
+          "durationSeconds": 0.096,
+          "summary": "14 tests passed, including exact sync count and pre-flush ordering for wake and heavy visibility resume."
+        },
+        {
+          "date": "2026-08-01",
+          "runner": "local",
+          "platform": "macos",
+          "command": "SKIP_BUILD=1 pnpm exec playwright test tests/e2e/terminal-streaming-refocus-viewport.spec.ts --config tests/playwright.config.ts --project electron-headless --workers=1 --repeat-each=5",
+          "result": "passed",
+          "durationSeconds": 35.2,
+          "summary": "Five consecutive Electron iterations passed after replacing fixed-time readiness and stale tab capture with deterministic viewport and pane-identity oracles."
+        }
+      ],
+      "runtimeBudget": {
+        "p95Seconds": 30,
+        "scope": "focused renderer unit test or one Electron E2E iteration"
+      },
+      "flakeHistory": {
+        "status": "soaking",
+        "evidence": "Five consecutive local Electron iterations passed; CI soak history is still required before promotion."
+      },
+      "redGreenEvidence": {
+        "status": "complete",
+        "evidence": "The controlled xterm viewport wobble reproduces the pinned-top failure with post-flush intent sampling and passes when intent is latched before the queued write flush."
+      },
+      "performanceBudget": {
+        "required": true,
+        "evidence": "Wake recovery keeps one O(panes) intent pass before the existing bounded 64 KiB-per-pane flush. Heavy resume removes its second intent pass and keeps the existing bounded 256 KiB-per-pane flush; no polling, timers, subprocesses, IPC, output parsing, fit, or repaint work is added."
+      },
+      "promotionCriteria": [
+        "Collect stable CI soak history for the Electron race gate.",
+        "Run the live oracle on Linux and Windows terminal backends.",
+        "Add live SSH or remote-runtime coverage for queued output during refocus."
+      ],
+      "knownGaps": [
+        "The deterministic wobble uses xterm private buffer state and must be updated if that internal contract changes.",
+        "Live Linux, Windows, SSH, WSL, and remote-runtime execution is not covered for this exact race.",
+        "The Electron gate proves follow-output behavior; adjacent scroll-intent coverage protects pinned viewport behavior."
+      ],
+      "demotionRule": "Demote or quarantine if the Electron oracle flakes without a product bug or harness bug filed to terminal-rendering."
+    },
+    {
       "id": "startup-upgrade.persisted-session-corpus",
       "title": "Current Orca preserves or recovers old production persisted sessions",
       "maturity": "experimental",
