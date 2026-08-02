@@ -4,7 +4,10 @@ import {
   type RelayClientSinkOptions,
   type SinkWriteSettlement
 } from './dispatcher'
-import { DISPATCHER_CONTROL_QUEUE_MAX_FRAMES } from './dispatcher-writer-admission'
+import {
+  DISPATCHER_CONTROL_QUEUE_MAX_BYTES,
+  DISPATCHER_CONTROL_QUEUE_MAX_FRAMES
+} from './dispatcher-writer-admission'
 import { LEGACY_CLIENT_RETAINED_BYTES_LOW } from './legacy-relay-publication-ledger'
 import type * as ProtocolModule from './protocol'
 import { encodeJsonRpcFrame, RelayErrorCode } from './protocol'
@@ -68,6 +71,47 @@ function makeDrainableSaturatingClient(highWaterMark: number): DrainableClient {
 function makeAnsiReplay(chars: number): string {
   const cell = '\u001b[2K\u001b[1;32mhello\u001b[0m \r\n'
   return cell.repeat(Math.ceil(chars / cell.length)).slice(0, chars)
+}
+
+const OVER_CAPACITY_MESSAGE = 'Relay response exceeded the bounded transport capacity'
+const CONTROL_PAD_METHOD = 'control.pad'
+
+// Why: control admission is sized in encoded frame bytes, so pad a notification to an exact frame size.
+function controlPadParams(frameBytes: number): { pad: string } {
+  const empty = encodeJsonRpcFrame(
+    { jsonrpc: '2.0', method: CONTROL_PAD_METHOD, params: { pad: '' } },
+    0,
+    0
+  ).length
+  return { pad: 'x'.repeat(frameBytes - empty) }
+}
+
+function fillControlLaneToByteBound(dispatcher: RelayDispatcher, clientId: number): void {
+  const padFrameBytes = 64 * 1024
+  const params = controlPadParams(padFrameBytes)
+  for (let index = 0; index < DISPATCHER_CONTROL_QUEUE_MAX_BYTES / padFrameBytes; index += 1) {
+    expect(
+      dispatcher.tryNotifyClient(clientId, CONTROL_PAD_METHOD, params, () => {}, {
+        controlOverflow: 'reject'
+      })
+    ).toBe(true)
+  }
+}
+
+// A bare notification is smaller than the error substitute, so its rejection proves the substitute cannot
+// fit either — anything that still gets through afterwards can only have come from the reserve.
+function expectControlLaneFull(dispatcher: RelayDispatcher, clientId: number): void {
+  expect(
+    dispatcher.tryNotifyClient(clientId, 'control.probe', undefined, () => {}, {
+      controlOverflow: 'reject'
+    })
+  ).toBe(false)
+}
+
+async function drainFully(client: DrainableClient, steps: number): Promise<void> {
+  for (let step = 0; step < steps && client.drain(); step += 1) {
+    await vi.advanceTimersByTimeAsync(0)
+  }
 }
 
 function makeBoundedClient(highWaterMark: number): BoundedClient {
@@ -482,6 +526,103 @@ describe('RelayDispatcher bounded-capacity degradation', () => {
       expect(primary.closes).toBe(0)
     } finally {
       stderr.mockRestore()
+      bounded.dispose()
+    }
+  })
+
+  it('answers from the control byte reserve when the lane is filled to the 1MiB bound', async () => {
+    const primary = makeDrainableSaturatingClient(65536)
+    const bounded = new RelayDispatcher(primary.write, primary.options)
+    try {
+      const clientId = bounded.activeClientIds()[0]
+      // 16 x 64KiB lands controlBytes on the bound exactly while using only 16 of the 256 frame slots,
+      // so the byte bound is the only thing that can reject the substitute.
+      fillControlLaneToByteBound(bounded, clientId)
+      expectControlLaneFull(bounded, clientId)
+
+      bounded.onRequest('pty.attach', async () => ({
+        incarnationId: 'inc-1',
+        replay: makeAnsiReplay(4 * 1024)
+      }))
+      bounded.feed(encodeJsonRpcFrame({ jsonrpc: '2.0', id: 91, method: 'pty.attach' }, 1, 0))
+      await vi.advanceTimersByTimeAsync(0)
+
+      expect(primary.closes).toBe(0)
+
+      await drainFully(primary, 64)
+      const payloads = primary.frames.map((frame) => decodePayload(frame))
+      expect(payloads.filter((payload) => payload.id === 91)).toEqual([
+        {
+          jsonrpc: '2.0',
+          id: 91,
+          error: { code: RelayErrorCode.ResponseOverCapacity, message: OVER_CAPACITY_MESSAGE }
+        }
+      ])
+      expect(primary.closes).toBe(0)
+    } finally {
+      bounded.dispose()
+    }
+  })
+
+  it('answers from the control frame reserve when all 256 frame slots are taken', async () => {
+    const primary = makeDrainableSaturatingClient(65536)
+    const bounded = new RelayDispatcher(primary.write, primary.options)
+    try {
+      const clientId = bounded.activeClientIds()[0]
+      // Tiny frames leave the byte bound untouched, so only the frame bound can reject the substitute.
+      for (let index = 0; index < DISPATCHER_CONTROL_QUEUE_MAX_FRAMES; index += 1) {
+        expect(
+          bounded.tryNotifyClient(clientId, `control.${index}`, undefined, () => {}, {
+            controlOverflow: 'reject'
+          })
+        ).toBe(true)
+      }
+      expectControlLaneFull(bounded, clientId)
+
+      bounded.onRequest('pty.attach', async () => ({ incarnationId: 'inc-1', replay: 'ok' }))
+      bounded.feed(encodeJsonRpcFrame({ jsonrpc: '2.0', id: 92, method: 'pty.attach' }, 1, 0))
+      await vi.advanceTimersByTimeAsync(0)
+
+      expect(primary.closes).toBe(0)
+
+      await drainFully(primary, DISPATCHER_CONTROL_QUEUE_MAX_FRAMES + 32)
+      const payloads = primary.frames.map((frame) => decodePayload(frame))
+      expect(payloads.filter((payload) => payload.id === 92)).toEqual([
+        {
+          jsonrpc: '2.0',
+          id: 92,
+          error: { code: RelayErrorCode.ResponseOverCapacity, message: OVER_CAPACITY_MESSAGE }
+        }
+      ])
+      expect(primary.closes).toBe(0)
+    } finally {
+      bounded.dispose()
+    }
+  })
+
+  it('settles a control-rejected response exactly once, when the reserved substitute is written', async () => {
+    const primary = makeDrainableSaturatingClient(65536)
+    const bounded = new RelayDispatcher(primary.write, primary.options)
+    try {
+      const clientId = bounded.activeClientIds()[0]
+      fillControlLaneToByteBound(bounded, clientId)
+
+      const settlements: SinkWriteSettlement[] = []
+      bounded.onRequest('pty.attach', async (_params, context) => {
+        context.onResponseSettled?.((result) => settlements.push(result))
+        return { incarnationId: 'inc-1', replay: makeAnsiReplay(4 * 1024) }
+      })
+      bounded.feed(encodeJsonRpcFrame({ jsonrpc: '2.0', id: 93, method: 'pty.attach' }, 1, 0))
+      await vi.advanceTimersByTimeAsync(0)
+
+      // The reserve admitted the substitute, so the fence waits on its write instead of failing admission.
+      expect(primary.closes).toBe(0)
+      expect(settlements).toHaveLength(0)
+
+      await drainFully(primary, 64)
+      expect(settlements).toEqual([{ ok: false, error: new Error(OVER_CAPACITY_MESSAGE) }])
+      expect(primary.closes).toBe(0)
+    } finally {
       bounded.dispose()
     }
   })
