@@ -16,6 +16,7 @@ import {
   onSshFilesystemProviderRegistered
 } from '../providers/ssh-filesystem-dispatch'
 import { MAX_BATCHED_WATCHER_EVENTS, queueWatcherEvents } from './filesystem-watcher-event-batch'
+import { mapWithConcurrency } from '../../shared/map-with-concurrency'
 import {
   createRemoteWatcherEventBatch,
   type RemoteWatcherEventBatch
@@ -300,7 +301,47 @@ function emitOverflowPayload(root: WatchedRoot): void {
   }
 }
 
-async function flushBatch(root: WatchedRoot): Promise<void> {
+// Why: mirrors DIRECTORY_STAT_CONCURRENCY in parcel-watcher-event-delivery.ts — the child bounds
+// the identical stat work, so main must too or one storm queues up to MAX_BATCHED_WATCHER_EVENTS
+// stats against the 4-thread libuv pool.
+const FLUSH_STAT_CONCURRENCY = 8
+
+// Why: a flush awaiting stats must not be overlapped by the next timer tick for the same root;
+// keep one running plus at most one queued so bursts coalesce instead of multiplying the fan-out.
+const inFlightFlushes = new WeakMap<WatchedRoot, Promise<void>>()
+const queuedFlushes = new WeakMap<WatchedRoot, Promise<void>>()
+
+function flushBatch(root: WatchedRoot): Promise<void> {
+  const inFlight = inFlightFlushes.get(root)
+  if (inFlight) {
+    const queued = queuedFlushes.get(root)
+    if (queued) {
+      return queued
+    }
+    const chained = inFlight.then(() => {
+      queuedFlushes.delete(root)
+      return flushBatch(root)
+    })
+    queuedFlushes.set(root, chained)
+    return chained
+  }
+
+  const running = runBatchFlush(root)
+    // Why: contain a flush failure here — a rejection would strand this root's queued promise and
+    // silently stop delivering its events for the rest of the session.
+    .catch((error) => {
+      console.error(`[filesystem-watcher] flush failed for ${root.rootPath}:`, error)
+    })
+    .finally(() => {
+      if (inFlightFlushes.get(root) === running) {
+        inFlightFlushes.delete(root)
+      }
+    })
+  inFlightFlushes.set(root, running)
+  return running
+}
+
+async function runBatchFlush(root: WatchedRoot): Promise<void> {
   const overflowed = root.batch.overflowed
   const rawEvents = root.batch.events.splice(0)
   root.batch.overflowed = false
@@ -319,8 +360,10 @@ async function flushBatch(root: WatchedRoot): Promise<void> {
 
   const coalesced = coalesceEvents(rawEvents)
 
-  const events: FsChangeEvent[] = await Promise.all(
-    coalesced.map(async (evt) => {
+  const events: FsChangeEvent[] = await mapWithConcurrency(
+    coalesced,
+    FLUSH_STAT_CONCURRENCY,
+    async (evt): Promise<FsChangeEvent> => {
       // Why: a deleted path can't be stat'd; leave isDirectory undefined and let the renderer infer from dirCache.
       const isDirectory = evt.type === 'delete' ? undefined : await tryStatIsDirectory(evt.path)
 
@@ -329,7 +372,7 @@ async function flushBatch(root: WatchedRoot): Promise<void> {
         absolutePath: evt.path,
         isDirectory
       }
-    })
+    }
   )
 
   const payload: FsChangedPayload = {
