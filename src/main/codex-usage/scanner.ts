@@ -3,7 +3,6 @@ import { basename, join, win32, posix } from 'node:path'
 import { createReadStream, existsSync } from 'node:fs'
 import { realpath, readdir, stat } from 'node:fs/promises'
 import { createInterface } from 'node:readline'
-import type { Repo } from '../../shared/types'
 import { areWorktreePathsEqual } from '../ipc/worktree-logic'
 import { getOrcaManagedCodexHomePath, getSystemCodexHomePath } from '../codex/codex-home-paths'
 import { getCodexAccountHomeSessionDirectories } from '../codex/codex-account-home-discovery'
@@ -16,7 +15,7 @@ import {
   normalizeFsPath
 } from '../usage/usage-path-comparison'
 import { ensureNumber, extractString } from '../usage/usage-record-coercion'
-import type { UsageWorktreeRef } from '../usage/usage-provider-contract'
+import type { UsageScanWorktreeRef } from '../usage/usage-provider-contract'
 import type {
   CodexUsageAttributedEvent,
   CodexUsageDailyAggregate,
@@ -26,7 +25,7 @@ import type {
   CodexUsageSession
 } from './types'
 
-export type CodexUsageWorktreeRef = UsageWorktreeRef
+export type CodexUsageWorktreeRef = UsageScanWorktreeRef
 
 type CodexUsageRawRecord = {
   timestamp?: string
@@ -824,22 +823,4 @@ export async function scanCodexUsageFiles(
     sessions: finalizeSessions(sessionsById),
     dailyAggregates: sortDailyAggregates(dailyByKey)
   }
-}
-
-export function createWorktreeRefs(
-  repos: Repo[],
-  worktreesByRepo: Map<string, { path: string; worktreeId: string; displayName: string }[]>
-): CodexUsageWorktreeRef[] {
-  const refs: CodexUsageWorktreeRef[] = []
-  for (const repo of repos) {
-    for (const worktree of worktreesByRepo.get(repo.id) ?? []) {
-      refs.push({
-        repoId: repo.id,
-        worktreeId: worktree.worktreeId,
-        path: worktree.path,
-        displayName: worktree.displayName
-      })
-    }
-  }
-  return refs
 }

@@ -2,7 +2,6 @@
 import { readdir, realpath, stat } from 'node:fs/promises'
 import { basename, isAbsolute, join, posix, win32 } from 'node:path'
 import { yieldToEventLoop } from '../../shared/event-loop-yield'
-import type { Repo } from '../../shared/types'
 import { areWorktreePathsEqual } from '../ipc/worktree-logic'
 import { resolveOpenCodeDataDirectory } from '../opencode/opencode-data-directory'
 import Database from '../sqlite/sync-database'
@@ -15,7 +14,7 @@ import {
   normalizeFsPath
 } from '../usage/usage-path-comparison'
 import { ensureNumber, extractString } from '../usage/usage-record-coercion'
-import type { UsageWorktreeRef } from '../usage/usage-provider-contract'
+import type { UsageScanWorktreeRef } from '../usage/usage-provider-contract'
 import type {
   OpenCodeUsageAttributedEvent,
   OpenCodeUsageDailyAggregate,
@@ -25,7 +24,7 @@ import type {
   OpenCodeUsageSession
 } from './types'
 
-export type OpenCodeUsageWorktreeRef = UsageWorktreeRef
+export type OpenCodeUsageWorktreeRef = UsageScanWorktreeRef
 
 type OpenCodeUsageRow = {
   id: string
@@ -669,22 +668,4 @@ export async function scanOpenCodeUsageDatabases(
     sessions: finalizeSessions(sessionsById),
     dailyAggregates: sortDailyAggregates(dailyByKey)
   }
-}
-
-export function createWorktreeRefs(
-  repos: Repo[],
-  worktreesByRepo: Map<string, { path: string; worktreeId: string; displayName: string }[]>
-): OpenCodeUsageWorktreeRef[] {
-  const refs: OpenCodeUsageWorktreeRef[] = []
-  for (const repo of repos) {
-    for (const worktree of worktreesByRepo.get(repo.id) ?? []) {
-      refs.push({
-        repoId: repo.id,
-        worktreeId: worktree.worktreeId,
-        path: worktree.path,
-        displayName: worktree.displayName
-      })
-    }
-  }
-  return refs
 }

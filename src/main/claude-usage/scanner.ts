@@ -4,7 +4,6 @@ import { join, basename } from 'node:path'
 import { realpath, readdir, stat } from 'node:fs/promises'
 import { createReadStream } from 'node:fs'
 import { createInterface } from 'node:readline'
-import type { Repo } from '../../shared/types'
 import type {
   ClaudeUsageAttributedTurn,
   ClaudeUsageDailyAggregate,
@@ -737,24 +736,6 @@ export async function scanClaudeUsageFiles(
         : left.day.localeCompare(right.day)
     )
   }
-}
-
-export function createWorktreeRefs(
-  repos: Repo[],
-  worktreesByRepo: Map<string, { path: string; worktreeId: string; displayName: string }[]>
-): ClaudeUsageWorktreeRef[] {
-  const refs: ClaudeUsageWorktreeRef[] = []
-  for (const repo of repos) {
-    for (const worktree of worktreesByRepo.get(repo.id) ?? []) {
-      refs.push({
-        repoId: repo.id,
-        worktreeId: worktree.worktreeId,
-        path: worktree.path,
-        displayName: worktree.displayName
-      })
-    }
-  }
-  return refs
 }
 
 export function getSessionProjectLabel(locationBreakdown: ClaudeUsageLocationBreakdown[]): string {

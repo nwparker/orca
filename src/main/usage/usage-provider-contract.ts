@@ -9,26 +9,33 @@
 
 export type UsageProviderId = 'claude' | 'codex' | 'opencode' | `plugin:${string}`
 
-export type UsageWorktreeRef = {
+/** Scan input. Distinct from `UsageWorktreeRef` in usage-worktree-metadata, which lacks `repoId`. */
+export type UsageScanWorktreeRef = {
   repoId: string
   worktreeId: string
   path: string
   displayName: string
 }
 
-export type UsageScanResult<TSource, TSession, TDaily> = {
-  /** Per-source scan cache. Providers persist this under their own field name. */
-  processedSources: readonly TSource[]
+/**
+ * `TSourceKey` is the provider's own name for its per-source scan cache (`processedFiles`,
+ * `processedDatabases`). It stays a type parameter because those names are persisted on disk.
+ */
+export type UsageScanResult<TSourceKey extends string, TSource, TSession, TDaily> = Record<
+  TSourceKey,
+  readonly TSource[]
+> & {
   sessions: readonly TSession[]
   dailyAggregates: readonly TDaily[]
 }
 
-export type UsageProvider<TSource, TSession, TDaily> = {
+export type UsageProvider<TSourceKey extends string, TSource, TSession, TDaily> = {
   readonly id: UsageProviderId
   readonly label: string
+  /** Bumped when the persisted projection changes shape; older caches are discarded. */
   readonly schemaVersion: number
   scan(
-    worktrees: readonly UsageWorktreeRef[],
-    previous: readonly TSource[]
-  ): Promise<UsageScanResult<TSource, TSession, TDaily>>
+    worktrees: UsageScanWorktreeRef[],
+    previous: TSource[]
+  ): Promise<UsageScanResult<TSourceKey, TSource, TSession, TDaily>>
 }
