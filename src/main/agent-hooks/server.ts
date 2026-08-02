@@ -49,6 +49,7 @@ import {
 } from '../../shared/claude-statusline-rate-limits'
 import {
   AGENT_STATUS_STALE_AFTER_MS,
+  AGENT_TYPE_MAX_LENGTH,
   type AgentStatusClearIpcPayload,
   type AgentStatusIpcPayload,
   type AgentType,
@@ -167,11 +168,35 @@ export const CLOSED_AGENT_STATUS_TAB_IDS_MAX = 1024
 export const CLOSED_AGENT_STATUS_PANE_KEYS_MAX = 1024
 export const PANE_KEY_ALIASES_MAX = 1024
 
+// Why: identities outlive their status rows (they survive a transport clear), so they need their own insertion-order bound.
+export const PROVIDER_SESSION_IDENTITIES_MAX = 512
+
+// Why: optional so an existing v2 file still hydrates and an older build (which reads only version/entries/authorityCommitments) ignores it.
 type LastStatusFile = {
   version: number
   entries: Record<string, PersistedAgentHookEventPayload>
   authorityCommitments?: Record<string, PersistedAgentHookAuthorityCommitment>
+  providerSessionIdentities?: Record<string, PersistedProviderSessionIdentity>
 }
+
+type PersistedProviderSessionIdentity = {
+  agent?: AgentType
+  sessionKey?: AgentProviderSessionMetadata['key']
+  sessionId: string
+  transcriptPath?: string
+  connectionId: string | null
+  worktreeId?: string
+  observedAt: number
+}
+
+type RetainedProviderSessionIdentity = Readonly<{
+  paneKey: string
+  agent: AgentType | undefined
+  providerSession: AgentProviderSessionMetadata
+  connectionId: string | null
+  worktreeId?: string
+  observedAt: number
+}>
 
 type AgentPromptSentDedupeEntry = {
   agentKind: AgentKind
@@ -351,6 +376,60 @@ function sanitizePersistedAuthorityCommitment(
     ...(typeof record.worktreeId === 'string' ? { worktreeId: record.worktreeId } : {}),
     observedAt
   })
+}
+
+function sanitizePersistedProviderSessionIdentity(
+  paneKey: string,
+  value: unknown
+): RetainedProviderSessionIdentity | null {
+  if (!isValidPaneKey(paneKey) || typeof value !== 'object' || value === null) {
+    return null
+  }
+  const record = value as Record<string, unknown>
+  // Why: reuse the canonical normalizer so a tampered file can't smuggle unsafe ids/paths past the same trust boundary.
+  const providerSession = normalizeAgentProviderSession({
+    key: typeof record.sessionKey === 'string' ? record.sessionKey : 'session_id',
+    id: record.sessionId,
+    transcriptPath: record.transcriptPath
+  })
+  const connectionId = record.connectionId
+  const observedAt = record.observedAt
+  if (
+    !providerSession ||
+    (connectionId !== null && connectionId !== undefined && typeof connectionId !== 'string') ||
+    typeof observedAt !== 'number' ||
+    !Number.isFinite(observedAt)
+  ) {
+    return null
+  }
+  const rawAgent = typeof record.agent === 'string' ? record.agent.trim() : ''
+  const agent =
+    rawAgent.length > 0 && rawAgent.length <= AGENT_TYPE_MAX_LENGTH && !/[\r\n]/.test(rawAgent)
+      ? rawAgent
+      : undefined
+  return Object.freeze({
+    paneKey,
+    agent,
+    providerSession,
+    connectionId: typeof connectionId === 'string' ? connectionId : null,
+    ...(typeof record.worktreeId === 'string' && record.worktreeId
+      ? { worktreeId: record.worktreeId }
+      : {}),
+    observedAt
+  })
+}
+
+function toProviderSessionIdentity(
+  retained: RetainedProviderSessionIdentity
+): AgentHookProviderSessionIdentity {
+  return {
+    paneKey: retained.paneKey,
+    sessionId: retained.providerSession.id,
+    ...(retained.providerSession.transcriptPath
+      ? { transcriptPath: retained.providerSession.transcriptPath }
+      : {}),
+    ...(retained.worktreeId ? { worktreeId: retained.worktreeId } : {})
+  }
 }
 
 function authorityCommitmentsMatch(
@@ -580,6 +659,8 @@ export class AgentHookServer {
   private hydratedAuthorityCommitments: readonly AgentHookAuthorityEvidence[] = Object.freeze([])
   private hydratedLaunchTokenHashByPaneKey = new Map<string, string>()
   private persistedAuthorityCommitmentsByPaneKey = new Map<string, AgentHookAuthorityEvidence>()
+  // Why: the pane->session binding must outlive a transient SSH clear, or a restart before replay resolves native chat to sessionId=null.
+  private retainedProviderSessionsByPaneKey = new Map<string, RetainedProviderSessionIdentity>()
   private revokedHydratedAuthorityCommitments = new WeakSet<AgentHookAuthorityEvidence>()
   private currentAuthorityObservations = new Map<string, AgentHookAuthorityEvidence>()
   private legacyPaneKeyAliases = new Map<string, PaneKeyAliasEntry>()
@@ -655,9 +736,33 @@ export class AgentHookServer {
     )
   }
 
-  /** Provider-session identities, including Pi's metadata-only rows. */
+  /** Provider-session identities, including Pi's metadata-only rows and bindings retained past a transport clear. */
   getProviderSessionIdentities(): AgentHookProviderSessionIdentity[] {
     return this.buildStatusChangeNotification().providerSessions
+  }
+
+  /** The pane's resume/transcript identity, falling back to the retained binding when its live status row is gone. */
+  getProviderSessionForPane(paneKey: string): AgentHookProviderSessionIdentity | null {
+    const resolvedPaneKey = this.resolvePaneKeyAlias(paneKey)
+    const live = this.state.lastStatusByPaneKey.get(resolvedPaneKey) as
+      | EnrichedAgentHookEventPayload
+      | undefined
+    if (live?.providerSession) {
+      return {
+        paneKey: resolvedPaneKey,
+        sessionId: live.providerSession.id,
+        ...(live.providerSession.transcriptPath
+          ? { transcriptPath: live.providerSession.transcriptPath }
+          : {}),
+        ...(live.worktreeId ? { worktreeId: live.worktreeId } : {})
+      }
+    }
+    // Why: a live row without providerSession is the authority for this pane; a retained binding would be a stale conversation.
+    if (live) {
+      return null
+    }
+    const retained = this.retainedProviderSessionsByPaneKey.get(resolvedPaneKey)
+    return retained ? toProviderSessionIdentity(retained) : null
   }
 
   getStatusSnapshotForPane(paneKey: string): AgentStatusIpcPayload[] {
@@ -880,6 +985,12 @@ export class AgentHookServer {
         })
       }
     }
+    for (const [paneKey, retained] of this.retainedProviderSessionsByPaneKey) {
+      // Why: only panes with no live row — the live row (even one without a session) is the current authority.
+      if (!this.state.lastStatusByPaneKey.has(paneKey)) {
+        providerSessions.push(toProviderSessionIdentity(retained))
+      }
+    }
     return { statuses, providerSessions }
   }
 
@@ -1043,6 +1154,36 @@ export class AgentHookServer {
     }
   }
 
+  /** Mirror an accepted status row's session identity into the durable binding (survives a transport clear). */
+  private retainProviderSessionIdentity(entry: EnrichedAgentHookEventPayload): void {
+    if (!entry.providerSession) {
+      return
+    }
+    this.storeRetainedProviderSession(
+      Object.freeze({
+        paneKey: entry.paneKey,
+        agent: entry.payload.agentType,
+        providerSession: entry.providerSession,
+        connectionId: entry.connectionId,
+        ...(entry.worktreeId ? { worktreeId: entry.worktreeId } : {}),
+        observedAt: entry.receivedAt
+      })
+    )
+  }
+
+  private storeRetainedProviderSession(retained: RetainedProviderSessionIdentity): void {
+    // Why: re-insert so insertion-order eviction behaves as least-recently-observed.
+    this.retainedProviderSessionsByPaneKey.delete(retained.paneKey)
+    this.retainedProviderSessionsByPaneKey.set(retained.paneKey, retained)
+    while (this.retainedProviderSessionsByPaneKey.size > PROVIDER_SESSION_IDENTITIES_MAX) {
+      const oldestKey = this.retainedProviderSessionsByPaneKey.keys().next().value
+      if (!oldestKey) {
+        break
+      }
+      this.retainedProviderSessionsByPaneKey.delete(oldestKey)
+    }
+  }
+
   private applyNormalizedStatus(
     payload: AgentHookEventPayload,
     onAccepted?: () => void
@@ -1065,6 +1206,7 @@ export class AgentHookServer {
       this.clearAssistantMessageRetry(enriched.paneKey)
       this.runtimeObservedStatusPaneKeys.delete(enriched.paneKey)
       this.state.lastStatusByPaneKey.set(enriched.paneKey, enriched)
+      this.retainProviderSessionIdentity(enriched)
       this.scheduleStatusPersist()
       this.notifyStatusChangeListeners()
       this.emitEnrichedStatus(enriched)
@@ -1178,6 +1320,7 @@ export class AgentHookServer {
     const enriched = this.attachStatusTiming(effectivePayload, now)
     this.runtimeObservedStatusPaneKeys.add(enriched.paneKey)
     this.state.lastStatusByPaneKey.set(enriched.paneKey, enriched)
+    this.retainProviderSessionIdentity(enriched)
     this.scheduleStatusPersist()
     this.notifyStatusChangeListeners()
     this.emitEnrichedStatus(enriched)
@@ -1469,6 +1612,14 @@ export class AgentHookServer {
       this.hydratedLaunchTokenHashByPaneKey.delete(previousOwnerPaneKey)
       this.hydratedLaunchTokenHashByPaneKey.set(toPaneKey, hydratedLaunchTokenHash)
     }
+    const retainedProviderSession = this.retainedProviderSessionsByPaneKey.get(previousOwnerPaneKey)
+    if (retainedProviderSession) {
+      this.retainedProviderSessionsByPaneKey.delete(previousOwnerPaneKey)
+      this.retainedProviderSessionsByPaneKey.set(
+        toPaneKey,
+        Object.freeze({ ...retainedProviderSession, paneKey: toPaneKey })
+      )
+    }
     const persistedAuthority = this.persistedAuthorityCommitmentsByPaneKey.get(previousOwnerPaneKey)
     if (persistedAuthority) {
       const owner = parsePaneKey(toPaneKey)
@@ -1543,6 +1694,7 @@ export class AgentHookServer {
       this.runtimeObservedStatusPaneKeys.delete(key)
       this.currentAuthorityObservations.delete(key)
       this.promptSentDedupeByPaneKey.delete(key)
+      this.retainedProviderSessionsByPaneKey.delete(key)
     }
     if (aliasChanged) {
       this.notifyPaneKeyAliasPersistenceListener()
@@ -1585,6 +1737,7 @@ export class AgentHookServer {
           this.runtimeObservedStatusPaneKeys.delete(entry.stablePaneKey)
           this.currentAuthorityObservations.delete(entry.stablePaneKey)
           this.promptSentDedupeByPaneKey.delete(entry.stablePaneKey)
+          this.retainedProviderSessionsByPaneKey.delete(entry.stablePaneKey)
         }
         aliasChanged = true
       }
@@ -2061,6 +2214,7 @@ export class AgentHookServer {
     this.hydratedAuthorityCommitments = Object.freeze([])
     this.hydratedLaunchTokenHashByPaneKey.clear()
     this.persistedAuthorityCommitmentsByPaneKey.clear()
+    this.retainedProviderSessionsByPaneKey.clear()
     this.revokedHydratedAuthorityCommitments = new WeakSet()
     this.currentAuthorityObservations.clear()
     this.promptSentDedupeByPaneKey.clear()
@@ -2147,6 +2301,7 @@ export class AgentHookServer {
     if (!options?.preserveAuthority) {
       this.hydratedLaunchTokenHashByPaneKey.delete(resolvedPaneKey)
       this.persistedAuthorityCommitmentsByPaneKey.delete(resolvedPaneKey)
+      this.retainedProviderSessionsByPaneKey.delete(resolvedPaneKey)
     }
     this.clearAssistantMessageRetry(resolvedPaneKey)
     this.clearCodexSubagentPoll(resolvedPaneKey)
@@ -2227,6 +2382,7 @@ export class AgentHookServer {
       this.runtimeObservedStatusPaneKeys.delete(paneKey)
       this.currentAuthorityObservations.delete(paneKey)
       this.promptSentDedupeByPaneKey.delete(paneKey)
+      this.retainedProviderSessionsByPaneKey.delete(paneKey)
     }
     if (aliasChanged) {
       this.notifyPaneKeyAliasPersistenceListener()
@@ -2247,6 +2403,7 @@ export class AgentHookServer {
     clearPaneCacheState(this.state, resolvedPaneKey)
     this.currentAuthorityObservations.delete(resolvedPaneKey)
     this.promptSentDedupeByPaneKey.delete(resolvedPaneKey)
+    this.retainedProviderSessionsByPaneKey.delete(resolvedPaneKey)
     let clearedAlias = false
     for (const [legacyPaneKey, stablePaneKey] of this.legacyPaneKeyAliases) {
       if (stablePaneKey.stablePaneKey === resolvedPaneKey) {
@@ -2256,6 +2413,7 @@ export class AgentHookServer {
         clearPaneCacheState(this.state, legacyPaneKey)
         this.currentAuthorityObservations.delete(legacyPaneKey)
         this.promptSentDedupeByPaneKey.delete(legacyPaneKey)
+        this.retainedProviderSessionsByPaneKey.delete(legacyPaneKey)
         clearedAlias = true
       }
     }
@@ -2405,6 +2563,7 @@ export class AgentHookServer {
     this.state.lastStatusByPaneKey.clear()
     this.hydratedLaunchTokenHashByPaneKey.clear()
     this.persistedAuthorityCommitmentsByPaneKey.clear()
+    this.retainedProviderSessionsByPaneKey.clear()
     let raw: string
     try {
       raw = readFileSync(this.lastStatusFilePath, 'utf8')
@@ -2476,6 +2635,8 @@ export class AgentHookServer {
           entry.payload = hydratedPayload
         }
         this.state.lastStatusByPaneKey.set(resolvedPaneKey, entry)
+        // Why: back-compat — a file written before providerSessionIdentities existed still carries the binding on its rows.
+        this.retainProviderSessionIdentity(entry)
         if (entry.connectionId) {
           // Why: a restart can see an earlier wall clock; seed ordering so new events stay after disk state.
           const previousWatermark = this.connectionTimestampWatermarkById.get(entry.connectionId)
@@ -2515,6 +2676,19 @@ export class AgentHookServer {
       }
       this.persistedAuthorityCommitmentsByPaneKey.set(resolvedPaneKey, commitment)
       this.hydratedLaunchTokenHashByPaneKey.set(resolvedPaneKey, commitment.launchTokenHash)
+    }
+    for (const [paneKey, rawIdentity] of Object.entries(file.providerSessionIdentities ?? {})) {
+      const resolvedPaneKey = this.resolvePaneKeyAlias(paneKey)
+      const identity = sanitizePersistedProviderSessionIdentity(resolvedPaneKey, rawIdentity)
+      if (!identity || identity.observedAt < ttlCutoff) {
+        dropped += 1
+        continue
+      }
+      const seeded = this.retainedProviderSessionsByPaneKey.get(resolvedPaneKey)
+      // Why: a live row's own binding is newer evidence than the retained section for the same pane.
+      if (!seeded || seeded.observedAt <= identity.observedAt) {
+        this.storeRetainedProviderSession(identity)
+      }
     }
     if (dropped > 0) {
       console.warn(
@@ -2612,10 +2786,29 @@ export class AgentHookServer {
         }
       }
     }
+    const providerSessionIdentities: Record<string, PersistedProviderSessionIdentity> = {}
+    for (const [paneKey, retained] of this.retainedProviderSessionsByPaneKey) {
+      if (!isValidPaneKey(paneKey)) {
+        continue
+      }
+      providerSessionIdentities[paneKey] = {
+        ...(retained.agent ? { agent: retained.agent } : {}),
+        sessionKey: retained.providerSession.key,
+        sessionId: retained.providerSession.id,
+        ...(retained.providerSession.transcriptPath
+          ? // Why: store the remote path verbatim — it belongs to the execution host, not this machine's path syntax.
+            { transcriptPath: retained.providerSession.transcriptPath }
+          : {}),
+        connectionId: retained.connectionId,
+        ...(retained.worktreeId ? { worktreeId: retained.worktreeId } : {}),
+        observedAt: retained.observedAt
+      }
+    }
     const file: LastStatusFile = {
       version: LAST_STATUS_FILE_VERSION,
       entries,
-      authorityCommitments
+      authorityCommitments,
+      providerSessionIdentities
     }
     return JSON.stringify(file)
   }
