@@ -41,6 +41,35 @@ function makeSaturatingClient(highWaterMark: number): BoundedClient {
   return client
 }
 
+type DrainableClient = BoundedClient & { drain: () => boolean }
+
+// Why: a saturating sink that can be released one frame at a time, so queued frames become observable.
+function makeDrainableSaturatingClient(highWaterMark: number): DrainableClient {
+  const client = makeSaturatingClient(highWaterMark) as DrainableClient
+  let pending: (() => void) | null = null
+  client.options.waitWriteDrain = (callback) => {
+    pending = callback
+    return () => {
+      if (pending === callback) {
+        pending = null
+      }
+    }
+  }
+  client.drain = () => {
+    const callback = pending
+    pending = null
+    callback?.()
+    return callback !== null
+  }
+  return client
+}
+
+// Why: a real reattach replay is ANSI-dense, so JSON escaping inflates it well past its character count.
+function makeAnsiReplay(chars: number): string {
+  const cell = '\u001b[2K\u001b[1;32mhello\u001b[0m \r\n'
+  return cell.repeat(Math.ceil(chars / cell.length)).slice(0, chars)
+}
+
 function makeBoundedClient(highWaterMark: number): BoundedClient {
   const client: BoundedClient = {
     frames: [],
@@ -406,6 +435,53 @@ describe('RelayDispatcher bounded-capacity degradation', () => {
         error: new Error('Relay response exceeded the bounded transport capacity')
       })
     } finally {
+      bounded.dispose()
+    }
+  })
+
+  it('answers every reattach response instead of closing when the batch exceeds the control budget', async () => {
+    const primary = makeDrainableSaturatingClient(65536)
+    const stderr = vi.spyOn(process.stderr, 'write').mockReturnValue(true)
+    const bounded = new RelayDispatcher(primary.write, primary.options)
+    try {
+      const replay = makeAnsiReplay(100 * 1024)
+      bounded.onRequest('pty.attach', async () => ({ incarnationId: 'inc-1', replay }))
+      for (let id = 1; id <= 8; id += 1) {
+        bounded.feed(
+          encodeJsonRpcFrame(
+            {
+              jsonrpc: '2.0',
+              id,
+              method: 'pty.attach',
+              params: { id: `pty-${id}`, suppressReplayNotification: true }
+            },
+            id,
+            0
+          )
+        )
+      }
+      await vi.advanceTimersByTimeAsync(0)
+
+      // The reattach burst must degrade per request, never take the link down.
+      expect(primary.closes).toBe(0)
+
+      for (let step = 0; step < 64 && primary.drain(); step += 1) {
+        await vi.advanceTimersByTimeAsync(0)
+      }
+
+      const responses = primary.frames.map(
+        (frame) => decodePayload(frame) as unknown as { id: number; error?: { code: number } }
+      )
+      expect(responses.map((response) => response.id).sort((a, b) => a - b)).toEqual([
+        1, 2, 3, 4, 5, 6, 7, 8
+      ])
+      expect(
+        responses.filter((response) => response.error?.code === RelayErrorCode.ResponseOverCapacity)
+          .length
+      ).toBeGreaterThan(0)
+      expect(primary.closes).toBe(0)
+    } finally {
+      stderr.mockRestore()
       bounded.dispose()
     }
   })
