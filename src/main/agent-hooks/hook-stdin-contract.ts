@@ -28,9 +28,13 @@ export const WINDOWS_HOOK_STDIN_DRAIN_LABEL = 'orca_agent_hook_drain_stdin'
 export const WINDOWS_HOOK_STDIN_READER = '"%SystemRoot%\\System32\\more.com"'
 export const WINDOWS_HOOK_STDIN_DRAIN_COMMAND = `${WINDOWS_HOOK_STDIN_READER} >nul 2>nul`
 
-// Why: missing Orca env means the caller is not Orca, so Orca owes it no stdin drain —
-// the #8430 EPIPE contract only covers hooks Orca invokes (payload written, stdin closed).
-// A non-Orca caller may hold stdin open forever, wedging more.com and its console (#11549).
+// Why: these guards deliberately exit instead of draining, walking back part of #8430.
+// #8430 did cover callers without Orca env, but it assumed every caller eventually closes
+// stdin. A non-Orca caller need not, and more.com then blocks forever: an immortal
+// cmd.exe/more.com pair plus a console window on every hook event (#11549). A transient
+// broken pipe on a caller that would never close stdin is the cheaper of the two failures.
+// Orca-invoked hooks keep the #8430 guarantee — their env is set, so they fall through to
+// the post command, which reads stdin to EOF.
 export function buildWindowsHookEnvironmentGuardLines(): string[] {
   return [
     'if "%ORCA_AGENT_HOOK_PORT%"=="" exit /b 0',

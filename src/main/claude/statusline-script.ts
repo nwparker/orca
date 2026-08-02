@@ -1,7 +1,4 @@
-import {
-  buildWindowsHookStdinDrainEpilogue,
-  WINDOWS_HOOK_STDIN_READER
-} from '../agent-hooks/hook-stdin-contract'
+import { WINDOWS_HOOK_STDIN_READER } from '../agent-hooks/hook-stdin-contract'
 import {
   CLAUDE_STATUSLINE_MIN_POST_INTERVAL_SECONDS,
   CLAUDE_STATUSLINE_PATHNAME
@@ -72,7 +69,6 @@ export function getManagedStatusLineScript(target: 'local' | 'posix' = 'local'):
       `:${STATUSLINE_CLEANUP_LABEL}`,
       'del "%ORCA_STATUSLINE_PAYLOAD_FILE%" >nul 2>nul',
       'exit /b 0',
-      ...buildWindowsHookStdinDrainEpilogue(),
       ''
     ].join('\r\n')
   }
