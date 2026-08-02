@@ -170,24 +170,6 @@ export async function listClaudeTranscriptFiles(): Promise<string[]> {
   return [...new Set(files.flat())].sort()
 }
 
-export async function getProcessedFileInfo(filePath: string): Promise<ClaudeUsageProcessedFile> {
-  const fileStat = await stat(filePath)
-  let lineCount = 0
-  const lines = createInterface({
-    input: createReadStream(filePath, { encoding: 'utf-8' }),
-    crlfDelay: Infinity
-  })
-  for await (const _line of lines) {
-    lineCount++
-  }
-  return {
-    path: filePath,
-    mtimeMs: fileStat.mtimeMs,
-    size: fileStat.size,
-    lineCount
-  }
-}
-
 async function getProcessedFileStat(
   filePath: string
 ): Promise<Omit<ClaudeUsageProcessedFile, 'lineCount'>> {
@@ -783,8 +765,4 @@ export function getSessionProjectLabel(locationBreakdown: ClaudeUsageLocationBre
     return locationBreakdown[0].projectLabel
   }
   return 'Multiple locations'
-}
-
-export function getDefaultWorktreeLabel(pathValue: string): string {
-  return basename(pathValue)
 }

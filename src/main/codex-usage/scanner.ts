@@ -1179,17 +1179,3 @@ export function createWorktreeRefs(
   }
   return refs
 }
-
-export function getDefaultWorktreeLabel(pathValue: string): string {
-  return basename(pathValue)
-}
-
-export function getSessionProjectLabel(locationBreakdown: CodexUsageLocationBreakdown[]): string {
-  if (locationBreakdown.length === 0) {
-    return 'Unknown location'
-  }
-  if (locationBreakdown.length === 1) {
-    return locationBreakdown[0].projectLabel
-  }
-  return 'Multiple locations'
-}
