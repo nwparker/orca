@@ -28,14 +28,14 @@ export const WINDOWS_HOOK_STDIN_DRAIN_LABEL = 'orca_agent_hook_drain_stdin'
 export const WINDOWS_HOOK_STDIN_READER = '"%SystemRoot%\\System32\\more.com"'
 export const WINDOWS_HOOK_STDIN_DRAIN_COMMAND = `${WINDOWS_HOOK_STDIN_READER} >nul 2>nul`
 
-// Why: batch payloads stream directly to curl and cannot be buffered safely in
-// environment variables, so guard failures share one EOF-draining epilogue.
+// Why: missing Orca env means the caller is not Orca, so Orca owes it no stdin drain —
+// the #8430 EPIPE contract only covers hooks Orca invokes (payload written, stdin closed).
+// A non-Orca caller may hold stdin open forever, wedging more.com and its console (#11549).
 export function buildWindowsHookEnvironmentGuardLines(): string[] {
-  const drainTarget = `goto :${WINDOWS_HOOK_STDIN_DRAIN_LABEL}`
   return [
-    `if "%ORCA_AGENT_HOOK_PORT%"=="" ${drainTarget}`,
-    `if "%ORCA_AGENT_HOOK_TOKEN%"=="" ${drainTarget}`,
-    `if "%ORCA_PANE_KEY%"=="" ${drainTarget}`
+    'if "%ORCA_AGENT_HOOK_PORT%"=="" exit /b 0',
+    'if "%ORCA_AGENT_HOOK_TOKEN%"=="" exit /b 0',
+    'if "%ORCA_PANE_KEY%"=="" exit /b 0'
   ]
 }
 

@@ -235,7 +235,7 @@ function withPlatform<T>(platform: NodeJS.Platform, run: () => T): T {
 }
 
 describe('Windows managed hook stdin structure', () => {
-  it('routes every batch guard to a shared drain epilogue', () => {
+  it('exits missing-Orca-env batch guards without entering the drain', () => {
     const home = mkdtempSync(join(tmpdir(), 'orca-hook-stdin-windows-'))
     homedirMock.mockReturnValue(home)
     const previousGrokHome = process.env.GROK_HOME
@@ -257,13 +257,22 @@ describe('Windows managed hook stdin structure', () => {
       expect(mainBatchScripts).toHaveLength(10)
       for (const fileName of mainBatchScripts) {
         const script = readFileSync(join(hooksDir, fileName), 'utf8')
+        // Why: a caller without Orca env is not Orca, so it may never close stdin —
+        // more.com would then block forever and leak a cmd.exe/more.com pair (#11549).
         expect(script, `${fileName} port guard`).toContain(
-          'if "%ORCA_AGENT_HOOK_PORT%"=="" goto :orca_agent_hook_drain_stdin'
+          'if "%ORCA_AGENT_HOOK_PORT%"=="" exit /b 0'
         )
         expect(script, `${fileName} token guard`).toContain(
+          'if "%ORCA_AGENT_HOOK_TOKEN%"=="" exit /b 0'
+        )
+        expect(script, `${fileName} pane guard`).toContain('if "%ORCA_PANE_KEY%"=="" exit /b 0')
+        expect(script, `${fileName} port guard drain`).not.toContain(
+          'if "%ORCA_AGENT_HOOK_PORT%"=="" goto :orca_agent_hook_drain_stdin'
+        )
+        expect(script, `${fileName} token guard drain`).not.toContain(
           'if "%ORCA_AGENT_HOOK_TOKEN%"=="" goto :orca_agent_hook_drain_stdin'
         )
-        expect(script, `${fileName} pane guard`).toContain(
+        expect(script, `${fileName} pane guard drain`).not.toContain(
           'if "%ORCA_PANE_KEY%"=="" goto :orca_agent_hook_drain_stdin'
         )
         expect(script, `${fileName} drain epilogue`).toContain(

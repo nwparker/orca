@@ -1,6 +1,5 @@
 import {
   buildWindowsHookStdinDrainEpilogue,
-  WINDOWS_HOOK_STDIN_DRAIN_LABEL,
   WINDOWS_HOOK_STDIN_READER
 } from '../agent-hooks/hook-stdin-contract'
 import {
@@ -20,7 +19,8 @@ export function getManagedStatusLineScript(target: 'local' | 'posix' = 'local'):
       '@echo off',
       'setlocal',
       // Why: pane key is static PTY env (the endpoint file never sets it), so it can gate before stdin is consumed.
-      `if "%ORCA_PANE_KEY%"=="" goto :${WINDOWS_HOOK_STDIN_DRAIN_LABEL}`,
+      // Why exit, not drain: no pane key means Orca did not launch this Claude, so its stdin may never hit EOF and more.com would hang per tick (#11549).
+      'if "%ORCA_PANE_KEY%"=="" exit /b 0',
       // Why: current keys end in a UUID; replacing the legacy delimiter also keeps surviving numeric-pane keys filename-safe.
       'set "ORCA_STATUSLINE_PANE_ID=%ORCA_PANE_KEY:~-36%"',
       'set "ORCA_STATUSLINE_PANE_ID=%ORCA_STATUSLINE_PANE_ID::=_%"',

@@ -85,15 +85,20 @@ describe('getManagedStatusLineScript (win32 local)', () => {
     expect(script).not.toContain('"configDir=%CLAUDE_CONFIG_DIR%"')
   })
 
-  it('drains stdin before exiting when the pane key is missing', () => {
+  it('exits without reading stdin when the pane key is missing', () => {
     stubPlatform('win32')
     const script = getManagedStatusLineScript('local')
-    const paneGuardIndex = script.indexOf(
-      'if "%ORCA_PANE_KEY%"=="" goto :orca_agent_hook_drain_stdin'
-    )
+    // Why: no pane key means Claude was not launched by Orca, so its stdin may never
+    // reach EOF; draining it would wedge more.com and leak a console window (#11549).
+    const paneGuardIndex = script.indexOf('if "%ORCA_PANE_KEY%"=="" exit /b 0')
     const captureIndex = script.indexOf('more.com')
     expect(paneGuardIndex).toBeGreaterThan(-1)
     expect(paneGuardIndex).toBeLessThan(captureIndex)
+    expect(script).not.toContain('if "%ORCA_PANE_KEY%"=="" goto :orca_agent_hook_drain_stdin')
+    // Orca-launched ticks still capture the payload, and the shared drain tail stays intact.
+    expect(script).toContain(
+      '"%SystemRoot%\\System32\\more.com" >"%ORCA_STATUSLINE_PAYLOAD_FILE%" 2>nul'
+    )
     expect(script).toContain(':orca_agent_hook_drain_stdin')
   })
 
