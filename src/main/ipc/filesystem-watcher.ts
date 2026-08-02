@@ -17,6 +17,7 @@ import {
 } from '../providers/ssh-filesystem-dispatch'
 import { MAX_BATCHED_WATCHER_EVENTS, queueWatcherEvents } from './filesystem-watcher-event-batch'
 import { mapWithConcurrency } from '../../shared/map-with-concurrency'
+import { DIRECTORY_STAT_CONCURRENCY, withDirectoryStatSlot } from './watcher-directory-stat-limit'
 import {
   createRemoteWatcherEventBatch,
   type RemoteWatcherEventBatch
@@ -278,7 +279,9 @@ function coalesceEvents(
 
 async function tryStatIsDirectory(filePath: string): Promise<boolean | undefined> {
   try {
-    const s = await stat(filePath)
+    // Why the slot: the bound has to be process-wide, or N watched roots each flushing concurrently
+    // would fan out to N × the cap against the shared libuv threadpool.
+    const s = await withDirectoryStatSlot(() => stat(filePath))
     return s.isDirectory()
   } catch {
     // Why: stat failure (EPERM, vanished file) → undefined; renderer treats it as a file event, the safe default (§4.4).
@@ -301,17 +304,33 @@ function emitOverflowPayload(root: WatchedRoot): void {
   }
 }
 
-// Why: mirrors DIRECTORY_STAT_CONCURRENCY in parcel-watcher-event-delivery.ts — the child bounds
-// the identical stat work, so main must too or one storm queues up to MAX_BATCHED_WATCHER_EVENTS
-// stats against the 4-thread libuv pool.
-const FLUSH_STAT_CONCURRENCY = 8
-
 // Why: a flush awaiting stats must not be overlapped by the next timer tick for the same root;
 // keep one running plus at most one queued so bursts coalesce instead of multiplying the fan-out.
 const inFlightFlushes = new WeakMap<WatchedRoot, Promise<void>>()
 const queuedFlushes = new WeakMap<WatchedRoot, Promise<void>>()
+// Why: a torn-down root must not start queued work or emit afterwards. Removal always discards the
+// WatchedRoot object (a later watch builds a fresh one), so the fence is permanent per root.
+const fencedRoots = new WeakSet<WatchedRoot>()
+
+/** Stop a removed root's flush machinery: no queued flush starts, no payload is emitted. */
+function fenceRootFlushes(root: WatchedRoot): void {
+  fencedRoots.add(root)
+  clearBatchTimer(root)
+  root.batch.events.length = 0
+  root.batch.overflowed = false
+  root.batch.firstEventAt = 0
+}
+
+/** Flush work still outstanding for a root; the queued promise subsumes the in-flight one. */
+function outstandingFlush(root: WatchedRoot): Promise<void> | undefined {
+  return queuedFlushes.get(root) ?? inFlightFlushes.get(root)
+}
 
 function flushBatch(root: WatchedRoot): Promise<void> {
+  if (fencedRoots.has(root)) {
+    return Promise.resolve()
+  }
+
   const inFlight = inFlightFlushes.get(root)
   if (inFlight) {
     const queued = queuedFlushes.get(root)
@@ -320,6 +339,11 @@ function flushBatch(root: WatchedRoot): Promise<void> {
     }
     const chained = inFlight.then(() => {
       queuedFlushes.delete(root)
+      // Why: a newer trailing timer installed after we queued already owns the pending events —
+      // draining them here would deliver before its window closes and orphan the live handle.
+      if (root.batch.timer) {
+        return
+      }
       return flushBatch(root)
     })
     queuedFlushes.set(root, chained)
@@ -345,7 +369,9 @@ async function runBatchFlush(root: WatchedRoot): Promise<void> {
   const overflowed = root.batch.overflowed
   const rawEvents = root.batch.events.splice(0)
   root.batch.overflowed = false
-  root.batch.timer = null
+  // Why: this drains every pending event, so cancel the live trailing timer rather than dropping the
+  // only handle to it — a queued flush can enter here with a newer timer already scheduled.
+  clearBatchTimer(root)
   root.batch.firstEventAt = 0
 
   if ((rawEvents.length === 0 && !overflowed) || root.listeners.size === 0) {
@@ -362,10 +388,14 @@ async function runBatchFlush(root: WatchedRoot): Promise<void> {
 
   const events: FsChangeEvent[] = await mapWithConcurrency(
     coalesced,
-    FLUSH_STAT_CONCURRENCY,
+    DIRECTORY_STAT_CONCURRENCY,
     async (evt): Promise<FsChangeEvent> => {
       // Why: a deleted path can't be stat'd; leave isDirectory undefined and let the renderer infer from dirCache.
-      const isDirectory = evt.type === 'delete' ? undefined : await tryStatIsDirectory(evt.path)
+      // Why the fence check: teardown drops this payload anyway, so stop holding open stats on a tree being deleted.
+      const isDirectory =
+        evt.type === 'delete' || fencedRoots.has(root)
+          ? undefined
+          : await tryStatIsDirectory(evt.path)
 
       return {
         kind: evt.type,
@@ -374,6 +404,12 @@ async function runBatchFlush(root: WatchedRoot): Promise<void> {
       }
     }
   )
+
+  if (fencedRoots.has(root)) {
+    // Why: teardown landed while these stats were outstanding. Deletion copies the listener map rather
+    // than clearing it, so without this the closed watcher still emits into the renderer.
+    return
+  }
 
   const payload: FsChangedPayload = {
     worktreePath: root.rootPath,
@@ -387,7 +423,21 @@ async function runBatchFlush(root: WatchedRoot): Promise<void> {
   }
 }
 
+// Why: batch.timer must name a live timer and nothing else — a queued flush reads it to decide
+// whether a newer trailing window already owns the pending events.
+function clearBatchTimer(root: WatchedRoot): void {
+  if (root.batch.timer) {
+    clearTimeout(root.batch.timer)
+    root.batch.timer = null
+  }
+}
+
 function scheduleBatchFlush(root: WatchedRoot): void {
+  if (fencedRoots.has(root)) {
+    // Why: unsubscribe is async, so events can still land after teardown; don't retain them or arm a timer.
+    return
+  }
+
   const now = Date.now()
 
   if (root.batch.firstEventAt === 0) {
@@ -396,18 +446,21 @@ function scheduleBatchFlush(root: WatchedRoot): void {
 
   // If we've exceeded the max wait, flush immediately
   if (now - root.batch.firstEventAt >= WATCH_BATCH_MAX_WAIT_MS) {
-    if (root.batch.timer) {
-      clearTimeout(root.batch.timer)
-    }
+    clearBatchTimer(root)
     void flushBatch(root)
     return
   }
 
   // Trailing-edge debounce: reset timer on each new event
-  if (root.batch.timer) {
-    clearTimeout(root.batch.timer)
-  }
-  root.batch.timer = setTimeout(() => void flushBatch(root), WATCH_BATCH_TRAILING_MS)
+  clearBatchTimer(root)
+  const timer = setTimeout(() => {
+    // The handle is spent once it fires; drop it so a later event installs a fresh window.
+    if (root.batch.timer === timer) {
+      root.batch.timer = null
+    }
+    void flushBatch(root)
+  }, WATCH_BATCH_TRAILING_MS)
+  root.batch.timer = timer
 }
 
 // ── Watcher creation ─────────────────────────────────────────────────
@@ -448,9 +501,7 @@ async function createWatcher(
           console.error(`[filesystem-watcher] error for ${rootKey}:`, err)
           emitOverflowPayload(root)
           // Why: after an error the native subscription may be invalid (deleted root); tear down the dead watcher so it doesn't dangle (§7.3).
-          if (root.batch.timer) {
-            clearTimeout(root.batch.timer)
-          }
+          fenceRootFlushes(root)
           // Why: error callback can fire before subscribe() assigns root.subscription; guard against null so cleanup doesn't crash.
           if (root.subscription) {
             retainLocalWatcherPhysicalFailure(rootKey, err)
@@ -508,9 +559,7 @@ function cleanupLocalWatchersForSender(senderId: number): void {
           clearTimeout(pending)
           pendingTeardowns.delete(key)
         }
-        if (watchedRoot.batch.timer) {
-          clearTimeout(watchedRoot.batch.timer)
-        }
+        fenceRootFlushes(watchedRoot)
         trackLocalUnsubscribe(key, watchedRoot)
         watchedRoots.delete(key)
       }
@@ -837,6 +886,7 @@ function unsubscribe(worktreePath: string, senderId: number): void {
       if (!currentRoot || currentRoot.listeners.size > 0) {
         return
       }
+      fenceRootFlushes(currentRoot)
       void trackLocalUnsubscribe(rootKey, currentRoot)
       watchedRoots.delete(rootKey)
     }, WATCHER_TEARDOWN_GRACE_MS)
@@ -873,6 +923,21 @@ export async function closeLocalWatcherForWorktreePath(
   if (pendingTeardown) {
     clearTimeout(pendingTeardown)
     pendingTeardowns.delete(rootKey)
+  }
+
+  // Why fence before the first await: the drains below can take seconds, and until the root is fenced a
+  // queued flush can still start a fresh stat batch on — and emit events from — the tree being deleted.
+  const closingRoot = watchedRoots.get(rootKey)
+  if (closingRoot) {
+    fenceRootFlushes(closingRoot)
+    // Why drain rather than only cancel: Windows can't remove a directory with stats still open on it,
+    // and the deadline keeps a slow flush from wedging the removal gate.
+    await drainBeforeWatcherRemoval(
+      outstandingFlush(closingRoot),
+      deadline,
+      `local watcher flush for ${rootKey}`,
+      { reserveMs: WATCHER_REMOVAL_FINAL_DRAIN_RESERVE_MS }
+    )
   }
 
   const inFlight = inFlightLocalInstalls.get(rootKey)
@@ -923,6 +988,11 @@ export async function closeLocalWatcherForWorktreePath(
     }
   }
   if (failedLocalUnsubscribes.has(rootKey)) {
+    // Why: this close aborts with the watcher still installed and its root reused by a later
+    // subscribe/restore, so lift the fence instead of leaving a live root that can never flush.
+    if (closingRoot && watchedRoots.get(rootKey) === closingRoot) {
+      fencedRoots.delete(closingRoot)
+    }
     throw failedLocalUnsubscribes.get(rootKey)
   }
 
@@ -930,9 +1000,8 @@ export async function closeLocalWatcherForWorktreePath(
   if (!root) {
     return
   }
-  if (root.batch.timer) {
-    clearTimeout(root.batch.timer)
-  }
+  // Re-fence: a watch that reinstalled during the drains above hands back a different root object.
+  fenceRootFlushes(root)
   watchedRoots.delete(rootKey)
   // Why: the in-process Parcel fallback has no unsubscribe timeout of its own, so an unbounded await
   // here would hang delete forever and hold the removal gate. The promise stays tracked in
@@ -1979,14 +2048,19 @@ export async function closeAllWatchers(): Promise<void> {
     token.abortController.abort()
   }
 
+  const closingFlushes: Promise<void>[] = []
   for (const [rootKey, root] of watchedRoots) {
-    if (root.batch.timer) {
-      clearTimeout(root.batch.timer)
+    fenceRootFlushes(root)
+    const outstanding = outstandingFlush(root)
+    if (outstanding) {
+      closingFlushes.push(outstanding)
     }
     await trackLocalUnsubscribe(rootKey, root).catch(() => undefined)
   }
   watchedRoots.clear()
-  await Promise.allSettled(Array.from(pendingLocalUnsubscribes))
+  // Why include the flushes: callers treat this as the shutdown barrier and Electron tears the Node
+  // environment down right after, so no stat may still be open on a watched tree when it resolves.
+  await Promise.allSettled([...closingFlushes, ...pendingLocalUnsubscribes])
   failedLocalUnsubscribes.clear()
   // Why: kill the forked watcher process instead of watcher.node's crash-prone async teardown; process death frees native handles.
   disposeWatcherProcess()

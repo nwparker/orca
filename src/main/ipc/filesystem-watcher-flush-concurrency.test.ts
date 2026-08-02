@@ -1,5 +1,5 @@
 import { join, resolve } from 'node:path'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const { handleMock } = vi.hoisted(() => ({
   handleMock: vi.fn()
@@ -75,7 +75,7 @@ function trackDeferredStats(): {
         while (pending.length > 0) {
           pending.shift()?.()
         }
-        await vi.advanceTimersByTimeAsync(0)
+        await (vi.isFakeTimers() ? vi.advanceTimersByTimeAsync(0) : Promise.resolve())
       }
     }
   }
@@ -90,6 +90,7 @@ function burst(worktreePath: string, prefix: string, count: number): WatcherEven
 
 describe('local filesystem watcher flush fan-out', () => {
   const handlers: HandlerMap = {}
+  let stats: ReturnType<typeof trackDeferredStats>
 
   beforeEach(async () => {
     vi.useRealTimers()
@@ -104,6 +105,15 @@ describe('local filesystem watcher flush fan-out', () => {
     })
     registerFilesystemWatcherHandlers()
     await closeAllWatchers()
+    vi.useFakeTimers()
+    stats = trackDeferredStats()
+  })
+
+  afterEach(async () => {
+    // Why: the directory-stat budget is process-wide, so a test that ends with stats still open
+    // (a failing assertion, say) would starve every later test in this file.
+    await Promise.all([closeAllWatchers(), stats.settle()])
+    vi.useRealTimers()
   })
 
   async function watchRoot(
@@ -120,8 +130,6 @@ describe('local filesystem watcher flush fan-out', () => {
   }
 
   it('bounds concurrent stats in one flush to the watcher child limit', async () => {
-    vi.useFakeTimers()
-    const stats = trackDeferredStats()
     const worktreePath = resolve('/tmp/repo-flush-bound')
     const { sender, emit } = await watchRoot(worktreePath)
 
@@ -134,13 +142,68 @@ describe('local filesystem watcher flush fan-out', () => {
     await stats.settle()
     expect(sender.send).toHaveBeenCalledTimes(1)
     expect((sender.send.mock.calls[0][1] as FsChangedPayload).events).toHaveLength(events.length)
-    await closeAllWatchers()
-    vi.useRealTimers()
+  })
+
+  it('caps concurrent stats across every watched root, not per root', async () => {
+    const roots: (Awaited<ReturnType<typeof watchRoot>> & { worktreePath: string })[] = []
+    for (let index = 0; index < 4; index++) {
+      const worktreePath = resolve(`/tmp/repo-flush-multi-${index}`)
+      roots.push({ worktreePath, ...(await watchRoot(worktreePath)) })
+    }
+
+    for (const root of roots) {
+      root.emit(null, burst(root.worktreePath, 'a', 24))
+    }
+    await vi.advanceTimersByTimeAsync(WATCH_BATCH_TRAILING_MS)
+
+    expect(stats.live()).toBeLessThanOrEqual(EXPECTED_STAT_CONCURRENCY)
+    expect(stats.peak()).toBeLessThanOrEqual(EXPECTED_STAT_CONCURRENCY)
+
+    await stats.settle()
+    for (const root of roots) {
+      expect(root.sender.send).toHaveBeenCalledTimes(1)
+      expect((root.sender.send.mock.calls[0][1] as FsChangedPayload).events).toHaveLength(24)
+    }
+  })
+
+  it('leaves events that arrive after a flush is queued to their own trailing window', async () => {
+    const worktreePath = resolve('/tmp/repo-flush-orphan-timer')
+    const { sender, emit } = await watchRoot(worktreePath)
+
+    emit(null, burst(worktreePath, 'a', 4))
+    await vi.advanceTimersByTimeAsync(WATCH_BATCH_TRAILING_MS)
+
+    // Second burst's timer fires while the first flush is still awaiting stats, creating the queued flush.
+    const secondBurst = burst(worktreePath, 'b', 4)
+    emit(null, secondBurst)
+    await vi.advanceTimersByTimeAsync(WATCH_BATCH_TRAILING_MS)
+
+    // Third burst installs a newer trailing timer that the queued flush must not drain early.
+    const thirdBurst = burst(worktreePath, 'c', 4)
+    emit(null, thirdBurst)
+    await stats.settle()
+
+    expect(sender.send).toHaveBeenCalledTimes(1)
+
+    await vi.advanceTimersByTimeAsync(WATCH_BATCH_TRAILING_MS)
+    await stats.settle()
+    expect(sender.send).toHaveBeenCalledTimes(2)
+    expect(
+      (sender.send.mock.calls[1][1] as FsChangedPayload).events.map((event) => event.absolutePath)
+    ).toEqual([...secondBurst, ...thirdBurst].map((event) => event.path))
+
+    // A timer orphaned by the queued flush would fire mid-window and deliver this burst early.
+    emit(null, burst(worktreePath, 'd', 4))
+    await vi.advanceTimersByTimeAsync(WATCH_BATCH_TRAILING_MS - 1)
+    await stats.settle()
+    expect(sender.send).toHaveBeenCalledTimes(2)
+
+    await vi.advanceTimersByTimeAsync(1)
+    await stats.settle()
+    expect(sender.send).toHaveBeenCalledTimes(3)
   })
 
   it('queues a flush that lands while another flush for the same root is awaiting stats', async () => {
-    vi.useFakeTimers()
-    const stats = trackDeferredStats()
     const worktreePath = resolve('/tmp/repo-flush-overlap')
     const { sender, emit } = await watchRoot(worktreePath)
 
@@ -162,13 +225,9 @@ describe('local filesystem watcher flush fan-out', () => {
     expect(
       (sender.send.mock.calls[1][1] as FsChangedPayload).events.map((event) => event.absolutePath)
     ).toEqual(secondBurst.map((event) => event.path))
-    await closeAllWatchers()
-    vi.useRealTimers()
   })
 
   it('keeps delivering after a flush throws instead of stranding the queued flush', async () => {
-    vi.useFakeTimers()
-    const stats = trackDeferredStats()
     const worktreePath = resolve('/tmp/repo-flush-throws')
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
     const { sender, emit } = await watchRoot(worktreePath)
@@ -189,7 +248,5 @@ describe('local filesystem watcher flush fan-out', () => {
       (sender.send.mock.calls[1][1] as FsChangedPayload).events.map((event) => event.absolutePath)
     ).toEqual(secondBurst.map((event) => event.path))
     consoleError.mockRestore()
-    await closeAllWatchers()
-    vi.useRealTimers()
   })
 })
