@@ -11,7 +11,7 @@ import {
   FRAME_DECODER_MAX_BYTES_PER_TURN,
   FRAME_DECODER_MAX_TURN_MS,
   FRAME_DECODER_MAX_RETAINED_BYTES
-} from './relay-frame-decoder'
+} from '../../shared/relay-frame-decoder'
 
 export {
   FrameDecoder,
@@ -23,7 +23,7 @@ export {
   FRAME_DECODER_MAX_TURN_MS,
   FRAME_DECODER_MAX_RETAINED_BYTES
 }
-export type { DecodedFrame, FrameDecoderOptions } from './relay-frame-decoder'
+export type { DecodedFrame, FrameDecoderOptions } from '../../shared/relay-frame-decoder'
 
 export const RELAY_VERSION = '0.1.0'
 export const RELAY_SENTINEL = `ORCA-RELAY v${RELAY_VERSION} READY\n`
