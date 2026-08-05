@@ -228,6 +228,8 @@ async function main() {
       throw new Error('daemon readiness did not publish the expected PID ownership record')
     }
     log('PID ownership record matches the ready daemon')
+    // Production releases startup IPC after ready; keeping it open can pin the child on Windows.
+    child.disconnect()
 
     const ptyHealthy = await runPtySpawnHealthCheck(socketPath, tokenPath, protocolVersion)
     if (ptyHealthy) {
@@ -236,7 +238,7 @@ async function main() {
 
     await new Promise((resolveExit, rejectExit) => {
       const timer = setTimeout(() => {
-        rejectExit(new Error(`daemon did not exit within ${SHUTDOWN_TIMEOUT_MS}ms of SIGTERM`))
+        rejectExit(new Error(`daemon did not exit within ${SHUTDOWN_TIMEOUT_MS}ms of shutdown RPC`))
       }, SHUTDOWN_TIMEOUT_MS)
       child.on('exit', (code, signal) => {
         clearTimeout(timer)
