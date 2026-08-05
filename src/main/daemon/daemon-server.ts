@@ -44,6 +44,7 @@ export type DaemonServerOptions = {
   pidPath?: string
   launchNonce?: string
   startedAtMs?: number
+  publishEndpointOwnership?: () => void
   /** Direct-construction seam for protocol fixture tests; production never overrides it. */
   protocolVersion?: number
   onIdleShutdown?: () => void
@@ -103,6 +104,7 @@ export class DaemonServer {
   private pidPath: string | null
   private launchNonce: string | null
   private startedAtMs: number | null
+  private publishEndpointOwnership: () => void
   private protocolVersion: number
   private onIdleShutdown: () => void
   private onAuthenticatedClientPair: () => void
@@ -173,6 +175,7 @@ export class DaemonServer {
       (this.protocolVersion >= CLEAN_DISCONNECT_PROTOCOL_VERSION
         ? Date.now() - process.uptime() * 1000
         : null)
+    this.publishEndpointOwnership = opts.publishEndpointOwnership ?? (() => {})
     this.onIdleShutdown = opts.onIdleShutdown ?? (() => {})
     this.initialAdoptionTimeoutMs =
       opts.initialAdoptionTestConfig?.timeoutMs ?? DaemonServer.INITIAL_ADOPTION_TIMEOUT_MS
@@ -216,7 +219,23 @@ export class DaemonServer {
       this.server.listen(this.socketPath, () => {
         // Why: drop the startup error listener after bind so it doesn't retain this closure.
         this.server?.off('error', onListenError)
-        writeFileSync(this.tokenPath, this.token, { mode: 0o600 })
+        try {
+          // Why: the PID/nonce record must exist before the token makes this listener adoptable.
+          this.publishEndpointOwnership()
+          writeFileSync(this.tokenPath, this.token, { mode: 0o600 })
+        } catch (error) {
+          if (this.pidPath && this.launchNonce) {
+            unlinkOwnedDaemonPidFile(this.pidPath, process.pid, this.launchNonce)
+          }
+          const server = this.server
+          this.server = null
+          if (!server) {
+            reject(error)
+            return
+          }
+          server.close(() => reject(error))
+          return
+        }
         try {
           chmodSync(this.socketPath, 0o600)
         } catch {

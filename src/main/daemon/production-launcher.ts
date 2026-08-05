@@ -1,10 +1,5 @@
 import { fork, type ChildProcess } from 'node:child_process'
-import { writeFileSync } from 'node:fs'
-import {
-  serializeDaemonPidFile,
-  type DaemonLauncher,
-  type DaemonProcessHandle
-} from './daemon-spawner'
+import type { DaemonLauncher, DaemonProcessHandle } from './daemon-spawner'
 import { parseDaemonReadyIdentity, type DaemonReadyIdentity } from './daemon-ready-identity'
 
 const READY_TIMEOUT_MS = 10_000
@@ -28,6 +23,7 @@ export function createProductionLauncher(opts: ProductionLauncherOptions): Daemo
     }
     const entryPath = opts.getDaemonEntryPath()
 
+    const appVersion = opts.getAppVersion()
     const child = fork(
       entryPath,
       [
@@ -35,7 +31,18 @@ export function createProductionLauncher(opts: ProductionLauncherOptions): Daemo
         socketPath,
         '--token',
         tokenPath,
-        ...(pidPath && launchNonce ? ['--pid-record', pidPath, '--launch-nonce', launchNonce] : [])
+        ...(pidPath && launchNonce
+          ? [
+              '--pid-record',
+              pidPath,
+              '--launch-nonce',
+              launchNonce,
+              '--entry-path',
+              entryPath,
+              '--app-version',
+              appVersion
+            ]
+          : [])
       ],
       {
         // Why: detached daemon output is not consumed; ignored streams cannot
@@ -47,31 +54,13 @@ export function createProductionLauncher(opts: ProductionLauncherOptions): Daemo
       }
     )
 
-    let readyIdentity: DaemonReadyIdentity
     try {
-      readyIdentity = await waitForReady(child)
+      await waitForReady(child)
     } catch (error) {
       return rejectAfterChildCleanup(child, error)
     }
-    if (pidPath && launchNonce) {
-      if (!Number.isSafeInteger(child.pid) || (child.pid as number) <= 0) {
-        return rejectAfterChildCleanup(child, new Error('Daemon readiness identity is incomplete'))
-      }
-      try {
-        writeFileSync(
-          pidPath,
-          serializeDaemonPidFile({
-            pid: child.pid as number,
-            ...readyIdentity,
-            entryPath,
-            appVersion: opts.getAppVersion(),
-            launchNonce
-          }),
-          { mode: 0o600, flag: 'wx' }
-        )
-      } catch (error) {
-        return rejectAfterChildCleanup(child, error)
-      }
+    if (!Number.isSafeInteger(child.pid) || (child.pid as number) <= 0) {
+      return rejectAfterChildCleanup(child, new Error('Daemon readiness identity is incomplete'))
     }
 
     // Unref so the Electron process can exit without waiting for the daemon

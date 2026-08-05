@@ -7,6 +7,7 @@ export type DaemonStartOptions = {
   pidPath?: string
   launchNonce?: string
   startedAtMs?: number
+  publishEndpointOwnership?: DaemonServerOptions['publishEndpointOwnership']
   /** Direct-construction seam for versioned protocol fixtures; never CLI/env configured. */
   protocolVersion?: number
   spawnSubprocess: DaemonServerOptions['spawnSubprocess']
@@ -29,6 +30,9 @@ export async function startDaemon(opts: DaemonStartOptions): Promise<DaemonHandl
     ...(opts.pidPath ? { pidPath: opts.pidPath } : {}),
     ...(opts.launchNonce ? { launchNonce: opts.launchNonce } : {}),
     ...(opts.startedAtMs ? { startedAtMs: opts.startedAtMs } : {}),
+    ...(opts.publishEndpointOwnership
+      ? { publishEndpointOwnership: opts.publishEndpointOwnership }
+      : {}),
     ...(opts.protocolVersion !== undefined ? { protocolVersion: opts.protocolVersion } : {}),
     spawnSubprocess: opts.spawnSubprocess,
     ...(opts.preparePtySpawn ? { preparePtySpawn: opts.preparePtySpawn } : {}),

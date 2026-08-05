@@ -1,12 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import {
   DaemonSpawner,
   getDaemonPidPath,
   getDaemonSocketPath,
   getDaemonTokenPath,
+  publishDaemonPidFile,
+  replaceDaemonPidFile,
   restoreClaimedDaemonArtifact
 } from './daemon-spawner'
 import { startDaemon, type DaemonHandle } from './daemon-main'
@@ -233,5 +235,47 @@ describe('restoreClaimedDaemonArtifact', () => {
         canonicalExists: () => true
       })
     ).toBe(true)
+  })
+})
+
+describe('daemon PID publication', () => {
+  it('publishes ownership exclusively', () => {
+    const dir = createTestDir()
+    const pidPath = join(dir, 'daemon.pid')
+    try {
+      publishDaemonPidFile(pidPath, {
+        pid: 101,
+        startedAtMs: 1_000,
+        launchNonce: 'launch-a'
+      })
+
+      expect(() =>
+        publishDaemonPidFile(pidPath, {
+          pid: 202,
+          startedAtMs: 2_000,
+          launchNonce: 'launch-b'
+        })
+      ).toThrow()
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('atomically replaces stale ownership with the authenticated endpoint identity', () => {
+    const dir = createTestDir()
+    const pidPath = join(dir, 'daemon.pid')
+    const endpointIdentity = {
+      pid: 202,
+      startedAtMs: 2_000,
+      launchNonce: 'launch-b'
+    }
+    try {
+      writeFileSync(pidPath, '{"pid":101,"launchNonce":"launch-a"}')
+
+      expect(replaceDaemonPidFile(pidPath, endpointIdentity)).toBe(true)
+      expect(JSON.parse(readFileSync(pidPath, 'utf8'))).toEqual(endpointIdentity)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })

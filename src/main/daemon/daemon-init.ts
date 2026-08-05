@@ -3,7 +3,7 @@ restart, teardown); the "swap the provider atomically" invariant keeps restart +
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { app } from 'electron'
-import { mkdirSync, existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
+import { mkdirSync, existsSync, readFileSync, unlinkSync } from 'node:fs'
 import { fork, type ChildProcess } from 'node:child_process'
 import { connect } from 'node:net'
 import {
@@ -11,7 +11,7 @@ import {
   getDaemonPidPath,
   getDaemonSocketPath,
   getDaemonTokenPath,
-  serializeDaemonPidFile,
+  replaceDaemonPidFile,
   unlinkOwnedDaemonPidFile,
   type DaemonLauncher,
   type DaemonProcessHandle
@@ -54,6 +54,7 @@ import {
   hasSeededUnconfirmedClaudePtys
 } from '../claude-accounts/live-pty-gate'
 import { parseDaemonReadyIdentity } from './daemon-ready-identity'
+import type { DaemonEndpointIdentity } from './daemon-hello-protocol'
 
 // Why: daemon init runs concurrent with window load, so an in-process t timestamp (not harness stderr timing) measures cold-start.
 function logDaemonMilestone(event: string, details: Record<string, unknown> = {}): void {
@@ -67,6 +68,8 @@ export const WEDGED_DAEMON_GRACE_RETRIES = 11
 const DAEMON_SELF_SHUTDOWN_WAIT_MS = 5_000
 const DAEMON_CHILD_TERMINATION_GRACE_MS = 5_000
 const DAEMON_CHILD_FORCE_EXIT_WAIT_MS = 1_000
+
+class DaemonEndpointOwnershipError extends Error {}
 
 let spawner: DaemonSpawner | null = null
 type DaemonProvider = DaemonPtyRouter | DaemonPtyAdapter | DegradedDaemonPtyProvider
@@ -184,17 +187,63 @@ async function holdDaemonAdoptionLease(
   handle: DaemonProcessHandle,
   socketPath: string,
   tokenPath: string,
-  connectedClient?: DaemonClient
+  connectedClient?: DaemonClient,
+  expectedIdentity?: DaemonEndpointIdentity,
+  pidPath?: string
 ): Promise<DaemonProcessHandle> {
   const client = connectedClient ?? new DaemonClient({ socketPath, tokenPath })
   try {
     await client.ensureConnected()
+    const readIdentity = (client as Partial<DaemonClient>).getDaemonIdentity
+    if (expectedIdentity) {
+      if (readIdentity) {
+        const actualIdentity = readIdentity.call(client)
+        if (
+          !actualIdentity ||
+          actualIdentity.pid !== expectedIdentity.pid ||
+          actualIdentity.startedAtMs !== expectedIdentity.startedAtMs ||
+          actualIdentity.launchNonce !== expectedIdentity.launchNonce
+        ) {
+          throw new DaemonEndpointOwnershipError('Daemon endpoint ownership changed during startup')
+        }
+      }
+    }
+    reconcileDaemonPidOwnership(client, pidPath)
   } catch (error) {
     client.disconnect()
     throw error
   }
   handle.releaseAdoptionLease = () => client.disconnect()
   return handle
+}
+
+function reconcileDaemonPidOwnership(client: DaemonClient, pidPath?: string): void {
+  const readIdentity = (client as Partial<DaemonClient>).getDaemonIdentity
+  const endpointIdentity = readIdentity?.call(client) ?? null
+  if (!pidPath || !endpointIdentity || pidRecordMatchesEndpoint(pidPath, endpointIdentity)) {
+    return
+  }
+  if (!replaceDaemonPidFile(pidPath, { ...endpointIdentity })) {
+    throw new DaemonEndpointOwnershipError('Daemon PID ownership could not be reconciled')
+  }
+  console.warn('[daemon] Repaired daemon PID ownership to match the authenticated endpoint')
+}
+
+function pidRecordMatchesEndpoint(pidPath: string, identity: DaemonEndpointIdentity): boolean {
+  try {
+    const record = JSON.parse(readFileSync(pidPath, 'utf8')) as {
+      pid?: unknown
+      startedAtMs?: unknown
+      launchNonce?: unknown
+    }
+    return (
+      record.pid === identity.pid &&
+      record.startedAtMs === identity.startedAtMs &&
+      record.launchNonce === identity.launchNonce
+    )
+  } catch {
+    return false
+  }
 }
 
 function releaseDaemonAdoptionLease(handle: DaemonProcessHandle | null): void {
@@ -354,9 +403,13 @@ function createOutOfProcessLauncher(
     try {
       // Why: acquire the full pair before control-only probes so an expired inherited deadline can't fire in the probe-to-adoption gap.
       await adoptionClient.ensureConnected()
-    } catch {
+      reconcileDaemonPidOwnership(adoptionClient, pidPath)
+    } catch (error) {
       adoptionClient.disconnect()
       adoptionClient = null
+      if (error instanceof DaemonEndpointOwnershipError) {
+        throw error
+      }
     }
     const preserveDaemon = async (
       mode?: 'degraded-new-pty-fallback'
@@ -367,7 +420,9 @@ function createOutOfProcessLauncher(
         createPreservedDaemonHandle(runtimeDir, PROTOCOL_VERSION, mode),
         socketPath,
         tokenPath,
-        connectedClient
+        connectedClient,
+        undefined,
+        pidPath
       )
     }
     try {
@@ -514,6 +569,10 @@ function createOutOfProcessLauncher(
           pidPath,
           '--launch-nonce',
           launchNonce,
+          '--entry-path',
+          entryPath,
+          '--app-version',
+          app.getVersion(),
           ...(macosLoginSessionWatch ? ['--login-session-watch'] : []),
           ...daemonLogArgs()
         ],
@@ -557,6 +616,7 @@ function createOutOfProcessLauncher(
       }
 
       // Wait for the daemon to signal readiness via IPC
+      let launchedIdentity: DaemonEndpointIdentity | null = null
       await new Promise<void>((resolve, reject) => {
         let timer: ReturnType<typeof setTimeout> | undefined
         let settled = false
@@ -606,22 +666,10 @@ function createOutOfProcessLauncher(
               void fail(new Error('Daemon readiness identity is incomplete'))
               return
             }
-            try {
-              // Why: pid record shares the daemon's self time and nonce so cleanup can identify this exact process incarnation.
-              writeFileSync(
-                pidPath,
-                serializeDaemonPidFile({
-                  pid: child.pid as number,
-                  ...readyIdentity,
-                  entryPath,
-                  appVersion: app.getVersion(),
-                  launchNonce
-                }),
-                { mode: 0o600, flag: 'wx' }
-              )
-            } catch (error) {
-              void fail(error instanceof Error ? error : new Error(String(error)))
-              return
+            launchedIdentity = {
+              pid: child.pid as number,
+              ...readyIdentity,
+              launchNonce
             }
             settled = true
             // Why: daemon is detached after readiness; detach startup listeners so the launch promise closure isn't retained.
@@ -652,14 +700,25 @@ function createOutOfProcessLauncher(
       })
 
       try {
+        if (!launchedIdentity) {
+          throw new Error('Daemon readiness identity is incomplete')
+        }
         return await holdDaemonAdoptionLease(
           {
             shutdown: () => terminateLaunchedDaemonChild(child)
           },
           socketPath,
-          tokenPath
+          tokenPath,
+          undefined,
+          launchedIdentity,
+          pidPath
         )
       } catch (error) {
+        if (error instanceof DaemonEndpointOwnershipError) {
+          await terminateLaunchedDaemonChild(child)
+          unlinkOwnedDaemonPidFile(pidPath, child.pid as number, launchNonce)
+          throw error
+        }
         // Why: another client may have adopted this live process; keep its pid record until exit, but remove one published after an early exit.
         let pidRecordRemoved = false
         const removeExitedPidRecord = (): void => {

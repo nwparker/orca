@@ -1,5 +1,13 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { constants, copyFileSync, existsSync, readFileSync, renameSync, unlinkSync } from 'node:fs'
+import {
+  constants,
+  copyFileSync,
+  existsSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync
+} from 'node:fs'
 import { join } from 'node:path'
 import { PROTOCOL_VERSION } from './types'
 
@@ -109,6 +117,39 @@ export function getDaemonPidPath(runtimeDir: string, protocolVersion = PROTOCOL_
 
 export function serializeDaemonPidFile(pidFile: DaemonPidFile): string {
   return JSON.stringify(pidFile)
+}
+
+export function publishDaemonPidFile(pidPath: string, pidFile: DaemonPidFile): void {
+  writeFileSync(pidPath, serializeDaemonPidFile(pidFile), { mode: 0o600, flag: 'wx' })
+}
+
+export function replaceDaemonPidFile(pidPath: string, pidFile: DaemonPidFile): boolean {
+  const claimedPath = `${pidPath}.replace-${process.pid}-${randomUUID()}`
+  let claimedExisting = false
+  try {
+    renameSync(pidPath, claimedPath)
+    claimedExisting = true
+  } catch {
+    // A missing record is repaired by the same exclusive publication below.
+  }
+
+  try {
+    publishDaemonPidFile(pidPath, pidFile)
+  } catch {
+    if (claimedExisting) {
+      restoreClaimedDaemonArtifact(claimedPath, pidPath)
+    }
+    return false
+  }
+
+  if (claimedExisting) {
+    try {
+      unlinkSync(claimedPath)
+    } catch {
+      // The canonical record is authoritative; the uniquely named claim is inert.
+    }
+  }
+  return true
 }
 
 export function unlinkOwnedDaemonPidFile(

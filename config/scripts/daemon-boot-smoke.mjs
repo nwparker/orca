@@ -18,7 +18,7 @@
 import { fork } from 'node:child_process'
 import { connect } from 'node:net'
 import { randomUUID } from 'node:crypto'
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
@@ -126,16 +126,35 @@ async function main() {
   const userDataDir = mkdtempSync(join(tmpdir(), 'orca-daemon-boot-smoke-'))
   const socketPath = makeSocketPath(userDataDir)
   const tokenPath = join(userDataDir, 'daemon.token')
+  const pidPath = join(userDataDir, 'daemon.pid')
+  const launchNonce = randomUUID()
   const protocolVersion = readProtocolVersion()
 
   log(`forking ${entryPath} under plain Node (${process.execPath})`)
-  const child = fork(entryPath, ['--socket', socketPath, '--token', tokenPath], {
-    // Plain Node: no ELECTRON_RUN_AS_NODE. process.execPath is already node in
-    // CI, and this is exactly the runtime where a leaked `require("electron")`
-    // throws MODULE_NOT_FOUND — the failure this smoke exists to catch.
-    stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
-    env: { ...process.env, ORCA_USER_DATA_PATH: userDataDir }
-  })
+  const child = fork(
+    entryPath,
+    [
+      '--socket',
+      socketPath,
+      '--token',
+      tokenPath,
+      '--pid-record',
+      pidPath,
+      '--launch-nonce',
+      launchNonce,
+      '--entry-path',
+      entryPath,
+      '--app-version',
+      'daemon-boot-smoke'
+    ],
+    {
+      // Plain Node: no ELECTRON_RUN_AS_NODE. process.execPath is already node in
+      // CI, and this is exactly the runtime where a leaked `require("electron")`
+      // throws MODULE_NOT_FOUND — the failure this smoke exists to catch.
+      stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
+      env: { ...process.env, ORCA_USER_DATA_PATH: userDataDir }
+    }
+  )
 
   let stderr = ''
   child.stderr?.on('data', (chunk) => {
@@ -185,6 +204,16 @@ async function main() {
       })
     })
     log('daemon signaled ready')
+    const pidRecord = JSON.parse(readFileSync(pidPath, 'utf8'))
+    if (
+      pidRecord.pid !== child.pid ||
+      pidRecord.launchNonce !== launchNonce ||
+      pidRecord.entryPath !== entryPath ||
+      pidRecord.appVersion !== 'daemon-boot-smoke'
+    ) {
+      throw new Error('daemon readiness did not publish the expected PID ownership record')
+    }
+    log('PID ownership record matches the ready daemon')
 
     const ptyHealthy = await runPtySpawnHealthCheck(socketPath, tokenPath, protocolVersion)
     if (ptyHealthy) {
@@ -205,6 +234,9 @@ async function main() {
       // termination. Either way the hard assertion is "it stops, no hang".
       child.kill('SIGTERM')
     })
+    if (existsSync(pidPath)) {
+      throw new Error('daemon left its PID ownership record behind after shutdown')
+    }
 
     log('PASS: daemon booted, served, and shut down under plain Node')
   } finally {
