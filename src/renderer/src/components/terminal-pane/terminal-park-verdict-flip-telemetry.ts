@@ -2,6 +2,12 @@
  * Cold-park verdict telemetry and a safe-side circuit breaker.
  * Field breadcrumbs prove render-cadence flips, but not which eligibility input
  * oscillates; burst damping keeps the pane mounted before React reaches #185.
+ *
+ * Scope: flips are counted on the rendered verdict, but the pin can only
+ * subtract from the cold-park candidate set. Churn driven by the other parked
+ * inputs (forced parking, portal ownership, deferred activation mounts) is
+ * observed and breadcrumbed, not damped — read a repeating `burst` crumb for
+ * one tab as "damping did not reach the oscillating input".
  */
 import { recordRendererCrashBreadcrumb } from '@/lib/crash-breadcrumb-recorder'
 
@@ -36,13 +42,21 @@ export type ParkVerdictFlipRecord = {
   pinnedUntilMs?: number | null
 }
 
+// Why it leaves pinnedUntilMs alone: the notice window is 60s from the first
+// flip, so it lapses mid-pin; clearing here would release damping early.
 function resetFlipWindows(record: ParkVerdictFlipRecord, nowMs: number): void {
   record.windowStartMs = nowMs
   record.flips = 0
   record.notified = false
   record.burstStartMs = nowMs
   record.burstFlips = 0
-  record.pinnedUntilMs = null
+}
+
+// Why liveness and not presence: a tab pinned while cold-park-eligible can stop
+// being a candidate before its deadline, and nothing would consult it again. An
+// expired pin must stop damping and stop gating breadcrumbs on its own.
+function isParkVerdictPinLive(record: ParkVerdictFlipRecord, nowMs: number): boolean {
+  return record.pinnedUntilMs != null && nowMs < record.pinnedUntilMs
 }
 
 /** Returns the safe-side pin deadline and re-arms an expired window. */
@@ -55,8 +69,9 @@ export function getParkVerdictUnparkPinUntilMs(args: {
   if (record?.pinnedUntilMs == null) {
     return null
   }
-  if (args.nowMs >= record.pinnedUntilMs || args.nowMs < record.windowStartMs) {
+  if (!isParkVerdictPinLive(record, args.nowMs) || args.nowMs < record.windowStartMs) {
     resetFlipWindows(record, args.nowMs)
+    record.pinnedUntilMs = null
     return null
   }
   return record.pinnedUntilMs
@@ -126,7 +141,7 @@ export function recordParkVerdictFlips(args: {
     record.flips += 1
     record.burstFlips += 1
 
-    if (record.pinnedUntilMs == null && record.burstFlips >= burstLimit) {
+    if (!isParkVerdictPinLive(record, nowMs) && record.burstFlips >= burstLimit) {
       record.pinnedUntilMs = nowMs + flipWindowMs
       recordRendererCrashBreadcrumb('terminal_park_verdict_churn', {
         tabId,
@@ -138,10 +153,10 @@ export function recordParkVerdictFlips(args: {
       })
       continue
     }
-    // Why pinnedUntilMs gates this: the burst crumb already reported the same
+    // Why a live pin gates this: the burst crumb already reported the same
     // window, so a second crumb would only double the volume the notice limit
     // exists to keep down.
-    if (record.pinnedUntilMs == null && !record.notified && record.flips >= noticeLimit) {
+    if (!isParkVerdictPinLive(record, nowMs) && !record.notified && record.flips >= noticeLimit) {
       record.notified = true
       // Why: flips is always exactly noticeLimit here, so elapsedMs is the only
       // field that separates slow churn from a burst the damping already caught.

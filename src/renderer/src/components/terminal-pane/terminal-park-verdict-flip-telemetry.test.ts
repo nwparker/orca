@@ -266,4 +266,74 @@ describe('getParkVerdictUnparkPinUntilMs', () => {
 
     expect(getParkVerdictUnparkPinUntilMs({ records, tabId: TAB, nowMs: 5 })).toBeNull()
   })
+
+  // Why: the notice window starts at the first flip and the pin starts one
+  // burst later, so the notice window always lapses first. Resetting it must
+  // not hand the pane back to the parking policy mid-damping.
+  it('survives a notice-window expiry that lands mid-pin', () => {
+    const records = new Map<string, ParkVerdictFlipRecord>()
+    const pinnedAtMs = churnToBurst(records)
+    const pinUntilMs = pinnedAtMs + TERMINAL_TAB_PARK_FLIP_WINDOW_MS
+    const windowLapseMs = 1_000 + TERMINAL_TAB_PARK_FLIP_WINDOW_MS
+
+    // An exogenous flip (visibility change, tab removal) after the notice
+    // window lapsed but before the pin deadline.
+    expect(windowLapseMs).toBeLessThan(pinUntilMs)
+    observe({ records, parked: true, nowMs: windowLapseMs })
+
+    expect(records.get(TAB)?.flips).toBe(1)
+    expect(getParkVerdictUnparkPinUntilMs({ records, tabId: TAB, nowMs: windowLapseMs })).toBe(
+      pinUntilMs
+    )
+  })
+})
+
+// Why liveness and not presence: a pinned tab can stop being cold-park eligible
+// before its deadline, and nothing consults getParkVerdictUnparkPinUntilMs for
+// it again. A stale deadline must not silence churn telemetry forever.
+describe('expired pins stop gating breadcrumbs', () => {
+  it('re-arms damping and notices without a getParkVerdictUnparkPinUntilMs call', () => {
+    const records = new Map<string, ParkVerdictFlipRecord>()
+    for (let i = 0; i < 40; i += 1) {
+      observe({ records, parked: i % 2 === 0, nowMs: 1_000 + i * 10 })
+    }
+    expect(recordBreadcrumb).toHaveBeenCalledTimes(1)
+    expect(recordBreadcrumb).toHaveBeenLastCalledWith(
+      'terminal_park_verdict_churn',
+      expect.objectContaining({ trigger: 'burst' })
+    )
+
+    // Churn resumes past the pin deadline; the pin was never read back.
+    const afterPinMs = 1_000 + TERMINAL_TAB_PARK_FLIP_WINDOW_MS * 2
+    for (let i = 0; i < 40; i += 1) {
+      observe({ records, parked: i % 2 === 0, nowMs: afterPinMs + i * 10 })
+    }
+
+    expect(recordBreadcrumb).toHaveBeenCalledTimes(2)
+    expect(recordBreadcrumb).toHaveBeenLastCalledWith(
+      'terminal_park_verdict_churn',
+      expect.objectContaining({ trigger: 'burst' })
+    )
+    expect(records.get(TAB)?.pinnedUntilMs).toBeGreaterThan(afterPinMs)
+  })
+
+  it('still reports slow churn after a pin lapses', () => {
+    const records = new Map<string, ParkVerdictFlipRecord>()
+    for (let i = 0; i < 40; i += 1) {
+      observe({ records, parked: i % 2 === 0, nowMs: 1_000 + i * 10 })
+    }
+    recordBreadcrumb.mockClear()
+
+    // Slow churn only: each step outruns the burst window, so the notice limit
+    // is the only trigger left. It must not stay gated by the lapsed pin.
+    const afterPinMs = 1_000 + TERMINAL_TAB_PARK_FLIP_WINDOW_MS * 2
+    for (let i = 0; i <= TERMINAL_TAB_PARK_FLIP_NOTICE_LIMIT; i += 1) {
+      observe({ records, parked: i % 2 === 0, nowMs: afterPinMs + i * SLOW_CHURN_STEP_MS })
+    }
+
+    expect(recordBreadcrumb).toHaveBeenCalledWith(
+      'terminal_park_verdict_churn',
+      expect.objectContaining({ trigger: 'window' })
+    )
+  })
 })

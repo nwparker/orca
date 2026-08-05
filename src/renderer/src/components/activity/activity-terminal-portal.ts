@@ -18,6 +18,26 @@ let currentTargets: ActivityTerminalPortalTarget[] = []
 const emptyTargets: ActivityTerminalPortalTarget[] = []
 const subscribers = new Set<() => void>()
 
+type ActivityTerminalPortalFieldEquals = (
+  left: ActivityTerminalPortalTarget,
+  right: ActivityTerminalPortalTarget
+) => boolean
+
+// Why the keyed record: a dropped field here silently suppresses a publish and
+// strands Terminal on stale routing — the wrong-terminal flash this file exists
+// to prevent. `satisfies` turns a new descriptor field into a build error.
+const ACTIVITY_TERMINAL_PORTAL_FIELD_EQUALS: readonly ActivityTerminalPortalFieldEquals[] =
+  Object.values({
+    slotId: (left, right) => left.slotId === right.slotId,
+    requestToken: (left, right) => left.requestToken === right.requestToken,
+    target: (left, right) => left.target === right.target,
+    worktreeId: (left, right) => left.worktreeId === right.worktreeId,
+    tabId: (left, right) => left.tabId === right.tabId,
+    paneKey: (left, right) => left.paneKey === right.paneKey,
+    forceUnavailable: (left, right) => left.forceUnavailable === right.forceUnavailable,
+    active: (left, right) => left.active === right.active
+  } satisfies Record<keyof ActivityTerminalPortalTarget, ActivityTerminalPortalFieldEquals>)
+
 function haveSameActivityTerminalPortals(
   left: readonly ActivityTerminalPortalTarget[],
   right: readonly ActivityTerminalPortalTarget[]
@@ -28,14 +48,7 @@ function haveSameActivityTerminalPortals(
       const candidate = right[index]
       return (
         candidate !== undefined &&
-        target.slotId === candidate.slotId &&
-        target.requestToken === candidate.requestToken &&
-        target.target === candidate.target &&
-        target.worktreeId === candidate.worktreeId &&
-        target.tabId === candidate.tabId &&
-        target.paneKey === candidate.paneKey &&
-        target.forceUnavailable === candidate.forceUnavailable &&
-        target.active === candidate.active
+        ACTIVITY_TERMINAL_PORTAL_FIELD_EQUALS.every((isEqual) => isEqual(target, candidate))
       )
     })
   )

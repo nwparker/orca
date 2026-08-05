@@ -190,7 +190,8 @@ function renderOverlayHost(root: Root): unknown {
 
 describe('cold-park verdict oscillation', () => {
   let container: HTMLDivElement
-  let root: Root
+  // Why optional: a throwing createRoot must not be masked by an afterEach TypeError.
+  let root: Root | undefined
 
   beforeEach(() => {
     park.coverage = true
@@ -211,8 +212,9 @@ describe('cold-park verdict oscillation', () => {
 
   afterEach(() => {
     act(() => {
-      root.unmount()
+      root?.unmount()
     })
+    root = undefined
     container.remove()
   })
 
