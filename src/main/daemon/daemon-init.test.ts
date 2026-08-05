@@ -31,6 +31,8 @@ const {
   parseDaemonPidFileMock,
   replaceDaemonPidFileMock,
   unlinkOwnedDaemonPidFileMock,
+  launchedStartedAtMs,
+  readLaunchedDaemonIdentity,
   daemonClientMock,
   spawnerInstances,
   ensureRunningOverrides,
@@ -93,10 +95,22 @@ const {
   )
   const replaceDaemonPidFileMock = vi.fn(() => true)
   const unlinkOwnedDaemonPidFileMock = vi.fn(() => true)
+  const launchedStartedAtMs = { current: 1_000_000 }
+
+  const readLaunchedDaemonIdentity = () => {
+    const args = forkMock.mock.calls.at(-1)?.[1]
+    const child = forkMock.mock.results.at(-1)?.value as { pid?: unknown } | undefined
+    const launchNonceIndex = Array.isArray(args) ? args.indexOf('--launch-nonce') : -1
+    const launchNonce = launchNonceIndex >= 0 ? args[launchNonceIndex + 1] : undefined
+    return typeof child?.pid === 'number' && typeof launchNonce === 'string'
+      ? { pid: child.pid, startedAtMs: launchedStartedAtMs.current, launchNonce }
+      : null
+  }
 
   const daemonClientMock = vi.fn().mockImplementation(function MockDaemonClient() {
     return {
       ensureConnected: vi.fn(async () => {}),
+      getDaemonIdentity: vi.fn(readLaunchedDaemonIdentity),
       request: vi.fn(async () => ({ sessions: [] })),
       disconnect: vi.fn()
     }
@@ -174,6 +188,8 @@ const {
     parseDaemonPidFileMock,
     replaceDaemonPidFileMock,
     unlinkOwnedDaemonPidFileMock,
+    launchedStartedAtMs,
+    readLaunchedDaemonIdentity,
     daemonClientMock,
     spawnerInstances,
     ensureRunningOverrides,
@@ -433,6 +449,7 @@ async function importFresh() {
   daemonClientMock.mockImplementation(function MockDaemonClient() {
     return {
       ensureConnected: vi.fn(async () => {}),
+      getDaemonIdentity: vi.fn(readLaunchedDaemonIdentity),
       request: vi.fn(async () => ({ sessions: [] })),
       disconnect: vi.fn()
     }
@@ -448,6 +465,7 @@ async function importFresh() {
   parseDaemonPidFileMock.mockReturnValue(null)
   unlinkOwnedDaemonPidFileMock.mockReset()
   unlinkOwnedDaemonPidFileMock.mockReturnValue(true)
+  launchedStartedAtMs.current = 1_000_000
   getProcessStartedAtMsMock.mockReset()
   getProcessStartedAtMsMock.mockReturnValue(1_000_000)
   // Why: import after resetModules so module-level spawner/adapter/restartInFlight start fresh — needed to test first-init and the coalescer.
@@ -1877,7 +1895,19 @@ describe('daemon-init: runRestartDaemon (7-step sequence)', () => {
     expect(launchArgs[launchNonceIndex + 1]).toMatch(/^[0-9a-f-]{36}$/)
   })
 
-  it('rejects and reaps a child that lost endpoint ownership before adoption', async () => {
+  it.each([
+    [
+      'changed endpoint identity',
+      () => ({
+        getDaemonIdentity: vi.fn(() => ({
+          pid: 999,
+          startedAtMs: 900_000,
+          launchNonce: 'stale-launch'
+        }))
+      })
+    ],
+    ['missing endpoint identity reader', () => ({})]
+  ])('rejects and reaps a child with %s before adoption', async (_case, identityMethods) => {
     const mod = await importFresh()
     checkDaemonHealthMock.mockResolvedValue('unreachable')
     await mod.initDaemonPtyProvider()
@@ -1890,14 +1920,10 @@ describe('daemon-init: runRestartDaemon (7-step sequence)', () => {
     }
     daemonClientMock.mockImplementationOnce(basicClient)
     daemonClientMock.mockImplementationOnce(basicClient)
-    daemonClientMock.mockImplementationOnce(function mismatchedClient() {
+    daemonClientMock.mockImplementationOnce(function postReadyClient() {
       return {
         ...basicClient(),
-        getDaemonIdentity: vi.fn(() => ({
-          pid: 999,
-          startedAtMs: 900_000,
-          launchNonce: 'stale-launch'
-        }))
+        ...identityMethods()
       }
     })
     const handlers: Record<string, ((arg?: unknown) => void)[]> = {
@@ -2709,6 +2735,7 @@ describe('daemon-init: runRestartDaemon (7-step sequence)', () => {
             throw new Error('Hello response timed out')
           }
         }),
+        getDaemonIdentity: vi.fn(readLaunchedDaemonIdentity),
         request: vi.fn(),
         disconnect: vi.fn()
       }
@@ -2896,6 +2923,7 @@ describe('daemon-init: runRestartDaemon (7-step sequence)', () => {
     ) => Promise<{ shutdown(): Promise<void> }>
     checkDaemonHealthMock.mockResolvedValueOnce('unreachable')
     getProcessStartedAtMsMock.mockReturnValue(null)
+    launchedStartedAtMs.current = 1_700_000_123_456
     forkMock.mockImplementationOnce(() => ({
       pid: 12345,
       on(event: string, cb: (arg?: unknown) => void) {

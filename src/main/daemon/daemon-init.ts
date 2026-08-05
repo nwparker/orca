@@ -196,16 +196,14 @@ async function holdDaemonAdoptionLease(
     await client.ensureConnected()
     const readIdentity = (client as Partial<DaemonClient>).getDaemonIdentity
     if (expectedIdentity) {
-      if (readIdentity) {
-        const actualIdentity = readIdentity.call(client)
-        if (
-          !actualIdentity ||
-          actualIdentity.pid !== expectedIdentity.pid ||
-          actualIdentity.startedAtMs !== expectedIdentity.startedAtMs ||
-          actualIdentity.launchNonce !== expectedIdentity.launchNonce
-        ) {
-          throw new DaemonEndpointOwnershipError('Daemon endpoint ownership changed during startup')
-        }
+      const actualIdentity = readIdentity?.call(client)
+      if (
+        !actualIdentity ||
+        actualIdentity.pid !== expectedIdentity.pid ||
+        actualIdentity.startedAtMs !== expectedIdentity.startedAtMs ||
+        actualIdentity.launchNonce !== expectedIdentity.launchNonce
+      ) {
+        throw new DaemonEndpointOwnershipError('Daemon endpoint ownership changed during startup')
       }
     }
     reconcileDaemonPidOwnership(client, pidPath)

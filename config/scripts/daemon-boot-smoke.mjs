@@ -54,30 +54,27 @@ function makeSocketPath(userDataDir) {
   return join(userDataDir, 'daemon.sock')
 }
 
-// Best-effort end-to-end PTY check over the daemon's own control-socket RPC.
-// Connects a single control socket, completes the hello handshake, and calls
-// `ptySpawnHealth` (the daemon spawns a throwaway PTY internally). Resolves
-// true on success, false on any failure — never throws.
-function runPtySpawnHealthCheck(socketPath, tokenPath, protocolVersion) {
-  return new Promise((resolveCheck) => {
+function runDaemonRpc(socketPath, tokenPath, protocolVersion, request, timeoutMs) {
+  return new Promise((resolveRpc, rejectRpc) => {
     let settled = false
     let buffer = ''
     const socket = connect(socketPath)
-    const finish = (ok, reason) => {
+    const finish = (error, response) => {
       if (settled) {
         return
       }
       settled = true
       clearTimeout(timer)
       socket.destroy()
-      if (!ok && reason) {
-        log(`PTY spawn health check skipped (best-effort): ${reason}`)
+      if (error) {
+        rejectRpc(error)
+      } else {
+        resolveRpc(response)
       }
-      resolveCheck(ok)
     }
-    const timer = setTimeout(() => finish(false, 'timed out'), PTY_HEALTH_TIMEOUT_MS)
+    const timer = setTimeout(() => finish(new Error(`${request.type} timed out`)), timeoutMs)
 
-    socket.on('error', (err) => finish(false, err.message))
+    socket.on('error', (error) => finish(error))
     socket.on('connect', () => {
       const token = readFileSync(tokenPath, 'utf8').trim()
       socket.write(
@@ -100,19 +97,19 @@ function runPtySpawnHealthCheck(socketPath, tokenPath, protocolVersion) {
         try {
           msg = JSON.parse(line)
         } catch {
-          finish(false, 'invalid response line')
+          finish(new Error('invalid response line'))
           return
         }
         if (msg.type === 'hello') {
           if (!msg.ok) {
-            finish(false, `hello rejected: ${msg.error ?? 'unknown'}`)
+            finish(new Error(`hello rejected: ${msg.error ?? 'unknown'}`))
             return
           }
-          socket.write(`${JSON.stringify({ id: 'health-1', type: 'ptySpawnHealth' })}\n`)
-        } else if (msg.id === 'health-1') {
+          socket.write(`${JSON.stringify(request)}\n`)
+        } else if (msg.id === request.id) {
           finish(
-            msg.ok === true,
-            msg.ok === true ? undefined : (msg.error ?? 'ptySpawnHealth failed')
+            msg.ok === true ? undefined : new Error(msg.error ?? `${request.type} failed`),
+            msg
           )
           return
         }
@@ -120,6 +117,23 @@ function runPtySpawnHealthCheck(socketPath, tokenPath, protocolVersion) {
       }
     })
   })
+}
+
+// Best-effort: constrained CI runners can make node-pty spawn flaky.
+async function runPtySpawnHealthCheck(socketPath, tokenPath, protocolVersion) {
+  try {
+    await runDaemonRpc(
+      socketPath,
+      tokenPath,
+      protocolVersion,
+      { id: 'health-1', type: 'ptySpawnHealth' },
+      PTY_HEALTH_TIMEOUT_MS
+    )
+    return true
+  } catch (error) {
+    log(`PTY spawn health check skipped (best-effort): ${error.message}`)
+    return false
+  }
 }
 
 async function main() {
@@ -226,13 +240,19 @@ async function main() {
       }, SHUTDOWN_TIMEOUT_MS)
       child.on('exit', (code, signal) => {
         clearTimeout(timer)
-        log(`daemon exited after signal (code=${code}, signal=${signal})`)
+        log(`daemon exited after shutdown RPC (code=${code}, signal=${signal})`)
         resolveExit()
       })
-      // Why: SIGTERM is the graceful stop on POSIX (the daemon handles it);
-      // Windows has no POSIX signal delivery, so Node maps this to process
-      // termination. Either way the hard assertion is "it stops, no hang".
-      child.kill('SIGTERM')
+      void runDaemonRpc(
+        socketPath,
+        tokenPath,
+        protocolVersion,
+        { id: 'shutdown-1', type: 'shutdown', payload: { killSessions: false } },
+        SHUTDOWN_TIMEOUT_MS
+      ).catch((error) => {
+        clearTimeout(timer)
+        rejectExit(error)
+      })
     })
     if (existsSync(pidPath)) {
       throw new Error('daemon left its PID ownership record behind after shutdown')

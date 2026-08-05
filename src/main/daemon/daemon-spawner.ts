@@ -136,8 +136,12 @@ export function replaceDaemonPidFile(pidPath: string, pidFile: DaemonPidFile): b
   try {
     publishDaemonPidFile(pidPath, pidFile)
   } catch {
-    if (claimedExisting) {
-      restoreClaimedDaemonArtifact(claimedPath, pidPath)
+    if (claimedExisting && restoreClaimedDaemonArtifact(claimedPath, pidPath)) {
+      try {
+        unlinkSync(claimedPath)
+      } catch {
+        // A uniquely named restored claim is inert.
+      }
     }
     return false
   }
