@@ -21,10 +21,10 @@ import {
   type TerminalTabColdParkCandidate
 } from './terminal-hidden-view-parking'
 import {
-  getParkVerdictUnparkPinUntilMs,
   recordParkVerdictFlips,
   type ParkVerdictFlipRecord
 } from './terminal-park-verdict-flip-telemetry'
+import { withholdUnparkableTerminalTabs } from './terminal-cold-park-withheld-tabs'
 import { getTerminalParkingPolicyOverrides } from './terminal-parking-e2e-overrides'
 import {
   selectEvictionExemptTerminalTabIds,
@@ -210,41 +210,22 @@ export function useTerminalTabColdParking(args: {
       },
       ...overrides
     })
-    // Why: a tab the byte watchers cannot cover (no capture, no layout
-    // snapshot, legacy leaf ids) must never park — it would go silent for
-    // bells/titles/completions, the failure that sank the first attempt.
-    // Why: any endogenous eligibility churn settles on the safe mounted side.
-    const parkVerdictPinUntilMsByTabId = new Map<string, number>()
-    for (const terminalTab of terminalTabs) {
-      if (!nextColdParkedTerminalTabIds.has(terminalTab.id)) {
-        continue
-      }
-      const parkVerdictPinUntilMs = getParkVerdictUnparkPinUntilMs({
-        records: parkVerdictRecordsRef.current,
-        tabId: terminalTab.id,
-        nowMs
-      })
-      if (parkVerdictPinUntilMs !== null) {
-        parkVerdictPinUntilMsByTabId.set(terminalTab.id, parkVerdictPinUntilMs)
-      }
-      if (
-        parkVerdictPinUntilMs !== null ||
-        !canWatcherCoverParkedTerminalTab(worktreeId, terminalTab)
-      ) {
-        nextColdParkedTerminalTabIds.delete(terminalTab.id)
-      }
-    }
+    const { parkedTabIds, parkVerdictPinUntilMsByTabId } = withholdUnparkableTerminalTabs({
+      worktreeId,
+      terminalTabs,
+      coldParkedTabIds: nextColdParkedTerminalTabIds,
+      parkVerdictRecords: parkVerdictRecordsRef.current,
+      nowMs
+    })
     setColdParkedTerminalTabIds((current) =>
-      haveSameTerminalTabIds(current, nextColdParkedTerminalTabIds)
-        ? current
-        : nextColdParkedTerminalTabIds
+      haveSameTerminalTabIds(current, parkedTabIds) ? current : parkedTabIds
     )
 
     for (const candidate of candidates) {
       if (
         candidate.isVisible ||
         candidate.hasActivityTerminalPortal ||
-        nextColdParkedTerminalTabIds.has(candidate.id)
+        parkedTabIds.has(candidate.id)
       ) {
         continue
       }
