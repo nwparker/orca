@@ -165,7 +165,7 @@ async function main() {
       // Plain Node: no ELECTRON_RUN_AS_NODE. process.execPath is already node in
       // CI, and this is exactly the runtime where a leaked `require("electron")`
       // throws MODULE_NOT_FOUND — the failure this smoke exists to catch.
-      stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
+      stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
       env: { ...process.env, ORCA_USER_DATA_PATH: userDataDir }
     }
   )
@@ -173,9 +173,6 @@ async function main() {
   let stderr = ''
   child.stderr?.on('data', (chunk) => {
     stderr += chunk.toString('utf8')
-  })
-  child.stdout?.on('data', (chunk) => {
-    process.stdout.write(chunk)
   })
 
   const cleanup = () => {
@@ -228,7 +225,8 @@ async function main() {
       throw new Error('daemon readiness did not publish the expected PID ownership record')
     }
     log('PID ownership record matches the ready daemon')
-    // Production releases startup IPC after ready; keeping it open can pin the child on Windows.
+    // Production releases startup-only handles after ready; they can pin the child on Windows.
+    child.stderr?.destroy()
     child.disconnect()
 
     const ptyHealthy = await runPtySpawnHealthCheck(socketPath, tokenPath, protocolVersion)
