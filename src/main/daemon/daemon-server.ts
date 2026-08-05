@@ -48,6 +48,7 @@ export type DaemonServerOptions = {
   /** Direct-construction seam for protocol fixture tests; production never overrides it. */
   protocolVersion?: number
   onIdleShutdown?: () => void
+  onRpcShutdown?: () => void
   /** Direct-construction-only controls; production uses the compiled initial-adoption timeout. */
   initialAdoptionTestConfig?: {
     timeoutMs: number
@@ -107,6 +108,7 @@ export class DaemonServer {
   private publishEndpointOwnership: () => void
   private protocolVersion: number
   private onIdleShutdown: () => void
+  private onRpcShutdown: () => void
   private onAuthenticatedClientPair: () => void
   private ptySpawnHealthCheck: () => Promise<void>
   private preparePtySpawn: () => Promise<void>
@@ -177,6 +179,7 @@ export class DaemonServer {
         : null)
     this.publishEndpointOwnership = opts.publishEndpointOwnership ?? (() => {})
     this.onIdleShutdown = opts.onIdleShutdown ?? (() => {})
+    this.onRpcShutdown = opts.onRpcShutdown ?? (() => {})
     this.initialAdoptionTimeoutMs =
       opts.initialAdoptionTestConfig?.timeoutMs ?? DaemonServer.INITIAL_ADOPTION_TIMEOUT_MS
     this.lifecycleClock = opts.initialAdoptionTestConfig?.clock ?? {
@@ -270,6 +273,11 @@ export class DaemonServer {
     this.unlinkOwnedEndpointArtifacts()
     await this.disposeDaemonResources()
     await serverClose
+  }
+
+  private async finishRpcShutdown(serverClose: Promise<void>): Promise<void> {
+    await this.finishOrdinaryShutdown(serverClose)
+    this.onRpcShutdown()
   }
 
   private unlinkOwnedEndpointArtifacts(): void {
@@ -1090,10 +1098,10 @@ export class DaemonServer {
         const controlSocket = this.clients.get(clientId)?.controlSocket
         if (controlSocket) {
           this.deferShutdownUntilReply(clientId, request.id, controlSocket, () =>
-            this.finishOrdinaryShutdown(serverClose)
+            this.finishRpcShutdown(serverClose)
           )
         } else if (!this.shutdownPromise) {
-          this.shutdownPromise = this.finishOrdinaryShutdown(serverClose)
+          this.shutdownPromise = this.finishRpcShutdown(serverClose)
         }
         return {}
       }

@@ -16,6 +16,7 @@ export type DaemonStartOptions = {
   onAuthenticatedClientPair?: DaemonServerOptions['onAuthenticatedClientPair']
   log?: DaemonFileLog
   onIdleShutdown?: () => void
+  onRpcShutdown?: () => void
   initialAdoptionTestConfig?: DaemonServerOptions['initialAdoptionTestConfig']
 }
 
@@ -42,6 +43,7 @@ export async function startDaemon(opts: DaemonStartOptions): Promise<DaemonHandl
       : {}),
     ...(opts.log ? { log: opts.log } : {}),
     ...(opts.onIdleShutdown ? { onIdleShutdown: opts.onIdleShutdown } : {}),
+    ...(opts.onRpcShutdown ? { onRpcShutdown: opts.onRpcShutdown } : {}),
     ...(opts.initialAdoptionTestConfig
       ? { initialAdoptionTestConfig: opts.initialAdoptionTestConfig }
       : {})

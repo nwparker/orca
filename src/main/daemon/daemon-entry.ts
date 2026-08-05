@@ -293,6 +293,12 @@ async function main(): Promise<void> {
       daemonLog.log('shutdown', { reason: 'idle' })
       daemonLog.close()
       process.exit(0)
+    },
+    onRpcShutdown: () => {
+      deathWatch?.stop()
+      shuttingDown = true
+      daemonLog.close()
+      process.exit(0)
     }
   })
   deathWatch?.start()
