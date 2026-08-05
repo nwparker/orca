@@ -654,6 +654,9 @@ function createOutOfProcessLauncher(
             )
             return
           }
+          if (Number.isSafeInteger(child.pid) && (child.pid as number) > 0) {
+            unlinkOwnedDaemonPidFile(pidPath, child.pid as number, launchNonce)
+          }
           reject(startupError)
         }
         function onReadyMessage(msg: unknown): void {

@@ -1,5 +1,9 @@
 import { fork, type ChildProcess } from 'node:child_process'
-import type { DaemonLauncher, DaemonProcessHandle } from './daemon-spawner'
+import {
+  unlinkOwnedDaemonPidFile,
+  type DaemonLauncher,
+  type DaemonProcessHandle
+} from './daemon-spawner'
 import { parseDaemonReadyIdentity, type DaemonReadyIdentity } from './daemon-ready-identity'
 
 const READY_TIMEOUT_MS = 10_000
@@ -57,10 +61,15 @@ export function createProductionLauncher(opts: ProductionLauncherOptions): Daemo
     try {
       await waitForReady(child)
     } catch (error) {
-      return rejectAfterChildCleanup(child, error)
+      return rejectAfterChildCleanup(child, error, pidPath, launchNonce)
     }
     if (!Number.isSafeInteger(child.pid) || (child.pid as number) <= 0) {
-      return rejectAfterChildCleanup(child, new Error('Daemon readiness identity is incomplete'))
+      return rejectAfterChildCleanup(
+        child,
+        new Error('Daemon readiness identity is incomplete'),
+        pidPath,
+        launchNonce
+      )
     }
 
     // Unref so the Electron process can exit without waiting for the daemon
@@ -68,7 +77,10 @@ export function createProductionLauncher(opts: ProductionLauncherOptions): Daemo
     child.disconnect()
 
     return {
-      shutdown: () => shutdownChild(child)
+      shutdown: async () => {
+        await shutdownChild(child)
+        unlinkLaunchedDaemonPidFile(child, pidPath, launchNonce)
+      }
     }
   }
 }
@@ -197,7 +209,12 @@ async function shutdownChild(child: ChildProcess): Promise<void> {
   }
 }
 
-async function rejectAfterChildCleanup(child: ChildProcess, launchError: unknown): Promise<never> {
+async function rejectAfterChildCleanup(
+  child: ChildProcess,
+  launchError: unknown,
+  pidPath?: string,
+  launchNonce?: string
+): Promise<never> {
   try {
     await shutdownChild(child)
   } catch (cleanupError) {
@@ -206,7 +223,18 @@ async function rejectAfterChildCleanup(child: ChildProcess, launchError: unknown
       'Daemon launch and child cleanup both failed'
     )
   }
+  unlinkLaunchedDaemonPidFile(child, pidPath, launchNonce)
   throw launchError
+}
+
+function unlinkLaunchedDaemonPidFile(
+  child: ChildProcess,
+  pidPath?: string,
+  launchNonce?: string
+): void {
+  if (pidPath && launchNonce && Number.isSafeInteger(child.pid) && (child.pid as number) > 0) {
+    unlinkOwnedDaemonPidFile(pidPath, child.pid as number, launchNonce)
+  }
 }
 
 function isNoSuchProcessError(error: unknown): boolean {

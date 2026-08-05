@@ -2125,6 +2125,7 @@ describe('daemon-init: runRestartDaemon (7-step sequence)', () => {
       expect(kill).toHaveBeenNthCalledWith(2, 12345, 'SIGKILL')
       expect(child.disconnect).toHaveBeenCalledOnce()
       expect(child.unref).toHaveBeenCalledOnce()
+      expect(unlinkOwnedDaemonPidFileMock).not.toHaveBeenCalled()
     } finally {
       kill.mockRestore()
       vi.useRealTimers()
@@ -2328,7 +2329,9 @@ describe('daemon-init: runRestartDaemon (7-step sequence)', () => {
 
     const launcher = spawnerInstances[0].launcher as (
       socketPath: string,
-      tokenPath: string
+      tokenPath: string,
+      pidPath?: string,
+      launchNonce?: string
     ) => Promise<{ shutdown(): Promise<void> }>
     const handlers: Record<string, ((arg?: unknown) => void)[]> = {
       message: [],
@@ -2382,11 +2385,21 @@ describe('daemon-init: runRestartDaemon (7-step sequence)', () => {
     }
     forkMock.mockReturnValueOnce(child)
 
-    const error = await launcher('/fake/socket', '/fake/token').catch((err: Error) => err)
+    const error = await launcher(
+      '/fake/socket',
+      '/fake/token',
+      '/fake/daemon.pid',
+      'failed-launch'
+    ).catch((err: Error) => err)
 
     expect(error).toBeInstanceOf(Error)
     expect((error as Error).message).toMatch(/Cannot find module 'electron'/)
     expect((error as Error).message).toMatch(/Daemon stderr \(tail\)/)
+    expect(unlinkOwnedDaemonPidFileMock).toHaveBeenCalledWith(
+      '/fake/daemon.pid',
+      4321,
+      'failed-launch'
+    )
     // Why: release the piped stderr so the detached daemon can't keep the parent event loop alive after failure.
     expect(stderrDestroy).toHaveBeenCalled()
   })
