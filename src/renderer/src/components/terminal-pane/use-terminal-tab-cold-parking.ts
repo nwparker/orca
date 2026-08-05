@@ -21,6 +21,7 @@ import {
   type TerminalTabColdParkCandidate
 } from './terminal-hidden-view-parking'
 import {
+  getParkVerdictUnparkPinUntilMs,
   recordParkVerdictFlips,
   type ParkVerdictFlipRecord
 } from './terminal-park-verdict-flip-telemetry'
@@ -212,9 +213,22 @@ export function useTerminalTabColdParking(args: {
     // Why: a tab the byte watchers cannot cover (no capture, no layout
     // snapshot, legacy leaf ids) must never park — it would go silent for
     // bells/titles/completions, the failure that sank the first attempt.
+    // Why: any endogenous eligibility churn settles on the safe mounted side.
+    const parkVerdictPinUntilMsByTabId = new Map<string, number>()
     for (const terminalTab of terminalTabs) {
+      if (!nextColdParkedTerminalTabIds.has(terminalTab.id)) {
+        continue
+      }
+      const parkVerdictPinUntilMs = getParkVerdictUnparkPinUntilMs({
+        records: parkVerdictRecordsRef.current,
+        tabId: terminalTab.id,
+        nowMs
+      })
+      if (parkVerdictPinUntilMs !== null) {
+        parkVerdictPinUntilMsByTabId.set(terminalTab.id, parkVerdictPinUntilMs)
+      }
       if (
-        nextColdParkedTerminalTabIds.has(terminalTab.id) &&
+        parkVerdictPinUntilMs !== null ||
         !canWatcherCoverParkedTerminalTab(worktreeId, terminalTab)
       ) {
         nextColdParkedTerminalTabIds.delete(terminalTab.id)
@@ -238,6 +252,8 @@ export function useTerminalTabColdParking(args: {
         parkingEnabled: terminalParkingEnabled,
         hiddenSinceMs: candidate.hiddenSinceMs,
         parkCooldownUntilMs: measureParkCooldownUntilRef.current,
+        // Why: pin expiry may be the only remaining wakeup after damping stops churn.
+        parkVerdictPinUntilMs: parkVerdictPinUntilMsByTabId.get(candidate.id) ?? null,
         nowMs,
         ...overrides
       })

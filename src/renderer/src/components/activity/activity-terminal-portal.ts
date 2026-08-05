@@ -18,6 +18,29 @@ let currentTargets: ActivityTerminalPortalTarget[] = []
 const emptyTargets: ActivityTerminalPortalTarget[] = []
 const subscribers = new Set<() => void>()
 
+function haveSameActivityTerminalPortals(
+  left: readonly ActivityTerminalPortalTarget[],
+  right: readonly ActivityTerminalPortalTarget[]
+): boolean {
+  return (
+    left.length === right.length &&
+    left.every((target, index) => {
+      const candidate = right[index]
+      return (
+        candidate !== undefined &&
+        target.slotId === candidate.slotId &&
+        target.requestToken === candidate.requestToken &&
+        target.target === candidate.target &&
+        target.worktreeId === candidate.worktreeId &&
+        target.tabId === candidate.tabId &&
+        target.paneKey === candidate.paneKey &&
+        target.forceUnavailable === candidate.forceUnavailable &&
+        target.active === candidate.active
+      )
+    })
+  )
+}
+
 // Why: the portal target is published with its {worktreeId, tabId} already
 // attached so consumers don't have to derive routing from the global
 // activeTabId/activeWorktreeId. The activity page knows which agent pane it
@@ -26,7 +49,8 @@ const subscribers = new Set<() => void>()
 // portaling a different terminal into the activity slot ("flash" of the wrong
 // terminal for a few ms).
 export function setActivityTerminalPortals(targets: ActivityTerminalPortalTarget[]): void {
-  if (currentTargets === targets) {
+  // Why: semantic no-ops must not synchronously bounce through Terminal and back into Activity.
+  if (currentTargets === targets || haveSameActivityTerminalPortals(currentTargets, targets)) {
     return
   }
   currentTargets = targets
