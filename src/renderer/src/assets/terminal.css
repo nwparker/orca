@@ -6,11 +6,16 @@
   position: relative;
 }
 
+/* Why: .pane-manager-root matches no live element, so a var declared there
+   never resolves and every calc() using it is dropped. Keep it on :root. */
+:root {
+  --orca-terminal-link-tooltip-height: 25px;
+}
+
 /* Ensure pane manager root fills its absolutely-positioned container */
 .pane-manager-root {
   width: 100% !important;
   height: 100% !important;
-  --orca-terminal-link-tooltip-height: 25px;
 }
 
 /* Reset the global border/outline base rule inside terminal panes */
@@ -501,7 +506,7 @@
   box-sizing: border-box;
   position: relative;
   width: calc(100% - var(--pane-padding-x, 4px));
-  height: calc(100% - var(--pane-padding-y, 4px) - var(--orca-terminal-link-tooltip-height));
+  height: calc(100% - var(--pane-padding-y, 4px) - var(--orca-terminal-link-tooltip-height, 25px));
   margin-top: var(--pane-padding-y, 4px);
   margin-left: var(--pane-padding-x, 4px);
 }
@@ -513,7 +518,7 @@
 .pane[data-has-title] .xterm-container {
   margin-top: var(--orca-pane-title-height);
   height: calc(
-    100% - var(--orca-pane-title-height) - var(--orca-terminal-link-tooltip-height)
+    100% - var(--orca-pane-title-height) - var(--orca-terminal-link-tooltip-height, 25px)
   ); /* match margin-top and the tooltip reserve */
 }
 

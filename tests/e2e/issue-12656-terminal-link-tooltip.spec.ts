@@ -161,8 +161,14 @@ test.describe('Issue #12656 terminal link tooltip', () => {
     expect(hovered.text).toContain(url)
     expect(hovered.tooltipHeight).toBeGreaterThan(0)
     expect(hovered.tooltipTop).toBeGreaterThanOrEqual(hovered.terminalBottom - 1)
+    // Why: bound the gap on both sides. A lower bound alone also passes when the
+    // reserve var fails to resolve and .xterm-container collapses to height:auto,
+    // which leaves a huge gap and an undersized terminal.
     expect(hovered.paneBottom - hovered.terminalBottom).toBeGreaterThanOrEqual(
       hovered.reserveHeight - 1
+    )
+    expect(hovered.paneBottom - hovered.terminalBottom).toBeLessThanOrEqual(
+      hovered.reserveHeight + 1
     )
     await captureProof(orcaPage, testInfo, 'issue-12656-fixed-hover.png')
 

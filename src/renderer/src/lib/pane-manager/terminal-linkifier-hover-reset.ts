@@ -38,8 +38,14 @@ export function resetTerminalLinkifierHoverState(terminal: Terminal): void {
   try {
     const linkifier = (terminal as unknown as TerminalCoreWithLinkifier)._core?.linkifier
     // Why: window blur can strand xterm's active link without another mouse
-    // event, so invoke its own leave path before invalidating the cache.
-    linkifier?._clearCurrentLink?.()
+    // event, so invoke its own leave path before invalidating the cache. Its
+    // own try: this runs provider leave() callbacks, and a throwing one must
+    // not skip the cache invalidation below.
+    try {
+      linkifier?._clearCurrentLink?.()
+    } catch {
+      /* provider leave() threw — cache invalidation below still applies */
+    }
     if (linkifier && '_currentLink' in linkifier) {
       linkifier._currentLink = undefined
     }
