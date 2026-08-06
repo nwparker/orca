@@ -492,6 +492,114 @@ describe('killStaleDaemon endpoint reclamation', () => {
     })
   }
 
+  it('does not unlink an endpoint republished between the probe and the removal', async () => {
+    if (process.platform === 'win32') {
+      return
+    }
+    // Why: probe and unlink are separate syscalls. A replacement publishing in between used
+    // to lose its only reachable name, leaving it alive hosting sessions nothing could reach.
+    writeFileSync(getDaemonPidPath(dir), String(999_999), { mode: 0o600 })
+    // A dead socket inode: bind elsewhere, hard-link into place, then close. libuv unlinks
+    // only its own bind name, leaving a socket whose listener is gone -> probe says 'refused'.
+    const stale = createServer()
+    const staleBind = join(dir, '.stalebind')
+    await listenOnSocketPath(stale, staleBind)
+    linkSync(staleBind, socketPath)
+    await closeServer(stale)
+    rmSync(staleBind, { force: true })
+
+    const replacement = createServer((socket) => socket.end())
+    let replacementBind = ''
+    try {
+      await killStaleDaemon(dir, socketPath, tokenPath, undefined, async () => {
+        // Daemon B publishes after the probe read 'refused' but before the unlink.
+        rmSync(socketPath, { force: true })
+        replacementBind = join(dir, '.replacement')
+        await listenOnSocketPath(replacement, replacementBind)
+        linkSync(replacementBind, socketPath)
+        rmSync(replacementBind, { force: true })
+      })
+
+      expect(existsSync(socketPath)).toBe(true)
+      await expect(canConnect(socketPath)).resolves.toBe(true)
+    } finally {
+      await closeServer(replacement)
+      rmSync(socketPath, { force: true })
+    }
+  })
+
+  it('preserves ownership when neither the process nor the endpoint can be judged', async () => {
+    if (process.platform === 'win32') {
+      return
+    }
+    // Why: two inconclusive signals are not a licence. A failed inspection plus a probe that
+    // cannot classify the endpoint used to delete a live daemon's record and authorize a fork.
+    const record = serializeDaemonPidFile({
+      pid: process.pid,
+      startedAtMs: null,
+      launchNonce: 'live-owner'
+    })
+    writeFileSync(getDaemonPidPath(dir), record, { mode: 0o600 })
+    // A regular file at the endpoint path yields ENOTSOCK — neither refused nor missing.
+    writeFileSync(socketPath, 'not-a-socket')
+    processInspection.broken = true
+
+    try {
+      await expect(killStaleDaemon(dir, socketPath, tokenPath)).resolves.toEqual({
+        killed: false,
+        liveOwnerSurvived: true
+      })
+      expect(readFileSync(getDaemonPidPath(dir), 'utf8')).toBe(record)
+      expect(existsSync(socketPath)).toBe(true)
+    } finally {
+      processInspection.broken = false
+      rmSync(socketPath, { force: true })
+    }
+  })
+
+  it('preserves ownership when the owner belongs to another user (EPERM)', async () => {
+    if (process.platform === 'win32') {
+      return
+    }
+    // Why: only ESRCH proves a process is gone. EPERM means it exists and is not ours to
+    // inspect — treating that as absence deleted a live daemon's ownership record.
+    const owner = createServer((socket) => socket.end())
+    await listenOnSocketPath(owner, socketPath)
+    const record = serializeDaemonPidFile({
+      pid: process.pid,
+      startedAtMs: null,
+      launchNonce: 'foreign-owner'
+    })
+    writeFileSync(getDaemonPidPath(dir), record, { mode: 0o600 })
+    const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => {
+      throw Object.assign(new Error('operation not permitted'), { code: 'EPERM' })
+    })
+
+    try {
+      await expect(killStaleDaemon(dir, socketPath, tokenPath)).resolves.toEqual({
+        killed: false,
+        liveOwnerSurvived: true
+      })
+      expect(readFileSync(getDaemonPidPath(dir), 'utf8')).toBe(record)
+    } finally {
+      killSpy.mockRestore()
+      await closeServer(owner)
+    }
+  })
+
+  it('still cleans up a legacy bare-integer pid record', async () => {
+    if (process.platform === 'win32') {
+      return
+    }
+    // Why: the oldest records are a bare integer. Fencing cleanup to JSON objects left them
+    // in place, and the replacement's exclusive publish then failed — no daemon at all.
+    writeFileSync(getDaemonPidPath(dir), String(999_999), { mode: 0o600 })
+
+    await killStaleDaemon(dir, socketPath, tokenPath)
+
+    expect(existsSync(getDaemonPidPath(dir))).toBe(false)
+  })
+
   it("leaves a replacement's pid record and endpoint alone when cleanup runs late", async () => {
     if (process.platform === 'win32') {
       return

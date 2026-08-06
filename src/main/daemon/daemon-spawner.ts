@@ -180,16 +180,23 @@ export function unlinkOwnedDaemonPidFile(
 ): boolean {
   return claimAndUnlinkOwnedFile(pidPath, (content) => {
     try {
-      const parsed = JSON.parse(content) as {
-        pid?: unknown
-        launchNonce?: unknown
+      const parsed: unknown = JSON.parse(content.trim())
+      // Why: the oldest records are a bare integer, not an object. Rejecting them left the
+      // file in place, and the replacement's exclusive publish then failed with EEXIST —
+      // trading a stale record for a daemon that cannot start at all.
+      if (typeof parsed === 'number') {
+        return expectedLaunchNonce === null && parsed === expectedPid
       }
-      if (parsed.pid !== expectedPid) {
+      if (!parsed || typeof parsed !== 'object') {
+        return false
+      }
+      const record = parsed as { pid?: unknown; launchNonce?: unknown }
+      if (record.pid !== expectedPid) {
         return false
       }
       return expectedLaunchNonce === null
-        ? parsed.launchNonce === undefined || parsed.launchNonce === null
-        : parsed.launchNonce === expectedLaunchNonce
+        ? record.launchNonce === undefined || record.launchNonce === null
+        : record.launchNonce === expectedLaunchNonce
     } catch {
       return false
     }

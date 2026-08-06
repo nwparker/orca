@@ -1,7 +1,7 @@
 /* oxlint-disable max-lines -- Why: pid validation shares process-identity
 helpers with kill escalation so the SIGKILL safety checks stay co-located. */
 import { execFile, execFileSync } from 'node:child_process'
-import { existsSync, readFileSync, unlinkSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { connect, type Socket } from 'node:net'
 import { promisify } from 'node:util'
 import {
@@ -11,6 +11,7 @@ import {
 import { isStartupDiagnosticsEnabled, logStartupDiagnostic } from '../startup/startup-diagnostics'
 import { encodeNdjson } from './ndjson'
 import { getDaemonPidPath, unlinkOwnedDaemonPidFile } from './daemon-spawner'
+import { readDaemonSocketIdentity, unlinkOwnedDaemonSocketPath } from './daemon-endpoint-ownership'
 import {
   PROTOCOL_VERSION,
   type HelloMessage,
@@ -569,9 +570,10 @@ async function inspectDaemonProcessIdentity(
 ): Promise<DaemonProcessIdentity> {
   try {
     process.kill(pid, 0)
-  } catch {
-    // Why: the process is gone. That is positive evidence, not a failed inspection.
-    return 'mismatch'
+  } catch (error) {
+    // Why: only ESRCH proves the process is gone. EPERM means it exists and belongs to
+    // another user — reading that as absence deletes a live daemon's ownership.
+    return isNoSuchProcessError(error) ? 'mismatch' : 'unknown'
   }
 
   const verdict = (matches: boolean): DaemonProcessIdentity => (matches ? 'match' : 'mismatch')
@@ -760,6 +762,12 @@ async function waitForProcessExit(pid: number, timeoutMs: number): Promise<boole
   }
 }
 
+/** Positive proof that nothing is serving the endpoint. A timed-out probe proves nothing. */
+async function endpointIsProvenDead(socketPath: string): Promise<boolean> {
+  const outcome = await probeSocketConnect(socketPath)
+  return outcome === 'refused' || outcome === 'missing'
+}
+
 export type StaleDaemonKillOutcome = {
   /** A daemon was positively confirmed gone. Drives replacement telemetry. */
   killed: boolean
@@ -775,7 +783,9 @@ export async function killStaleDaemon(
   runtimeDir: string,
   socketPath: string,
   tokenPath: string,
-  protocolVersion = PROTOCOL_VERSION
+  protocolVersion = PROTOCOL_VERSION,
+  /** Direct-construction-only seam: lets a test interleave a replacement publish. */
+  afterEndpointProbe?: () => Promise<void>
 ): Promise<StaleDaemonKillOutcome> {
   const pidPath = getDaemonPidPath(runtimeDir, protocolVersion)
   let killedDaemon = false
@@ -795,16 +805,15 @@ export async function killStaleDaemon(
           parsedPid.startedAtMs
         )
       : 'mismatch'
-    if (parsedPid && identity === 'unknown') {
+    if (parsedPid && identity === 'unknown' && !(await endpointIsProvenDead(socketPath))) {
       // Why: the inspection failed, which is not evidence that this PID is someone else's.
-      // The endpoint is the tiebreaker — if something still answers, a daemon is alive and
-      // its ownership must survive, or we fork a replacement onto a live endpoint.
-      if ((await probeSocketConnect(socketPath)) === 'connected') {
-        console.warn(
-          '[daemon] Preserving daemon that could not be inspected: reason=identity_probe_failed'
-        )
-        return { killed: false, liveOwnerSurvived: true }
-      }
+      // The endpoint is the tiebreaker, and it only settles the question when it positively
+      // proves nothing is serving. A probe that merely timed out is not proof either, so
+      // two inconclusive signals must preserve ownership rather than combine into a licence.
+      console.warn(
+        '[daemon] Preserving daemon that could not be inspected: reason=identity_probe_failed'
+      )
+      return { killed: false, liveOwnerSurvived: true }
     }
     if (parsedPid && identity === 'match') {
       const { pid, startedAtMs } = parsedPid
@@ -834,21 +843,23 @@ export async function killStaleDaemon(
         // window is long enough for the pid to be recycled if the original
         // daemon died during the wait. Without this, we'd SIGKILL an unrelated
         // process that happens to now own the same pid.
-        if (
-          (await inspectDaemonProcessIdentity(pid, socketPath, tokenPath, startedAtMs)) !== 'match'
-        ) {
-          // Why: a failed identity probe has two causes with opposite correct actions —
-          // the pid really was recycled (daemon dead, reclaim the endpoint), or the probe
-          // itself failed under load (`ps` has a 2s timeout). The endpoint settles it: if
-          // something still answers the socket, a daemon is alive and must be preserved.
-          if ((await probeSocketConnect(socketPath)) === 'connected') {
+        const recheck = await inspectDaemonProcessIdentity(pid, socketPath, tokenPath, startedAtMs)
+        if (recheck === 'mismatch') {
+          // Why: the pid provably no longer belongs to our daemon, so it is gone regardless
+          // of what the endpoint says.
+          console.warn('[daemon] Skipping SIGKILL for stale daemon: reason=pid_recycled')
+          exited = true
+        } else if (recheck === 'unknown') {
+          // Why: the inspection failed under load. Only an endpoint that proves nothing is
+          // serving may license reclaiming — a timed-out probe is not a second opinion.
+          if (await endpointIsProvenDead(socketPath)) {
+            console.warn('[daemon] Skipping SIGKILL for stale daemon: reason=pid_recycled')
+            exited = true
+          } else {
             console.warn(
               '[daemon] Preserving daemon that could not be identified: reason=identity_probe_failed'
             )
             liveOwnerSurvived = true
-          } else {
-            console.warn('[daemon] Skipping SIGKILL for stale daemon: reason=pid_recycled')
-            exited = true
           }
         } else {
           try {
@@ -890,17 +901,16 @@ export async function killStaleDaemon(
     unlinkOwnedDaemonPidFile(pidPath, recordedOwner.pid, recordedOwner.launchNonce)
   }
 
+  // Why: capture the endpoint we are about to judge, then remove only that exact entry. The
+  // probe and the unlink are separate syscalls, so a replacement can publish in between —
+  // an unfenced unlink then deletes the live replacement's only reachable name.
+  const doomedEndpoint = readDaemonSocketIdentity(socketPath)
   const socketOutcome = await probeSocketConnect(socketPath)
   // Why: only positive evidence of a dead endpoint authorizes reclaiming the name — and
-  // having killed the previous owner is not that evidence. A replacement can bind between
-  // the kill and this probe, and unlinking a live endpoint strands the daemon behind it.
-  const endpointIsReclaimable = socketOutcome === 'refused' || socketOutcome === 'missing'
-  if (process.platform !== 'win32' && existsSync(socketPath) && endpointIsReclaimable) {
-    try {
-      unlinkSync(socketPath)
-    } catch {
-      // Best-effort
-    }
+  // having killed the previous owner is not that evidence.
+  if (socketOutcome === 'refused' || socketOutcome === 'missing') {
+    await afterEndpointProbe?.()
+    unlinkOwnedDaemonSocketPath(socketPath, doomedEndpoint)
   }
   return { killed: killedDaemon, liveOwnerSurvived }
 }
