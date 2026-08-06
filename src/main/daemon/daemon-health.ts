@@ -60,7 +60,7 @@ export type ParsedDaemonPid = {
  * name is safe to reclaim. 'unknown' — the probe itself failed (timeout on a loaded host,
  * EPERM); the endpoint must be left alone because absence of proof is not proof of death.
  */
-type SocketProbeOutcome = 'connected' | 'missing' | 'refused' | 'unknown'
+export type SocketProbeOutcome = 'connected' | 'missing' | 'refused' | 'unknown'
 
 function probeSocketConnect(socketPath: string): Promise<SocketProbeOutcome> {
   return new Promise((resolve) => {
@@ -762,9 +762,18 @@ async function waitForProcessExit(pid: number, timeoutMs: number): Promise<boole
   }
 }
 
+/**
+ * Direct-construction-only seam. Which errno a non-socket path yields is platform-specific
+ * (macOS ENOTSOCK vs Linux refused), so the decision rule below cannot be driven portably
+ * through real syscalls. The probe itself is covered separately; this injects its verdict.
+ */
+export type StaleDaemonKillTestHooks = {
+  probeEndpoint?: (socketPath: string) => Promise<SocketProbeOutcome>
+  afterEndpointProbe?: () => Promise<void>
+}
+
 /** Positive proof that nothing is serving the endpoint. A timed-out probe proves nothing. */
-async function endpointIsProvenDead(socketPath: string): Promise<boolean> {
-  const outcome = await probeSocketConnect(socketPath)
+function endpointIsProvenDead(outcome: SocketProbeOutcome): boolean {
   return outcome === 'refused' || outcome === 'missing'
 }
 
@@ -784,9 +793,9 @@ export async function killStaleDaemon(
   socketPath: string,
   tokenPath: string,
   protocolVersion = PROTOCOL_VERSION,
-  /** Direct-construction-only seam: lets a test interleave a replacement publish. */
-  afterEndpointProbe?: () => Promise<void>
+  testHooks?: StaleDaemonKillTestHooks
 ): Promise<StaleDaemonKillOutcome> {
+  const probeEndpoint = testHooks?.probeEndpoint ?? probeSocketConnect
   const pidPath = getDaemonPidPath(runtimeDir, protocolVersion)
   let killedDaemon = false
   let liveOwnerSurvived = false
@@ -805,7 +814,11 @@ export async function killStaleDaemon(
           parsedPid.startedAtMs
         )
       : 'mismatch'
-    if (parsedPid && identity === 'unknown' && !(await endpointIsProvenDead(socketPath))) {
+    if (
+      parsedPid &&
+      identity === 'unknown' &&
+      !endpointIsProvenDead(await probeEndpoint(socketPath))
+    ) {
       // Why: the inspection failed, which is not evidence that this PID is someone else's.
       // The endpoint is the tiebreaker, and it only settles the question when it positively
       // proves nothing is serving. A probe that merely timed out is not proof either, so
@@ -852,7 +865,7 @@ export async function killStaleDaemon(
         } else if (recheck === 'unknown') {
           // Why: the inspection failed under load. Only an endpoint that proves nothing is
           // serving may license reclaiming — a timed-out probe is not a second opinion.
-          if (await endpointIsProvenDead(socketPath)) {
+          if (endpointIsProvenDead(await probeEndpoint(socketPath))) {
             console.warn('[daemon] Skipping SIGKILL for stale daemon: reason=pid_recycled')
             exited = true
           } else {
@@ -905,11 +918,11 @@ export async function killStaleDaemon(
   // probe and the unlink are separate syscalls, so a replacement can publish in between —
   // an unfenced unlink then deletes the live replacement's only reachable name.
   const doomedEndpoint = readDaemonSocketIdentity(socketPath)
-  const socketOutcome = await probeSocketConnect(socketPath)
+  const socketOutcome = await probeEndpoint(socketPath)
   // Why: only positive evidence of a dead endpoint authorizes reclaiming the name — and
   // having killed the previous owner is not that evidence.
-  if (socketOutcome === 'refused' || socketOutcome === 'missing') {
-    await afterEndpointProbe?.()
+  if (endpointIsProvenDead(socketOutcome)) {
+    await testHooks?.afterEndpointProbe?.()
     unlinkOwnedDaemonSocketPath(socketPath, doomedEndpoint)
   }
   return { killed: killedDaemon, liveOwnerSurvived }

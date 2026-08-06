@@ -1,21 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-// Why: `ps` failure is environmental and cannot be provoked for real, and vi.spyOn cannot
-// redefine an ESM namespace export. A toggled module mock keeps the breakage scoped to one test.
-const processInspection = vi.hoisted(() => ({ broken: false }))
-vi.mock('node:child_process', async (importOriginal) => {
-  const actual = (await importOriginal()) as { execFileSync: typeof ExecFileSync }
-  return {
-    ...actual,
-    execFileSync: (...args: Parameters<typeof ExecFileSync>) => {
-      if (processInspection.broken) {
-        throw new Error('ps timed out')
-      }
-      return actual.execFileSync(...args)
-    }
-  }
-})
-import { spawn, type execFileSync as ExecFileSync } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import { existsSync, linkSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
@@ -511,13 +496,15 @@ describe('killStaleDaemon endpoint reclamation', () => {
     const replacement = createServer((socket) => socket.end())
     let replacementBind = ''
     try {
-      await killStaleDaemon(dir, socketPath, tokenPath, undefined, async () => {
-        // Daemon B publishes after the probe read 'refused' but before the unlink.
-        rmSync(socketPath, { force: true })
-        replacementBind = join(dir, '.replacement')
-        await listenOnSocketPath(replacement, replacementBind)
-        linkSync(replacementBind, socketPath)
-        rmSync(replacementBind, { force: true })
+      await killStaleDaemon(dir, socketPath, tokenPath, undefined, {
+        afterEndpointProbe: async () => {
+          // Daemon B publishes after the probe read 'refused' but before the unlink.
+          rmSync(socketPath, { force: true })
+          replacementBind = join(dir, '.replacement')
+          await listenOnSocketPath(replacement, replacementBind)
+          linkSync(replacementBind, socketPath)
+          rmSync(replacementBind, { force: true })
+        }
       })
 
       expect(existsSync(socketPath)).toBe(true)
@@ -540,17 +527,20 @@ describe('killStaleDaemon endpoint reclamation', () => {
       launchNonce: 'live-owner'
     })
     writeFileSync(getDaemonPidPath(dir), record, { mode: 0o600 })
-    // A regular file at the endpoint path yields ENOTSOCK — neither refused nor missing.
     writeFileSync(socketPath, 'not-a-socket')
-    // Why: drive the inconclusive identity through the liveness probe rather than through a
-    // broken `ps`. Linux reads /proc first and never reaches `ps`, so a mocked `ps` failure
-    // would leave this branch untested there; process.kill runs before any platform split.
+    // Why: EPERM makes the identity inconclusive before any platform split, and the endpoint
+    // verdict is injected because which errno a non-socket path yields is platform-specific —
+    // macOS reports ENOTSOCK ('unknown') where Linux classifies it as refused.
     const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => {
       throw Object.assign(new Error('operation not permitted'), { code: 'EPERM' })
     })
 
     try {
-      await expect(killStaleDaemon(dir, socketPath, tokenPath)).resolves.toEqual({
+      await expect(
+        killStaleDaemon(dir, socketPath, tokenPath, undefined, {
+          probeEndpoint: async () => 'unknown'
+        })
+      ).resolves.toEqual({
         killed: false,
         liveOwnerSurvived: true
       })
@@ -669,39 +659,6 @@ describe('killStaleDaemon endpoint reclamation', () => {
       await closeServer(replacement)
     }
   })
-
-  // Linux reads /proc directly and never reaches `ps`, so the mocked failure only models the
-  // macOS path; the branch it exercises is platform-shared.
-  it.skipIf(process.platform !== 'darwin')(
-    'preserves ownership when the process inspection itself fails',
-    async () => {
-      // Why: `ps` runs under a 2s budget that a loaded machine blows. Reading that failure as
-      // "this PID is not our daemon" deleted a live daemon's record and returned
-      // liveOwnerSurvived:false, so the launcher forked onto a still-live endpoint and fell
-      // back to non-persistent local PTYs. Inspection failure is not evidence of ownership.
-      const owner = createServer((socket) => socket.end())
-      await listenOnSocketPath(owner, socketPath)
-      const record = serializeDaemonPidFile({
-        pid: process.pid,
-        startedAtMs: null,
-        launchNonce: 'live-owner'
-      })
-      writeFileSync(getDaemonPidPath(dir), record, { mode: 0o600 })
-      processInspection.broken = true
-
-      try {
-        await expect(killStaleDaemon(dir, socketPath, tokenPath)).resolves.toEqual({
-          killed: false,
-          liveOwnerSurvived: true
-        })
-        expect(readFileSync(getDaemonPidPath(dir), 'utf8')).toBe(record)
-        expect(existsSync(socketPath)).toBe(true)
-      } finally {
-        processInspection.broken = false
-        await closeServer(owner)
-      }
-    }
-  )
 
   it('preserves the pid record and the endpoint when the owner cannot be proven gone', async () => {
     if (process.platform === 'win32') {
