@@ -125,6 +125,69 @@ function isMissingFileError(error: unknown): boolean {
 }
 
 /**
+ * Reclaims a canonical endpoint name on behalf of a daemon that is not us.
+ *
+ * Why liveness rather than identity: the inode we meant to remove has already been freed, and
+ * Linux hands the same inode number straight back to the next socket — `birthtimeMs` is often
+ * unavailable there too, so identity can silently match a live replacement. What actually
+ * distinguishes a dead endpoint from a live one is whether anything answers it. Renaming
+ * claims the entry atomically first; connecting through the claimed name still reaches the
+ * original listener, because the binding is to the inode, not to the name.
+ */
+export async function reclaimDeadDaemonSocketPath(
+  socketPath: string,
+  isEndpointAlive: (path: string) => Promise<boolean>
+): Promise<boolean> {
+  if (process.platform === 'win32') {
+    return false
+  }
+  const claimedPath = join(dirname(socketPath), `.c${randomBytes(5).toString('hex')}`)
+  try {
+    renameSync(socketPath, claimedPath)
+  } catch {
+    return false
+  }
+  if (!(await isEndpointAlive(claimedPath))) {
+    try {
+      unlinkSync(claimedPath)
+      return true
+    } catch {
+      return false
+    }
+  }
+  // Something is serving it after all. Put it back and leave it alone.
+  restoreClaimedDaemonSocketPath(claimedPath, socketPath)
+  return false
+}
+
+/**
+ * Why the narrow predicate: only a confirmed EEXIST with a canonical entry present proves a
+ * replacement won the name. Any other failure means the restore did not happen, and dropping
+ * the claim then would destroy the endpoint rather than hand it over.
+ */
+function restoreClaimedDaemonSocketPath(claimedPath: string, socketPath: string): void {
+  try {
+    linkSync(claimedPath, socketPath)
+  } catch (error) {
+    if (!(isFileExistsError(error) && existsSync(socketPath))) {
+      // Restore failed and nobody replaced it — a rename cannot fail on an absent target,
+      // and keeping the claim on disk is better than deleting the only copy.
+      try {
+        renameSync(claimedPath, socketPath)
+      } catch {
+        // Leave the claim in place for the age-gated sweep rather than losing the endpoint.
+      }
+      return
+    }
+  }
+  try {
+    unlinkSync(claimedPath)
+  } catch {
+    // A uniquely named leftover is inert and is swept by age.
+  }
+}
+
+/**
  * Removes the canonical endpoint name only while it still resolves to our own listener.
  *
  * Why the rename: checking identity and then unlinking are two syscalls, and no amount of
@@ -141,37 +204,21 @@ export function unlinkOwnedDaemonSocketPath(
   if (process.platform === 'win32' || !owned) {
     return false
   }
-  const claimedPath = `${dirname(socketPath)}/.c${randomBytes(5).toString('hex')}`
-  try {
-    renameSync(socketPath, claimedPath)
-  } catch {
-    // Nothing at the canonical path, or we cannot claim it. Either way, not ours to remove.
+  // Safe here precisely because the caller still holds the socket open: a bound inode cannot
+  // be freed, so its number cannot be recycled under us the way a dead endpoint's can.
+  if (!daemonSocketIdentityMatches(readDaemonSocketIdentity(socketPath), owned)) {
     return false
   }
-  if (daemonSocketIdentityMatches(readDaemonSocketIdentity(claimedPath), owned)) {
-    try {
-      unlinkSync(claimedPath)
-      return true
-    } catch {
-      return false
-    }
-  }
-  // Not ours after all — put it back, unless a replacement already took the name.
   try {
-    linkSync(claimedPath, socketPath)
+    unlinkSync(socketPath)
+    return true
   } catch {
-    // EEXIST: a replacement published while we held the claim. Its entry is authoritative.
+    return false
   }
-  try {
-    unlinkSync(claimedPath)
-  } catch {
-    // A uniquely named leftover is inert and is swept by age.
-  }
-  return false
 }
 
 const ABANDONED_DAEMON_CLAIM_PATTERN =
-  /(?:\.(?:cleanup|replace)-\d+-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|^\.b[0-9a-f]{10})$/
+  /(?:\.(?:cleanup|replace)-\d+-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|^\.[bc][0-9a-f]{10})$/
 
 const ABANDONED_DAEMON_CLAIM_MIN_AGE_MS = 60 * 60 * 1000
 

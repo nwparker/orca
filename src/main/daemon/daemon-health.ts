@@ -15,7 +15,7 @@ import {
   unlinkDaemonPidFileWhen,
   unlinkOwnedDaemonPidFile
 } from './daemon-spawner'
-import { readDaemonSocketIdentity, unlinkOwnedDaemonSocketPath } from './daemon-endpoint-ownership'
+import { reclaimDeadDaemonSocketPath } from './daemon-endpoint-ownership'
 import {
   PROTOCOL_VERSION,
   type HelloMessage,
@@ -927,23 +927,29 @@ export async function killStaleDaemon(
   // Why: capture the endpoint we are about to judge, then remove only that exact entry. The
   // probe and the unlink are separate syscalls, so a replacement can publish in between —
   // an unfenced unlink then deletes the live replacement's only reachable name.
-  const doomedEndpoint = readDaemonSocketIdentity(socketPath)
-  const socketOutcome = await probeEndpoint(socketPath)
-  // Why: only positive evidence of a dead endpoint authorizes reclaiming the name — and
-  // having killed the previous owner is not that evidence.
-  if (endpointIsProvenDead(socketOutcome)) {
+  // Why the same rule for both probes: a live replacement found by the first probe is the
+  // same situation as one found by the second, and treating them differently left the caller
+  // forking beside an endpoint it could never publish onto. 'unknown' is deliberately not
+  // treated as a live owner — it keeps the endpoint file, but it must not block a cold start
+  // where nothing was ever running.
+  const firstOutcome = await probeEndpoint(socketPath)
+  if (firstOutcome === 'connected') {
+    return { killed: killedDaemon, liveOwnerSurvived: true }
+  }
+  if (endpointIsProvenDead(firstOutcome)) {
     await testHooks?.afterEndpointProbe?.()
-    // Why: re-prove as late as possible. Identity alone cannot fence this — Linux recycles
-    // inode numbers the moment the old inode is freed — but a replacement is by definition
-    // listening, so a fresh probe vetoes the removal.
-    if (endpointIsProvenDead(await probeEndpoint(socketPath))) {
-      unlinkOwnedDaemonSocketPath(socketPath, doomedEndpoint)
-    } else {
-      // Why: something took the endpoint while we were cleaning up. Reporting "no live owner"
-      // would send the caller off to fork beside it, and that fork cannot publish — the
-      // exclusive claim is already held — so the user ends up with no daemon at all.
+    const secondOutcome = await probeEndpoint(socketPath)
+    if (secondOutcome === 'connected') {
       console.warn('[daemon] Endpoint was republished during cleanup — preserving the new owner')
       return { killed: killedDaemon, liveOwnerSurvived: true }
+    }
+    if (endpointIsProvenDead(secondOutcome)) {
+      // Why liveness, not identity: this inode was freed, and Linux hands the number straight
+      // back, so a replacement can match what we captured. Only "nothing answers" is decisive.
+      await reclaimDeadDaemonSocketPath(
+        socketPath,
+        async (path) => (await probeEndpoint(path)) === 'connected'
+      )
     }
   }
   return { killed: killedDaemon, liveOwnerSurvived }

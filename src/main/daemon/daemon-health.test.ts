@@ -553,6 +553,33 @@ describe('killStaleDaemon endpoint reclamation', () => {
   )
 
   it.skipIf(process.platform === 'win32')(
+    'reports a live owner when the first cleanup probe already finds one',
+    async () => {
+      // Why: a replacement found by the first probe is the same situation as one found by the
+      // second. Reporting no live owner here sent the caller off to fork beside it, and that
+      // fork cannot publish because the exclusive claim is already held.
+      writeFileSync(getDaemonPidPath(dir), String(999_999), { mode: 0o600 })
+      const replacement = createServer((socket) => socket.end())
+      const bind = join(dir, '.firstprobe')
+      await listenOnSocketPath(replacement, bind)
+      linkSync(bind, socketPath)
+      rmSync(bind, { force: true })
+
+      try {
+        await expect(killStaleDaemon(dir, socketPath, tokenPath)).resolves.toEqual({
+          killed: false,
+          liveOwnerSurvived: true
+        })
+        expect(existsSync(socketPath)).toBe(true)
+        await expect(canConnect(socketPath)).resolves.toBe(true)
+      } finally {
+        await closeServer(replacement)
+        rmSync(socketPath, { force: true })
+      }
+    }
+  )
+
+  it.skipIf(process.platform === 'win32')(
     'reports a live owner when the endpoint is republished during cleanup',
     async () => {
       // Why: returning "no live owner" sends the caller off to fork beside the new owner, and

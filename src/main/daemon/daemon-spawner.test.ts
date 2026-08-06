@@ -16,6 +16,7 @@ import {
 import {
   getDaemonSocketBindPath,
   publishDaemonSocketPath,
+  reclaimDeadDaemonSocketPath,
   sweepAbandonedDaemonClaims,
   unlinkOwnedDaemonSocketPath
 } from './daemon-endpoint-ownership'
@@ -403,11 +404,59 @@ describe('daemon socket publication', () => {
   })
 })
 
+describe('reclaimDeadDaemonSocketPath', () => {
+  it.skipIf(process.platform === 'win32')('removes a dead endpoint', async () => {
+    const dir = createTestDir()
+    const canonicalPath = join(dir, 'daemon.sock')
+    try {
+      const server = createServer()
+      const bindPath = getDaemonSocketBindPath(canonicalPath)
+      await listenOnSocketPath(server, bindPath)
+      publishDaemonSocketPath(bindPath, canonicalPath)
+      await closeSocketServer(server)
+
+      await expect(
+        reclaimDeadDaemonSocketPath(canonicalPath, async (path) => connectsToSocketPath(path))
+      ).resolves.toBe(true)
+      expect(existsSync(canonicalPath)).toBe(false)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it.skipIf(process.platform === 'win32')(
+    'restores an endpoint that turns out to be alive',
+    async () => {
+      // Why: the claim is taken before liveness is known, so a live endpoint must come back.
+      // Identity cannot decide this — Linux recycles the inode number of the dead one.
+      const dir = createTestDir()
+      const canonicalPath = join(dir, 'daemon.sock')
+      const server = createServer((socket) => socket.end())
+      try {
+        const bindPath = getDaemonSocketBindPath(canonicalPath)
+        await listenOnSocketPath(server, bindPath)
+        publishDaemonSocketPath(bindPath, canonicalPath)
+
+        await expect(
+          reclaimDeadDaemonSocketPath(canonicalPath, async (path) => connectsToSocketPath(path))
+        ).resolves.toBe(false)
+        expect(existsSync(canonicalPath)).toBe(true)
+        await expect(connectsToSocketPath(canonicalPath)).resolves.toBe(true)
+      } finally {
+        await closeSocketServer(server)
+        rmSync(dir, { recursive: true, force: true })
+      }
+    }
+  )
+})
+
 describe('sweepAbandonedDaemonClaims', () => {
   const claimNames = [
     `daemon-v${PROTOCOL_VERSION}.pid.cleanup-123-${randomUUID()}`,
     `daemon-v${PROTOCOL_VERSION}.pid.replace-123-${randomUUID()}`,
-    '.b0123456789'
+    '.b0123456789',
+    // Endpoint reclaim claims use the same scratch convention and must be swept too.
+    '.c0123456789'
   ]
   const preservedNames = [`daemon-v${PROTOCOL_VERSION}.pid`, `daemon-v${PROTOCOL_VERSION}.token`]
 
