@@ -174,7 +174,9 @@ export function replaceDaemonPidFile(pidPath: string, pidFile: DaemonPidFile): b
 export function unlinkOwnedDaemonPidFile(
   pidPath: string,
   expectedPid: number,
-  expectedLaunchNonce: string
+  // Why: records written before launch nonces existed carry none. Matching on PID alone is
+  // weaker, but it still fences against removing a replacement's record, which is the point.
+  expectedLaunchNonce: string | null
 ): boolean {
   return claimAndUnlinkOwnedFile(pidPath, (content) => {
     try {
@@ -182,7 +184,12 @@ export function unlinkOwnedDaemonPidFile(
         pid?: unknown
         launchNonce?: unknown
       }
-      return parsed.pid === expectedPid && parsed.launchNonce === expectedLaunchNonce
+      if (parsed.pid !== expectedPid) {
+        return false
+      }
+      return expectedLaunchNonce === null
+        ? parsed.launchNonce === undefined || parsed.launchNonce === null
+        : parsed.launchNonce === expectedLaunchNonce
     } catch {
       return false
     }

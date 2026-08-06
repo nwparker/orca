@@ -10,7 +10,7 @@ import {
 } from '../../shared/process-output-field-scanner'
 import { isStartupDiagnosticsEnabled, logStartupDiagnostic } from '../startup/startup-diagnostics'
 import { encodeNdjson } from './ndjson'
-import { getDaemonPidPath } from './daemon-spawner'
+import { getDaemonPidPath, unlinkOwnedDaemonPidFile } from './daemon-spawner'
 import {
   PROTOCOL_VERSION,
   type HelloMessage,
@@ -553,45 +553,56 @@ async function queryWindowsProcessIdentity(pid: number): Promise<WindowsProcessI
   }
 }
 
-async function isDaemonProcess(
+/**
+ * 'unknown' is load-bearing: a failed inspection is not evidence that the recorded PID is
+ * someone else's. `ps` runs under a 2s budget and PowerShell CIM under 3s, and a loaded
+ * machine blows both — reading that as "not our daemon" is what authorized reclaiming a live
+ * daemon's ownership in the first place.
+ */
+type DaemonProcessIdentity = 'match' | 'mismatch' | 'unknown'
+
+async function inspectDaemonProcessIdentity(
   pid: number,
   socketPath: string,
   tokenPath: string,
   startedAtMs: number | null
-): Promise<boolean> {
+): Promise<DaemonProcessIdentity> {
   try {
     process.kill(pid, 0)
   } catch {
-    return false
+    // Why: the process is gone. That is positive evidence, not a failed inspection.
+    return 'mismatch'
   }
+
+  const verdict = (matches: boolean): DaemonProcessIdentity => (matches ? 'match' : 'mismatch')
 
   if (process.platform === 'win32') {
     const identity = await queryWindowsProcessIdentity(pid)
     if (identity === null) {
-      return false
+      return 'unknown'
     }
     // Why: image names are too broad after PID reuse. Match the daemon entry
     // plus the exact socket/token args so we only kill the daemon for this
     // userData protocol endpoint.
-    return (
+    return verdict(
       commandLineMatchesDaemon(identity.commandLine, socketPath, tokenPath) &&
-      startTimesWithinTolerance(identity.startedAtMs, startedAtMs, WIN32_START_TIME_TOLERANCE_MS)
+        startTimesWithinTolerance(identity.startedAtMs, startedAtMs, WIN32_START_TIME_TOLERANCE_MS)
     )
   }
 
   try {
     const cmdline = readFileSync(`/proc/${pid}/cmdline`, 'utf8')
-    return (
+    return verdict(
       commandLineMatchesDaemon(cmdline, socketPath, tokenPath) && startTimeMatches(pid, startedAtMs)
     )
   } catch {
     const identity = getPsProcessIdentity(pid)
     if (!identity) {
-      return false
+      return 'unknown'
     }
-    return (
+    return verdict(
       commandLineMatchesDaemon(identity.commandLine, socketPath, tokenPath) &&
-      startTimesWithinTolerance(identity.startedAtMs, startedAtMs, START_TIME_TOLERANCE_MS)
+        startTimesWithinTolerance(identity.startedAtMs, startedAtMs, START_TIME_TOLERANCE_MS)
     )
   }
 }
@@ -654,7 +665,12 @@ async function readVerifiedDaemonPid(
 
   if (
     !parsedPid ||
-    !(await isDaemonProcess(parsedPid.pid, socketPath, tokenPath, parsedPid.startedAtMs))
+    (await inspectDaemonProcessIdentity(
+      parsedPid.pid,
+      socketPath,
+      tokenPath,
+      parsedPid.startedAtMs
+    )) !== 'match'
   ) {
     return null
   }
@@ -764,12 +780,33 @@ export async function killStaleDaemon(
   const pidPath = getDaemonPidPath(runtimeDir, protocolVersion)
   let killedDaemon = false
   let liveOwnerSurvived = false
+  // Why: identity is resolved once, and the record we may later remove is captured here so
+  // cleanup can be fenced to this exact incarnation rather than to whatever occupies the path
+  // by the time we get there.
+  let recordedOwner: ParsedDaemonPid | null = null
   try {
     const parsedPid = parseDaemonPidFile(readFileSync(pidPath, 'utf8'))
-    if (
-      parsedPid &&
-      (await isDaemonProcess(parsedPid.pid, socketPath, tokenPath, parsedPid.startedAtMs))
-    ) {
+    recordedOwner = parsedPid
+    const identity = parsedPid
+      ? await inspectDaemonProcessIdentity(
+          parsedPid.pid,
+          socketPath,
+          tokenPath,
+          parsedPid.startedAtMs
+        )
+      : 'mismatch'
+    if (parsedPid && identity === 'unknown') {
+      // Why: the inspection failed, which is not evidence that this PID is someone else's.
+      // The endpoint is the tiebreaker — if something still answers, a daemon is alive and
+      // its ownership must survive, or we fork a replacement onto a live endpoint.
+      if ((await probeSocketConnect(socketPath)) === 'connected') {
+        console.warn(
+          '[daemon] Preserving daemon that could not be inspected: reason=identity_probe_failed'
+        )
+        return { killed: false, liveOwnerSurvived: true }
+      }
+    }
+    if (parsedPid && identity === 'match') {
       const { pid, startedAtMs } = parsedPid
       try {
         process.kill(pid, 'SIGTERM')
@@ -797,7 +834,9 @@ export async function killStaleDaemon(
         // window is long enough for the pid to be recycled if the original
         // daemon died during the wait. Without this, we'd SIGKILL an unrelated
         // process that happens to now own the same pid.
-        if (!(await isDaemonProcess(pid, socketPath, tokenPath, startedAtMs))) {
+        if (
+          (await inspectDaemonProcessIdentity(pid, socketPath, tokenPath, startedAtMs)) !== 'match'
+        ) {
           // Why: a failed identity probe has two causes with opposite correct actions —
           // the pid really was recycled (daemon dead, reclaim the endpoint), or the probe
           // itself failed under load (`ps` has a 2s timeout). The endpoint settles it: if
@@ -844,18 +883,18 @@ export async function killStaleDaemon(
     return { killed: killedDaemon, liveOwnerSurvived }
   }
 
-  try {
-    unlinkSync(pidPath)
-  } catch {
-    // Best-effort
+  // Why: remove only the record belonging to the daemon we just dealt with. An unfenced
+  // unlink deletes whatever occupies the path now, which after a slow kill can be a
+  // replacement's freshly published ownership.
+  if (recordedOwner) {
+    unlinkOwnedDaemonPidFile(pidPath, recordedOwner.pid, recordedOwner.launchNonce)
   }
 
   const socketOutcome = await probeSocketConnect(socketPath)
-  // Why: only positive evidence of a dead endpoint authorizes reclaiming the name. A probe
-  // that merely timed out leaves a live daemon's endpoint in place instead of unlinking it
-  // and forking a duplicate onto the freed path.
-  const endpointIsReclaimable =
-    killedDaemon || socketOutcome === 'refused' || socketOutcome === 'missing'
+  // Why: only positive evidence of a dead endpoint authorizes reclaiming the name — and
+  // having killed the previous owner is not that evidence. A replacement can bind between
+  // the kill and this probe, and unlinking a live endpoint strands the daemon behind it.
+  const endpointIsReclaimable = socketOutcome === 'refused' || socketOutcome === 'missing'
   if (process.platform !== 'win32' && existsSync(socketPath) && endpointIsReclaimable) {
     try {
       unlinkSync(socketPath)

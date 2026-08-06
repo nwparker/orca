@@ -1,6 +1,22 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { spawn } from 'node:child_process'
-import { existsSync, linkSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+
+// Why: `ps` failure is environmental and cannot be provoked for real, and vi.spyOn cannot
+// redefine an ESM namespace export. A toggled module mock keeps the breakage scoped to one test.
+const processInspection = vi.hoisted(() => ({ broken: false }))
+vi.mock('node:child_process', async (importOriginal) => {
+  const actual = (await importOriginal()) as { execFileSync: typeof ExecFileSync }
+  return {
+    ...actual,
+    execFileSync: (...args: Parameters<typeof ExecFileSync>) => {
+      if (processInspection.broken) {
+        throw new Error('ps timed out')
+      }
+      return actual.execFileSync(...args)
+    }
+  }
+})
+import { spawn, type execFileSync as ExecFileSync } from 'node:child_process'
+import { existsSync, linkSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
 import { createServer, connect, Socket, type Server } from 'node:net'
@@ -475,6 +491,104 @@ describe('killStaleDaemon endpoint reclamation', () => {
       })
     })
   }
+
+  it("leaves a replacement's pid record and endpoint alone when cleanup runs late", async () => {
+    if (process.platform === 'win32') {
+      return
+    }
+    // Why: cleanup used to unlink whatever occupied the pid path, and treated "we killed
+    // something" as licence to unlink the socket. A replacement that publishes during the
+    // kill wait was then left alive hosting sessions but unreachable — the original failure.
+    const child = spawn(
+      process.execPath,
+      [
+        '-e',
+        // Ignoring SIGTERM holds the kill wait open, which is the window a replacement
+        // publishes into. A child that dies instantly never reproduces the race.
+        "process.on('SIGTERM', () => {}); console.log('ready'); setInterval(() => {}, 1000)",
+        'daemon-entry',
+        socketPath,
+        tokenPath
+      ],
+      { stdio: ['ignore', 'pipe', 'ignore'] }
+    )
+    // Why: wait for the handler to actually be installed — a SIGTERM that lands during Node
+    // boot is handled by the default disposition and kills the child, closing the window.
+    await new Promise<void>((resolve, reject) => {
+      child.once('error', reject)
+      child.stdout?.once('data', () => resolve())
+    })
+    const childPid = child.pid as number
+    const childExited = new Promise<void>((resolve) => child.once('exit', () => resolve()))
+    writeFileSync(
+      getDaemonPidPath(dir),
+      serializeDaemonPidFile({ pid: childPid, startedAtMs: null, launchNonce: 'daemon-a' }),
+      { mode: 0o600 }
+    )
+
+    // Daemon B takes over the endpoint and publishes its ownership mid-kill.
+    const replacementRecord = serializeDaemonPidFile({
+      pid: process.pid,
+      startedAtMs: 2_000,
+      launchNonce: 'daemon-b'
+    })
+    const replacement = createServer((socket) => socket.end())
+    const handover = setTimeout(() => {
+      void listenOnSocketPath(replacement, socketPath).then(() => {
+        writeFileSync(getDaemonPidPath(dir), replacementRecord, { mode: 0o600 })
+      })
+    }, 300)
+
+    try {
+      await killStaleDaemon(dir, socketPath, tokenPath)
+
+      expect(readFileSync(getDaemonPidPath(dir), 'utf8')).toBe(replacementRecord)
+      expect(existsSync(socketPath)).toBe(true)
+      await expect(canConnect(socketPath)).resolves.toBe(true)
+    } finally {
+      clearTimeout(handover)
+      try {
+        process.kill(childPid, 'SIGKILL')
+      } catch {
+        // Already gone.
+      }
+      await childExited
+      await closeServer(replacement)
+    }
+  })
+
+  // Linux reads /proc directly and never reaches `ps`, so the mocked failure only models the
+  // macOS path; the branch it exercises is platform-shared.
+  it.skipIf(process.platform !== 'darwin')(
+    'preserves ownership when the process inspection itself fails',
+    async () => {
+      // Why: `ps` runs under a 2s budget that a loaded machine blows. Reading that failure as
+      // "this PID is not our daemon" deleted a live daemon's record and returned
+      // liveOwnerSurvived:false, so the launcher forked onto a still-live endpoint and fell
+      // back to non-persistent local PTYs. Inspection failure is not evidence of ownership.
+      const owner = createServer((socket) => socket.end())
+      await listenOnSocketPath(owner, socketPath)
+      const record = serializeDaemonPidFile({
+        pid: process.pid,
+        startedAtMs: null,
+        launchNonce: 'live-owner'
+      })
+      writeFileSync(getDaemonPidPath(dir), record, { mode: 0o600 })
+      processInspection.broken = true
+
+      try {
+        await expect(killStaleDaemon(dir, socketPath, tokenPath)).resolves.toEqual({
+          killed: false,
+          liveOwnerSurvived: true
+        })
+        expect(readFileSync(getDaemonPidPath(dir), 'utf8')).toBe(record)
+        expect(existsSync(socketPath)).toBe(true)
+      } finally {
+        processInspection.broken = false
+        await closeServer(owner)
+      }
+    }
+  )
 
   it('preserves the pid record and the endpoint when the owner cannot be proven gone', async () => {
     if (process.platform === 'win32') {
