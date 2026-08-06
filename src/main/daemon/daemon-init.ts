@@ -14,8 +14,10 @@ import {
   replaceDaemonPidFile,
   unlinkOwnedDaemonPidFile,
   type DaemonLauncher,
+  type DaemonPidFile,
   type DaemonProcessHandle
 } from './daemon-spawner'
+import { sweepAbandonedDaemonClaims } from './daemon-endpoint-ownership'
 import { DaemonPtyAdapter, type DaemonRespawnReason } from './daemon-pty-adapter'
 import { DaemonPtyRouter } from './daemon-pty-router'
 import { DaemonClient } from './client'
@@ -27,6 +29,7 @@ import {
 } from './types'
 import {
   getMacDaemonSystemResolverHealth,
+  getDaemonCommandLine,
   getDaemonLaunchIdentity,
   checkDaemonHealth,
   isDaemonStaleForCurrentBundle,
@@ -53,13 +56,16 @@ import {
   confirmSeededClaudeLivePtys,
   hasSeededUnconfirmedClaudePtys
 } from '../claude-accounts/live-pty-gate'
-import { parseDaemonReadyIdentity } from './daemon-ready-identity'
+import { parseDaemonReadyIdentity, readDaemonProcessIncarnation } from './daemon-ready-identity'
 import type { DaemonEndpointIdentity } from './daemon-hello-protocol'
 
 // Why: daemon init runs concurrent with window load, so an in-process t timestamp (not harness stderr timing) measures cold-start.
 function logDaemonMilestone(event: string, details: Record<string, unknown> = {}): void {
   if (isStartupDiagnosticsEnabled()) {
-    logStartupDiagnostic(event, { t: Math.round(performance.now()), ...details })
+    logStartupDiagnostic(event, {
+      t: Math.round(performance.now()),
+      ...details
+    })
   }
 }
 
@@ -70,6 +76,22 @@ const DAEMON_CHILD_TERMINATION_GRACE_MS = 5_000
 const DAEMON_CHILD_FORCE_EXIT_WAIT_MS = 1_000
 
 class DaemonEndpointOwnershipError extends Error {}
+
+/**
+ * The one method the ownership checks need from a connected client.
+ *
+ * Why: naming the capability instead of casting DaemonClient to Partial keeps a rename from
+ * silently turning the fence into a no-op — the compiler now rejects a client without it.
+ */
+type DaemonEndpointIdentityReader = {
+  getDaemonIdentity?: () => DaemonEndpointIdentity | null
+}
+
+function readDaemonEndpointIdentity(
+  client: DaemonEndpointIdentityReader
+): DaemonEndpointIdentity | null {
+  return client.getDaemonIdentity?.() ?? null
+}
 
 let spawner: DaemonSpawner | null = null
 type DaemonProvider = DaemonPtyRouter | DaemonPtyAdapter | DegradedDaemonPtyProvider
@@ -194,9 +216,8 @@ async function holdDaemonAdoptionLease(
   const client = connectedClient ?? new DaemonClient({ socketPath, tokenPath })
   try {
     await client.ensureConnected()
-    const readIdentity = (client as Partial<DaemonClient>).getDaemonIdentity
     if (expectedIdentity) {
-      const actualIdentity = readIdentity?.call(client)
+      const actualIdentity = readDaemonEndpointIdentity(client)
       if (
         !actualIdentity ||
         actualIdentity.pid !== expectedIdentity.pid ||
@@ -206,7 +227,7 @@ async function holdDaemonAdoptionLease(
         throw new DaemonEndpointOwnershipError('Daemon endpoint ownership changed during startup')
       }
     }
-    reconcileDaemonPidOwnership(client, pidPath)
+    await reconcileDaemonPidOwnership(client, pidPath)
   } catch (error) {
     client.disconnect()
     throw error
@@ -215,16 +236,63 @@ async function holdDaemonAdoptionLease(
   return handle
 }
 
-function reconcileDaemonPidOwnership(client: DaemonClient, pidPath?: string): void {
-  const readIdentity = (client as Partial<DaemonClient>).getDaemonIdentity
-  const endpointIdentity = readIdentity?.call(client) ?? null
+async function reconcileDaemonPidOwnership(
+  client: DaemonEndpointIdentityReader,
+  pidPath?: string
+): Promise<void> {
+  const endpointIdentity = readDaemonEndpointIdentity(client)
   if (!pidPath || !endpointIdentity || pidRecordMatchesEndpoint(pidPath, endpointIdentity)) {
     return
   }
-  if (!replaceDaemonPidFile(pidPath, { ...endpointIdentity })) {
-    throw new DaemonEndpointOwnershipError('Daemon PID ownership could not be reconciled')
+  // Why: the mismatched record's metadata describes a different daemon and must not be copied
+  // onto this one. Re-derive it from the authenticated owner instead, so the repaired record
+  // keeps the fields freshness, host pinning and pid-recycle detection depend on.
+  const ownerMetadata = await readDaemonOwnerMetadata(endpointIdentity.pid)
+  if (!replaceDaemonPidFile(pidPath, { ...endpointIdentity, ...ownerMetadata })) {
+    // Why: fail open. A record that disagrees with the endpoint is a diagnosable nuisance;
+    // abandoning a healthy adoptable daemon over a failed file write costs the user every
+    // persistent terminal on the machine.
+    console.warn(
+      '[daemon] Could not repair daemon PID ownership; adopting the authenticated endpoint anyway'
+    )
+    return
   }
   console.warn('[daemon] Repaired daemon PID ownership to match the authenticated endpoint')
+}
+
+/**
+ * Recovers the owning daemon's launch metadata from its command line.
+ *
+ * Why: `entryPath`/`appVersion` gate bundle-freshness and (on Windows) which relocated daemon
+ * host directories are pinned against pruning, and the Linux pair gates pid-recycle detection.
+ * Publishing a repaired record without them makes a healthy daemon look permanently stale.
+ */
+async function readDaemonOwnerMetadata(pid: number): Promise<Partial<DaemonPidFile>> {
+  const metadata: Partial<DaemonPidFile> = {}
+  const commandLine = await getDaemonCommandLine(pid)
+  if (commandLine) {
+    const entryPath = matchDaemonLaunchArgument(commandLine, '--entry-path')
+    const appVersion = matchDaemonLaunchArgument(commandLine, '--app-version')
+    if (entryPath) {
+      metadata.entryPath = entryPath
+    }
+    if (appVersion) {
+      metadata.appVersion = appVersion
+    }
+  }
+  const incarnation = await readDaemonProcessIncarnation(pid)
+  if (incarnation) {
+    metadata.linuxStartTicks = incarnation.linuxStartTicks
+    metadata.bootId = incarnation.bootId
+  }
+  return metadata
+}
+
+// Why: fork() passes argv as an array, so a value is the single token after its flag; the
+// command line renders them separated by a space or NUL depending on the platform source.
+function matchDaemonLaunchArgument(commandLine: string, flag: string): string | null {
+  const match = new RegExp(`${flag}[\\s\\0]+([^\\s\\0]+)`).exec(commandLine)
+  return match?.[1] ?? null
 }
 
 function pidRecordMatchesEndpoint(pidPath: string, identity: DaemonEndpointIdentity): boolean {
@@ -397,17 +465,17 @@ function createOutOfProcessLauncher(
         }
       | undefined
     let confirmedReplacement = false
-    let adoptionClient: DaemonClient | null = new DaemonClient({ socketPath, tokenPath })
+    let adoptionClient: DaemonClient | null = new DaemonClient({
+      socketPath,
+      tokenPath
+    })
     try {
       // Why: acquire the full pair before control-only probes so an expired inherited deadline can't fire in the probe-to-adoption gap.
       await adoptionClient.ensureConnected()
-      reconcileDaemonPidOwnership(adoptionClient, pidPath)
-    } catch (error) {
+      await reconcileDaemonPidOwnership(adoptionClient, pidPath)
+    } catch {
       adoptionClient.disconnect()
       adoptionClient = null
-      if (error instanceof DaemonEndpointOwnershipError) {
-        throw error
-      }
     }
     const preserveDaemon = async (
       mode?: 'degraded-new-pty-fallback'
@@ -438,7 +506,10 @@ function createOutOfProcessLauncher(
             return preserveDaemon()
           }
           console.warn('[daemon] Replacing daemon with unavailable macOS system resolver')
-          pendingReplacement = { reason: 'unhealthy_resolver', liveSessionCount }
+          pendingReplacement = {
+            reason: 'unhealthy_resolver',
+            liveSessionCount
+          }
           confirmedReplacement = (await cleanupDaemonForProtocol(runtimeDir, PROTOCOL_VERSION))
             .cleaned
         } else {
@@ -523,14 +594,25 @@ function createOutOfProcessLauncher(
         }
         // Why: unlike the log above, telemetry gates on confirmedReplacement below — the
         // post-kill truth — so a cold start that killed nothing never reports a replacement.
-        pendingReplacement = { reason: 'failed_health_check', liveSessionCount }
+        pendingReplacement = {
+          reason: 'failed_health_check',
+          liveSessionCount
+        }
       }
 
       // Why: a raw socket can outlive a broken daemon; kill by PID before respawn so the new daemon doesn't race the stale one.
       adoptionClient?.disconnect()
       adoptionClient = null
-      confirmedReplacement =
-        (await killStaleDaemon(runtimeDir, socketPath, tokenPath)) || confirmedReplacement
+      const killOutcome = await killStaleDaemon(runtimeDir, socketPath, tokenPath)
+      if (killOutcome.liveOwnerSurvived) {
+        // Why: forking beside a daemon we could not prove dead is precisely how the endpoint
+        // owner and the session host diverge. Fail closed — the caller falls back to local
+        // PTYs for this launch, and the next one re-probes a daemon that may since have died.
+        throw new DaemonEndpointOwnershipError(
+          'Daemon replacement aborted: the existing daemon could not be confirmed stopped'
+        )
+      }
+      confirmedReplacement = killOutcome.killed || confirmedReplacement
       // Why: rank by how well each reason is evidenced. A confirmed kill whose reason positively
       // identified the daemon outranks the attribution, so a stale bundle caught here is not billed
       // to the resolver. failed_health_check is the residual "couldn't tell" bucket though — it also
@@ -767,6 +849,9 @@ export async function initDaemonPtyProvider(
   const info = await newSpawner.ensureRunning()
   // Why: reclaim superseded daemon-host copies on EVERY launch (spawns are rare), keeping current + live-daemon-pinned versions.
   pruneOldDaemonHosts(collectPinnedDaemonVersions(runtimeDir))
+  // Why: rename-claim and bind scratch names are unlinked by their owner, but a failed unlink
+  // leaves one behind forever; age-gated so a claim still in flight is never disturbed.
+  sweepAbandonedDaemonClaims(runtimeDir)
   const launchMode = newSpawner.getHandle()?.mode
   logDaemonMilestone('daemon-current-ready')
   if (signal?.aborted) {
@@ -857,7 +942,9 @@ export async function initDaemonPtyProvider(
   setLocalPtyProvider(routedAdapter)
   // Why: the first window may register PTY listeners before daemon init finishes; rebind so daemon PTYs still fan out events.
   rebindLocalProviderListeners()
-  logDaemonMilestone('daemon-init-done', { legacyAdapters: legacyAdapters.length })
+  logDaemonMilestone('daemon-init-done', {
+    legacyAdapters: legacyAdapters.length
+  })
   await reconcileSeededClaudeLivePtys(routedAdapter)
 }
 
@@ -1144,7 +1231,8 @@ export async function cleanupDaemonForProtocol(
     didRequestShutdown = true
   } catch {
     // Previous-protocol daemons may be wedged or too old for the RPC path; fall back to PID cleanup (only unlinks a live socket after proving the process is killed).
-    didKillStaleDaemon = await killStaleDaemon(runtimeDir, socketPath, tokenPath, protocolVersion)
+    didKillStaleDaemon = (await killStaleDaemon(runtimeDir, socketPath, tokenPath, protocolVersion))
+      .killed
   } finally {
     client.disconnect()
   }

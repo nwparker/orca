@@ -30,6 +30,7 @@ const {
   getProcessStartedAtMsMock,
   parseDaemonPidFileMock,
   replaceDaemonPidFileMock,
+  getDaemonCommandLineMock,
   unlinkOwnedDaemonPidFileMock,
   launchedStartedAtMs,
   readLaunchedDaemonIdentity,
@@ -88,12 +89,16 @@ const {
   const getMacDaemonSystemResolverHealthMock = vi.fn(() => 'healthy')
   const getDaemonLaunchIdentityMock = vi.fn(() => 'match')
   const isDaemonStaleForCurrentBundleMock = vi.fn(() => false)
-  const killStaleDaemonMock = vi.fn(async () => true)
+  const killStaleDaemonMock = vi.fn(async () => ({
+    killed: true,
+    liveOwnerSurvived: false
+  }))
   const getProcessStartedAtMsMock = vi.fn((): number | null => 1_000_000)
   const parseDaemonPidFileMock = vi.fn(
     (): { pid: number; startedAtMs: number | null } | null => null
   )
   const replaceDaemonPidFileMock = vi.fn(() => true)
+  const getDaemonCommandLineMock = vi.fn(async (_pid: number): Promise<string | null> => null)
   const unlinkOwnedDaemonPidFileMock = vi.fn(() => true)
   const launchedStartedAtMs = { current: 1_000_000 }
 
@@ -103,7 +108,11 @@ const {
     const launchNonceIndex = Array.isArray(args) ? args.indexOf('--launch-nonce') : -1
     const launchNonce = launchNonceIndex >= 0 ? args[launchNonceIndex + 1] : undefined
     return typeof child?.pid === 'number' && typeof launchNonce === 'string'
-      ? { pid: child.pid, startedAtMs: launchedStartedAtMs.current, launchNonce }
+      ? {
+          pid: child.pid,
+          startedAtMs: launchedStartedAtMs.current,
+          launchNonce
+        }
       : null
   }
 
@@ -187,6 +196,7 @@ const {
     getProcessStartedAtMsMock,
     parseDaemonPidFileMock,
     replaceDaemonPidFileMock,
+    getDaemonCommandLineMock,
     unlinkOwnedDaemonPidFileMock,
     launchedStartedAtMs,
     readLaunchedDaemonIdentity,
@@ -269,6 +279,7 @@ vi.mock('net', () => ({ connect: netConnectMock }))
 
 vi.mock('./daemon-health', () => ({
   checkDaemonHealth: checkDaemonHealthMock,
+  getDaemonCommandLine: getDaemonCommandLineMock,
   getDaemonLaunchIdentity: getDaemonLaunchIdentityMock,
   getMacDaemonSystemResolverHealth: getMacDaemonSystemResolverHealthMock,
   healthCheckDaemon: healthCheckDaemonMock,
@@ -309,7 +320,10 @@ vi.mock('./daemon-spawner', () => ({
           const result = await override()
           const releaseAdoptionLease = vi.fn()
           adoptionLeaseReleases.push(releaseAdoptionLease)
-          this.handle = { releaseAdoptionLease, shutdown: vi.fn(async () => {}) }
+          this.handle = {
+            releaseAdoptionLease,
+            shutdown: vi.fn(async () => {})
+          }
           if (result.mode) {
             this.handle.mode = result.mode
           }
@@ -341,6 +355,7 @@ vi.mock('./daemon-spawner', () => ({
     `/fake/daemon/daemon-v${version ?? PROTOCOL_VERSION}.pid`,
   serializeDaemonPidFile: (obj: unknown) => JSON.stringify(obj),
   replaceDaemonPidFile: replaceDaemonPidFileMock,
+  sweepAbandonedDaemonClaims: vi.fn(() => 0),
   unlinkOwnedDaemonPidFile: unlinkOwnedDaemonPidFileMock
 }))
 
@@ -439,7 +454,10 @@ async function importFresh() {
   // mockReset (not mockClear) also drops an unconsumed *Once queue, so a test that bails early
   // can't leak a queued false into the next test's confirmedReplacement gate.
   killStaleDaemonMock.mockReset()
-  killStaleDaemonMock.mockResolvedValue(true)
+  killStaleDaemonMock.mockResolvedValue({
+    killed: true,
+    liveOwnerSurvived: false
+  })
   getAppPathMock.mockReset()
   getAppPathMock.mockReturnValue('/fake/app')
   forkMock.mockReset()
@@ -508,7 +526,10 @@ describe('daemon-init: runRestartDaemon (7-step sequence)', () => {
     probeSocketExistsMock.mockReturnValue(false)
     netConnectMock.mockReset()
     netConnectMock.mockImplementation(() => {
-      const handlers: Record<string, (() => void)[]> = { connect: [], error: [] }
+      const handlers: Record<string, (() => void)[]> = {
+        connect: [],
+        error: []
+      }
       return {
         on(event: string, cb: () => void) {
           handlers[event]?.push(cb)
@@ -623,7 +644,10 @@ describe('daemon-init: runRestartDaemon (7-step sequence)', () => {
     expect(spawnerInstances[0].ensureRunning).toHaveBeenCalledTimes(1)
 
     abortController.abort()
-    resolveEnsureRunning({ socketPath: '/fake/socket-late', tokenPath: '/fake/token-late' })
+    resolveEnsureRunning({
+      socketPath: '/fake/socket-late',
+      tokenPath: '/fake/token-late'
+    })
     await started
 
     expect(adapterInstances).toHaveLength(1)
@@ -707,7 +731,10 @@ describe('daemon-init: runRestartDaemon (7-step sequence)', () => {
     const result = await provider!.spawn({ cols: 80, rows: 24 })
 
     expect(result.id).toBe('local-fallback-pty')
-    expect(localFallbackProvider.spawn).toHaveBeenCalledWith({ cols: 80, rows: 24 })
+    expect(localFallbackProvider.spawn).toHaveBeenCalledWith({
+      cols: 80,
+      rows: 24
+    })
     expect(adapterInstances[0].listProcesses).toHaveBeenCalled()
   })
 
@@ -910,7 +937,10 @@ describe('daemon-init: runRestartDaemon (7-step sequence)', () => {
     ensureRunningOverrides.push(async () => {
       await outgoingRespawn?.('daemon_died')
       respawnedMidRestart = true
-      return { socketPath: '/fake/restarted-socket', tokenPath: '/fake/restarted-token' }
+      return {
+        socketPath: '/fake/restarted-socket',
+        tokenPath: '/fake/restarted-token'
+      }
     })
 
     await mod.restartDaemon()
@@ -931,7 +961,10 @@ describe('daemon-init: runRestartDaemon (7-step sequence)', () => {
     ensureRunningOverrides.push(async () => {
       await restartedRespawn?.('daemon_died')
       respawnedMidSecondRestart = true
-      return { socketPath: '/fake/restarted-socket-2', tokenPath: '/fake/restarted-token-2' }
+      return {
+        socketPath: '/fake/restarted-socket-2',
+        tokenPath: '/fake/restarted-token-2'
+      }
     })
 
     await mod.restartDaemon()
@@ -1082,7 +1115,10 @@ describe('daemon-init: runRestartDaemon (7-step sequence)', () => {
     // Make probeSocket return true: needs both the fs.existsSync proxy AND net.connect resolving "alive".
     probeSocketExistsMock.mockReturnValue(true)
     netConnectMock.mockImplementationOnce(() => {
-      const handlers: Record<string, (() => void)[]> = { connect: [], error: [] }
+      const handlers: Record<string, (() => void)[]> = {
+        connect: [],
+        error: []
+      }
       return {
         on(event: string, cb: () => void) {
           handlers[event]?.push(cb)
@@ -1103,7 +1139,9 @@ describe('daemon-init: runRestartDaemon (7-step sequence)', () => {
 
     // The shutdown RPC must have been issued with killSessions=true.
     expect(ensureConnectedMock).toHaveBeenCalled()
-    expect(requestMock).toHaveBeenCalledWith('shutdown', { killSessions: true })
+    expect(requestMock).toHaveBeenCalledWith('shutdown', {
+      killSessions: true
+    })
     // The fallback killStaleDaemon must NOT fire when the RPC path worked.
     expect(killStaleDaemonMock).not.toHaveBeenCalled()
   })
@@ -1141,7 +1179,10 @@ describe('daemon-init: runRestartDaemon (7-step sequence)', () => {
 
       await vi.advanceTimersByTimeAsync(1000)
 
-      await expect(cleanup).resolves.toEqual({ cleaned: false, killedCount: 0 })
+      await expect(cleanup).resolves.toEqual({
+        cleaned: false,
+        killedCount: 0
+      })
       expect(socket.destroy).toHaveBeenCalledTimes(1)
       expect(socket.listenerCount('connect')).toBe(0)
       expect(socket.listenerCount('error')).toBe(0)
@@ -1204,7 +1245,9 @@ describe('daemon-init: runRestartDaemon (7-step sequence)', () => {
 
   it('respawns instead of reusing a healthy daemon launched from another app path', async () => {
     const mod = await importFresh()
-    await mod.initDaemonPtyProvider(undefined, { macosLoginSessionWatch: true })
+    await mod.initDaemonPtyProvider(undefined, {
+      macosLoginSessionWatch: true
+    })
 
     const launcher = spawnerInstances[0].launcher as (
       socketPath: string,
@@ -1318,7 +1361,11 @@ describe('daemon-init: runRestartDaemon (7-step sequence)', () => {
       }
     })
     readFileSyncMock.mockReturnValueOnce(
-      JSON.stringify({ pid: 202, startedAtMs: 2_000_000, launchNonce: 'stale-owner' })
+      JSON.stringify({
+        pid: 202,
+        startedAtMs: 2_000_000,
+        launchNonce: 'stale-owner'
+      })
     )
     readFileSyncMock.mockReturnValueOnce(JSON.stringify(endpointIdentity))
     const launcher = spawnerInstances[0].launcher as (
@@ -1342,6 +1389,138 @@ describe('daemon-init: runRestartDaemon (7-step sequence)', () => {
         '[daemon] Repaired daemon PID ownership to match the authenticated endpoint'
       )
       handle.releaseAdoptionLease?.()
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  it('republishes the endpoint owner launch metadata into a repaired PID record', async () => {
+    const mod = await importFresh()
+    await mod.initDaemonPtyProvider()
+    const endpointIdentity = {
+      pid: 101,
+      startedAtMs: 1_000_000,
+      launchNonce: 'socket-owner'
+    }
+    daemonClientMock.mockImplementationOnce(function MockAdoptionClient() {
+      return {
+        ensureConnected: vi.fn(async () => {}),
+        getDaemonIdentity: vi.fn(() => endpointIdentity),
+        request: vi.fn(),
+        disconnect: vi.fn()
+      }
+    })
+    readFileSyncMock.mockReturnValueOnce(
+      JSON.stringify({
+        pid: 202,
+        startedAtMs: 2_000_000,
+        launchNonce: 'stale-owner'
+      })
+    )
+    // Why: the mismatched record's metadata belongs to another daemon, so freshness and
+    // host-pinning fields have to be re-derived from the authenticated owner's command line —
+    // a record without appVersion reads as a permanently stale bundle.
+    getDaemonCommandLineMock.mockResolvedValueOnce(
+      'node /app/out/main/daemon-entry.js --socket /fake/socket --entry-path /app/out/main/daemon-entry.js --app-version 9.9.9'
+    )
+    const launcher = spawnerInstances[0].launcher as (
+      socketPath: string,
+      tokenPath: string,
+      pidPath?: string,
+      launchNonce?: string
+    ) => Promise<{ releaseAdoptionLease?(): void; shutdown(): Promise<void> }>
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    try {
+      const handle = await launcher('/fake/socket', '/fake/token', '/fake/daemon.pid', 'unused')
+
+      expect(getDaemonCommandLineMock).toHaveBeenCalledWith(101)
+      expect(replaceDaemonPidFileMock).toHaveBeenCalledWith('/fake/daemon.pid', {
+        ...endpointIdentity,
+        entryPath: '/app/out/main/daemon-entry.js',
+        appVersion: '9.9.9'
+      })
+      handle.releaseAdoptionLease?.()
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  it('adopts the authenticated endpoint even when the PID record cannot be repaired', async () => {
+    const mod = await importFresh()
+    await mod.initDaemonPtyProvider()
+    const endpointIdentity = {
+      pid: 101,
+      startedAtMs: 1_000_000,
+      launchNonce: 'socket-owner'
+    }
+    daemonClientMock.mockImplementationOnce(function MockAdoptionClient() {
+      return {
+        ensureConnected: vi.fn(async () => {}),
+        getDaemonIdentity: vi.fn(() => endpointIdentity),
+        request: vi.fn(),
+        disconnect: vi.fn()
+      }
+    })
+    readFileSyncMock.mockReturnValueOnce(
+      JSON.stringify({
+        pid: 202,
+        startedAtMs: 2_000_000,
+        launchNonce: 'stale-owner'
+      })
+    )
+    // Why: fail open. Losing every persistent terminal because a pid file write failed is a
+    // far worse outcome than a record that disagrees with the endpoint.
+    replaceDaemonPidFileMock.mockReturnValueOnce(false)
+    const launcher = spawnerInstances[0].launcher as (
+      socketPath: string,
+      tokenPath: string,
+      pidPath?: string,
+      launchNonce?: string
+    ) => Promise<{ releaseAdoptionLease?(): void; shutdown(): Promise<void> }>
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const forkCallsBefore = forkMock.mock.calls.length
+
+    try {
+      const handle = await launcher('/fake/socket', '/fake/token', '/fake/daemon.pid', 'unused')
+
+      expect(handle).toBeDefined()
+      // The healthy daemon is adopted, not replaced.
+      expect(forkMock.mock.calls.length).toBe(forkCallsBefore)
+      expect(warn).toHaveBeenCalledWith(
+        '[daemon] Could not repair daemon PID ownership; adopting the authenticated endpoint anyway'
+      )
+      handle.releaseAdoptionLease?.()
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  it('refuses to fork a replacement beside a daemon that could not be confirmed stopped', async () => {
+    const mod = await importFresh()
+    checkDaemonHealthMock.mockResolvedValue('unreachable')
+    await mod.initDaemonPtyProvider()
+    const forkCallsBefore = forkMock.mock.calls.length
+    // Why: forking beside a survivor is exactly how the endpoint owner and the session host
+    // diverge — one daemon answers the socket while another hosts the visible terminals.
+    killStaleDaemonMock.mockResolvedValueOnce({
+      killed: false,
+      liveOwnerSurvived: true
+    })
+    const launcher = spawnerInstances[0].launcher as (
+      socketPath: string,
+      tokenPath: string,
+      pidPath?: string,
+      launchNonce?: string
+    ) => Promise<unknown>
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    try {
+      await expect(
+        launcher('/fake/socket', '/fake/token', '/fake/daemon.pid', 'launch-new')
+      ).rejects.toThrow('could not be confirmed stopped')
+
+      expect(forkMock.mock.calls.length).toBe(forkCallsBefore)
     } finally {
       warn.mockRestore()
     }
@@ -1658,7 +1837,10 @@ describe('daemon-init: runRestartDaemon (7-step sequence)', () => {
     const mod = await importFresh()
     await mod.initDaemonPtyProvider()
     checkDaemonHealthMock.mockResolvedValue('unreachable')
-    killStaleDaemonMock.mockResolvedValueOnce(false)
+    killStaleDaemonMock.mockResolvedValueOnce({
+      killed: false,
+      liveOwnerSurvived: false
+    })
     forkMock.mockImplementationOnce(() => {
       throw new Error('stop after replacement decision')
     })
@@ -1686,7 +1868,9 @@ describe('daemon-init: runRestartDaemon (7-step sequence)', () => {
 
     // The daemon is gone before the launcher looks: nothing answers, nothing left to kill.
     checkDaemonHealthMock.mockResolvedValue('unreachable')
-    killStaleDaemonMock.mockResolvedValueOnce(false).mockResolvedValueOnce(false)
+    killStaleDaemonMock
+      .mockResolvedValueOnce({ killed: false, liveOwnerSurvived: false })
+      .mockResolvedValueOnce({ killed: false, liveOwnerSurvived: false })
     forkMock.mockImplementationOnce(() => {
       throw new Error('stop after replacement decision')
     })
@@ -1784,12 +1968,18 @@ describe('daemon-init: runRestartDaemon (7-step sequence)', () => {
     trackDaemonReplacedMock.mockClear()
 
     getDaemonLaunchIdentityMock.mockReturnValueOnce('mismatch')
-    killStaleDaemonMock.mockResolvedValueOnce(false)
+    killStaleDaemonMock.mockResolvedValueOnce({
+      killed: false,
+      liveOwnerSurvived: false
+    })
     // The daemon answers cleanup's liveness probe, then the endpoint goes away so the self-shutdown
     // wait succeeds and cleanup reports cleaned:true.
     probeSocketExistsMock.mockReturnValue(true)
     netConnectMock.mockImplementationOnce(() => {
-      const handlers: Record<string, (() => void)[]> = { connect: [], error: [] }
+      const handlers: Record<string, (() => void)[]> = {
+        connect: [],
+        error: []
+      }
       return {
         on(event: string, cb: () => void) {
           handlers[event]?.push(cb)
@@ -2159,7 +2349,9 @@ describe('daemon-init: runRestartDaemon (7-step sequence)', () => {
   })
 
   it('surfaces non-ESRCH startup termination errors and releases IPC', async () => {
-    const signalError = Object.assign(new Error('operation not permitted'), { code: 'EPERM' })
+    const signalError = Object.assign(new Error('operation not permitted'), {
+      code: 'EPERM'
+    })
     const kill = vi.spyOn(process, 'kill').mockImplementation(() => {
       throw signalError
     })
@@ -2194,7 +2386,9 @@ describe('daemon-init: runRestartDaemon (7-step sequence)', () => {
 
       expect(error).toBeInstanceOf(AggregateError)
       expect((error as AggregateError).errors).toEqual([
-        expect.objectContaining({ message: 'Daemon readiness identity is incomplete' }),
+        expect.objectContaining({
+          message: 'Daemon readiness identity is incomplete'
+        }),
         signalError
       ])
       expect(child.disconnect).toHaveBeenCalledOnce()
@@ -2249,8 +2443,12 @@ describe('daemon-init: runRestartDaemon (7-step sequence)', () => {
 
       expect(error).toBeInstanceOf(AggregateError)
       expect((error as AggregateError).errors).toEqual([
-        expect.objectContaining({ message: 'Daemon readiness identity is incomplete' }),
-        expect.objectContaining({ message: 'Daemon did not exit after SIGKILL' })
+        expect.objectContaining({
+          message: 'Daemon readiness identity is incomplete'
+        }),
+        expect.objectContaining({
+          message: 'Daemon did not exit after SIGKILL'
+        })
       ])
       expect(kill).toHaveBeenNthCalledWith(1, 12345, 'SIGTERM')
       expect(kill).toHaveBeenNthCalledWith(2, 12345, 'SIGKILL')
@@ -2541,7 +2739,10 @@ describe('daemon-init: runRestartDaemon (7-step sequence)', () => {
     const launcher = spawnerInstances[0].launcher as (
       socketPath: string,
       tokenPath: string
-    ) => Promise<{ mode?: 'degraded-new-pty-fallback'; shutdown(): Promise<void> }>
+    ) => Promise<{
+      mode?: 'degraded-new-pty-fallback'
+      shutdown(): Promise<void>
+    }>
     checkDaemonHealthMock.mockResolvedValueOnce('pty-spawn-unhealthy')
 
     const handle = await launcher('/fake/socket', '/fake/token')
@@ -2694,7 +2895,9 @@ describe('daemon-init: runRestartDaemon (7-step sequence)', () => {
     daemonClientMock.mockImplementationOnce(function MockDaemonClient() {
       return {
         ensureConnected: vi.fn(async () => {}),
-        request: vi.fn(async () => ({ sessions: [{ sessionId: 'wt-1@@live', isAlive: true }] })),
+        request: vi.fn(async () => ({
+          sessions: [{ sessionId: 'wt-1@@live', isAlive: true }]
+        })),
         disconnect: vi.fn()
       }
     })
@@ -2949,7 +3152,10 @@ describe('daemon-init: runRestartDaemon (7-step sequence)', () => {
     const mod = await importFresh()
     readFileSyncMock.mockReturnValue('{"pid":123}')
     // process.pid is guaranteed alive, so the liveness probe succeeds.
-    parseDaemonPidFileMock.mockReturnValue({ pid: process.pid, startedAtMs: null })
+    parseDaemonPidFileMock.mockReturnValue({
+      pid: process.pid,
+      startedAtMs: null
+    })
 
     await mod.initDaemonPtyProvider()
 

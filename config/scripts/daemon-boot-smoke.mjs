@@ -18,7 +18,7 @@
 import { fork } from 'node:child_process'
 import { connect } from 'node:net'
 import { randomUUID } from 'node:crypto'
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
@@ -225,8 +225,14 @@ async function main() {
       throw new Error('daemon readiness did not publish the expected PID ownership record')
     }
     log('PID ownership record matches the ready daemon')
+    if (!existsSync(socketPath)) {
+      throw new Error('daemon did not publish its endpoint at the canonical socket path')
+    }
+    log('endpoint published at the canonical socket path')
     // Production releases startup-only handles after ready; they can pin the child on Windows.
+    // Diagnostics past this point therefore carry the tail captured up to readiness only.
     child.stderr?.destroy()
+    stderr += '[boot-smoke] stderr released at readiness, mirroring production\n'
     child.disconnect()
 
     const ptyHealthy = await runPtySpawnHealthCheck(socketPath, tokenPath, protocolVersion)
@@ -247,7 +253,11 @@ async function main() {
         socketPath,
         tokenPath,
         protocolVersion,
-        { id: 'shutdown-1', type: 'shutdown', payload: { killSessions: false } },
+        {
+          id: 'shutdown-1',
+          type: 'shutdown',
+          payload: { killSessions: false }
+        },
         SHUTDOWN_TIMEOUT_MS
       ).catch((error) => {
         clearTimeout(timer)
@@ -256,6 +266,14 @@ async function main() {
     })
     if (existsSync(pidPath)) {
       throw new Error('daemon left its PID ownership record behind after shutdown')
+    }
+    if (process.platform !== 'win32' && existsSync(socketPath)) {
+      throw new Error('daemon left its endpoint socket behind after shutdown')
+    }
+    // The private bind name is consumed by the publish; nothing may linger in the runtime dir.
+    const leaked = readdirSync(userDataDir).filter((entry) => entry.startsWith('.b'))
+    if (leaked.length > 0) {
+      throw new Error(`daemon leaked private bind names: ${leaked.join(', ')}`)
     }
 
     log('PASS: daemon booted, served, and shut down under plain Node')

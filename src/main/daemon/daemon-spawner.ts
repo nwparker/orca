@@ -119,8 +119,15 @@ export function serializeDaemonPidFile(pidFile: DaemonPidFile): string {
   return JSON.stringify(pidFile)
 }
 
+function isMissingFileError(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT'
+}
+
 export function publishDaemonPidFile(pidPath: string, pidFile: DaemonPidFile): void {
-  writeFileSync(pidPath, serializeDaemonPidFile(pidFile), { mode: 0o600, flag: 'wx' })
+  writeFileSync(pidPath, serializeDaemonPidFile(pidFile), {
+    mode: 0o600,
+    flag: 'wx'
+  })
 }
 
 export function replaceDaemonPidFile(pidPath: string, pidFile: DaemonPidFile): boolean {
@@ -129,8 +136,14 @@ export function replaceDaemonPidFile(pidPath: string, pidFile: DaemonPidFile): b
   try {
     renameSync(pidPath, claimedPath)
     claimedExisting = true
-  } catch {
-    // A missing record is repaired by the same exclusive publication below.
+  } catch (error) {
+    // Why: only a genuinely absent record is safe to treat as unclaimed. On Windows an
+    // external opener without FILE_SHARE_DELETE (AV, indexer, backup) fails the rename
+    // with EPERM/EACCES/EBUSY; falling through would then hit EEXIST on the exclusive
+    // publish and report a false ownership conflict for a record that is simply locked.
+    if (!isMissingFileError(error)) {
+      return false
+    }
   }
 
   try {
@@ -163,7 +176,10 @@ export function unlinkOwnedDaemonPidFile(
 ): boolean {
   return claimAndUnlinkOwnedFile(pidPath, (content) => {
     try {
-      const parsed = JSON.parse(content) as { pid?: unknown; launchNonce?: unknown }
+      const parsed = JSON.parse(content) as {
+        pid?: unknown
+        launchNonce?: unknown
+      }
       return parsed.pid === expectedPid && parsed.launchNonce === expectedLaunchNonce
     } catch {
       return false
