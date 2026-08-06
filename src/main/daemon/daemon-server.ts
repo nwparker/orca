@@ -52,6 +52,9 @@ export type DaemonServerOptions = {
   launchNonce?: string
   startedAtMs?: number
   publishEndpointOwnership?: () => void
+  /** Reported in the hello so a repaired PID record can carry the real owner's metadata. */
+  entryPath?: string
+  appVersion?: string
   /** Direct-construction seam for protocol fixture tests; production never overrides it. */
   protocolVersion?: number
   onIdleShutdown?: () => void
@@ -115,6 +118,8 @@ export class DaemonServer {
   private launchNonce: string | null
   private startedAtMs: number | null
   private publishEndpointOwnership: () => void
+  private entryPath: string | null
+  private appVersion: string | null
   private ownedSocketIdentity: DaemonSocketIdentity | null = null
   private endpointOwnershipTimer: ReturnType<typeof setInterval> | null = null
   private endpointOwnershipLossStreak = 0
@@ -190,6 +195,8 @@ export class DaemonServer {
         ? Date.now() - process.uptime() * 1000
         : null)
     this.publishEndpointOwnership = opts.publishEndpointOwnership ?? (() => {})
+    this.entryPath = opts.entryPath ?? null
+    this.appVersion = opts.appVersion ?? null
     this.onIdleShutdown = opts.onIdleShutdown ?? (() => {})
     this.onRpcShutdown = opts.onRpcShutdown ?? (() => {})
     this.initialAdoptionTimeoutMs =
@@ -246,14 +253,19 @@ export class DaemonServer {
         } catch {
           // Best-effort on platforms that support it
         }
+        let publishedOwnership = false
         try {
           // Why: the exclusive link is the endpoint claim, and the PID/nonce record must
           // exist before the token makes this listener adoptable.
           this.ownedSocketIdentity = publishDaemonSocketPath(bindPath, this.socketPath)
           this.publishEndpointOwnership()
+          publishedOwnership = true
           writeFileSync(this.tokenPath, this.token, { mode: 0o600 })
         } catch (error) {
-          if (this.pidPath && this.launchNonce) {
+          // Why: roll back only a record we actually wrote. Losing the endpoint claim means
+          // the record at that path belongs to the incumbent daemon, and even the ownership-
+          // checked unlink briefly renames it aside — enough to strand a live daemon's record.
+          if (publishedOwnership && this.pidPath && this.launchNonce) {
             unlinkOwnedDaemonPidFile(this.pidPath, process.pid, this.launchNonce)
           }
           unlinkOwnedDaemonSocketPath(this.socketPath, this.ownedSocketIdentity)
@@ -361,7 +373,9 @@ export class DaemonServer {
     }
     if (state === 'indeterminate') {
       // Why: an inconclusive stat proves nothing. Retiring on EACCES or EIO would take down a
-      // daemon that is still serving every terminal on the machine.
+      // daemon that is still serving every terminal on the machine. Reset the streak too, so
+      // the confirmations we act on are consecutive rather than merely cumulative.
+      this.endpointOwnershipLossStreak = 0
       return
     }
     this.endpointOwnershipLossStreak++
@@ -594,7 +608,9 @@ export class DaemonServer {
               daemonIdentity: {
                 pid: process.pid,
                 startedAtMs: this.startedAtMs,
-                launchNonce: this.launchNonce
+                launchNonce: this.launchNonce,
+                ...(this.entryPath ? { entryPath: this.entryPath } : {}),
+                ...(this.appVersion ? { appVersion: this.appVersion } : {})
               }
             }
           : {})

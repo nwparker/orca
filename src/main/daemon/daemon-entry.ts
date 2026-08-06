@@ -257,6 +257,8 @@ async function main(): Promise<void> {
     ...(pidPath ? { pidPath } : {}),
     ...(launchNonce ? { launchNonce } : {}),
     ...(pidPath ? { startedAtMs } : {}),
+    ...(entryPath ? { entryPath } : {}),
+    ...(appVersion ? { appVersion } : {}),
     ...(pidPath && launchNonce
       ? {
           publishEndpointOwnership: () =>

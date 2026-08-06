@@ -582,7 +582,7 @@ async function isDaemonProcess(
   }
 }
 
-export async function getDaemonCommandLine(pid: number): Promise<string | null> {
+async function getDaemonCommandLine(pid: number): Promise<string | null> {
   if (process.platform === 'win32') {
     return (await queryWindowsProcessIdentity(pid))?.commandLine ?? null
   }
@@ -677,6 +677,10 @@ export async function isDaemonStaleForCurrentBundle(
   return true
 }
 
+function isNoSuchProcessError(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && 'code' in error && error.code === 'ESRCH'
+}
+
 async function waitForProcessExit(pid: number, timeoutMs: number): Promise<boolean> {
   const deadline = Date.now() + timeoutMs
   for (;;) {
@@ -719,7 +723,16 @@ export async function killStaleDaemon(
       (await isDaemonProcess(parsedPid.pid, socketPath, tokenPath, parsedPid.startedAtMs))
     ) {
       const { pid, startedAtMs } = parsedPid
-      process.kill(pid, 'SIGTERM')
+      try {
+        process.kill(pid, 'SIGTERM')
+      } catch (error) {
+        // Why: ESRCH means it is already gone. Anything else (EPERM from a daemon owned by
+        // another user) means it is alive and we cannot stop it — falling through to the
+        // blanket catch would report "nothing alive" and authorize a duplicate beside it.
+        if (!isNoSuchProcessError(error)) {
+          return { killed: false, liveOwnerSurvived: true }
+        }
+      }
       const deadline = Date.now() + KILL_WAIT_MS
       let exited = false
       while (Date.now() < deadline) {

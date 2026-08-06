@@ -36,6 +36,9 @@ export function publishDaemonSocketPath(
     // Named pipes are not directory entries; the pipe name itself is exclusive.
     return null
   }
+  // Why: stat the bound name first — the link shares the inode, so a racing unlink of the
+  // canonical name cannot erase our identity and leave the endpoint unwatched and uncleanable.
+  const identity = readDaemonSocketIdentity(boundPath)
   try {
     linkSync(boundPath, canonicalPath)
   } catch (error) {
@@ -50,9 +53,8 @@ export function publishDaemonSocketPath(
       throw error
     }
     renameSync(boundPath, canonicalPath)
-    return readDaemonSocketIdentity(canonicalPath)
+    return identity
   }
-  const identity = readDaemonSocketIdentity(canonicalPath)
   try {
     unlinkSync(boundPath)
   } catch {

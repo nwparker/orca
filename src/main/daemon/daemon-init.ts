@@ -29,7 +29,6 @@ import {
 } from './types'
 import {
   getMacDaemonSystemResolverHealth,
-  getDaemonCommandLine,
   getDaemonLaunchIdentity,
   checkDaemonHealth,
   isDaemonStaleForCurrentBundle,
@@ -247,8 +246,9 @@ async function reconcileDaemonPidOwnership(
   // Why: the mismatched record's metadata describes a different daemon and must not be copied
   // onto this one. Re-derive it from the authenticated owner instead, so the repaired record
   // keeps the fields freshness, host pinning and pid-recycle detection depend on.
-  const ownerMetadata = await readDaemonOwnerMetadata(endpointIdentity.pid)
-  if (!replaceDaemonPidFile(pidPath, { ...endpointIdentity, ...ownerMetadata })) {
+  const { pid, startedAtMs, launchNonce } = endpointIdentity
+  const ownerMetadata = await readDaemonOwnerMetadata(endpointIdentity)
+  if (!replaceDaemonPidFile(pidPath, { pid, startedAtMs, launchNonce, ...ownerMetadata })) {
     // Why: fail open. A record that disagrees with the endpoint is a diagnosable nuisance;
     // abandoning a healthy adoptable daemon over a failed file write costs the user every
     // persistent terminal on the machine.
@@ -261,38 +261,31 @@ async function reconcileDaemonPidOwnership(
 }
 
 /**
- * Recovers the owning daemon's launch metadata from its command line.
+ * Recovers the owning daemon's launch metadata.
  *
  * Why: `entryPath`/`appVersion` gate bundle-freshness and (on Windows) which relocated daemon
  * host directories are pinned against pruning, and the Linux pair gates pid-recycle detection.
  * Publishing a repaired record without them makes a healthy daemon look permanently stale.
+ * The values come from the authenticated hello rather than the owner's command line: a command
+ * line is a single space-joined string, so any install path containing a space (`C:\Program
+ * Files\...`, `/Applications/Orca 2.app/...`) cannot be split back into argv unambiguously.
  */
-async function readDaemonOwnerMetadata(pid: number): Promise<Partial<DaemonPidFile>> {
+async function readDaemonOwnerMetadata(
+  identity: DaemonEndpointIdentity
+): Promise<Partial<DaemonPidFile>> {
   const metadata: Partial<DaemonPidFile> = {}
-  const commandLine = await getDaemonCommandLine(pid)
-  if (commandLine) {
-    const entryPath = matchDaemonLaunchArgument(commandLine, '--entry-path')
-    const appVersion = matchDaemonLaunchArgument(commandLine, '--app-version')
-    if (entryPath) {
-      metadata.entryPath = entryPath
-    }
-    if (appVersion) {
-      metadata.appVersion = appVersion
-    }
+  if (identity.entryPath) {
+    metadata.entryPath = identity.entryPath
   }
-  const incarnation = await readDaemonProcessIncarnation(pid)
+  if (identity.appVersion) {
+    metadata.appVersion = identity.appVersion
+  }
+  const incarnation = await readDaemonProcessIncarnation(identity.pid)
   if (incarnation) {
     metadata.linuxStartTicks = incarnation.linuxStartTicks
     metadata.bootId = incarnation.bootId
   }
   return metadata
-}
-
-// Why: fork() passes argv as an array, so a value is the single token after its flag; the
-// command line renders them separated by a space or NUL depending on the platform source.
-function matchDaemonLaunchArgument(commandLine: string, flag: string): string | null {
-  const match = new RegExp(`${flag}[\\s\\0]+([^\\s\\0]+)`).exec(commandLine)
-  return match?.[1] ?? null
 }
 
 function pidRecordMatchesEndpoint(pidPath: string, identity: DaemonEndpointIdentity): boolean {
@@ -606,11 +599,20 @@ function createOutOfProcessLauncher(
       const killOutcome = await killStaleDaemon(runtimeDir, socketPath, tokenPath)
       if (killOutcome.liveOwnerSurvived) {
         // Why: forking beside a daemon we could not prove dead is precisely how the endpoint
-        // owner and the session host diverge. Fail closed — the caller falls back to local
-        // PTYs for this launch, and the next one re-probes a daemon that may since have died.
-        throw new DaemonEndpointOwnershipError(
-          'Daemon replacement aborted: the existing daemon could not be confirmed stopped'
+        // owner and the session host diverge. But refusing outright would leave the user with
+        // no daemon at all, and we have just proved something still answers the endpoint —
+        // so adopt it in degraded mode: existing sessions keep working, new PTYs run locally.
+        console.warn(
+          '[daemon] DEGRADED MODE: adopting a daemon that could not be confirmed stopped. Existing sessions keep working; fresh terminals run on the local provider WITHOUT daemon persistence until you restart the daemon (Manage Sessions → Restart).'
         )
+        try {
+          return await preserveDaemon('degraded-new-pty-fallback')
+        } catch {
+          // It died between the probe and the adoption; the endpoint is genuinely free now.
+          throw new DaemonEndpointOwnershipError(
+            'Daemon replacement aborted: the existing daemon could not be confirmed stopped'
+          )
+        }
       }
       confirmedReplacement = killOutcome.killed || confirmedReplacement
       // Why: rank by how well each reason is evidenced. A confirmed kill whose reason positively
@@ -840,6 +842,11 @@ export async function initDaemonPtyProvider(
   }
   const runtimeDir = getRuntimeDir()
 
+  // Why: rename-claim and bind scratch names are unlinked by their owner, but a failed unlink
+  // leaves one behind forever. Sweep before launching so a failed launch is still reclaimed;
+  // age-gated so a claim still in flight is never disturbed.
+  sweepAbandonedDaemonClaims(runtimeDir)
+
   const newSpawner = new DaemonSpawner({
     runtimeDir,
     launcher: createOutOfProcessLauncher(runtimeDir, options.macosLoginSessionWatch ?? false)
@@ -849,9 +856,6 @@ export async function initDaemonPtyProvider(
   const info = await newSpawner.ensureRunning()
   // Why: reclaim superseded daemon-host copies on EVERY launch (spawns are rare), keeping current + live-daemon-pinned versions.
   pruneOldDaemonHosts(collectPinnedDaemonVersions(runtimeDir))
-  // Why: rename-claim and bind scratch names are unlinked by their owner, but a failed unlink
-  // leaves one behind forever; age-gated so a claim still in flight is never disturbed.
-  sweepAbandonedDaemonClaims(runtimeDir)
   const launchMode = newSpawner.getHandle()?.mode
   logDaemonMilestone('daemon-current-ready')
   if (signal?.aborted) {

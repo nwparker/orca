@@ -1397,10 +1397,17 @@ describe('daemon-init: runRestartDaemon (7-step sequence)', () => {
   it('republishes the endpoint owner launch metadata into a repaired PID record', async () => {
     const mod = await importFresh()
     await mod.initDaemonPtyProvider()
+    // Why: the mismatched record's metadata belongs to another daemon, so freshness and
+    // host-pinning fields must come from the authenticated owner — a record without
+    // appVersion reads as a permanently stale bundle and gets needlessly replaced. The
+    // install path deliberately contains a space: re-parsing it out of a space-joined
+    // command line truncated it and made a healthy daemon look like a different app path.
     const endpointIdentity = {
       pid: 101,
       startedAtMs: 1_000_000,
-      launchNonce: 'socket-owner'
+      launchNonce: 'socket-owner',
+      entryPath: '/Applications/Orca 2.app/Contents/out/main/daemon-entry.js',
+      appVersion: '9.9.9'
     }
     daemonClientMock.mockImplementationOnce(function MockAdoptionClient() {
       return {
@@ -1417,12 +1424,6 @@ describe('daemon-init: runRestartDaemon (7-step sequence)', () => {
         launchNonce: 'stale-owner'
       })
     )
-    // Why: the mismatched record's metadata belongs to another daemon, so freshness and
-    // host-pinning fields have to be re-derived from the authenticated owner's command line —
-    // a record without appVersion reads as a permanently stale bundle.
-    getDaemonCommandLineMock.mockResolvedValueOnce(
-      'node /app/out/main/daemon-entry.js --socket /fake/socket --entry-path /app/out/main/daemon-entry.js --app-version 9.9.9'
-    )
     const launcher = spawnerInstances[0].launcher as (
       socketPath: string,
       tokenPath: string,
@@ -1434,10 +1435,11 @@ describe('daemon-init: runRestartDaemon (7-step sequence)', () => {
     try {
       const handle = await launcher('/fake/socket', '/fake/token', '/fake/daemon.pid', 'unused')
 
-      expect(getDaemonCommandLineMock).toHaveBeenCalledWith(101)
       expect(replaceDaemonPidFileMock).toHaveBeenCalledWith('/fake/daemon.pid', {
-        ...endpointIdentity,
-        entryPath: '/app/out/main/daemon-entry.js',
+        pid: 101,
+        startedAtMs: 1_000_000,
+        launchNonce: 'socket-owner',
+        entryPath: '/Applications/Orca 2.app/Contents/out/main/daemon-entry.js',
         appVersion: '9.9.9'
       })
       handle.releaseAdoptionLease?.()
@@ -1496,13 +1498,15 @@ describe('daemon-init: runRestartDaemon (7-step sequence)', () => {
     }
   })
 
-  it('refuses to fork a replacement beside a daemon that could not be confirmed stopped', async () => {
+  it('degrades instead of forking beside a daemon that could not be confirmed stopped', async () => {
     const mod = await importFresh()
     checkDaemonHealthMock.mockResolvedValue('unreachable')
     await mod.initDaemonPtyProvider()
     const forkCallsBefore = forkMock.mock.calls.length
     // Why: forking beside a survivor is exactly how the endpoint owner and the session host
-    // diverge — one daemon answers the socket while another hosts the visible terminals.
+    // diverge — one daemon answers the socket while another hosts the visible terminals. But
+    // refusing outright would leave the user with no daemon at all, and something demonstrably
+    // still answers the endpoint, so adopt it degraded: live sessions keep working.
     killStaleDaemonMock.mockResolvedValueOnce({
       killed: false,
       liveOwnerSurvived: true
@@ -1512,15 +1516,15 @@ describe('daemon-init: runRestartDaemon (7-step sequence)', () => {
       tokenPath: string,
       pidPath?: string,
       launchNonce?: string
-    ) => Promise<unknown>
+    ) => Promise<{ mode?: string; releaseAdoptionLease?(): void }>
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
 
     try {
-      await expect(
-        launcher('/fake/socket', '/fake/token', '/fake/daemon.pid', 'launch-new')
-      ).rejects.toThrow('could not be confirmed stopped')
+      const handle = await launcher('/fake/socket', '/fake/token', '/fake/daemon.pid', 'launch-new')
 
+      expect(handle.mode).toBe('degraded-new-pty-fallback')
       expect(forkMock.mock.calls.length).toBe(forkCallsBefore)
+      handle.releaseAdoptionLease?.()
     } finally {
       warn.mockRestore()
     }

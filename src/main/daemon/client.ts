@@ -503,7 +503,13 @@ function parseDaemonEndpointIdentity(value: unknown): DaemonEndpointIdentity | n
   if (!value || typeof value !== 'object') {
     return null
   }
-  const identity = value as { pid?: unknown; startedAtMs?: unknown; launchNonce?: unknown }
+  const identity = value as {
+    pid?: unknown
+    startedAtMs?: unknown
+    launchNonce?: unknown
+    entryPath?: unknown
+    appVersion?: unknown
+  }
   if (
     !Number.isSafeInteger(identity.pid) ||
     (identity.pid as number) <= 0 ||
@@ -518,7 +524,13 @@ function parseDaemonEndpointIdentity(value: unknown): DaemonEndpointIdentity | n
   return {
     pid: identity.pid as number,
     startedAtMs: identity.startedAtMs,
-    launchNonce: identity.launchNonce
+    launchNonce: identity.launchNonce,
+    ...(typeof identity.entryPath === 'string' && identity.entryPath.length > 0
+      ? { entryPath: identity.entryPath }
+      : {}),
+    ...(typeof identity.appVersion === 'string' && identity.appVersion.length > 0
+      ? { appVersion: identity.appVersion }
+      : {})
   }
 }
 
