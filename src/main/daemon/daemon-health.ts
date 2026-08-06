@@ -923,7 +923,12 @@ export async function killStaleDaemon(
   // having killed the previous owner is not that evidence.
   if (endpointIsProvenDead(socketOutcome)) {
     await testHooks?.afterEndpointProbe?.()
-    unlinkOwnedDaemonSocketPath(socketPath, doomedEndpoint)
+    // Why: re-prove as late as possible. Identity alone cannot fence this — Linux recycles
+    // inode numbers the moment the old inode is freed — but a replacement is by definition
+    // listening, so a fresh probe vetoes the removal.
+    if (endpointIsProvenDead(await probeEndpoint(socketPath))) {
+      unlinkOwnedDaemonSocketPath(socketPath, doomedEndpoint)
+    }
   }
   return { killed: killedDaemon, liveOwnerSurvived }
 }

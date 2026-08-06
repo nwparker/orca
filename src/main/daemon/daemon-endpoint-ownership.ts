@@ -5,8 +5,12 @@ import { randomBytes } from 'node:crypto'
 import { existsSync, linkSync, readdirSync, renameSync, statSync, unlinkSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
-/** The exact directory entry a daemon owns. Compared before any endpoint removal. */
-export type DaemonSocketIdentity = { dev: bigint; ino: bigint }
+/**
+ * The exact endpoint a daemon owns. `birthtimeMs` is not redundant: Linux reuses inode
+ * numbers as soon as the inode is freed, so dev+ino alone will happily match a replacement
+ * socket that landed on the recycled number, which is the entry we must never remove.
+ */
+export type DaemonSocketIdentity = { dev: bigint; ino: bigint; birthtimeMs: number }
 
 /**
  * A private, same-directory name to bind before publishing the canonical endpoint.
@@ -73,7 +77,7 @@ export function readDaemonSocketIdentity(socketPath: string): DaemonSocketIdenti
   }
   try {
     const stats = statSync(socketPath, { bigint: true })
-    return { dev: stats.dev, ino: stats.ino }
+    return { dev: stats.dev, ino: stats.ino, birthtimeMs: Number(stats.birthtimeMs) }
   } catch {
     return null
   }
@@ -83,7 +87,13 @@ export function daemonSocketIdentityMatches(
   a: DaemonSocketIdentity | null,
   b: DaemonSocketIdentity | null
 ): boolean {
-  return a !== null && b !== null && a.dev === b.dev && a.ino === b.ino
+  return (
+    a !== null &&
+    b !== null &&
+    a.dev === b.dev &&
+    a.ino === b.ino &&
+    a.birthtimeMs === b.birthtimeMs
+  )
 }
 
 /** 'indeterminate' is deliberately distinct from 'lost': only positive evidence may retire a daemon. */
@@ -98,7 +108,11 @@ export function readDaemonEndpointOwnershipState(
   }
   try {
     const stats = statSync(socketPath, { bigint: true })
-    return stats.dev === owned.dev && stats.ino === owned.ino ? 'owned' : 'lost'
+    return stats.dev === owned.dev &&
+      stats.ino === owned.ino &&
+      Number(stats.birthtimeMs) === owned.birthtimeMs
+      ? 'owned'
+      : 'lost'
   } catch (error) {
     // Why: a stat that failed for any reason other than "the entry is gone" proves nothing.
     // Treating EACCES or EIO as lost ownership would retire a perfectly healthy daemon.

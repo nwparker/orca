@@ -7,6 +7,7 @@ import { basename, join } from 'node:path'
 import { createServer, connect, Socket, type Server } from 'node:net'
 import { DaemonServer } from './daemon-server'
 import { getDaemonPidPath, serializeDaemonPidFile } from './daemon-spawner'
+import type { SocketProbeOutcome } from './daemon-health'
 import {
   checkDaemonHealth,
   E2E_FORCE_DAEMON_HEALTH_UNREACHABLE_ENV,
@@ -507,6 +508,47 @@ describe('killStaleDaemon endpoint reclamation', () => {
         }
       })
 
+      expect(existsSync(socketPath)).toBe(true)
+      await expect(canConnect(socketPath)).resolves.toBe(true)
+    } finally {
+      await closeServer(replacement)
+      rmSync(socketPath, { force: true })
+    }
+  })
+
+  it('vetoes endpoint removal when a replacement is listening by the time it would run', async () => {
+    if (process.platform === 'win32') {
+      return
+    }
+    // Why: identity alone cannot fence this. Linux recycles inode numbers as soon as the old
+    // inode is freed, so a replacement can land on the very number we captured and match. The
+    // late re-probe is the real guard: a replacement is listening, so it vetoes the removal.
+    writeFileSync(getDaemonPidPath(dir), String(999_999), { mode: 0o600 })
+    const stale = createServer()
+    const staleBind = join(dir, '.vetobind')
+    await listenOnSocketPath(stale, staleBind)
+    linkSync(staleBind, socketPath)
+    await closeServer(stale)
+    rmSync(staleBind, { force: true })
+
+    const replacement = createServer((socket) => socket.end())
+    // First probe licenses removal; the hook then publishes a live replacement.
+    const outcomes: SocketProbeOutcome[] = ['refused', 'connected']
+    let probeCount = 0
+
+    try {
+      await killStaleDaemon(dir, socketPath, tokenPath, undefined, {
+        probeEndpoint: async () => outcomes[probeCount++] ?? 'connected',
+        afterEndpointProbe: async () => {
+          rmSync(socketPath, { force: true })
+          const bind = join(dir, '.vetorepl')
+          await listenOnSocketPath(replacement, bind)
+          linkSync(bind, socketPath)
+          rmSync(bind, { force: true })
+        }
+      })
+
+      expect(probeCount).toBe(2)
       expect(existsSync(socketPath)).toBe(true)
       await expect(canConnect(socketPath)).resolves.toBe(true)
     } finally {
