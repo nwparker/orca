@@ -186,6 +186,8 @@ describe('daemon endpoint ownership publication', () => {
         checkEndpointOwnership: () => void
         retirementRequested: boolean
       }
+      // An inconclusive or matching probe must never retire a healthy daemon, however often it runs.
+      daemon.checkEndpointOwnership()
       daemon.checkEndpointOwnership()
       expect(daemon.retirementRequested).toBe(false)
 
@@ -198,6 +200,11 @@ describe('daemon endpoint ownership publication', () => {
       unlinkSync(usurperBind)
 
       try {
+        // A single observation can land inside a replacement's unlink-then-link gap, so the
+        // first one must not retire anything.
+        daemon.checkEndpointOwnership()
+        expect(daemon.retirementRequested).toBe(false)
+
         daemon.checkEndpointOwnership()
         // Why: retirement drains rather than kills — an orphaned daemon stops being a
         // permanent unreachable host without tearing live sessions out from under the user.

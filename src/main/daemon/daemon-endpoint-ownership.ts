@@ -84,6 +84,30 @@ export function daemonSocketIdentityMatches(
   return a !== null && b !== null && a.dev === b.dev && a.ino === b.ino
 }
 
+/** 'indeterminate' is deliberately distinct from 'lost': only positive evidence may retire a daemon. */
+export type DaemonEndpointOwnershipState = 'owned' | 'lost' | 'indeterminate'
+
+export function readDaemonEndpointOwnershipState(
+  socketPath: string,
+  owned: DaemonSocketIdentity | null
+): DaemonEndpointOwnershipState {
+  if (process.platform === 'win32' || !owned) {
+    return 'indeterminate'
+  }
+  try {
+    const stats = statSync(socketPath, { bigint: true })
+    return stats.dev === owned.dev && stats.ino === owned.ino ? 'owned' : 'lost'
+  } catch (error) {
+    // Why: a stat that failed for any reason other than "the entry is gone" proves nothing.
+    // Treating EACCES or EIO as lost ownership would retire a perfectly healthy daemon.
+    return isMissingFileError(error) ? 'lost' : 'indeterminate'
+  }
+}
+
+function isMissingFileError(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT'
+}
+
 /** Removes the canonical endpoint name only while it still resolves to our own listener. */
 export function unlinkOwnedDaemonSocketPath(
   socketPath: string,

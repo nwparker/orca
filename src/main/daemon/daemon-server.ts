@@ -24,10 +24,9 @@ import { isTuiAgent } from '../../shared/tui-agent-config'
 import { parsePtyStartupIngressIntent } from '../../shared/pty-startup-ingress'
 import { unlinkOwnedDaemonPidFile, unlinkOwnedDaemonTokenFile } from './daemon-spawner'
 import {
-  daemonSocketIdentityMatches,
   getDaemonSocketBindPath,
   publishDaemonSocketPath,
-  readDaemonSocketIdentity,
+  readDaemonEndpointOwnershipState,
   unlinkOwnedDaemonSocketPath,
   type DaemonSocketIdentity
 } from './daemon-endpoint-ownership'
@@ -106,6 +105,7 @@ export class DaemonServer {
   private static readonly INITIAL_ADOPTION_TIMEOUT_MS = 2 * 60 * 1000
   private static readonly SHUTDOWN_REPLY_FLUSH_TIMEOUT_MS = 1_000
   private static readonly ENDPOINT_OWNERSHIP_POLL_MS = 30 * 1000
+  private static readonly ENDPOINT_OWNERSHIP_LOSS_CONFIRMATIONS = 2
   private server: Server | null = null
   private token: string
   private host: TerminalHost
@@ -117,6 +117,7 @@ export class DaemonServer {
   private publishEndpointOwnership: () => void
   private ownedSocketIdentity: DaemonSocketIdentity | null = null
   private endpointOwnershipTimer: ReturnType<typeof setInterval> | null = null
+  private endpointOwnershipLossStreak = 0
   private protocolVersion: number
   private onIdleShutdown: () => void
   private onRpcShutdown: () => void
@@ -353,12 +354,20 @@ export class DaemonServer {
     if (process.platform === 'win32' || !this.ownedSocketIdentity || this.shutdownPromise) {
       return
     }
-    if (
-      daemonSocketIdentityMatches(
-        readDaemonSocketIdentity(this.socketPath),
-        this.ownedSocketIdentity
-      )
-    ) {
+    const state = readDaemonEndpointOwnershipState(this.socketPath, this.ownedSocketIdentity)
+    if (state === 'owned') {
+      this.endpointOwnershipLossStreak = 0
+      return
+    }
+    if (state === 'indeterminate') {
+      // Why: an inconclusive stat proves nothing. Retiring on EACCES or EIO would take down a
+      // daemon that is still serving every terminal on the machine.
+      return
+    }
+    this.endpointOwnershipLossStreak++
+    // Why: a replacement publishes by unlink-then-link, so a single observation can land in
+    // that gap. Require the loss to persist before acting on it.
+    if (this.endpointOwnershipLossStreak < DaemonServer.ENDPOINT_OWNERSHIP_LOSS_CONFIRMATIONS) {
       return
     }
     if (this.retirementRequested) {
