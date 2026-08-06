@@ -124,7 +124,16 @@ function isMissingFileError(error: unknown): boolean {
   return typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT'
 }
 
-/** Removes the canonical endpoint name only while it still resolves to our own listener. */
+/**
+ * Removes the canonical endpoint name only while it still resolves to our own listener.
+ *
+ * Why the rename: checking identity and then unlinking are two syscalls, and no amount of
+ * re-checking between them is atomic — a replacement publishing in the gap gets deleted.
+ * Renaming claims the directory entry in one operation, so from that point nobody else's
+ * entry can be at the canonical path. Only then is it safe to inspect what we took: ours
+ * gets dropped, anyone else's gets linked back, and a replacement that published while we
+ * held the claim wins the restore by EEXIST.
+ */
 export function unlinkOwnedDaemonSocketPath(
   socketPath: string,
   owned: DaemonSocketIdentity | null
@@ -132,15 +141,33 @@ export function unlinkOwnedDaemonSocketPath(
   if (process.platform === 'win32' || !owned) {
     return false
   }
-  if (!daemonSocketIdentityMatches(readDaemonSocketIdentity(socketPath), owned)) {
+  const claimedPath = `${dirname(socketPath)}/.c${randomBytes(5).toString('hex')}`
+  try {
+    renameSync(socketPath, claimedPath)
+  } catch {
+    // Nothing at the canonical path, or we cannot claim it. Either way, not ours to remove.
     return false
+  }
+  if (daemonSocketIdentityMatches(readDaemonSocketIdentity(claimedPath), owned)) {
+    try {
+      unlinkSync(claimedPath)
+      return true
+    } catch {
+      return false
+    }
+  }
+  // Not ours after all — put it back, unless a replacement already took the name.
+  try {
+    linkSync(claimedPath, socketPath)
+  } catch {
+    // EEXIST: a replacement published while we held the claim. Its entry is authoritative.
   }
   try {
-    unlinkSync(socketPath)
-    return true
+    unlinkSync(claimedPath)
   } catch {
-    return false
+    // A uniquely named leftover is inert and is swept by age.
   }
+  return false
 }
 
 const ABANDONED_DAEMON_CLAIM_PATTERN =

@@ -203,6 +203,18 @@ export function unlinkOwnedDaemonPidFile(
   })
 }
 
+/**
+ * Removes a PID record whose content still satisfies `matches`, under the same rename claim
+ * used for owned records. Lets an unparseable record be reclaimed without risking a valid
+ * replacement record that appeared in the meantime.
+ */
+export function unlinkDaemonPidFileWhen(
+  pidPath: string,
+  matches: (content: string) => boolean
+): boolean {
+  return claimAndUnlinkOwnedFile(pidPath, matches)
+}
+
 export function unlinkOwnedDaemonTokenFile(tokenPath: string, expectedToken: string): boolean {
   return claimAndUnlinkOwnedFile(tokenPath, (content) => content.trim() === expectedToken)
 }

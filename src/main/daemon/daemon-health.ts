@@ -10,7 +10,11 @@ import {
 } from '../../shared/process-output-field-scanner'
 import { isStartupDiagnosticsEnabled, logStartupDiagnostic } from '../startup/startup-diagnostics'
 import { encodeNdjson } from './ndjson'
-import { getDaemonPidPath, unlinkOwnedDaemonPidFile } from './daemon-spawner'
+import {
+  getDaemonPidPath,
+  unlinkDaemonPidFileWhen,
+  unlinkOwnedDaemonPidFile
+} from './daemon-spawner'
 import { readDaemonSocketIdentity, unlinkOwnedDaemonSocketPath } from './daemon-endpoint-ownership'
 import {
   PROTOCOL_VERSION,
@@ -912,6 +916,12 @@ export async function killStaleDaemon(
   // replacement's freshly published ownership.
   if (recordedOwner) {
     unlinkOwnedDaemonPidFile(pidPath, recordedOwner.pid, recordedOwner.launchNonce)
+  } else {
+    // Why: a record we cannot parse names no owner to fence against, but leaving it in place
+    // fails the next daemon's exclusive publish with EEXIST — no daemon at all. Reclaim it
+    // under the same rename claim, and only while it is still unparseable, so a valid record
+    // published in the meantime is left alone.
+    unlinkDaemonPidFileWhen(pidPath, (content) => parseDaemonPidFile(content) === null)
   }
 
   // Why: capture the endpoint we are about to judge, then remove only that exact entry. The
@@ -928,6 +938,12 @@ export async function killStaleDaemon(
     // listening, so a fresh probe vetoes the removal.
     if (endpointIsProvenDead(await probeEndpoint(socketPath))) {
       unlinkOwnedDaemonSocketPath(socketPath, doomedEndpoint)
+    } else {
+      // Why: something took the endpoint while we were cleaning up. Reporting "no live owner"
+      // would send the caller off to fork beside it, and that fork cannot publish — the
+      // exclusive claim is already held — so the user ends up with no daemon at all.
+      console.warn('[daemon] Endpoint was republished during cleanup — preserving the new owner')
+      return { killed: killedDaemon, liveOwnerSurvived: true }
     }
   }
   return { killed: killedDaemon, liveOwnerSurvived }

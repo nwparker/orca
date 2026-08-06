@@ -170,30 +170,29 @@ describe('daemon health', () => {
     }
   })
 
-  it('does not unlink a live socket when the pid file does not match this daemon', async () => {
-    if (process.platform === 'win32') {
-      return
-    }
-
-    const server = createServer((socket) => socket.end())
-    await new Promise<void>((resolve, reject) => {
-      server.once('error', reject)
-      server.listen(socketPath, () => {
-        server.off('error', reject)
-        resolve()
+  it.skipIf(process.platform === 'win32')(
+    'does not unlink a live socket when the pid file does not match this daemon',
+    async () => {
+      const server = createServer((socket) => socket.end())
+      await new Promise<void>((resolve, reject) => {
+        server.once('error', reject)
+        server.listen(socketPath, () => {
+          server.off('error', reject)
+          resolve()
+        })
       })
-    })
-    writeFileSync(getDaemonPidPath(dir), String(process.pid), { mode: 0o600 })
+      writeFileSync(getDaemonPidPath(dir), String(process.pid), { mode: 0o600 })
 
-    try {
-      await expect(killStaleDaemon(dir, socketPath, tokenPath)).resolves.toMatchObject({
-        killed: false
-      })
-      await expect(canConnect(socketPath)).resolves.toBe(true)
-    } finally {
-      await closeServer(server)
+      try {
+        await expect(killStaleDaemon(dir, socketPath, tokenPath)).resolves.toMatchObject({
+          killed: false
+        })
+        await expect(canConnect(socketPath)).resolves.toBe(true)
+      } finally {
+        await closeServer(server)
+      }
     }
-  })
+  )
 })
 
 describe('parseDaemonPidFile', () => {
@@ -355,10 +354,7 @@ describe('startTimeMatches', () => {
     expect(startTimeMatches(process.pid, actual + 500)).toBe(true)
   })
 
-  it('returns false for start times outside tolerance', () => {
-    if (process.platform === 'win32') {
-      return
-    }
+  it.skipIf(process.platform === 'win32')('returns false for start times outside tolerance', () => {
     const actual = getProcessStartedAtMs(process.pid)
     if (actual === null) {
       return
@@ -419,38 +415,37 @@ describe('killStaleDaemon pid identity guards', () => {
     rmSync(dir, { recursive: true, force: true })
   })
 
-  it('does not SIGTERM when the saved startedAtMs mismatches the current process', async () => {
-    if (process.platform === 'win32') {
-      return
-    }
-
-    // Why: seed a pid file that claims the daemon is `process.pid` (us) but
-    // was started 1 hour ago. Our real start time is "now," so startTimeMatches
-    // returns false and isDaemonProcess rejects. killStaleDaemon must not call
-    // process.kill in that case.
-    const bogusStartedAtMs = Date.now() - 60 * 60 * 1000
-    writeFileSync(
-      getDaemonPidPath(dir),
-      serializeDaemonPidFile({ pid: process.pid, startedAtMs: bogusStartedAtMs }),
-      { mode: 0o600 }
-    )
-
-    // isDaemonProcess uses process.kill(pid, 0) as a liveness probe; that's
-    // expected and not a real kill. We only care that no actual termination
-    // signal is sent.
-    const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true)
-    try {
-      await expect(killStaleDaemon(dir, socketPath, tokenPath)).resolves.toMatchObject({
-        killed: false
-      })
-      const terminationSignals = killSpy.mock.calls.filter(
-        ([, sig]) => sig === 'SIGTERM' || sig === 'SIGKILL'
+  it.skipIf(process.platform === 'win32')(
+    'does not SIGTERM when the saved startedAtMs mismatches the current process',
+    async () => {
+      // Why: seed a pid file that claims the daemon is `process.pid` (us) but
+      // was started 1 hour ago. Our real start time is "now," so startTimeMatches
+      // returns false and isDaemonProcess rejects. killStaleDaemon must not call
+      // process.kill in that case.
+      const bogusStartedAtMs = Date.now() - 60 * 60 * 1000
+      writeFileSync(
+        getDaemonPidPath(dir),
+        serializeDaemonPidFile({ pid: process.pid, startedAtMs: bogusStartedAtMs }),
+        { mode: 0o600 }
       )
-      expect(terminationSignals).toEqual([])
-    } finally {
-      killSpy.mockRestore()
+
+      // isDaemonProcess uses process.kill(pid, 0) as a liveness probe; that's
+      // expected and not a real kill. We only care that no actual termination
+      // signal is sent.
+      const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true)
+      try {
+        await expect(killStaleDaemon(dir, socketPath, tokenPath)).resolves.toMatchObject({
+          killed: false
+        })
+        const terminationSignals = killSpy.mock.calls.filter(
+          ([, sig]) => sig === 'SIGTERM' || sig === 'SIGKILL'
+        )
+        expect(terminationSignals).toEqual([])
+      } finally {
+        killSpy.mockRestore()
+      }
     }
-  })
+  )
 })
 
 describe('killStaleDaemon endpoint reclamation', () => {
@@ -478,323 +473,386 @@ describe('killStaleDaemon endpoint reclamation', () => {
     })
   }
 
-  it('does not unlink an endpoint republished between the probe and the removal', async () => {
-    if (process.platform === 'win32') {
-      return
-    }
-    // Why: probe and unlink are separate syscalls. A replacement publishing in between used
-    // to lose its only reachable name, leaving it alive hosting sessions nothing could reach.
-    writeFileSync(getDaemonPidPath(dir), String(999_999), { mode: 0o600 })
-    // A dead socket inode: bind elsewhere, hard-link into place, then close. libuv unlinks
-    // only its own bind name, leaving a socket whose listener is gone -> probe says 'refused'.
-    const stale = createServer()
-    const staleBind = join(dir, '.stalebind')
-    await listenOnSocketPath(stale, staleBind)
-    linkSync(staleBind, socketPath)
-    await closeServer(stale)
-    rmSync(staleBind, { force: true })
+  it.skipIf(process.platform === 'win32')(
+    'does not unlink an endpoint republished between the probe and the removal',
+    async () => {
+      // Why: probe and unlink are separate syscalls. A replacement publishing in between used
+      // to lose its only reachable name, leaving it alive hosting sessions nothing could reach.
+      writeFileSync(getDaemonPidPath(dir), String(999_999), { mode: 0o600 })
+      // A dead socket inode: bind elsewhere, hard-link into place, then close. libuv unlinks
+      // only its own bind name, leaving a socket whose listener is gone -> probe says 'refused'.
+      const stale = createServer()
+      const staleBind = join(dir, '.stalebind')
+      await listenOnSocketPath(stale, staleBind)
+      linkSync(staleBind, socketPath)
+      await closeServer(stale)
+      rmSync(staleBind, { force: true })
 
-    const replacement = createServer((socket) => socket.end())
-    let replacementBind = ''
-    try {
-      await killStaleDaemon(dir, socketPath, tokenPath, undefined, {
-        afterEndpointProbe: async () => {
-          // Daemon B publishes after the probe read 'refused' but before the unlink.
-          rmSync(socketPath, { force: true })
-          replacementBind = join(dir, '.replacement')
-          await listenOnSocketPath(replacement, replacementBind)
-          linkSync(replacementBind, socketPath)
-          rmSync(replacementBind, { force: true })
-        }
-      })
-
-      expect(existsSync(socketPath)).toBe(true)
-      await expect(canConnect(socketPath)).resolves.toBe(true)
-    } finally {
-      await closeServer(replacement)
-      rmSync(socketPath, { force: true })
-    }
-  })
-
-  it('vetoes endpoint removal when a replacement is listening by the time it would run', async () => {
-    if (process.platform === 'win32') {
-      return
-    }
-    // Why: identity alone cannot fence this. Linux recycles inode numbers as soon as the old
-    // inode is freed, so a replacement can land on the very number we captured and match. The
-    // late re-probe is the real guard: a replacement is listening, so it vetoes the removal.
-    writeFileSync(getDaemonPidPath(dir), String(999_999), { mode: 0o600 })
-    const stale = createServer()
-    const staleBind = join(dir, '.vetobind')
-    await listenOnSocketPath(stale, staleBind)
-    linkSync(staleBind, socketPath)
-    await closeServer(stale)
-    rmSync(staleBind, { force: true })
-
-    const replacement = createServer((socket) => socket.end())
-    // First probe licenses removal; the hook then publishes a live replacement.
-    const outcomes: SocketProbeOutcome[] = ['refused', 'connected']
-    let probeCount = 0
-
-    try {
-      await killStaleDaemon(dir, socketPath, tokenPath, undefined, {
-        probeEndpoint: async () => outcomes[probeCount++] ?? 'connected',
-        afterEndpointProbe: async () => {
-          rmSync(socketPath, { force: true })
-          const bind = join(dir, '.vetorepl')
-          await listenOnSocketPath(replacement, bind)
-          linkSync(bind, socketPath)
-          rmSync(bind, { force: true })
-        }
-      })
-
-      expect(probeCount).toBe(2)
-      expect(existsSync(socketPath)).toBe(true)
-      await expect(canConnect(socketPath)).resolves.toBe(true)
-    } finally {
-      await closeServer(replacement)
-      rmSync(socketPath, { force: true })
-    }
-  })
-
-  it('preserves ownership when neither the process nor the endpoint can be judged', async () => {
-    if (process.platform === 'win32') {
-      return
-    }
-    // Why: two inconclusive signals are not a licence. A failed inspection plus a probe that
-    // cannot classify the endpoint used to delete a live daemon's record and authorize a fork.
-    const record = serializeDaemonPidFile({
-      pid: process.pid,
-      startedAtMs: null,
-      launchNonce: 'live-owner'
-    })
-    writeFileSync(getDaemonPidPath(dir), record, { mode: 0o600 })
-    writeFileSync(socketPath, 'not-a-socket')
-    // Why: EPERM makes the identity inconclusive before any platform split, and the endpoint
-    // verdict is injected because which errno a non-socket path yields is platform-specific —
-    // macOS reports ENOTSOCK ('unknown') where Linux classifies it as refused.
-    const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => {
-      throw Object.assign(new Error('operation not permitted'), { code: 'EPERM' })
-    })
-
-    try {
-      await expect(
-        killStaleDaemon(dir, socketPath, tokenPath, undefined, {
-          probeEndpoint: async () => 'unknown'
+      const replacement = createServer((socket) => socket.end())
+      let replacementBind = ''
+      try {
+        await killStaleDaemon(dir, socketPath, tokenPath, undefined, {
+          afterEndpointProbe: async () => {
+            // Daemon B publishes after the probe read 'refused' but before the unlink.
+            rmSync(socketPath, { force: true })
+            replacementBind = join(dir, '.replacement')
+            await listenOnSocketPath(replacement, replacementBind)
+            linkSync(replacementBind, socketPath)
+            rmSync(replacementBind, { force: true })
+          }
         })
-      ).resolves.toEqual({
-        killed: false,
-        liveOwnerSurvived: true
-      })
-      expect(readFileSync(getDaemonPidPath(dir), 'utf8')).toBe(record)
-      expect(existsSync(socketPath)).toBe(true)
-    } finally {
-      killSpy.mockRestore()
-      rmSync(socketPath, { force: true })
+
+        expect(existsSync(socketPath)).toBe(true)
+        await expect(canConnect(socketPath)).resolves.toBe(true)
+      } finally {
+        await closeServer(replacement)
+        rmSync(socketPath, { force: true })
+      }
     }
-  })
+  )
 
-  it('preserves ownership when the owner belongs to another user (EPERM)', async () => {
-    if (process.platform === 'win32') {
-      return
+  it.skipIf(process.platform === 'win32')(
+    'vetoes endpoint removal when a replacement is listening by the time it would run',
+    async () => {
+      // Why: identity alone cannot fence this. Linux recycles inode numbers as soon as the old
+      // inode is freed, so a replacement can land on the very number we captured and match. The
+      // late re-probe is the real guard: a replacement is listening, so it vetoes the removal.
+      writeFileSync(getDaemonPidPath(dir), String(999_999), { mode: 0o600 })
+      const stale = createServer()
+      const staleBind = join(dir, '.vetobind')
+      await listenOnSocketPath(stale, staleBind)
+      linkSync(staleBind, socketPath)
+      await closeServer(stale)
+      rmSync(staleBind, { force: true })
+
+      const replacement = createServer((socket) => socket.end())
+      // First probe licenses removal; the hook then publishes a live replacement.
+      const outcomes: SocketProbeOutcome[] = ['refused', 'connected']
+      let probeCount = 0
+
+      try {
+        await killStaleDaemon(dir, socketPath, tokenPath, undefined, {
+          probeEndpoint: async () => outcomes[probeCount++] ?? 'connected',
+          afterEndpointProbe: async () => {
+            rmSync(socketPath, { force: true })
+            const bind = join(dir, '.vetorepl')
+            await listenOnSocketPath(replacement, bind)
+            linkSync(bind, socketPath)
+            rmSync(bind, { force: true })
+          }
+        })
+
+        expect(probeCount).toBe(2)
+        expect(existsSync(socketPath)).toBe(true)
+        await expect(canConnect(socketPath)).resolves.toBe(true)
+      } finally {
+        await closeServer(replacement)
+        rmSync(socketPath, { force: true })
+      }
     }
-    // Why: only ESRCH proves a process is gone. EPERM means it exists and is not ours to
-    // inspect — treating that as absence deleted a live daemon's ownership record.
-    const owner = createServer((socket) => socket.end())
-    await listenOnSocketPath(owner, socketPath)
-    const record = serializeDaemonPidFile({
-      pid: process.pid,
-      startedAtMs: null,
-      launchNonce: 'foreign-owner'
-    })
-    writeFileSync(getDaemonPidPath(dir), record, { mode: 0o600 })
-    const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => {
-      throw Object.assign(new Error('operation not permitted'), { code: 'EPERM' })
-    })
+  )
 
-    try {
-      await expect(killStaleDaemon(dir, socketPath, tokenPath)).resolves.toEqual({
-        killed: false,
-        liveOwnerSurvived: true
-      })
-      expect(readFileSync(getDaemonPidPath(dir), 'utf8')).toBe(record)
-    } finally {
-      killSpy.mockRestore()
-      await closeServer(owner)
+  it.skipIf(process.platform === 'win32')(
+    'reports a live owner when the endpoint is republished during cleanup',
+    async () => {
+      // Why: returning "no live owner" sends the caller off to fork beside the new owner, and
+      // that fork cannot publish — the exclusive claim is already held — so the user is left
+      // with no daemon at all rather than the perfectly good one already running.
+      writeFileSync(getDaemonPidPath(dir), String(999_999), { mode: 0o600 })
+      const replacement = createServer((socket) => socket.end())
+      const outcomes: SocketProbeOutcome[] = ['refused', 'connected']
+      let probeCount = 0
+
+      try {
+        await expect(
+          killStaleDaemon(dir, socketPath, tokenPath, undefined, {
+            probeEndpoint: async () => outcomes[probeCount++] ?? 'connected',
+            afterEndpointProbe: async () => {
+              const bind = join(dir, '.republished')
+              await listenOnSocketPath(replacement, bind)
+              linkSync(bind, socketPath)
+              rmSync(bind, { force: true })
+            }
+          })
+        ).resolves.toEqual({ killed: false, liveOwnerSurvived: true })
+      } finally {
+        await closeServer(replacement)
+        rmSync(socketPath, { force: true })
+      }
     }
-  })
+  )
 
-  it('still cleans up a legacy bare-integer pid record', async () => {
-    if (process.platform === 'win32') {
-      return
-    }
-    // Why: the oldest records are a bare integer. Fencing cleanup to JSON objects left them
-    // in place, and the replacement's exclusive publish then failed — no daemon at all.
-    writeFileSync(getDaemonPidPath(dir), String(999_999), { mode: 0o600 })
+  it.skipIf(process.platform === 'win32')(
+    'reclaims a malformed pid record so the next daemon can publish',
+    async () => {
+      // Why: an unparseable record names no owner to fence against, but leaving it in place
+      // fails the next daemon's exclusive publish with EEXIST — no daemon at all.
+      writeFileSync(getDaemonPidPath(dir), '{truncated', { mode: 0o600 })
 
-    await killStaleDaemon(dir, socketPath, tokenPath)
-
-    expect(existsSync(getDaemonPidPath(dir))).toBe(false)
-  })
-
-  it("leaves a replacement's pid record and endpoint alone when cleanup runs late", async () => {
-    if (process.platform === 'win32') {
-      return
-    }
-    // Why: cleanup used to unlink whatever occupied the pid path, and treated "we killed
-    // something" as licence to unlink the socket. A replacement that publishes during the
-    // kill wait was then left alive hosting sessions but unreachable — the original failure.
-    const child = spawn(
-      process.execPath,
-      [
-        '-e',
-        // Ignoring SIGTERM holds the kill wait open, which is the window a replacement
-        // publishes into. A child that dies instantly never reproduces the race.
-        "process.on('SIGTERM', () => {}); console.log('ready'); setInterval(() => {}, 1000)",
-        'daemon-entry',
-        socketPath,
-        tokenPath
-      ],
-      { stdio: ['ignore', 'pipe', 'ignore'] }
-    )
-    // Why: wait for the handler to actually be installed — a SIGTERM that lands during Node
-    // boot is handled by the default disposition and kills the child, closing the window.
-    await new Promise<void>((resolve, reject) => {
-      child.once('error', reject)
-      child.stdout?.once('data', () => resolve())
-    })
-    const childPid = child.pid as number
-    const childExited = new Promise<void>((resolve) => child.once('exit', () => resolve()))
-    writeFileSync(
-      getDaemonPidPath(dir),
-      serializeDaemonPidFile({ pid: childPid, startedAtMs: null, launchNonce: 'daemon-a' }),
-      { mode: 0o600 }
-    )
-
-    // Daemon B takes over the endpoint and publishes its ownership mid-kill.
-    const replacementRecord = serializeDaemonPidFile({
-      pid: process.pid,
-      startedAtMs: 2_000,
-      launchNonce: 'daemon-b'
-    })
-    const replacement = createServer((socket) => socket.end())
-    const handover = setTimeout(() => {
-      void listenOnSocketPath(replacement, socketPath).then(() => {
-        writeFileSync(getDaemonPidPath(dir), replacementRecord, { mode: 0o600 })
-      })
-    }, 300)
-
-    try {
       await killStaleDaemon(dir, socketPath, tokenPath)
 
+      expect(existsSync(getDaemonPidPath(dir))).toBe(false)
+    }
+  )
+
+  it.skipIf(process.platform === 'win32')(
+    'leaves a valid record written over a malformed one alone',
+    async () => {
+      // Why: reclaiming the unparseable record must still be fenced — a replacement that
+      // published a real record in the meantime owns the path.
+      writeFileSync(getDaemonPidPath(dir), '{truncated', { mode: 0o600 })
+      const replacementRecord = serializeDaemonPidFile({
+        pid: process.pid,
+        startedAtMs: 2_000,
+        launchNonce: 'daemon-b'
+      })
+
+      await killStaleDaemon(dir, socketPath, tokenPath, undefined, {
+        probeEndpoint: async () => {
+          writeFileSync(getDaemonPidPath(dir), replacementRecord, { mode: 0o600 })
+          return 'missing'
+        }
+      })
+
       expect(readFileSync(getDaemonPidPath(dir), 'utf8')).toBe(replacementRecord)
-      expect(existsSync(socketPath)).toBe(true)
-      await expect(canConnect(socketPath)).resolves.toBe(true)
-    } finally {
-      clearTimeout(handover)
-      try {
-        process.kill(childPid, 'SIGKILL')
-      } catch {
-        // Already gone.
-      }
-      await childExited
-      await closeServer(replacement)
     }
-  })
+  )
 
-  it('preserves the pid record and the endpoint when the owner cannot be proven gone', async () => {
-    if (process.platform === 'win32') {
-      return
-    }
-
-    // Why: isDaemonProcess matches on the command line, so a child carrying the daemon
-    // entry plus this endpoint's paths is adopted as the recorded owner by the first probe.
-    const child = spawn(
-      process.execPath,
-      ['-e', 'setInterval(() => {}, 1000)', 'daemon-entry', socketPath, tokenPath],
-      { stdio: 'ignore' }
-    )
-    await new Promise<void>((resolve, reject) => {
-      child.once('spawn', resolve)
-      child.once('error', reject)
-    })
-    const childPid = child.pid as number
-    const childExited = new Promise<void>((resolve) => child.once('exit', () => resolve()))
-    const server = createServer((socket) => socket.end())
-    await listenOnSocketPath(server, socketPath)
-    writeFileSync(
-      getDaemonPidPath(dir),
-      serializeDaemonPidFile({ pid: childPid, startedAtMs: null }),
-      { mode: 0o600 }
-    )
-
-    const realKill = process.kill.bind(process)
-    const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true)
-    // Why: the recorded owner vanishes mid-wait, so the pre-SIGKILL identity re-probe
-    // fails and only the still-answering endpoint proves a daemon is alive.
-    const identityBreaker = setTimeout(() => realKill(childPid, 'SIGKILL'), 800)
-    try {
-      await expect(killStaleDaemon(dir, socketPath, tokenPath)).resolves.toEqual({
-        killed: false,
-        liveOwnerSurvived: true
+  it.skipIf(process.platform === 'win32')(
+    'preserves ownership when neither the process nor the endpoint can be judged',
+    async () => {
+      // Why: two inconclusive signals are not a licence. A failed inspection plus a probe that
+      // cannot classify the endpoint used to delete a live daemon's record and authorize a fork.
+      const record = serializeDaemonPidFile({
+        pid: process.pid,
+        startedAtMs: null,
+        launchNonce: 'live-owner'
       })
-      expect(existsSync(getDaemonPidPath(dir))).toBe(true)
-      expect(existsSync(socketPath)).toBe(true)
-      await expect(canConnect(socketPath)).resolves.toBe(true)
-    } finally {
-      clearTimeout(identityBreaker)
-      killSpy.mockRestore()
+      writeFileSync(getDaemonPidPath(dir), record, { mode: 0o600 })
+      writeFileSync(socketPath, 'not-a-socket')
+      // Why: EPERM makes the identity inconclusive before any platform split, and the endpoint
+      // verdict is injected because which errno a non-socket path yields is platform-specific —
+      // macOS reports ENOTSOCK ('unknown') where Linux classifies it as refused.
+      const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => {
+        throw Object.assign(new Error('operation not permitted'), { code: 'EPERM' })
+      })
+
       try {
-        realKill(childPid, 'SIGKILL')
-      } catch {
-        // Already gone.
+        await expect(
+          killStaleDaemon(dir, socketPath, tokenPath, undefined, {
+            probeEndpoint: async () => 'unknown'
+          })
+        ).resolves.toEqual({
+          killed: false,
+          liveOwnerSurvived: true
+        })
+        expect(readFileSync(getDaemonPidPath(dir), 'utf8')).toBe(record)
+        expect(existsSync(socketPath)).toBe(true)
+      } finally {
+        killSpy.mockRestore()
+        rmSync(socketPath, { force: true })
       }
-      await childExited
+    }
+  )
+
+  it.skipIf(process.platform === 'win32')(
+    'preserves ownership when the owner belongs to another user (EPERM)',
+    async () => {
+      // Why: only ESRCH proves a process is gone. EPERM means it exists and is not ours to
+      // inspect — treating that as absence deleted a live daemon's ownership record.
+      const owner = createServer((socket) => socket.end())
+      await listenOnSocketPath(owner, socketPath)
+      const record = serializeDaemonPidFile({
+        pid: process.pid,
+        startedAtMs: null,
+        launchNonce: 'foreign-owner'
+      })
+      writeFileSync(getDaemonPidPath(dir), record, { mode: 0o600 })
+      const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => {
+        throw Object.assign(new Error('operation not permitted'), { code: 'EPERM' })
+      })
+
+      try {
+        await expect(killStaleDaemon(dir, socketPath, tokenPath)).resolves.toEqual({
+          killed: false,
+          liveOwnerSurvived: true
+        })
+        expect(readFileSync(getDaemonPidPath(dir), 'utf8')).toBe(record)
+      } finally {
+        killSpy.mockRestore()
+        await closeServer(owner)
+      }
+    }
+  )
+
+  it.skipIf(process.platform === 'win32')(
+    'still cleans up a legacy bare-integer pid record',
+    async () => {
+      // Why: the oldest records are a bare integer. Fencing cleanup to JSON objects left them
+      // in place, and the replacement's exclusive publish then failed — no daemon at all.
+      writeFileSync(getDaemonPidPath(dir), String(999_999), { mode: 0o600 })
+
+      await killStaleDaemon(dir, socketPath, tokenPath)
+
+      expect(existsSync(getDaemonPidPath(dir))).toBe(false)
+    }
+  )
+
+  it.skipIf(process.platform === 'win32')(
+    "leaves a replacement's pid record and endpoint alone when cleanup runs late",
+    async () => {
+      // Why: cleanup used to unlink whatever occupied the pid path, and treated "we killed
+      // something" as licence to unlink the socket. A replacement that publishes during the
+      // kill wait was then left alive hosting sessions but unreachable — the original failure.
+      const child = spawn(
+        process.execPath,
+        [
+          '-e',
+          // Ignoring SIGTERM holds the kill wait open, which is the window a replacement
+          // publishes into. A child that dies instantly never reproduces the race.
+          "process.on('SIGTERM', () => {}); console.log('ready'); setInterval(() => {}, 1000)",
+          'daemon-entry',
+          socketPath,
+          tokenPath
+        ],
+        { stdio: ['ignore', 'pipe', 'ignore'] }
+      )
+      // Why: wait for the handler to actually be installed — a SIGTERM that lands during Node
+      // boot is handled by the default disposition and kills the child, closing the window.
+      await new Promise<void>((resolve, reject) => {
+        child.once('error', reject)
+        child.stdout?.once('data', () => resolve())
+      })
+      const childPid = child.pid as number
+      const childExited = new Promise<void>((resolve) => child.once('exit', () => resolve()))
+      writeFileSync(
+        getDaemonPidPath(dir),
+        serializeDaemonPidFile({ pid: childPid, startedAtMs: null, launchNonce: 'daemon-a' }),
+        { mode: 0o600 }
+      )
+
+      // Daemon B takes over the endpoint and publishes its ownership mid-kill.
+      const replacementRecord = serializeDaemonPidFile({
+        pid: process.pid,
+        startedAtMs: 2_000,
+        launchNonce: 'daemon-b'
+      })
+      const replacement = createServer((socket) => socket.end())
+      const handover = setTimeout(() => {
+        void listenOnSocketPath(replacement, socketPath).then(() => {
+          writeFileSync(getDaemonPidPath(dir), replacementRecord, { mode: 0o600 })
+        })
+      }, 300)
+
+      try {
+        await killStaleDaemon(dir, socketPath, tokenPath)
+
+        expect(readFileSync(getDaemonPidPath(dir), 'utf8')).toBe(replacementRecord)
+        expect(existsSync(socketPath)).toBe(true)
+        await expect(canConnect(socketPath)).resolves.toBe(true)
+      } finally {
+        clearTimeout(handover)
+        try {
+          process.kill(childPid, 'SIGKILL')
+        } catch {
+          // Already gone.
+        }
+        await childExited
+        await closeServer(replacement)
+      }
+    }
+  )
+
+  it.skipIf(process.platform === 'win32')(
+    'preserves the pid record and the endpoint when the owner cannot be proven gone',
+    async () => {
+      // Why: isDaemonProcess matches on the command line, so a child carrying the daemon
+      // entry plus this endpoint's paths is adopted as the recorded owner by the first probe.
+      const child = spawn(
+        process.execPath,
+        ['-e', 'setInterval(() => {}, 1000)', 'daemon-entry', socketPath, tokenPath],
+        { stdio: 'ignore' }
+      )
+      await new Promise<void>((resolve, reject) => {
+        child.once('spawn', resolve)
+        child.once('error', reject)
+      })
+      const childPid = child.pid as number
+      const childExited = new Promise<void>((resolve) => child.once('exit', () => resolve()))
+      const server = createServer((socket) => socket.end())
+      await listenOnSocketPath(server, socketPath)
+      writeFileSync(
+        getDaemonPidPath(dir),
+        serializeDaemonPidFile({ pid: childPid, startedAtMs: null }),
+        { mode: 0o600 }
+      )
+
+      const realKill = process.kill.bind(process)
+      const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true)
+      // Why: the recorded owner vanishes mid-wait, so the pre-SIGKILL identity re-probe
+      // fails and only the still-answering endpoint proves a daemon is alive.
+      const identityBreaker = setTimeout(() => realKill(childPid, 'SIGKILL'), 800)
+      try {
+        await expect(killStaleDaemon(dir, socketPath, tokenPath)).resolves.toEqual({
+          killed: false,
+          liveOwnerSurvived: true
+        })
+        expect(existsSync(getDaemonPidPath(dir))).toBe(true)
+        expect(existsSync(socketPath)).toBe(true)
+        await expect(canConnect(socketPath)).resolves.toBe(true)
+      } finally {
+        clearTimeout(identityBreaker)
+        killSpy.mockRestore()
+        try {
+          realKill(childPid, 'SIGKILL')
+        } catch {
+          // Already gone.
+        }
+        await childExited
+        await closeServer(server)
+      }
+    }
+  )
+
+  it.skipIf(process.platform === 'win32')(
+    'unlinks a stale endpoint file once connects to it are refused',
+    async () => {
+      // Why: hard-linking the bound inode leaves the endpoint name behind after the
+      // listener closes — exactly the entry a crashed daemon leaves for connect to refuse.
+      const bindPath = join(dir, '.bstale')
+      const server = createServer((socket) => socket.end())
+      await listenOnSocketPath(server, bindPath)
+      linkSync(bindPath, socketPath)
       await closeServer(server)
-    }
-  })
 
-  it('unlinks a stale endpoint file once connects to it are refused', async () => {
-    if (process.platform === 'win32') {
-      return
-    }
-
-    // Why: hard-linking the bound inode leaves the endpoint name behind after the
-    // listener closes — exactly the entry a crashed daemon leaves for connect to refuse.
-    const bindPath = join(dir, '.bstale')
-    const server = createServer((socket) => socket.end())
-    await listenOnSocketPath(server, bindPath)
-    linkSync(bindPath, socketPath)
-    await closeServer(server)
-
-    await expect(killStaleDaemon(dir, socketPath, tokenPath)).resolves.toEqual({
-      killed: false,
-      liveOwnerSurvived: false
-    })
-    expect(existsSync(socketPath)).toBe(false)
-  })
-
-  it('keeps the endpoint file when the connect probe neither connects nor is refused', async () => {
-    if (process.platform === 'win32') {
-      return
-    }
-
-    writeFileSync(socketPath, '')
-    // A connect that never settles leaves the probe to time out, which is not proof
-    // the endpoint is dead — net.connect itself cannot be spied on in ESM.
-    const connectSpy = vi
-      .spyOn(Socket.prototype, 'connect')
-      .mockImplementation(function (this: Socket) {
-        return this
-      })
-    try {
       await expect(killStaleDaemon(dir, socketPath, tokenPath)).resolves.toEqual({
         killed: false,
         liveOwnerSurvived: false
       })
-      expect(existsSync(socketPath)).toBe(true)
-    } finally {
-      connectSpy.mockRestore()
+      expect(existsSync(socketPath)).toBe(false)
     }
-  })
+  )
+
+  it.skipIf(process.platform === 'win32')(
+    'keeps the endpoint file when the connect probe neither connects nor is refused',
+    async () => {
+      writeFileSync(socketPath, '')
+      // A connect that never settles leaves the probe to time out, which is not proof
+      // the endpoint is dead — net.connect itself cannot be spied on in ESM.
+      const connectSpy = vi
+        .spyOn(Socket.prototype, 'connect')
+        .mockImplementation(function (this: Socket) {
+          return this
+        })
+      try {
+        await expect(killStaleDaemon(dir, socketPath, tokenPath)).resolves.toEqual({
+          killed: false,
+          liveOwnerSurvived: false
+        })
+        expect(existsSync(socketPath)).toBe(true)
+      } finally {
+        connectSpy.mockRestore()
+      }
+    }
+  )
 })
