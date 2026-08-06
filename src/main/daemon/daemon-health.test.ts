@@ -542,7 +542,12 @@ describe('killStaleDaemon endpoint reclamation', () => {
     writeFileSync(getDaemonPidPath(dir), record, { mode: 0o600 })
     // A regular file at the endpoint path yields ENOTSOCK — neither refused nor missing.
     writeFileSync(socketPath, 'not-a-socket')
-    processInspection.broken = true
+    // Why: drive the inconclusive identity through the liveness probe rather than through a
+    // broken `ps`. Linux reads /proc first and never reaches `ps`, so a mocked `ps` failure
+    // would leave this branch untested there; process.kill runs before any platform split.
+    const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => {
+      throw Object.assign(new Error('operation not permitted'), { code: 'EPERM' })
+    })
 
     try {
       await expect(killStaleDaemon(dir, socketPath, tokenPath)).resolves.toEqual({
@@ -552,7 +557,7 @@ describe('killStaleDaemon endpoint reclamation', () => {
       expect(readFileSync(getDaemonPidPath(dir), 'utf8')).toBe(record)
       expect(existsSync(socketPath)).toBe(true)
     } finally {
-      processInspection.broken = false
+      killSpy.mockRestore()
       rmSync(socketPath, { force: true })
     }
   })
