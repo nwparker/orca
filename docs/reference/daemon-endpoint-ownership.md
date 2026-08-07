@@ -361,13 +361,38 @@ a leftover carries proof of who may remove it, not a sweeper that guesses.
 
 ## Residual risk
 
-Two starting daemons can interleave so that the loser briefly holds a live listener no name
-resolves to. It exits at step 5, or failing that within one poll of the ownership watchdog. It
-has no sessions, so nothing is lost.
+Two starting daemons can interleave so the loser briefly holds a live listener no name resolves
+to. It exits at step 5, or within one poll of the ownership watchdog. It has no sessions, so
+nothing is lost.
 
-The sharper residual is the one described under step 4: a publisher preempted between its
-re-check and its `rename` can still replace an entry that changed hands in those two syscalls.
-Unlike the pre-step-4 behaviour, this no longer widens with probe duration or scheduling delay,
-so the victim is overwhelmingly likely to be another zero-session racer rather than an
-established daemon. It is bounded rather than eliminated, and it is the honest limit of a
-lock-free protocol here.
+### The step 4 window, stated properly
+
+Earlier versions of this document said the loser of a publish race is always a starting daemon
+with no sessions. That is wrong, and it is worth being precise about why, because it is the
+sharpest thing known about this design.
+
+Step 4's re-check and its `rename` are two syscalls. A publisher preempted between them can
+resume and replace an entry it never probed. The victim is **not** necessarily a zero-session
+racer: if A published, verified, armed, and accepted a terminal in that gap, then B's rename
+destroys A's directory entry. B then fails its own exclusive PID publish — A already holds it —
+and aborts, leaving the canonical name pointing at B's dead socket. A stays alive with the user's
+terminal but is unreachable until the ownership watchdog retires it, and the user's session is
+stranded in the meantime. That is the original symptom reached through a much narrower window.
+
+The window requires B to lose the CPU between two adjacent syscalls for long enough that A
+completes publish, PID, token, arm, accept, and PTY spawn. It is small but not zero, and calling
+it harmless was overclaiming.
+
+**The fix, not yet applied.** Publish the exclusive PID record _before_ the endpoint rename rather
+than after. That record is already an atomic mutual exclusion — `open` with `O_EXCL` — so a
+preempted B would fail it on resume and never reach its rename, leaving A intact. It reuses a
+primitive the design already depends on instead of inventing a lock. It is a real reordering of
+the startup sequence and wants its own review and a test that pauses a publisher between the
+re-check and the rename, which is why it is recorded here rather than done in passing.
+
+**What cannot be fixed from this branch.** An already-released build's stale cleanup unlinks the
+canonical socket on the strength of an earlier kill result, even when its own probe just
+connected. A new daemon publishing during that window has its live socket deleted by shipped
+code. It is reachable only while two versions run concurrently, it exists old-against-old too,
+and no change here can fence a process that is already deployed. Landing this is what stops the
+behaviour going forward.
