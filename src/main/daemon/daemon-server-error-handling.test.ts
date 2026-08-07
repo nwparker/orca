@@ -59,8 +59,14 @@ describe('daemon server error handling', () => {
     expect(daemon.server?.listenerCount('error')).toBe(1)
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     try {
+      // Twice on purpose: a one-shot listener survives the first error and dies on the second,
+      // so a single emit cannot tell a permanent handler from `once`.
       expect(() => daemon.server?.emit('error', new Error('EMFILE: accept failed'))).not.toThrow()
-      expect(warn).toHaveBeenCalled()
+      expect(() =>
+        daemon.server?.emit('error', new Error('EMFILE: accept failed again'))
+      ).not.toThrow()
+      expect(warn).toHaveBeenCalledTimes(2)
+      expect(daemon.server?.listenerCount('error')).toBe(1)
     } finally {
       warn.mockRestore()
     }
