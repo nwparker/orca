@@ -181,6 +181,33 @@ Unit CI shards run **ubuntu-latest only**. A test gated to darwin never executes
 platform gating in tests must be `skipIf(win32)` — never `skipIf` on anything that would also
 exclude Linux, and never an early `return` that silently passes.
 
+## Upgrades and mixed versions
+
+Users update the app while a daemon from the previous version may still be running and hosting
+live terminals, so both directions matter.
+
+The socket path is protocol-scoped (`daemon-v<N>.sock`), so daemons at different protocol
+versions never contend for a name at all. This change does not alter the protocol version, so
+the interesting case is a same-protocol version mismatch:
+
+- **Old daemon running, user upgrades.** If it is healthy the new app adopts it and nothing
+  touches the entry. If it is not, the launcher kills it; the old daemon's own shutdown path
+  removes its entry (old behaviour), and the new daemon's link then finds a free name. If it
+  crashed instead, the new daemon proves the leftover dead and renames over it.
+- **New daemon running, user downgrades.** The new daemon leaves its entry behind on exit. The
+  old code's reclaim path exists precisely to clear a stale entry: it probes, gets
+  `ECONNREFUSED`, unlinks, and forks. That path is the one being deleted going forward, but it
+  still works in the old build.
+
+Neither direction produces two live daemons or a daemon that cannot start.
+
+**The already-affected user.** Someone sitting on two live daemons today — one owning the socket,
+one hosting their sessions — is not rescued by this change specifically. The retirement watchdog
+that makes the orphan stand down already shipped separately; this change is what stops the state
+from being reachable again. Retirement also drains rather than kills, so an orphan holding a
+shell that never exits can still linger. That is worth saying plainly rather than claiming this
+change recovers them.
+
 ## Residual risk
 
 Two starting daemons can interleave so that the loser briefly holds a live listener no name
