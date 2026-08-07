@@ -2,8 +2,10 @@
    rename-claim protocol leaves behind. Kept apart from daemon-spawner so the rule that
    decides who may serve on the socket path is readable on its own. */
 import { randomBytes } from 'node:crypto'
-import { existsSync, linkSync, readdirSync, renameSync, statSync, unlinkSync } from 'node:fs'
+import { existsSync, linkSync, renameSync, statSync, unlinkSync } from 'node:fs'
 import { dirname, join } from 'node:path'
+
+export { sweepAbandonedDaemonClaims } from './daemon-endpoint-claim-sweep'
 
 /**
  * The exact endpoint a daemon owns. `birthtimeMs` is not redundant: Linux reuses inode
@@ -143,6 +145,8 @@ export type DaemonEndpointReclaimOutcome =
   | 'absent'
   /** Could not be classified; the entry was put back and must be left alone. */
   | 'inconclusive'
+  /** The claim is retained because its canonical name could not be restored. */
+  | 'restoration-failed'
 
 export async function reclaimDeadDaemonSocketPath(
   socketPath: string,
@@ -159,17 +163,25 @@ export async function reclaimDeadDaemonSocketPath(
   }
   // Why tri-state: collapsing this to a boolean makes an unclassifiable probe read as "dead",
   // which deletes an endpoint that may well be serving. Only proof of death may remove it.
-  const liveness = await probeEndpoint(claimedPath)
+  let liveness: 'alive' | 'dead' | 'unknown' = 'unknown'
+  try {
+    liveness = await probeEndpoint(claimedPath)
+  } catch {
+    // A failed probe still owes the claimed endpoint its canonical name back.
+  }
   if (liveness === 'dead') {
     try {
       unlinkSync(claimedPath)
       return 'reclaimed'
     } catch {
-      restoreClaimedDaemonSocketPath(claimedPath, socketPath)
-      return 'inconclusive'
+      return restoreClaimedDaemonSocketPath(claimedPath, socketPath)
+        ? 'inconclusive'
+        : 'restoration-failed'
     }
   }
-  restoreClaimedDaemonSocketPath(claimedPath, socketPath)
+  if (!restoreClaimedDaemonSocketPath(claimedPath, socketPath)) {
+    return 'restoration-failed'
+  }
   return liveness === 'alive' ? 'live-owner' : 'inconclusive'
 }
 
@@ -181,14 +193,13 @@ export async function reclaimDeadDaemonSocketPath(
  * took. Link fails with EEXIST instead, which is the correct outcome — the newer publisher
  * owns the name and our claim is simply dropped.
  */
-function restoreClaimedDaemonSocketPath(claimedPath: string, socketPath: string): void {
+function restoreClaimedDaemonSocketPath(claimedPath: string, socketPath: string): boolean {
   try {
     linkSync(claimedPath, socketPath)
   } catch (error) {
     if (!(isFileExistsError(error) && existsSync(socketPath))) {
-      // The restore did not happen and nobody replaced the name. Keep the claim on disk —
-      // the age-gated sweep can reclaim it later, and losing the only copy is worse.
-      return
+      // Keep the sole reachable name for a later recovery attempt.
+      return false
     }
   }
   try {
@@ -196,6 +207,7 @@ function restoreClaimedDaemonSocketPath(claimedPath: string, socketPath: string)
   } catch {
     // A uniquely named leftover is inert and is swept by age.
   }
+  return true
 }
 
 /**
@@ -235,43 +247,4 @@ export function unlinkOwnedDaemonSocketPath(
   }
   restoreClaimedDaemonSocketPath(claimedPath, socketPath)
   return false
-}
-
-const ABANDONED_DAEMON_CLAIM_PATTERN =
-  /(?:\.(?:cleanup|replace)-\d+-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|^\.[bc][0-9a-f]{10})$/
-
-const ABANDONED_DAEMON_CLAIM_MIN_AGE_MS = 60 * 60 * 1000
-
-/**
- * Reclaims claim/bind scratch names left behind when a rename-claim or bind publish
- * could not remove its own temporary entry. Age-gated so a claim in flight is never touched.
- */
-export function sweepAbandonedDaemonClaims(
-  runtimeDir: string,
-  minAgeMs = ABANDONED_DAEMON_CLAIM_MIN_AGE_MS,
-  now = Date.now()
-): number {
-  let swept = 0
-  let entries: string[]
-  try {
-    entries = readdirSync(runtimeDir)
-  } catch {
-    return 0
-  }
-  for (const entry of entries) {
-    if (!ABANDONED_DAEMON_CLAIM_PATTERN.test(entry)) {
-      continue
-    }
-    const claimPath = join(runtimeDir, entry)
-    try {
-      if (now - statSync(claimPath).mtimeMs < minAgeMs) {
-        continue
-      }
-      unlinkSync(claimPath)
-      swept++
-    } catch {
-      // Best-effort; a locked or already-removed claim is retried on a future launch.
-    }
-  }
-  return swept
 }

@@ -1,7 +1,7 @@
 /* oxlint-disable max-lines -- Why: pid validation shares process-identity
 helpers with kill escalation so the SIGKILL safety checks stay co-located. */
 import { execFile, execFileSync } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, lstatSync, readFileSync } from 'node:fs'
 import { connect, type Socket } from 'node:net'
 import { promisify } from 'node:util'
 import {
@@ -68,9 +68,15 @@ export type SocketProbeOutcome = 'connected' | 'missing' | 'refused' | 'unknown'
 
 function probeSocketConnect(socketPath: string): Promise<SocketProbeOutcome> {
   return new Promise((resolve) => {
-    if (process.platform !== 'win32' && !existsSync(socketPath)) {
-      resolve('missing')
-      return
+    let occupiedUnixEntry = false
+    if (process.platform !== 'win32') {
+      try {
+        lstatSync(socketPath)
+        occupiedUnixEntry = true
+      } catch (error) {
+        resolve(isMissingFileError(error) ? 'missing' : 'unknown')
+        return
+      }
     }
     const sock = connect({ path: socketPath })
     let settled = false
@@ -93,7 +99,13 @@ function probeSocketConnect(socketPath: string): Promise<SocketProbeOutcome> {
     }
     const onError = (error: NodeJS.ErrnoException): void => {
       settle(
-        error.code === 'ECONNREFUSED' ? 'refused' : error.code === 'ENOENT' ? 'missing' : 'unknown'
+        error.code === 'ECONNREFUSED' || error.code === 'ENOTSOCK'
+          ? 'refused'
+          : error.code === 'ENOENT'
+            ? occupiedUnixEntry
+              ? 'refused'
+              : 'missing'
+            : 'unknown'
       )
     }
     const timer = setTimeout(() => {
@@ -747,6 +759,10 @@ export async function getMacDaemonTccAttributionHealth(
   return 'unknown'
 }
 
+function isMissingFileError(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT'
+}
+
 function isNoSuchProcessError(error: unknown): boolean {
   return typeof error === 'object' && error !== null && 'code' in error && error.code === 'ESRCH'
 }
@@ -952,7 +968,7 @@ export async function killStaleDaemon(
     }
     return outcome === 'unknown' ? 'unknown' : 'dead'
   })
-  if (reclaim === 'live-owner' || reclaim === 'inconclusive') {
+  if (reclaim === 'live-owner' || reclaim === 'inconclusive' || reclaim === 'restoration-failed') {
     // Why: the claim found something serving, or could not tell. Reporting no owner sends the
     // caller off to fork onto a name it cannot publish, so the working daemon is preserved.
     console.warn('[daemon] Endpoint was republished during cleanup — preserving the new owner')

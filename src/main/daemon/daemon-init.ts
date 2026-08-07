@@ -875,7 +875,7 @@ export async function initDaemonPtyProvider(
   // Why: rename-claim and bind scratch names are unlinked by their owner, but a failed unlink
   // leaves one behind forever. Sweep before launching so a failed launch is still reclaimed;
   // age-gated so a claim still in flight is never disturbed.
-  sweepAbandonedDaemonClaims(runtimeDir)
+  sweepAbandonedDaemonClaims(runtimeDir, undefined, undefined, getDaemonSocketPath(runtimeDir))
 
   const newSpawner = new DaemonSpawner({
     runtimeDir,
