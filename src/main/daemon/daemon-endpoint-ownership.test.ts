@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   existsSync,
   linkSync,
+  chmodSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -14,7 +15,11 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DaemonServer } from './daemon-server'
 import { getDaemonSocketPath, publishDaemonPidFile } from './daemon-spawner'
-import { readDaemonSocketIdentity } from './daemon-endpoint-ownership'
+import {
+  publishDaemonSocketPath,
+  readDaemonSocketIdentity,
+  reclaimDeadDaemonSocketPath
+} from './daemon-endpoint-ownership'
 import type { SubprocessHandle } from './session'
 
 function connectsTo(socketPath: string): Promise<boolean> {
@@ -42,6 +47,62 @@ function createMockSubprocess(): SubprocessHandle {
     dispose() {}
   }
 }
+
+describe('daemon endpoint claim classification', () => {
+  it.skipIf(process.platform === 'win32')(
+    'reports inconclusive when the endpoint cannot be claimed',
+    async () => {
+      // Why: only a missing source proves nothing was there. Reporting a permission failure as
+      // absent tells the caller the name is free, and its exclusive publish then fails EEXIST.
+      const dir = mkdtempSync(join(tmpdir(), 'daemon-claim-classify-'))
+      const socketPath = join(dir, 'daemon.sock')
+      const server = createServer((socket) => socket.end())
+      const bind = join(dir, '.claimbind')
+      await new Promise<void>((resolve) => server.listen(bind, resolve))
+      linkSync(bind, socketPath)
+      unlinkSync(bind)
+      chmodSync(dir, 0o500)
+
+      try {
+        await expect(reclaimDeadDaemonSocketPath(socketPath, async () => 'dead')).resolves.toBe(
+          'inconclusive'
+        )
+        expect(existsSync(socketPath)).toBe(true)
+      } finally {
+        chmodSync(dir, 0o700)
+        await new Promise<void>((resolve) => server.close(() => resolve()))
+        rmSync(dir, { recursive: true, force: true })
+      }
+    }
+  )
+
+  it.skipIf(process.platform === 'win32')(
+    'refuses to publish by overwriting an entry it did not claim',
+    async () => {
+      // Why: the removed fallback checked for an absent canonical name and then renamed over
+      // it. A daemon publishing in that gap was silently overwritten and stranded.
+      const dir = mkdtempSync(join(tmpdir(), 'daemon-publish-excl-'))
+      const socketPath = join(dir, 'daemon.sock')
+      const incumbent = createServer((socket) => socket.end())
+      const newcomer = createServer((socket) => socket.end())
+      try {
+        const incumbentBind = join(dir, '.incumbent')
+        await new Promise<void>((resolve) => incumbent.listen(incumbentBind, resolve))
+        const incumbentIdentity = publishDaemonSocketPath(incumbentBind, socketPath)
+
+        const newcomerBind = join(dir, '.newcomer')
+        await new Promise<void>((resolve) => newcomer.listen(newcomerBind, resolve))
+        expect(() => publishDaemonSocketPath(newcomerBind, socketPath)).toThrow()
+
+        expect(readDaemonSocketIdentity(socketPath)).toEqual(incumbentIdentity)
+      } finally {
+        await new Promise<void>((resolve) => incumbent.close(() => resolve()))
+        await new Promise<void>((resolve) => newcomer.close(() => resolve()))
+        rmSync(dir, { recursive: true, force: true })
+      }
+    }
+  )
+})
 
 describe('daemon endpoint ownership publication', () => {
   let dir: string

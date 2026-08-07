@@ -1277,8 +1277,16 @@ export async function cleanupDaemonForProtocol(
     didRequestShutdown = true
   } catch {
     // Previous-protocol daemons may be wedged or too old for the RPC path; fall back to PID cleanup (only unlinks a live socket after proving the process is killed).
-    didKillStaleDaemon = (await killStaleDaemon(runtimeDir, socketPath, tokenPath, protocolVersion))
-      .killed
+    const killOutcome = await killStaleDaemon(runtimeDir, socketPath, tokenPath, protocolVersion)
+    didKillStaleDaemon = killOutcome.killed
+    if (killOutcome.liveOwnerSurvived) {
+      // Why: something still owns the endpoint. Returning as if it were cleaned lets restart
+      // fork a replacement that cannot publish onto the held name, leaving the user with no
+      // daemon instead of the one still running.
+      throw new DaemonEndpointOwnershipError(
+        'Daemon cleanup aborted: the existing daemon could not be confirmed stopped'
+      )
+    }
   } finally {
     client.disconnect()
   }

@@ -45,22 +45,12 @@ export function publishDaemonSocketPath(
   // Why: stat the bound name first — the link shares the inode, so a racing unlink of the
   // canonical name cannot erase our identity and leave the endpoint unwatched and uncleanable.
   const identity = readDaemonSocketIdentity(boundPath)
-  try {
-    linkSync(boundPath, canonicalPath)
-  } catch (error) {
-    if (isFileExistsError(error)) {
-      throw error
-    }
-    // Why: a filesystem without hard links must not stop the daemon from starting. Rename
-    // still moves the bind name out from under libuv, which preserves the property that
-    // matters most — a late close cannot delete a replacement's endpoint. Exclusivity
-    // degrades to check-then-act here, which is no weaker than binding the path directly.
-    if (existsSync(canonicalPath)) {
-      throw error
-    }
-    renameSync(boundPath, canonicalPath)
-    return identity
-  }
+  // Why no fallback: the previous one checked for an absent canonical name and then renamed
+  // over it, which is check-then-act with an operation that replaces whatever it finds — a
+  // daemon publishing in that gap was silently overwritten and stranded. Requiring the link
+  // also guarantees restore works later, since publishing proves the filesystem supports it.
+  // userData is always local, so this is not a reachable limitation in practice.
+  linkSync(boundPath, canonicalPath)
   try {
     unlinkSync(boundPath)
   } catch {
@@ -158,8 +148,10 @@ export async function reclaimDeadDaemonSocketPath(
   const claimedPath = join(dirname(socketPath), `.c${randomBytes(5).toString('hex')}`)
   try {
     renameSync(socketPath, claimedPath)
-  } catch {
-    return 'absent'
+  } catch (error) {
+    // Why: only a missing source proves there was nothing to claim. Reporting EACCES or EIO as
+    // absent tells the caller the name is free, and its exclusive publish then fails EEXIST.
+    return isMissingFileError(error) ? 'absent' : 'inconclusive'
   }
   // Why tri-state: collapsing this to a boolean makes an unclassifiable probe read as "dead",
   // which deletes an endpoint that may well be serving. Only proof of death may remove it.
