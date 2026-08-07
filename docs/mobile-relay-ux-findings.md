@@ -6,11 +6,11 @@ desktop or relay-server code. All file references are in `mobile/` of this workt
 
 ## 1. Symptom → root-cause summary
 
-| # | Symptom | Root cause (verified) |
-|---|---------|----------------------|
-| S1 | Resume lands on an empty "Host" page, grey dot | Bare cross-stack `router.push` into a cold nested host navigator resolves to the host index route **without the `hostId` param**; every screen below then runs with `hostId: undefined` |
-| S2 | Tapping a healthy relay host shows grey 1–2s before green | Every screen focus funnels into the network-handoff recovery path, which **suspends the healthy relay session** (publishes `disconnected`) and re-dials; the re-dial is invisible because `migrateTo` binds new-session state only after authentication |
-| S3 | Relay-forced pairing looks dead ~5–10s | The pairing relay path has **no log sink** (only direct-path entries reach the "Pairing log"), and post-pairing the app dials the unreachable LAN endpoint for up to 12s before relay recovery is even eligible |
+| #   | Symptom                                                   | Root cause (verified)                                                                                                                                                                                                                                   |
+| --- | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| S1  | Resume lands on an empty "Host" page, grey dot            | Bare cross-stack `router.push` into a cold nested host navigator resolves to the host index route **without the `hostId` param**; every screen below then runs with `hostId: undefined`                                                                 |
+| S2  | Tapping a healthy relay host shows grey 1–2s before green | Every screen focus funnels into the network-handoff recovery path, which **suspends the healthy relay session** (publishes `disconnected`) and re-dials; the re-dial is invisible because `migrateTo` binds new-session state only after authentication |
+| S3  | Relay-forced pairing looks dead ~5–10s                    | The pairing relay path has **no log sink** (only direct-path entries reach the "Pairing log"), and post-pairing the app dials the unreachable LAN endpoint for up to 12s before relay recovery is even eligible                                         |
 
 ## 2. Verified end-to-end causal chains
 
@@ -38,7 +38,7 @@ desktop or relay-server code. All file references are in `mobile/` of this workt
    navigation history.
 
 Corrections to the preliminary sweep: the empty page is primarily the missing `hostId` param, not
-the connection-gated fetches or the cold 30s worktree cache (those matter only when landing *with*
+the connection-gated fetches or the cold 30s worktree cache (those matter only when landing _with_
 a valid `hostId`, e.g. the mistap-strand case). Also, the Resume target "validation" is weaker than
 it looks: `getCachedWorktrees` is seeded from the persisted home snapshot at hydration
 (`app/index.tsx:264-277`) and the 30s TTL is stamped at seed time (`src/cache/worktree-cache.ts:20`),
@@ -148,13 +148,13 @@ proves the nested stack exists (`mountedHostStack`, `mobile-task-navigation.ts:5
 
 Bare pushes remaining (host stack plausibly cold at each):
 
-| Call site | Target | Cold scenario |
-|---|---|---|
+| Call site                                                                   | Target                              | Cold scenario                                                                                             |
+| --------------------------------------------------------------------------- | ----------------------------------- | --------------------------------------------------------------------------------------------------------- |
 | `app/_layout.tsx:127` via `src/notifications/notification-routing.ts:58,64` | `/h/<id>/session/<wt>` or `/h/<id>` | **Coldest path** — `getLastNotificationResponse()` after launch from a killed app, plus the warm listener |
-| `app/index.tsx:740-746` (Resume) | `/h/[hostId]/session/[worktreeId]` | Fixed by PR #12001 |
-| `app/index.tsx:835` (Account-usage card) | `/h/<id>/accounts` | Home is the root route |
-| `orca://` deep links (scheme in `app.json:9`, no linking config) | any `/h/...` | Default filesystem linking, zero coordination; `app/_layout.tsx:52-58` only intercepts pairing codes |
-| `app/h/[hostId]/history/[worktreeId].tsx:15`, `pr/[worktreeId].tsx:16` | redirect to source-control | A cold deep link to these hits the same cold-navigator resolution first |
+| `app/index.tsx:740-746` (Resume)                                            | `/h/[hostId]/session/[worktreeId]`  | Fixed by PR #12001                                                                                        |
+| `app/index.tsx:835` (Account-usage card)                                    | `/h/<id>/accounts`                  | Home is the root route                                                                                    |
+| `orca://` deep links (scheme in `app.json:9`, no linking config)            | any `/h/...`                        | Default filesystem linking, zero coordination; `app/_layout.tsx:52-58` only intercepts pairing codes      |
+| `app/h/[hostId]/history/[worktreeId].tsx:15`, `pr/[worktreeId].tsx:16`      | redirect to source-control          | A cold deep link to these hits the same cold-navigator resolution first                                   |
 
 Shallow index-only pushes (`app/index.tsx:723,803`, onboarding/pair flows) don't need coordination.
 No `<Link>`, `navigationRef`, or `router.navigate` anywhere in `mobile/`.
@@ -280,6 +280,7 @@ background-suspend test unchanged.
 Approach: `getState(hostId)` returns `'connecting'` when the host is known (primed profile or
 pending open) and no entry exists yet; `'disconnected'` only for unknown/closed hosts. Aligns every
 host screen with home's `?? 'connecting'`. Two companion changes in the same class:
+
 - `forceReconnect` should notify `'connecting'` (or insert a placeholder entry) instead of leaving
   the deleted-entry window grey (`src/transport/client-context.tsx:201-218`) — every Retry button
   currently drives the UI grey before amber.
@@ -366,7 +367,7 @@ Approach: (1) on Resume tap with the host connected, validate the target against
 to the host index with a notice. (3) Use the validating reader in
 `src/worktree/last-visited-worktree-repo.ts` on home instead of the raw `JSON.parse`
 (`app/index.tsx:315-322`), and import the storage-key constant at both literal call sites.
-Risk: false bounces during slow catalog loads — only bounce on a *confirmed* fresh catalog miss.
+Risk: false bounces during slow catalog loads — only bounce on a _confirmed_ fresh catalog miss.
 Tests: repo tests for the validating reader on home; session-screen bounce cases incl. sentinel
 exemptions.
 
@@ -407,7 +408,7 @@ rather than inventing new indicators. The in-repo reference pattern is
 `src/worktree/home-worktree-info.ts:27-47`: counts older than a 10min TTL render as
 "Last known: N worktrees" instead of being dropped, and `markHomeWorktreeCatalogUnavailable`
 preserves proven counts across a failed refresh, flagging only `staleCounts`.
-Tests: per-surface "data survives disconnect→reconnect" cases; F1 largely removes the *trigger*
+Tests: per-surface "data survives disconnect→reconnect" cases; F1 largely removes the _trigger_
 (suspend blips), so this is hardening, not the primary fix.
 
 ## 5. Backward compatibility (old/new phone × old/new desktop)
@@ -425,18 +426,18 @@ Tests: per-surface "data survives disconnect→reconnect" cases; F1 largely remo
 
 ## 6. Constants appendix (verified)
 
-| Constant | Value | Where |
-|---|---|---|
-| Direct connect timeout | 12s | `src/transport/rpc-client.ts:126` |
-| Direct handshake timeout | 5s | `rpc-client.ts:127` |
-| Direct reconnect ladder | 0.5→60s, give up 12, trickle 90s | `rpc-client.ts:113-117` |
-| `migrateTo` auth timeout | 12s | `src/transport/stable-logical-rpc-client.ts:182` |
-| Relay backoff | 250ms floor, 500ms base, 30s ceiling, full jitter | `src/transport/mobile-relay-retry-delays.ts:3-5` |
-| Host-offline relay retry | 5–15s | `mobile-relay-retry-delays.ts:7-8` |
-| Gate reprobe cadence | 60s→15min | `mobile-relay-retry-delays.ts:13-14` |
-| Director resolve timeout | 5s (invite & resume) | `mobile-relay-invite-director.ts:16`, `mobile-relay-resume-director.ts:21` |
-| Pairing relay recovery | ≤3 attempts × (5s director + ≤100/200/400ms jitter) | `src/transport/pairing-relay-candidate.ts:42,58-71` |
-| Pairing overall cap | 25s | `app/pair-confirm.tsx:27` |
-| Relay E2EE layer timers | none | `mobile-relay-e2ee-link.ts`, `mobile-e2ee-v2-*.ts` |
-| Worktree cache TTL | 30s from write/seed | `src/cache/worktree-cache.ts:12` |
-| Direct activity probe (foreground) | detects half-open ≤8s | `rpc-client.ts:1119-1124` |
+| Constant                           | Value                                               | Where                                                                      |
+| ---------------------------------- | --------------------------------------------------- | -------------------------------------------------------------------------- |
+| Direct connect timeout             | 12s                                                 | `src/transport/rpc-client.ts:126`                                          |
+| Direct handshake timeout           | 5s                                                  | `rpc-client.ts:127`                                                        |
+| Direct reconnect ladder            | 0.5→60s, give up 12, trickle 90s                    | `rpc-client.ts:113-117`                                                    |
+| `migrateTo` auth timeout           | 12s                                                 | `src/transport/stable-logical-rpc-client.ts:182`                           |
+| Relay backoff                      | 250ms floor, 500ms base, 30s ceiling, full jitter   | `src/transport/mobile-relay-retry-delays.ts:3-5`                           |
+| Host-offline relay retry           | 5–15s                                               | `mobile-relay-retry-delays.ts:7-8`                                         |
+| Gate reprobe cadence               | 60s→15min                                           | `mobile-relay-retry-delays.ts:13-14`                                       |
+| Director resolve timeout           | 5s (invite & resume)                                | `mobile-relay-invite-director.ts:16`, `mobile-relay-resume-director.ts:21` |
+| Pairing relay recovery             | ≤3 attempts × (5s director + ≤100/200/400ms jitter) | `src/transport/pairing-relay-candidate.ts:42,58-71`                        |
+| Pairing overall cap                | 25s                                                 | `app/pair-confirm.tsx:27`                                                  |
+| Relay E2EE layer timers            | none                                                | `mobile-relay-e2ee-link.ts`, `mobile-e2ee-v2-*.ts`                         |
+| Worktree cache TTL                 | 30s from write/seed                                 | `src/cache/worktree-cache.ts:12`                                           |
+| Direct activity probe (foreground) | detects half-open ≤8s                               | `rpc-client.ts:1119-1124`                                                  |

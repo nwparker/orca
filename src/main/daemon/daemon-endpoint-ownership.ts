@@ -16,10 +16,12 @@ const PUBLISH_ATTEMPTS = 3
  * retired for the endpoint, and answering it produced the same defects — deleting a live
  * listener's only pathname, and deleting a healthy daemon's ownership record mid-claim.
  * Every actor already removes its own scratch name on every non-crash path, so what a sweeper
- * would collect is crash debris. That debris is inert: bind names are random so they never
- * collide or block a bind, claim names are unique per claim, and nothing reads either back.
- * A few stray bytes per crash is a far better trade than a mechanism that can delete the files
- * of a process that is still running.
+ * would collect is mostly crash debris. It is not free — the runtime directory is still scanned
+ * once per launch by collectPinnedDaemonVersions, and the claim paths tolerate a failed unlink,
+ * so leftovers can accumulate slowly even without a crash. But no reader mistakes them for real
+ * artifacts, a colliding bind name only fails one listen, and the measured cost stays small at
+ * plausible rates — which beats a mechanism that can delete a running process's files.
+ * See docs/reference/daemon-endpoint-ownership.md.
  */
 
 /**

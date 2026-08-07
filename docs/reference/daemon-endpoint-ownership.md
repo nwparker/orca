@@ -101,11 +101,11 @@ Because a departing daemon leaves its entry behind, `EEXIST` is the ordinary cas
 the rare one, so step 3's probe runs on nearly every start. That probe has a 500 ms timeout,
 which would be a poor thing to pay at startup — so it was measured rather than assumed:
 
-| entry occupying the name | p50 | p99 | max |
-| --- | --- | --- | --- |
+| entry occupying the name       | p50                            | p99            | max            |
+| ------------------------------ | ------------------------------ | -------------- | -------------- |
 | dead socket (the steady state) | 0.03 ms darwin / 0.02 ms linux | 0.40 / 0.71 ms | 0.99 / 1.22 ms |
-| regular file | 0.02 / 0.01 ms | 0.09 / 0.05 ms | 0.09 / 0.05 ms |
-| dangling symlink | 0.03 / 0.01 ms | 0.14 / 0.09 ms | 0.14 / 0.09 ms |
+| regular file                   | 0.02 / 0.01 ms                 | 0.09 / 0.05 ms | 0.09 / 0.05 ms |
+| dangling symlink               | 0.03 / 0.01 ms                 | 0.14 / 0.09 ms | 0.14 / 0.09 ms |
 
 The timeout is never reached in any of these: a dead endpoint refuses immediately rather than
 hanging. The 500 ms budget exists for a genuinely unresponsive host, where waiting is correct —
@@ -228,7 +228,7 @@ a daemon closes cleanly, so one that outlives its owner is debris.
 
 The sweeper removes those, and pid `.cleanup-`/`.replace-` scratch names, after an hour. Age
 alone is **not** the rule, and the tempting version of this is a bug: between `listen` and
-publish, a bind name is the *only* name its daemon has, and an old mtime does not prove the
+publish, a bind name is the _only_ name its daemon has, and an old mtime does not prove the
 process died — one stopped by a debugger or caught in a host suspend is still listening on it.
 So an aged bind socket is asked whether anything answers before it is removed. Getting this
 wrong would destroy a live listener's sole reachable name, which is the same defect as the
@@ -285,20 +285,44 @@ carries the original mtime across — it deleted a healthy daemon's ownership re
 process that had claimed it was still validating. Five findings across two review rounds, every
 one of them in the sweeper, none in the publish protocol.
 
-What it collected was crash debris, because every actor already removes its own scratch name on
-every non-crash path: libuv unlinks the bound name when a server closes, and the claim protocol
-restores or drops its own claim. And that debris is inert — bind names are random so they never
-collide with or block a future bind, claim names are unique per claim, nothing reads either back,
-and with the sweeper gone nothing enumerates the directory at all.
-
-So the trade was a few stray bytes per crash against a mechanism that could delete the files of a
-running process. Extending the invariant is the simpler and safer answer:
+The invariant extends to cover it:
 
 > **No actor removes a name it did not create.**
 
 The same reasoning covers the one dead endpoint stranded per protocol generation. Sweeping it
 would mean deleting an endpoint on a liveness judgement about another daemon, and an old-protocol
-daemon can still be live during an upgrade. Tidiness is not worth reintroducing the defect class.
+daemon can still be live during an upgrade.
+
+### What that costs, measured
+
+Two things were initially claimed here that are not true, and the corrected versions are the
+honest case for the trade rather than a tidier one.
+
+**The directory is still enumerated.** `collectPinnedDaemonVersions` calls `readdirSync` on the
+runtime directory on every launch. It matches `/^daemon-v\d+\.pid$/` exactly, so leftovers are
+never mistaken for real artifacts — but they are still traversed. Measured on APFS with the same
+call shape: 10k entries scan in 5.2 ms, 100k in 59 ms.
+
+**Leftovers are not "a few bytes", and not only from crashes.** A claim file occupies a 4 KiB
+block; 10k of them is ~40 MB. And `replaceDaemonPidFile` and `claimAndUnlinkOwnedFile` both
+deliberately tolerate a failed unlink, so a _non-crash_ shutdown on Windows can leave a claim
+behind when an AV scanner or indexer holds a delete-share lock — a case the code explicitly
+anticipates. So this is slow accumulation, not a crash-only phenomenon.
+
+At plausible rates the cost stays small. Reaching hundreds of megabytes and tens of milliseconds
+of scan per launch needs on the order of 100–1000 leaked claims per day sustained for years,
+which is a stress bound rather than an observed rate. Against that sits a mechanism with a
+demonstrated ability to delete a running process's files. The trade still favours removal, but it
+is a real cost rather than none.
+
+**Bind-name collision is bounded and self-correcting.** Names are 40 bits of randomness. Among
+leaked names the birthday probability is 0.0006% at 1 leak/day over ten years and 0.06% at
+10/day; it only becomes material in the thousands-per-day regime, which requires repeatedly
+killing a daemon inside the narrow bind-to-publish window rather than any ordinary crash. A
+collision fails one `listen` and the next launch draws again — it does not persist.
+
+If accumulation ever proves real in the field, the answer is an intrinsically fenced scheme where
+a leftover carries proof of who may remove it, not a sweeper that guesses.
 
 ## Residual risk
 
