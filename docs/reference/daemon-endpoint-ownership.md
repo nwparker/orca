@@ -272,6 +272,22 @@ from being reachable again. Retirement also drains rather than kills, so an orph
 shell that never exits can still linger. That is worth saying plainly rather than claiming this
 change recovers them.
 
+## One dead entry per protocol generation, deliberately not swept
+
+Since a departing daemon leaves its endpoint behind and the socket path is protocol-scoped
+(`daemon-v<N>.sock`), each protocol bump strands the previous generation's entry in the runtime
+directory forever. Protocol versions turn over reasonably often, so this is a real if slow
+accumulation rather than a theoretical one.
+
+It is left alone on purpose. Sweeping it would mean a process deleting an endpoint it does not
+own, on the strength of a liveness judgement about somebody else — the exact pattern this design
+exists to remove — and an old-protocol daemon can still be running during an upgrade, so the
+judgement is not even safe in principle. The cost of not doing it is a handful of zero-byte
+directory entries in the app's own `userData`. Nothing enumerates that directory in a way this
+affects: the only other reader matches `daemon-v<N>.pid` specifically.
+
+Tidiness is not worth reintroducing the defect class.
+
 ## Residual risk
 
 Two starting daemons can interleave so that the loser briefly holds a live listener no name
