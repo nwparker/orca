@@ -132,8 +132,25 @@ export function publishDaemonPidFile(pidPath: string, pidFile: DaemonPidFile): v
   })
 }
 
+/**
+ * Scratch names for the two claim protocols.
+ *
+ * Why `.swap`/`.hold` and not the `.cleanup`/`.replace` these once were: released builds carry a
+ * sweeper matching `\.(?:cleanup|replace)-\d+-<uuid>$` that deletes on age alone, with no
+ * liveness or ownership check. A claim briefly holds the ONLY copy of a live daemon's token or
+ * PID record, so an old build starting while a claimant is paused would destroy it with no way
+ * to restore. Exported so a test can pin them against that released pattern.
+ */
+export function getDaemonPidSwapClaimPath(pidPath: string): string {
+  return `${pidPath}.swap-${process.pid}-${randomUUID()}`
+}
+
+export function getDaemonArtifactHoldClaimPath(filePath: string): string {
+  return `${filePath}.hold-${process.pid}-${randomUUID()}`
+}
+
 export function replaceDaemonPidFile(pidPath: string, pidFile: DaemonPidFile): boolean {
-  const claimedPath = `${pidPath}.replace-${process.pid}-${randomUUID()}`
+  const claimedPath = getDaemonPidSwapClaimPath(pidPath)
   let claimedExisting = false
   try {
     renameSync(pidPath, claimedPath)
@@ -223,7 +240,7 @@ function claimAndUnlinkOwnedFile(
   filePath: string,
   ownsContent: (content: string) => boolean
 ): boolean {
-  const claimedPath = `${filePath}.cleanup-${process.pid}-${randomUUID()}`
+  const claimedPath = getDaemonArtifactHoldClaimPath(filePath)
   try {
     // Why: rename claims one exact directory entry before inspection, so a replacement
     // installed afterward stays at the canonical path and cannot be unlinked by us.

@@ -229,12 +229,29 @@ a daemon closes cleanly, so one that outlives its owner is debris.
 Nothing collects it. The reasoning, and the measured cost of not collecting it, are below under
 "Nothing sweeps anyone else's leftovers".
 
-The bind namespace is `.p`, not the `.b` it once was, for a mixed-version reason worth stating
-here too: released builds carry a sweeper that matches `^\.b[0-9a-f]{10}$` and unlinks on age
-alone. Removing our own sweeper does not un-ship theirs. A new daemon paused between bind and
-publish for longer than their age gate would have had its only pathname deleted by an old build
-starting beside it — so the namespace had to move out of their pattern, not just the sweeper out
-of ours.
+### Every scratch namespace had to move, not just the sweeper
+
+Removing our own sweeper does not un-ship the one already in the field. Released builds sweep
+`^\.b[0-9a-f]{10}$` and `\.(?:cleanup|replace)-\d+-<uuid>$` on age alone, with no liveness or
+ownership check, before they adopt or launch. So every name this code creates that an old build
+would match had to move out of their pattern:
+
+| was                      | now                   | what an old build could otherwise destroy                 |
+| ------------------------ | --------------------- | --------------------------------------------------------- |
+| `.b<hex>`                | `.p<hex>`             | a paused daemon's only pathname, between bind and publish |
+| `*.replace-<pid>-<uuid>` | `*.swap-<pid>-<uuid>` | the only copy of a live daemon's PID record, mid-claim    |
+| `*.cleanup-<pid>-<uuid>` | `*.hold-<pid>-<uuid>` | the only copy of a live daemon's token, mid-claim         |
+
+The claim cases are the sharper ones: a claim exists precisely because the protocol has renamed
+the canonical artifact aside and holds the sole copy while validating it. An old build deleting
+that leaves the claimant unable to restore what it took. A test pins all three namespaces against
+the released regex, so reintroducing any of them fails in CI rather than in the field.
+
+**What this cannot fix.** An already-released build's own stale-cleanup can still delete a socket
+or PID record that a new daemon published during its kill window — it removes whatever occupies
+the path rather than what it proved dead. That behaviour is in shipped code, reachable only while
+two versions run concurrently, and it exists old-against-old too. Nothing in this branch can fence
+a process that is already deployed; landing this is what stops the behaviour going forward.
 
 ## Platform notes
 

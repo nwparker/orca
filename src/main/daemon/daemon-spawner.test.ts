@@ -5,7 +5,9 @@ import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { createServer, connect, type Server } from 'node:net'
 import {
   DaemonSpawner,
+  getDaemonArtifactHoldClaimPath,
   getDaemonPidPath,
+  getDaemonPidSwapClaimPath,
   getDaemonSocketPath,
   getDaemonTokenPath,
   publishDaemonPidFile,
@@ -350,15 +352,24 @@ function connectsToSocketPath(socketPath: string): Promise<boolean> {
 }
 
 describe('daemon socket publication', () => {
-  it('keeps the private bind name outside the released sweeper pattern', () => {
-    // Why pinned: builds already in the field sweep `^\.b[0-9a-f]{10}$` on age alone, with no
-    // liveness check. Deleting our sweeper does not un-ship theirs, so a new daemon paused
-    // between bind and publish would lose its only pathname to an old build starting beside it.
-    // Renaming this namespace back into their pattern must fail here, not in the field.
-    const RELEASED_SWEEPER_BIND_PATTERN = /^\.b[0-9a-f]{10}$/
-    for (let i = 0; i < 50; i++) {
-      const bindName = basename(getDaemonSocketBindPath(getDaemonSocketPath('/tmp/orca-daemon')))
-      expect(bindName).not.toMatch(RELEASED_SWEEPER_BIND_PATTERN)
+  it('keeps every scratch namespace outside the released sweeper pattern', () => {
+    // Why pinned, and why all three: builds already in the field sweep these names on age alone
+    // with no liveness or ownership check, and deleting our sweeper does not un-ship theirs. A
+    // bind name is a live listener's only pathname; a claim briefly holds the only copy of a
+    // live daemon's token or PID record. Renaming any of them back into the released pattern
+    // must fail here rather than in the field.
+    const RELEASED_SWEEPER_PATTERN =
+      /(?:\.(?:cleanup|replace)-\d+-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|^\.b[0-9a-f]{10})$/
+
+    for (let i = 0; i < 20; i++) {
+      const names = [
+        basename(getDaemonSocketBindPath(getDaemonSocketPath('/tmp/orca-daemon'))),
+        basename(getDaemonPidSwapClaimPath('/tmp/orca-daemon/daemon-v32.pid')),
+        basename(getDaemonArtifactHoldClaimPath('/tmp/orca-daemon/daemon-v32.token'))
+      ]
+      for (const name of names) {
+        expect(name).not.toMatch(RELEASED_SWEEPER_PATTERN)
+      }
     }
   })
 
