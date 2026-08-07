@@ -921,9 +921,15 @@ export async function initDaemonPtyProvider(
   const runtimeDir = getRuntimeDir()
 
   // Why: a bind name lives only between listen and publish, and libuv unlinks it when a daemon
-  // closes — so one that outlives its owner is crash debris. Sweep before launching; age-gated
-  // and, for anything still listening, left alone regardless of age.
-  await sweepAbandonedDaemonClaims(runtimeDir)
+  // closes — so one that outlives its owner is crash debris. Age-gated, and anything still
+  // listening is left alone regardless of age.
+  // Why not awaited: this is housekeeping, and every aged bind socket costs a liveness probe
+  // that can run to its timeout — serial work on the one path a user is actually waiting on.
+  // Nothing about starting a daemon depends on it, and the age gate keeps it well away from a
+  // bind still in flight.
+  void sweepAbandonedDaemonClaims(runtimeDir).catch(() => {
+    // Best-effort; a future launch retries.
+  })
 
   const newSpawner = new DaemonSpawner({
     runtimeDir,

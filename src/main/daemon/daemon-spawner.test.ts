@@ -2,7 +2,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { randomUUID } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { basename, join } from 'node:path'
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync
+} from 'node:fs'
 import { createServer, connect, type Server } from 'node:net'
 import {
   DaemonSpawner,
@@ -553,6 +561,38 @@ describe('sweepAbandonedDaemonClaims', () => {
         await expect(connectsToSocketPath(bindPath)).resolves.toBe(true)
       } finally {
         await closeSocketServer(server)
+        rmSync(dir, { recursive: true, force: true })
+      }
+    }
+  )
+
+  it.skipIf(process.platform === 'win32')(
+    'defers aged bind names past its probe budget instead of probing them all',
+    async () => {
+      // Why bounded: an entry that never classifies is kept and re-probed on every launch, so an
+      // unbounded sweep gets slower each time. Probes are capped and the rest wait for next time.
+      const dir = createTestDir()
+      const aged = Date.now() + 24 * 60 * 60 * 1000
+      const servers: Server[] = []
+      try {
+        for (let i = 0; i < 20; i++) {
+          const server = createServer((socket) => socket.end())
+          servers.push(server)
+          await listenOnSocketPath(server, join(dir, `.b${i.toString(16).padStart(10, '0')}`))
+        }
+        let probed = 0
+        await sweepAbandonedDaemonClaims(dir, undefined, aged, async () => {
+          probed++
+          return 'unknown'
+        })
+
+        // 20 aged live binds, but only the budget is spent; none are removed on 'unknown'.
+        expect(probed).toBe(16)
+        expect(readdirSync(dir)).toHaveLength(20)
+      } finally {
+        for (const server of servers) {
+          await closeSocketServer(server)
+        }
         rmSync(dir, { recursive: true, force: true })
       }
     }
