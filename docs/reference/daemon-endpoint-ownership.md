@@ -95,6 +95,22 @@ The decisive measurement is step 4's gaplessness. Hammering `connect` across a l
 The control is the shape the code used before this change. It does not narrowly race; it gaps
 essentially every time it is observed.
 
+### What the occupied path costs
+
+Because a departing daemon leaves its entry behind, `EEXIST` is the ordinary case rather than
+the rare one, so step 3's probe runs on nearly every start. That probe has a 500 ms timeout,
+which would be a poor thing to pay at startup — so it was measured rather than assumed:
+
+| entry occupying the name | p50 | p99 | max |
+| --- | --- | --- | --- |
+| dead socket (the steady state) | 0.03 ms darwin / 0.02 ms linux | 0.40 / 0.71 ms | 0.99 / 1.22 ms |
+| regular file | 0.02 / 0.01 ms | 0.09 / 0.05 ms | 0.09 / 0.05 ms |
+| dangling symlink | 0.03 / 0.01 ms | 0.14 / 0.09 ms | 0.14 / 0.09 ms |
+
+The timeout is never reached in any of these: a dead endpoint refuses immediately rather than
+hanging. The 500 ms budget exists for a genuinely unresponsive host, where waiting is correct —
+and where the outcome is `inconclusive`, which declines rather than replaces.
+
 ## Why each step is load-bearing
 
 **Why link before rename, rather than rename always.** `rename` replaces whatever it finds.
