@@ -245,6 +245,22 @@ Unit CI shards run **ubuntu-latest only**. A test gated to darwin never executes
 platform gating in tests must be `skipIf(win32)` — never `skipIf` on anything that would also
 exclude Linux, and never an early `return` that silently passes.
 
+## What declining actually costs the user
+
+Three of the four publish outcomes decline to serve: `occupied`, `lost`, and `inconclusive`.
+Since `inconclusive` is also what exhausting the retry bound reports, it is worth stating where
+that lands rather than leaving it as an abstract status.
+
+`occupied` is the good case — the launcher adopts the incumbent, and the user gets the daemon
+that is already running. `lost` and `inconclusive` fail the daemon's startup, which is caught at
+the startup-service boundary and reported; the app keeps the local PTY provider it already had.
+The user gets working terminals without daemon persistence, and the next launch tries again.
+
+That is the same degradation the app already falls back to for any other daemon startup failure,
+and it is the reason declining is cheap: the failure mode of being too cautious is terminals that
+work but do not survive an app restart, while the failure mode of being too eager is terminals
+that acknowledge input and never run it.
+
 ## Upgrades and mixed versions
 
 Users update the app while a daemon from the previous version may still be running and hosting
