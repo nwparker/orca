@@ -272,21 +272,33 @@ from being reachable again. Retirement also drains rather than kills, so an orph
 shell that never exits can still linger. That is worth saying plainly rather than claiming this
 change recovers them.
 
-## One dead entry per protocol generation, deliberately not swept
+## Nothing sweeps anyone else's leftovers
 
-Since a departing daemon leaves its endpoint behind and the socket path is protocol-scoped
-(`daemon-v<N>.sock`), each protocol bump strands the previous generation's entry in the runtime
-directory forever. Protocol versions turn over reasonably often, so this is a real if slow
-accumulation rather than a theoretical one.
+The endpoint is not the only name this component creates. Publishing binds a private `.b<hex>`
+socket, and the PID/token claim protocol renames artifacts aside as `.cleanup-*`/`.replace-*`.
+A sweeper used to reclaim those by age.
 
-It is left alone on purpose. Sweeping it would mean a process deleting an endpoint it does not
-own, on the strength of a liveness judgement about somebody else — the exact pattern this design
-exists to remove — and an old-protocol daemon can still be running during an upgrade, so the
-judgement is not even safe in principle. The cost of not doing it is a handful of zero-byte
-directory entries in the app's own `userData`. Nothing enumerates that directory in a way this
-affects: the only other reader matches `daemon-v<N>.pid` specifically.
+It is gone. Deciding whether someone else's leftover is safe to delete is the same question this
+design retired for the endpoint, and answering it produced the same defects in miniature: it
+deleted a live listener's only pathname when a probe merely timed out, and — because `rename`
+carries the original mtime across — it deleted a healthy daemon's ownership record while the
+process that had claimed it was still validating. Five findings across two review rounds, every
+one of them in the sweeper, none in the publish protocol.
 
-Tidiness is not worth reintroducing the defect class.
+What it collected was crash debris, because every actor already removes its own scratch name on
+every non-crash path: libuv unlinks the bound name when a server closes, and the claim protocol
+restores or drops its own claim. And that debris is inert — bind names are random so they never
+collide with or block a future bind, claim names are unique per claim, nothing reads either back,
+and with the sweeper gone nothing enumerates the directory at all.
+
+So the trade was a few stray bytes per crash against a mechanism that could delete the files of a
+running process. Extending the invariant is the simpler and safer answer:
+
+> **No actor removes a name it did not create.**
+
+The same reasoning covers the one dead endpoint stranded per protocol generation. Sweeping it
+would mean deleting an endpoint on a liveness judgement about another daemon, and an old-protocol
+daemon can still be live during an upgrade. Tidiness is not worth reintroducing the defect class.
 
 ## Residual risk
 

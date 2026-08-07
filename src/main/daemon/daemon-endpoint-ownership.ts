@@ -7,10 +7,20 @@ import { linkSync, renameSync, statSync, unlinkSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { endpointIsProvenDead, type SocketProbeOutcome } from './daemon-endpoint-probe'
 
-export { sweepAbandonedDaemonClaims } from './daemon-endpoint-claim-sweep'
-
 // Why bounded: each attempt is only retried when another publisher demonstrably took the name.
 const PUBLISH_ATTEMPTS = 3
+
+/*
+ * Why there is no sweeper for the scratch names this file and daemon-spawner create:
+ * deciding whether someone else's leftover is safe to delete is the same question this design
+ * retired for the endpoint, and answering it produced the same defects — deleting a live
+ * listener's only pathname, and deleting a healthy daemon's ownership record mid-claim.
+ * Every actor already removes its own scratch name on every non-crash path, so what a sweeper
+ * would collect is crash debris. That debris is inert: bind names are random so they never
+ * collide or block a bind, claim names are unique per claim, and nothing reads either back.
+ * A few stray bytes per crash is a far better trade than a mechanism that can delete the files
+ * of a process that is still running.
+ */
 
 /**
  * The exact endpoint a daemon owns. `birthtimeMs` is not redundant: Linux reuses inode numbers

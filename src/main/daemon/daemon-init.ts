@@ -17,10 +17,7 @@ import {
   type DaemonPidFile,
   type DaemonProcessHandle
 } from './daemon-spawner'
-import {
-  DAEMON_EXIT_ENDPOINT_OCCUPIED,
-  sweepAbandonedDaemonClaims
-} from './daemon-endpoint-ownership'
+import { DAEMON_EXIT_ENDPOINT_OCCUPIED } from './daemon-endpoint-ownership'
 import { DaemonPtyAdapter, type DaemonRespawnReason } from './daemon-pty-adapter'
 import { DaemonPtyRouter } from './daemon-pty-router'
 import { DaemonClient } from './client'
@@ -927,17 +924,6 @@ export async function initDaemonPtyProvider(
     await new Promise((resolve) => setTimeout(resolve, e2eInitDelayMs))
   }
   const runtimeDir = getRuntimeDir()
-
-  // Why: a bind name lives only between listen and publish, and libuv unlinks it when a daemon
-  // closes — so one that outlives its owner is crash debris. Age-gated, and anything still
-  // listening is left alone regardless of age.
-  // Why not awaited: this is housekeeping, and every aged bind socket costs a liveness probe
-  // that can run to its timeout — serial work on the one path a user is actually waiting on.
-  // Nothing about starting a daemon depends on it, and the age gate keeps it well away from a
-  // bind still in flight.
-  void sweepAbandonedDaemonClaims(runtimeDir).catch(() => {
-    // Best-effort; a future launch retries.
-  })
 
   const newSpawner = new DaemonSpawner({
     runtimeDir,

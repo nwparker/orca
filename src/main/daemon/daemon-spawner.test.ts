@@ -1,18 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { randomUUID } from 'node:crypto'
 import { tmpdir } from 'node:os'
-import { basename, join } from 'node:path'
-import {
-  chmodSync,
-  existsSync,
-  mkdtempSync,
-  readFileSync,
-  readdirSync,
-  renameSync,
-  rmSync,
-  utimesSync,
-  writeFileSync
-} from 'node:fs'
+import { join } from 'node:path'
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer, connect, type Server } from 'node:net'
 import {
   DaemonSpawner,
@@ -26,8 +15,7 @@ import {
 import {
   getDaemonSocketBindPath,
   publishDaemonEndpoint,
-  readDaemonSocketIdentity,
-  sweepAbandonedDaemonClaims
+  readDaemonSocketIdentity
 } from './daemon-endpoint-ownership'
 import { probeSocketConnect } from './daemon-endpoint-probe'
 import { startDaemon, type DaemonHandle } from './daemon-main'
@@ -456,175 +444,4 @@ describe('daemon socket publication', () => {
       }
     }
   )
-})
-
-describe('sweepAbandonedDaemonClaims', () => {
-  const claimNames = [
-    `daemon-v${PROTOCOL_VERSION}.pid.cleanup-123-${randomUUID()}`,
-    `daemon-v${PROTOCOL_VERSION}.pid.replace-123-${randomUUID()}`,
-    // Why generated rather than handwritten: a literal proves the regexp matches the literal.
-    // Only a real bind name proves the sweep still recognises what publishing actually creates.
-    basename(getDaemonSocketBindPath(join('/tmp', 'daemon.sock')))
-  ]
-  const preservedNames = [`daemon-v${PROTOCOL_VERSION}.pid`, `daemon-v${PROTOCOL_VERSION}.token`]
-
-  function seedClaimDir(): string {
-    const dir = createTestDir()
-    for (const name of [...claimNames, ...preservedNames]) {
-      writeFileSync(join(dir, name), 'x')
-    }
-    return dir
-  }
-
-  it('removes aged claim and bind scratch names without touching daemon artifacts', async () => {
-    const dir = seedClaimDir()
-    try {
-      await expect(
-        sweepAbandonedDaemonClaims(dir, undefined, Date.now() + 24 * 60 * 60 * 1000)
-      ).resolves.toBe(claimNames.length)
-
-      for (const name of claimNames) {
-        expect(existsSync(join(dir, name))).toBe(false)
-      }
-      for (const name of preservedNames) {
-        expect(existsSync(join(dir, name))).toBe(true)
-      }
-    } finally {
-      rmSync(dir, { recursive: true, force: true })
-    }
-  })
-
-  it('leaves freshly written claims alone so an in-flight claim is never stolen', async () => {
-    const dir = seedClaimDir()
-    try {
-      await expect(sweepAbandonedDaemonClaims(dir)).resolves.toBe(0)
-
-      for (const name of [...claimNames, ...preservedNames]) {
-        expect(existsSync(join(dir, name))).toBe(true)
-      }
-    } finally {
-      rmSync(dir, { recursive: true, force: true })
-    }
-  })
-
-  it.skipIf(process.platform === 'win32')(
-    'keeps an aged bind name that something is still listening on',
-    async () => {
-      // Why: a bind name is the only name its daemon has between listen and publish, and age
-      // does not prove death — a process stopped by a debugger or a host suspend is still
-      // serving. Removing it would destroy a live listener's sole reachable name.
-      const dir = createTestDir()
-      const bindPath = join(dir, '.b00feed1234')
-      const server = createServer((socket) => socket.end())
-      try {
-        await listenOnSocketPath(server, bindPath)
-
-        await expect(
-          sweepAbandonedDaemonClaims(dir, undefined, Date.now() + 24 * 60 * 60 * 1000)
-        ).resolves.toBe(0)
-        expect(existsSync(bindPath)).toBe(true)
-        await expect(connectsToSocketPath(bindPath)).resolves.toBe(true)
-
-        // Once nothing answers it, the same aged name is debris and is reclaimed.
-        await closeSocketServer(server)
-        writeFileSync(bindPath, '')
-        await expect(
-          sweepAbandonedDaemonClaims(dir, undefined, Date.now() + 24 * 60 * 60 * 1000)
-        ).resolves.toBe(1)
-        expect(existsSync(bindPath)).toBe(false)
-      } finally {
-        await closeSocketServer(server)
-        rmSync(dir, { recursive: true, force: true })
-      }
-    }
-  )
-
-  it.skipIf(process.platform === 'win32')(
-    'keeps an aged bind name whose liveness could not be classified',
-    async () => {
-      // Why: an unclassifiable probe — a timeout on a loaded host, an EPERM — proves nothing,
-      // and this name is the only one its daemon has. Removing on anything short of proof of
-      // death is the third-party reclaim mistake aimed at the bind name instead.
-      const dir = createTestDir()
-      const bindPath = join(dir, '.b00feed5678')
-      const server = createServer((socket) => socket.end())
-      try {
-        await listenOnSocketPath(server, bindPath)
-
-        await expect(
-          sweepAbandonedDaemonClaims(
-            dir,
-            undefined,
-            Date.now() + 24 * 60 * 60 * 1000,
-            async () => 'unknown'
-          )
-        ).resolves.toBe(0)
-        expect(existsSync(bindPath)).toBe(true)
-        await expect(connectsToSocketPath(bindPath)).resolves.toBe(true)
-      } finally {
-        await closeSocketServer(server)
-        rmSync(dir, { recursive: true, force: true })
-      }
-    }
-  )
-
-  it.skipIf(process.platform === 'win32')(
-    'defers aged bind names past its probe budget instead of probing them all',
-    async () => {
-      // Why bounded: an entry that never classifies is kept and re-probed on every launch, so an
-      // unbounded sweep gets slower each time. Probes are capped and the rest wait for next time.
-      const dir = createTestDir()
-      const aged = Date.now() + 24 * 60 * 60 * 1000
-      const servers: Server[] = []
-      try {
-        for (let i = 0; i < 20; i++) {
-          const server = createServer((socket) => socket.end())
-          servers.push(server)
-          await listenOnSocketPath(server, join(dir, `.b${i.toString(16).padStart(10, '0')}`))
-        }
-        let probed = 0
-        await sweepAbandonedDaemonClaims(dir, undefined, aged, async () => {
-          probed++
-          return 'unknown'
-        })
-
-        // 20 aged live binds, but only the budget is spent; none are removed on 'unknown'.
-        expect(probed).toBe(16)
-        expect(readdirSync(dir)).toHaveLength(20)
-      } finally {
-        for (const server of servers) {
-          await closeSocketServer(server)
-        }
-        rmSync(dir, { recursive: true, force: true })
-      }
-    }
-  )
-
-  it('keeps a fresh claim taken over a long-lived artifact', async () => {
-    // Why: a claim is made by renaming the canonical artifact aside, and rename carries the
-    // original mtime across — so a claim on an hours-old token looked instantly ancient and this
-    // sweep would delete it out from under the process still validating it. ctime tracks the
-    // rename, which is what the age gate actually means.
-    const dir = createTestDir()
-    const artifact = join(dir, `daemon-v${PROTOCOL_VERSION}.token`)
-    const claim = join(dir, `daemon-v${PROTOCOL_VERSION}.token.cleanup-123-${randomUUID()}`)
-    try {
-      writeFileSync(artifact, 'token')
-      const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000)
-      utimesSync(artifact, twoHoursAgo, twoHoursAgo)
-      renameSync(artifact, claim)
-
-      // The claim is seconds old even though the file it names is hours old.
-      await expect(sweepAbandonedDaemonClaims(dir)).resolves.toBe(0)
-      expect(existsSync(claim)).toBe(true)
-    } finally {
-      rmSync(dir, { recursive: true, force: true })
-    }
-  })
-
-  it('returns zero when the runtime dir does not exist', async () => {
-    await expect(
-      sweepAbandonedDaemonClaims(join(tmpdir(), `daemon-sweep-missing-${randomUUID()}`))
-    ).resolves.toBe(0)
-  })
 })
