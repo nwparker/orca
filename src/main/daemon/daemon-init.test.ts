@@ -1341,7 +1341,7 @@ describe('daemon-init: runRestartDaemon (7-step sequence)', () => {
           // Why the exit code and not the message: the launcher settles on exit, so keying
           // adoption off the notification alone could lose that race.
           if (event === 'exit') {
-            queueMicrotask(() => cb(3))
+            queueMicrotask(() => cb(20))
           }
           return this
         },

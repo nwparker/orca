@@ -56,8 +56,13 @@ export class DaemonEndpointUnavailableError extends Error {
  * A live daemon already owns the endpoint, so this one stands down and the launcher should adopt
  * the incumbent. Carried as a process exit code because that is delivered by the same event the
  * launcher settles its wait on, unlike an IPC message, which can lose that race.
+ *
+ * Why 20 and not a small number: Node reserves 1-13 for its own fatal conditions — 3 is
+ * "Internal JavaScript Parse Error", which a corrupt or half-written daemon bundle would exit
+ * with. The launcher would then read a daemon that never started as one standing down for a
+ * live incumbent, and go off to adopt something that does not exist.
  */
-export const DAEMON_EXIT_ENDPOINT_OCCUPIED = 3
+export const DAEMON_EXIT_ENDPOINT_OCCUPIED = 20
 
 export type DaemonEndpointPublishOutcome =
   /** The endpoint name is ours. */
