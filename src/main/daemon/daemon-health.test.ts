@@ -7,7 +7,7 @@ import { basename, join } from 'node:path'
 import { createServer, connect, Socket, type Server } from 'node:net'
 import { DaemonServer } from './daemon-server'
 import { getDaemonPidPath, serializeDaemonPidFile } from './daemon-spawner'
-import type { SocketProbeOutcome } from './daemon-health'
+import type { SocketProbeOutcome } from './daemon-endpoint-probe'
 import {
   checkDaemonHealth,
   E2E_FORCE_DAEMON_HEALTH_UNREACHABLE_ENV,

@@ -1,7 +1,7 @@
 /* oxlint-disable max-lines -- Why: pid validation shares process-identity
 helpers with kill escalation so the SIGKILL safety checks stay co-located. */
 import { execFile, execFileSync } from 'node:child_process'
-import { existsSync, lstatSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { connect, type Socket } from 'node:net'
 import { promisify } from 'node:util'
 import {
@@ -16,6 +16,11 @@ import {
   unlinkOwnedDaemonPidFile
 } from './daemon-spawner'
 import { reclaimDeadDaemonSocketPath } from './daemon-endpoint-ownership'
+import {
+  endpointIsProvenDead,
+  probeSocketConnect,
+  type SocketProbeOutcome
+} from './daemon-endpoint-probe'
 import {
   PROTOCOL_VERSION,
   type HelloMessage,
@@ -57,64 +62,6 @@ export type ParsedDaemonPid = {
   linuxStartTicks: string | null
   bootId: string | null
   spawnerExecPath: string | null
-}
-
-/**
- * 'connected' — something is listening. 'missing'/'refused' — nothing is, and the endpoint
- * name is safe to reclaim. 'unknown' — the probe itself failed (timeout on a loaded host,
- * EPERM); the endpoint must be left alone because absence of proof is not proof of death.
- */
-export type SocketProbeOutcome = 'connected' | 'missing' | 'refused' | 'unknown'
-
-function probeSocketConnect(socketPath: string): Promise<SocketProbeOutcome> {
-  return new Promise((resolve) => {
-    let occupiedUnixEntry = false
-    if (process.platform !== 'win32') {
-      try {
-        lstatSync(socketPath)
-        occupiedUnixEntry = true
-      } catch (error) {
-        resolve(isMissingFileError(error) ? 'missing' : 'unknown')
-        return
-      }
-    }
-    const sock = connect({ path: socketPath })
-    let settled = false
-    const cleanup = (): void => {
-      clearTimeout(timer)
-      sock.off('connect', onConnect)
-      sock.off('error', onError)
-    }
-    const settle = (result: SocketProbeOutcome): void => {
-      if (settled) {
-        return
-      }
-      settled = true
-      cleanup()
-      resolve(result)
-    }
-    const onConnect = (): void => {
-      settle('connected')
-      sock.destroy()
-    }
-    const onError = (error: NodeJS.ErrnoException): void => {
-      settle(
-        error.code === 'ECONNREFUSED' || error.code === 'ENOTSOCK'
-          ? 'refused'
-          : error.code === 'ENOENT'
-            ? occupiedUnixEntry
-              ? 'refused'
-              : 'missing'
-            : 'unknown'
-      )
-    }
-    const timer = setTimeout(() => {
-      settle('unknown')
-      sock.destroy()
-    }, 500)
-    sock.on('connect', onConnect)
-    sock.on('error', onError)
-  })
 }
 
 export function checkDaemonHealth(socketPath: string, tokenPath: string): Promise<DaemonHealth> {
@@ -759,10 +706,6 @@ export async function getMacDaemonTccAttributionHealth(
   return 'unknown'
 }
 
-function isMissingFileError(error: unknown): boolean {
-  return typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT'
-}
-
 function isNoSuchProcessError(error: unknown): boolean {
   return typeof error === 'object' && error !== null && 'code' in error && error.code === 'ESRCH'
 }
@@ -790,11 +733,6 @@ async function waitForProcessExit(pid: number, timeoutMs: number): Promise<boole
 export type StaleDaemonKillTestHooks = {
   probeEndpoint?: (socketPath: string) => Promise<SocketProbeOutcome>
   afterEndpointProbe?: () => Promise<void>
-}
-
-/** Positive proof that nothing is serving the endpoint. A timed-out probe proves nothing. */
-function endpointIsProvenDead(outcome: SocketProbeOutcome): boolean {
-  return outcome === 'refused' || outcome === 'missing'
 }
 
 export type StaleDaemonKillOutcome = {
