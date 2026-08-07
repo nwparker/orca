@@ -246,6 +246,63 @@ describe('publishDaemonEndpoint', () => {
     }
   })
 
+  unixIt('does not replace an entry whose inode number was recycled', async () => {
+    // Why birthtime and not just dev+ino here: the entry being compared is one we believe is
+    // dead, so its inode can be freed — and Linux hands the number straight back. A replacement
+    // landing on the recycled number compares equal and would license the very rename this
+    // check exists to prevent. Recycling cannot be provoked on demand, so the identity read is
+    // mocked to report the same dev+ino with a later birthtime, which is what recycling looks
+    // like. (The post-publish check is the opposite case: there our own listener holds the
+    // inode open, so dev+ino alone is sound.)
+    const directory = makeTempDir()
+    const canonicalPath = join(directory, 'd')
+    const boundPath = getDaemonSocketBindPath(canonicalPath)
+    const newcomer = await listen(boundPath)
+    try {
+      writeFileSync(canonicalPath, 'dead entry')
+      const deadEntry = statSync(canonicalPath, { bigint: true })
+      let canonicalStats = 0
+      vi.doMock('node:fs', async () => {
+        const actual = await vi.importActual<typeof NodeFs>('node:fs')
+        return {
+          ...actual,
+          statSync: (target: string, options?: { bigint?: boolean }) => {
+            const stats = actual.statSync(target, options as never) as unknown as {
+              dev: bigint
+              ino: bigint
+              birthtimeMs: bigint
+            }
+            if (target !== canonicalPath) {
+              return stats
+            }
+            // Every read reports a later birthtime than the last, so no two consecutive reads
+            // of the entry agree — what an inode recycled under us looks like.
+            canonicalStats += 1
+            return {
+              dev: stats.dev,
+              ino: stats.ino,
+              birthtimeMs: stats.birthtimeMs + BigInt(canonicalStats)
+            }
+          }
+        }
+      })
+      vi.resetModules()
+      const { publishDaemonEndpoint: publishWithRecycle } =
+        await import('./daemon-endpoint-ownership')
+
+      const outcome = await publishWithRecycle(boundPath, canonicalPath, probeSocketConnect)
+
+      // The publisher must back off rather than replace an entry it cannot still identify.
+      expect(outcome).toEqual({ status: 'occupied' })
+      const after = statSync(canonicalPath, { bigint: true })
+      expect({ dev: after.dev, ino: after.ino }).toEqual({ dev: deadEntry.dev, ino: deadEntry.ino })
+      expect(newcomer.connections()).toBe(0)
+    } finally {
+      await close(newcomer.server)
+      rmSync(directory, { recursive: true, force: true })
+    }
+  })
+
   unixIt('refuses to serve a bound endpoint it cannot identify', async () => {
     // Why: without the bound identity we can neither verify the publish nor arm the ownership
     // watchdog, so we would serve a name we could never check. Startup has nothing to protect.
