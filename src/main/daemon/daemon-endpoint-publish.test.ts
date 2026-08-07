@@ -478,7 +478,13 @@ describe('publishDaemonEndpoint', () => {
     }
   })
 
-  unixIt('keeps a replacement reachable after the incumbent closes', async () => {
+  unixIt('leaves the published endpoint behind when its own owner closes', async () => {
+    // Why this and not a "late close" staging: closing is what makes an incumbent replaceable,
+    // so the two cannot be ordered against each other at this level. The property that made the
+    // original bug possible is testable directly — libuv unlinks the pathname a server BOUND
+    // to, so a daemon that published by linking a private name must leave the canonical entry
+    // intact when it closes. Ordering a close after a replacement publishes needs the full
+    // lifecycle and is covered in daemon-endpoint-ownership.test.ts.
     const directory = makeTempDir()
     const canonicalPath = join(directory, 'd')
     const incumbentPath = getDaemonSocketBindPath(canonicalPath)
@@ -486,20 +492,49 @@ describe('publishDaemonEndpoint', () => {
     const incumbent = await listen(incumbentPath)
     const replacement = await listen(replacementPath)
     try {
-      await publishListener(incumbentPath, canonicalPath)
+      const published = await publishDaemonEndpoint(
+        incumbentPath,
+        canonicalPath,
+        probeSocketConnect
+      )
+      expect(published).toMatchObject({ status: 'published' })
+
       await close(incumbent.server)
+
+      // The entry survives its owner's close — dead, but still the name to be replaced.
+      expect(readDaemonSocketIdentity(canonicalPath)).not.toBeNull()
+      await expect(probeSocketConnect(canonicalPath)).resolves.toBe('refused')
 
       const outcome = await publishDaemonEndpoint(
         replacementPath,
         canonicalPath,
         probeSocketConnect
       )
-
       expect(outcome).toMatchObject({ status: 'published' })
       await expectReachable(canonicalPath)
       expect(replacement.connections()).toBe(1)
     } finally {
       await Promise.all([close(incumbent.server), close(replacement.server)])
+      rmSync(directory, { recursive: true, force: true })
+    }
+  })
+
+  unixIt('returns the identity that actually holds the canonical name', async () => {
+    // Why: callers arm the ownership watchdog with this value, so an identity that does not
+    // describe the published entry makes every later ownership check meaningless.
+    const directory = makeTempDir()
+    const canonicalPath = join(directory, 'd')
+    const boundPath = getDaemonSocketBindPath(canonicalPath)
+    const newcomer = await listen(boundPath)
+    try {
+      const outcome = await publishDaemonEndpoint(boundPath, canonicalPath, probeSocketConnect)
+
+      expect(outcome.status).toBe('published')
+      expect(outcome.status === 'published' ? outcome.identity : null).toEqual(
+        readDaemonSocketIdentity(canonicalPath)
+      )
+    } finally {
+      await close(newcomer.server)
       rmSync(directory, { recursive: true, force: true })
     }
   })

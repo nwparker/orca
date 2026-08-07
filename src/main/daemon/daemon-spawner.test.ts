@@ -529,7 +529,7 @@ describe('sweepAbandonedDaemonClaims', () => {
     }
   )
 
-  it('returns zero for an unreadable runtime dir', async () => {
+  it('returns zero when the runtime dir does not exist', async () => {
     await expect(
       sweepAbandonedDaemonClaims(join(tmpdir(), `daemon-sweep-missing-${randomUUID()}`))
     ).resolves.toBe(0)

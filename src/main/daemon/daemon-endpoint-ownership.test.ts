@@ -207,8 +207,11 @@ describe('daemon endpoint ownership publication', () => {
   )
 
   it.skipIf(process.platform === 'win32')(
-    'refuses a second listener when a live daemon socket path was removed',
+    'refuses a duplicate launch through the exclusive PID record',
     async () => {
+      // Why the PID record and not the socket: this asserts the ownership record is exclusive,
+      // which is what rejects here. It does not prove a second listener was never transiently
+      // published — endpoint exclusivity is covered in daemon-endpoint-publish.test.ts.
       const pidPath = join(dir, 'daemon.pid')
       server = new DaemonServer({
         socketPath,

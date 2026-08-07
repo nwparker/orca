@@ -224,6 +224,33 @@ async function main() {
       throw new Error('losing racer left its ownership record behind')
     }
 
+    // Why a second, non-racing phase: above, both racers are awaited to ready-or-exit before a
+    // winner is identified, so the loser has usually already gone and killing it proves little.
+    // With a known-live incumbent the interleaving is forced rather than hoped for: the newcomer
+    // must find the endpoint occupied, refuse to take it, and damage nothing on its way out.
+    const survivorInodeBeforeBlocked = statSync(socketPath).ino
+    const blocked = bootDaemon('blocked', dir, socketPath)
+    daemons.push(blocked)
+    await blocked.ready.then(
+      () => {
+        throw new Error('a daemon published onto an endpoint a live daemon already owned')
+      },
+      () => {
+        // Expected: it cannot publish onto a live owner's name, so it exits instead.
+      }
+    )
+    await killAndWait(blocked.child)
+    if (!existsSync(socketPath) || statSync(socketPath).ino !== survivorInodeBeforeBlocked) {
+      throw new Error("a daemon that could not publish removed the live owner's endpoint")
+    }
+    if (!(await isDaemonReachable(socketPath, survivor.tokenPath, protocolVersion))) {
+      throw new Error('live owner became unreachable after a newcomer failed to publish')
+    }
+    if (existsSync(blocked.pidPath)) {
+      throw new Error('a daemon that could not publish left an ownership record behind')
+    }
+    log('a newcomer refused the live owner’s endpoint and left it intact')
+
     log('PASS: the racing survivor remains reachable through the canonical endpoint')
   } finally {
     for (const daemon of daemons) {
