@@ -1,6 +1,10 @@
 import { readdirSync, statSync, unlinkSync } from 'node:fs'
 import { join } from 'node:path'
-import { probeSocketConnect, type SocketProbeOutcome } from './daemon-endpoint-probe'
+import {
+  endpointIsProvenDead,
+  probeSocketConnect,
+  type SocketProbeOutcome
+} from './daemon-endpoint-probe'
 
 const ABANDONED_DAEMON_ARTIFACT_CLAIM_PATTERN =
   /\.(?:cleanup|replace)-\d+-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
@@ -40,7 +44,11 @@ export async function sweepAbandonedDaemonClaims(
       if (now - stats.mtimeMs < minAgeMs) {
         continue
       }
-      if (bindName && stats.isSocket() && (await probeEndpoint(claimPath)) === 'connected') {
+      // Why proof of death rather than merely "did not answer": a timeout on a loaded host, or
+      // an EPERM, classifies nothing — and this name is the only one its daemon has. Removing on
+      // anything short of proof is the same mistake as the third-party reclaim this design
+      // retired, just aimed at the bind name instead of the canonical one.
+      if (bindName && stats.isSocket() && !endpointIsProvenDead(await probeEndpoint(claimPath))) {
         continue
       }
       unlinkSync(claimPath)

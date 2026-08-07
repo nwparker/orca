@@ -529,6 +529,35 @@ describe('sweepAbandonedDaemonClaims', () => {
     }
   )
 
+  it.skipIf(process.platform === 'win32')(
+    'keeps an aged bind name whose liveness could not be classified',
+    async () => {
+      // Why: an unclassifiable probe — a timeout on a loaded host, an EPERM — proves nothing,
+      // and this name is the only one its daemon has. Removing on anything short of proof of
+      // death is the third-party reclaim mistake aimed at the bind name instead.
+      const dir = createTestDir()
+      const bindPath = join(dir, '.b00feed5678')
+      const server = createServer((socket) => socket.end())
+      try {
+        await listenOnSocketPath(server, bindPath)
+
+        await expect(
+          sweepAbandonedDaemonClaims(
+            dir,
+            undefined,
+            Date.now() + 24 * 60 * 60 * 1000,
+            async () => 'unknown'
+          )
+        ).resolves.toBe(0)
+        expect(existsSync(bindPath)).toBe(true)
+        await expect(connectsToSocketPath(bindPath)).resolves.toBe(true)
+      } finally {
+        await closeSocketServer(server)
+        rmSync(dir, { recursive: true, force: true })
+      }
+    }
+  )
+
   it('returns zero when the runtime dir does not exist', async () => {
     await expect(
       sweepAbandonedDaemonClaims(join(tmpdir(), `daemon-sweep-missing-${randomUUID()}`))
