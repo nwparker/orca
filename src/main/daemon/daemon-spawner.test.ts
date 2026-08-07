@@ -15,12 +15,11 @@ import {
 } from './daemon-spawner'
 import {
   getDaemonSocketBindPath,
-  publishDaemonSocketPath,
+  publishDaemonEndpoint,
   readDaemonSocketIdentity,
-  reclaimDeadDaemonSocketPath,
-  sweepAbandonedDaemonClaims,
-  unlinkOwnedDaemonSocketPath
+  sweepAbandonedDaemonClaims
 } from './daemon-endpoint-ownership'
+import { probeSocketConnect } from './daemon-endpoint-probe'
 import { startDaemon, type DaemonHandle } from './daemon-main'
 import { DaemonClient } from './client'
 import type { SubprocessHandle } from './session'
@@ -360,154 +359,89 @@ describe('daemon socket publication', () => {
     expect(getDaemonSocketBindPath(canonicalPath).length).toBeLessThan(canonicalPath.length)
   })
 
-  it('publishes a bound listener under the canonical endpoint and reclaims only its own entry', async () => {
-    if (process.platform === 'win32') {
-      return
-    }
-    const dir = createTestDir()
-    const canonicalPath = getDaemonSocketPath(dir)
-    const first = createServer((socket) => socket.end())
-    const second = createServer((socket) => socket.end())
-    try {
-      const firstBindPath = getDaemonSocketBindPath(canonicalPath)
-      await listenOnSocketPath(first, firstBindPath)
-
-      const firstIdentity = publishDaemonSocketPath(firstBindPath, canonicalPath)
-      expect(firstIdentity).not.toBeNull()
-      expect(existsSync(canonicalPath)).toBe(true)
-      expect(existsSync(firstBindPath)).toBe(false)
-      await expect(connectsToSocketPath(canonicalPath)).resolves.toBe(true)
-
-      const secondBindPath = getDaemonSocketBindPath(canonicalPath)
-      await listenOnSocketPath(second, secondBindPath)
-      let publishError: NodeJS.ErrnoException | null = null
-      try {
-        publishDaemonSocketPath(secondBindPath, canonicalPath)
-      } catch (error) {
-        publishError = error as NodeJS.ErrnoException
-      }
-      expect(publishError?.code).toBe('EEXIST')
-
-      expect(unlinkOwnedDaemonSocketPath(canonicalPath, firstIdentity)).toBe(true)
-      expect(existsSync(canonicalPath)).toBe(false)
-
-      // The endpoint name now resolves to a different listener's inode.
-      const secondIdentity = publishDaemonSocketPath(secondBindPath, canonicalPath)
-      expect(secondIdentity).not.toEqual(firstIdentity)
-      expect(unlinkOwnedDaemonSocketPath(canonicalPath, firstIdentity)).toBe(false)
-      expect(existsSync(canonicalPath)).toBe(true)
-      await expect(connectsToSocketPath(canonicalPath)).resolves.toBe(true)
-    } finally {
-      await closeSocketServer(first)
-      await closeSocketServer(second)
-      rmSync(dir, { recursive: true, force: true })
-    }
-  })
-})
-
-describe('reclaimDeadDaemonSocketPath', () => {
-  it.skipIf(process.platform === 'win32')('removes a dead endpoint', async () => {
-    const dir = createTestDir()
-    const canonicalPath = join(dir, 'daemon.sock')
-    try {
-      const server = createServer()
-      const bindPath = getDaemonSocketBindPath(canonicalPath)
-      await listenOnSocketPath(server, bindPath)
-      publishDaemonSocketPath(bindPath, canonicalPath)
-      await closeSocketServer(server)
-
-      await expect(
-        reclaimDeadDaemonSocketPath(canonicalPath, async (path) =>
-          (await connectsToSocketPath(path)) ? 'alive' : 'dead'
-        )
-      ).resolves.toBe('reclaimed')
-      expect(existsSync(canonicalPath)).toBe(false)
-    } finally {
-      rmSync(dir, { recursive: true, force: true })
-    }
-  })
-
   it.skipIf(process.platform === 'win32')(
-    'restores an endpoint that turns out to be alive',
+    'keeps a live incumbent reachable when a second listener publishes',
     async () => {
-      // Why: the claim is taken before liveness is known, so a live endpoint must come back.
-      // Identity cannot decide this — Linux recycles the inode number of the dead one.
       const dir = createTestDir()
-      const canonicalPath = join(dir, 'daemon.sock')
-      const server = createServer((socket) => socket.end())
+      const canonicalPath = getDaemonSocketPath(dir)
+      const incumbent = createServer((socket) => socket.end())
+      const newcomer = createServer((socket) => socket.end())
       try {
-        const bindPath = getDaemonSocketBindPath(canonicalPath)
-        await listenOnSocketPath(server, bindPath)
-        publishDaemonSocketPath(bindPath, canonicalPath)
+        const incumbentBind = getDaemonSocketBindPath(canonicalPath)
+        await listenOnSocketPath(incumbent, incumbentBind)
+        const incumbentOutcome = await publishDaemonEndpoint(
+          incumbentBind,
+          canonicalPath,
+          probeSocketConnect
+        )
+        expect(incumbentOutcome.status).toBe('published')
+        const incumbentIdentity = readDaemonSocketIdentity(canonicalPath)
 
+        const newcomerBind = getDaemonSocketBindPath(canonicalPath)
+        await listenOnSocketPath(newcomer, newcomerBind)
         await expect(
-          reclaimDeadDaemonSocketPath(canonicalPath, async (path) =>
-            (await connectsToSocketPath(path)) ? 'alive' : 'dead'
-          )
-        ).resolves.toBe('live-owner')
-        expect(existsSync(canonicalPath)).toBe(true)
+          publishDaemonEndpoint(newcomerBind, canonicalPath, probeSocketConnect)
+        ).resolves.toEqual({ status: 'occupied' })
+
+        expect(readDaemonSocketIdentity(canonicalPath)).toEqual(incumbentIdentity)
         await expect(connectsToSocketPath(canonicalPath)).resolves.toBe(true)
       } finally {
-        await closeSocketServer(server)
+        await closeSocketServer(incumbent)
+        await closeSocketServer(newcomer)
         rmSync(dir, { recursive: true, force: true })
       }
     }
   )
-})
-
-describe('daemon endpoint claim safety', () => {
-  it.skipIf(process.platform === 'win32')('keeps an endpoint it cannot classify', async () => {
-    // Why: an unclassifiable probe is not proof of death. Collapsing it to "dead" deletes
-    // an endpoint that may well be serving.
-    const dir = createTestDir()
-    const canonicalPath = join(dir, 'daemon.sock')
-    const server = createServer((socket) => socket.end())
-    try {
-      const bindPath = getDaemonSocketBindPath(canonicalPath)
-      await listenOnSocketPath(server, bindPath)
-      publishDaemonSocketPath(bindPath, canonicalPath)
-
-      await expect(reclaimDeadDaemonSocketPath(canonicalPath, async () => 'unknown')).resolves.toBe(
-        'inconclusive'
-      )
-      expect(existsSync(canonicalPath)).toBe(true)
-      await expect(connectsToSocketPath(canonicalPath)).resolves.toBe(true)
-    } finally {
-      await closeSocketServer(server)
-      rmSync(dir, { recursive: true, force: true })
-    }
-  })
 
   it.skipIf(process.platform === 'win32')(
-    'never overwrites a daemon that published while the claim was held',
+    'leaves an unclassifiable incumbent untouched',
     async () => {
-      // Why: restoring with rename replaces whatever is at the target, so a newer publisher
-      // would be silently swapped out for the older entry we took.
       const dir = createTestDir()
-      const canonicalPath = join(dir, 'daemon.sock')
-      const held = createServer((socket) => socket.end())
+      const canonicalPath = getDaemonSocketPath(dir)
       const newcomer = createServer((socket) => socket.end())
       try {
-        const heldBind = getDaemonSocketBindPath(canonicalPath)
-        await listenOnSocketPath(held, heldBind)
-        const heldIdentity = publishDaemonSocketPath(heldBind, canonicalPath)
+        writeFileSync(canonicalPath, 'incumbent')
+        const newcomerBind = getDaemonSocketBindPath(canonicalPath)
+        await listenOnSocketPath(newcomer, newcomerBind)
 
         await expect(
-          reclaimDeadDaemonSocketPath(canonicalPath, async () => {
-            // Daemon C publishes onto the freed name while we hold the claim.
-            const newcomerBind = getDaemonSocketBindPath(canonicalPath)
-            await listenOnSocketPath(newcomer, newcomerBind)
-            publishDaemonSocketPath(newcomerBind, canonicalPath)
-            return 'alive'
-          })
-        ).resolves.toBe('live-owner')
+          publishDaemonEndpoint(newcomerBind, canonicalPath, async () => 'unknown')
+        ).resolves.toEqual({ status: 'inconclusive' })
+        expect(readFileSync(canonicalPath, 'utf8')).toBe('incumbent')
+      } finally {
+        await closeSocketServer(newcomer)
+        rmSync(dir, { recursive: true, force: true })
+      }
+    }
+  )
 
-        // The newcomer must still own the name, not the entry we had claimed.
-        expect(readDaemonSocketIdentity(canonicalPath)).not.toEqual(heldIdentity)
+  it.skipIf(process.platform === 'win32')(
+    'replaces a dead incumbent with a reachable listener',
+    async () => {
+      const dir = createTestDir()
+      const canonicalPath = getDaemonSocketPath(dir)
+      const incumbent = createServer((socket) => socket.end())
+      const replacement = createServer((socket) => socket.end())
+      try {
+        const incumbentBind = getDaemonSocketBindPath(canonicalPath)
+        await listenOnSocketPath(incumbent, incumbentBind)
+        await publishDaemonEndpoint(incumbentBind, canonicalPath, probeSocketConnect)
+        await closeSocketServer(incumbent)
+        await expect(connectsToSocketPath(canonicalPath)).resolves.toBe(false)
+
+        const replacementBind = getDaemonSocketBindPath(canonicalPath)
+        await listenOnSocketPath(replacement, replacementBind)
+        const outcome = await publishDaemonEndpoint(
+          replacementBind,
+          canonicalPath,
+          probeSocketConnect
+        )
+
+        expect(outcome.status).toBe('published')
         await expect(connectsToSocketPath(canonicalPath)).resolves.toBe(true)
       } finally {
-        await closeSocketServer(held)
-        await closeSocketServer(newcomer)
+        await closeSocketServer(incumbent)
+        await closeSocketServer(replacement)
         rmSync(dir, { recursive: true, force: true })
       }
     }
@@ -518,9 +452,7 @@ describe('sweepAbandonedDaemonClaims', () => {
   const claimNames = [
     `daemon-v${PROTOCOL_VERSION}.pid.cleanup-123-${randomUUID()}`,
     `daemon-v${PROTOCOL_VERSION}.pid.replace-123-${randomUUID()}`,
-    '.b0123456789',
-    // Endpoint reclaim claims use the same scratch convention and must be swept too.
-    '.c0123456789'
+    '.b0123456789'
   ]
   const preservedNames = [`daemon-v${PROTOCOL_VERSION}.pid`, `daemon-v${PROTOCOL_VERSION}.token`]
 

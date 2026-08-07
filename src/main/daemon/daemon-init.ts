@@ -872,10 +872,10 @@ export async function initDaemonPtyProvider(
   }
   const runtimeDir = getRuntimeDir()
 
-  // Why: rename-claim and bind scratch names are unlinked by their owner, but a failed unlink
-  // leaves one behind forever. Sweep before launching so a failed launch is still reclaimed;
-  // age-gated so a claim still in flight is never disturbed.
-  sweepAbandonedDaemonClaims(runtimeDir, undefined, undefined, getDaemonSocketPath(runtimeDir))
+  // Why: a bind name lives only between listen and publish, and libuv unlinks it when a daemon
+  // closes — so one that outlives its owner is crash debris. Sweep before launching, age-gated
+  // so a bind still in flight is never disturbed.
+  sweepAbandonedDaemonClaims(runtimeDir)
 
   const newSpawner = new DaemonSpawner({
     runtimeDir,
@@ -1243,14 +1243,6 @@ export async function cleanupDaemonForProtocol(
       // Endpoint absence doesn't prove the PID record belongs to the current protocol; leave artifact cleanup to the owning daemon.
       return { cleaned: false, killedCount: 0 }
     }
-    // Best-effort remove a stale socket so a future launch doesn't hit EADDRINUSE on bind.
-    if (process.platform !== 'win32' && existsSync(socketPath)) {
-      try {
-        unlinkSync(socketPath)
-      } catch {
-        // Best-effort
-      }
-    }
     try {
       unlinkSync(pidPath)
     } catch {
@@ -1299,14 +1291,6 @@ export async function cleanupDaemonForProtocol(
     return { cleaned: true, killedCount }
   }
 
-  // Defensively unlink the socket: the daemon normally removes it after `shutdown`, but on some crash paths it lingers and blocks a later rebind.
-  if (didRequestShutdown && process.platform !== 'win32' && existsSync(socketPath)) {
-    try {
-      unlinkSync(socketPath)
-    } catch {
-      // Best-effort
-    }
-  }
   try {
     unlinkSync(pidPath)
   } catch {
@@ -1360,13 +1344,6 @@ export async function createLegacyDaemonAdapters(
         ]) {
           try {
             unlinkSync(stalePath)
-          } catch {
-            // Best-effort
-          }
-        }
-        if (process.platform !== 'win32' && existsSync(socketPath)) {
-          try {
-            unlinkSync(socketPath)
           } catch {
             // Best-effort
           }

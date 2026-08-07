@@ -24,12 +24,13 @@ import { isTuiAgent } from '../../shared/tui-agent-config'
 import { parsePtyStartupIngressIntent } from '../../shared/pty-startup-ingress'
 import { unlinkOwnedDaemonPidFile, unlinkOwnedDaemonTokenFile } from './daemon-spawner'
 import {
+  DaemonEndpointUnavailableError,
   getDaemonSocketBindPath,
-  publishDaemonSocketPath,
+  publishDaemonEndpoint,
   readDaemonEndpointOwnershipState,
-  unlinkOwnedDaemonSocketPath,
   type DaemonSocketIdentity
 } from './daemon-endpoint-ownership'
+import { probeSocketConnect } from './daemon-endpoint-probe'
 import {
   CLEAN_DISCONNECT_PROTOCOL_VERSION,
   PROTOCOL_VERSION,
@@ -247,8 +248,6 @@ export class DaemonServer {
         process.platform === 'win32' ? this.socketPath : getDaemonSocketBindPath(this.socketPath)
 
       this.server.listen(bindPath, () => {
-        // Why: drop the startup error listener after bind so it doesn't retain this closure.
-        this.server?.off('error', onListenError)
         try {
           // Why: tighten the mode on the private bind name so the endpoint is never reachable
           // at the canonical path with default permissions, even briefly.
@@ -256,46 +255,74 @@ export class DaemonServer {
         } catch {
           // Best-effort on platforms that support it
         }
-        let publishedOwnership = false
-        try {
-          // Why: the exclusive link is the endpoint claim, and the PID/nonce record must
-          // exist before the token makes this listener adoptable.
-          this.ownedSocketIdentity = publishDaemonSocketPath(bindPath, this.socketPath)
-          this.publishEndpointOwnership()
-          publishedOwnership = true
-          writeFileSync(this.tokenPath, this.token, { mode: 0o600 })
-        } catch (error) {
-          // Why: roll back only a record we actually wrote. Losing the endpoint claim means
-          // the record at that path belongs to the incumbent daemon, and even the ownership-
-          // checked unlink briefly renames it aside — enough to strand a live daemon's record.
-          if (publishedOwnership && this.pidPath && this.launchNonce) {
-            unlinkOwnedDaemonPidFile(this.pidPath, process.pid, this.launchNonce)
-          }
-          unlinkOwnedDaemonSocketPath(this.socketPath, this.ownedSocketIdentity)
-          this.ownedSocketIdentity = null
-          const server = this.server
-          this.server = null
-          // Why: settle before close — an already-accepted connection defers the close
-          // callback indefinitely, and start() has no timeout of its own.
-          reject(error)
-          server?.close()
-          if (process.platform !== 'win32') {
-            try {
-              unlinkSync(bindPath)
-            } catch {
-              // Already consumed by a successful link, or never created.
+        // Why the error listener outlives bind now: publishing awaits a liveness probe, so the
+        // window between listening and settling is milliseconds rather than instant, and an
+        // unhandled 'error' on a net.Server throws. It is detached once start() settles so it
+        // does not retain this closure.
+        void this.publishAndArm(bindPath).then(
+          () => {
+            this.server?.off('error', onListenError)
+            resolve()
+          },
+          (error: unknown) => {
+            const server = this.server
+            server?.off('error', onListenError)
+            this.server = null
+            // Why: settle before close — an already-accepted connection defers the close
+            // callback indefinitely, and start() has no timeout of its own.
+            reject(error)
+            server?.close()
+            if (process.platform !== 'win32') {
+              try {
+                unlinkSync(bindPath)
+              } catch {
+                // Already consumed by a successful link or rename, or never created.
+              }
             }
           }
-          return
-        }
-        if (this.protocolVersion >= CLEAN_DISCONNECT_PROTOCOL_VERSION) {
-          // Why: a parent crash before the first full client pair must not leave an empty daemon alive forever.
-          this.armInitialAdoptionTimeout()
-        }
-        this.startEndpointOwnershipWatch()
-        resolve()
+        )
       })
     })
+  }
+
+  /**
+   * Takes the canonical endpoint, then makes this listener adoptable — in that order.
+   *
+   * Why the endpoint is never rolled back: a daemon that aborts after publishing just closes,
+   * and the entry it leaves behind is dead. The next daemon proves that and replaces it in one
+   * rename. Deleting it here would be a third party removing an entry it cannot prove is still
+   * its own, which is the defect class this design retires.
+   */
+  private async publishAndArm(bindPath: string): Promise<void> {
+    const outcome = await publishDaemonEndpoint(bindPath, this.socketPath, probeSocketConnect)
+    if (outcome.status !== 'published') {
+      // Why log: this is the only point at which the design can decline to serve, so a field
+      // regression surfaces here rather than as a user reporting terminals that never run.
+      this.log.log('endpoint-publish-declined', { reason: outcome.status })
+      console.warn(`[daemon] Endpoint unavailable at startup: reason=${outcome.status}`)
+      throw new DaemonEndpointUnavailableError(outcome.status)
+    }
+    this.ownedSocketIdentity = outcome.identity
+    let publishedOwnership = false
+    try {
+      // Why: the PID/nonce record must exist before the token makes this listener adoptable.
+      this.publishEndpointOwnership()
+      publishedOwnership = true
+      writeFileSync(this.tokenPath, this.token, { mode: 0o600 })
+    } catch (error) {
+      // Why: roll back only a record we actually wrote — anything already at that path
+      // belongs to a daemon that is not us.
+      if (publishedOwnership && this.pidPath && this.launchNonce) {
+        unlinkOwnedDaemonPidFile(this.pidPath, process.pid, this.launchNonce)
+      }
+      this.ownedSocketIdentity = null
+      throw error
+    }
+    if (this.protocolVersion >= CLEAN_DISCONNECT_PROTOCOL_VERSION) {
+      // Why: a parent crash before the first full client pair must not leave an empty daemon alive forever.
+      this.armInitialAdoptionTimeout()
+    }
+    this.startEndpointOwnershipWatch()
   }
 
   async shutdown(): Promise<void> {
@@ -326,14 +353,15 @@ export class DaemonServer {
   }
 
   private unlinkOwnedEndpointArtifacts(): void {
-    // Why: ownership checks prevent removing a late replacement's token, PID record or endpoint.
+    // Why: ownership checks prevent removing a late replacement's token or PID record.
     unlinkOwnedDaemonTokenFile(this.tokenPath, this.token)
     if (this.pidPath && this.launchNonce) {
       unlinkOwnedDaemonPidFile(this.pidPath, process.pid, this.launchNonce)
     }
-    // Why: we bound a private name, so libuv unlinks nothing at the canonical path — this
-    // is the only removal of our endpoint, and it is skipped once someone else owns it.
-    unlinkOwnedDaemonSocketPath(this.socketPath, this.ownedSocketIdentity)
+    // Why the endpoint is deliberately left behind: removing it means fencing the removal
+    // against a replacement that published in the meantime, and that fencing — claim, probe,
+    // restore — was the single largest source of defects in this component. A dead entry costs
+    // nothing and the next daemon replaces it in one rename, on a path every start exercises.
     this.ownedSocketIdentity = null
   }
 
@@ -382,8 +410,10 @@ export class DaemonServer {
       return
     }
     this.endpointOwnershipLossStreak++
-    // Why: a replacement publishes by unlink-then-link, so a single observation can land in
-    // that gap. Require the loss to persist before acting on it.
+    // Why still require two: a replacement now publishes by a single rename, so there is no
+    // gap to land in and one observation would do. This stays a backstop rather than the
+    // detector — publishing verifies its own ownership immediately — so the cost of being
+    // sure is one extra poll on a daemon that is by then serving nobody.
     if (this.endpointOwnershipLossStreak < DaemonServer.ENDPOINT_OWNERSHIP_LOSS_CONFIRMATIONS) {
       return
     }

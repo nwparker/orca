@@ -9,6 +9,7 @@ import { encodeNdjson } from './ndjson'
 import { PROTOCOL_VERSION, type DaemonRequest } from './types'
 import type { SubprocessHandle } from './session'
 import { getDaemonPidPath, getDaemonSocketPath, serializeDaemonPidFile } from './daemon-spawner'
+import { waitForEndpointUnreachable } from './daemon-endpoint-reachability-test-harness'
 
 const confirmForegroundProcessMock = vi.fn(async () => 'droid')
 
@@ -916,6 +917,7 @@ describe('DaemonServer', () => {
       await expect(c.ensureConnected()).rejects.toThrow()
     })
 
+    // Runs everywhere: a closed Windows pipe classifies as missing, not connected.
     it('still terminates via the shutdown RPC when disposal cannot prove physical exit', async () => {
       await startServer()
       const daemon = server as unknown as DaemonServerPrivate & {
@@ -931,7 +933,8 @@ describe('DaemonServer', () => {
       await expect(c.request('shutdown', { killSessions: true })).resolves.toEqual({})
 
       await waitFor(() => daemon.server === null)
-      await waitFor(() => !existsSync(socketPath))
+      // Why not existsSync: the dead entry remains for the next publisher to replace.
+      expect(await waitForEndpointUnreachable(socketPath)).toBe(true)
       const late = new DaemonClient({ socketPath, tokenPath })
       await expect(late.ensureConnected()).rejects.toThrow()
     })

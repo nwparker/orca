@@ -1,16 +1,18 @@
-/* Ownership of the daemon's canonical endpoint name and of the scratch entries the
-   rename-claim protocol leaves behind. Kept apart from daemon-spawner so the rule that
-   decides who may serve on the socket path is readable on its own. */
+/* Who may serve on the daemon's canonical endpoint name.
+   The rule, in one sentence: only a daemon publishing itself onto the endpoint may mutate that
+   directory entry, and only by replacing an entry it has itself just proven dead.
+   See docs/reference/daemon-endpoint-ownership.md. */
 import { randomBytes } from 'node:crypto'
-import { existsSync, linkSync, renameSync, statSync, unlinkSync } from 'node:fs'
+import { linkSync, renameSync, statSync, unlinkSync } from 'node:fs'
 import { dirname, join } from 'node:path'
+import { endpointIsProvenDead, type SocketProbeOutcome } from './daemon-endpoint-probe'
 
 export { sweepAbandonedDaemonClaims } from './daemon-endpoint-claim-sweep'
 
 /**
- * The exact endpoint a daemon owns. `birthtimeMs` is not redundant: Linux reuses inode
- * numbers as soon as the inode is freed, so dev+ino alone will happily match a replacement
- * socket that landed on the recycled number, which is the entry we must never remove.
+ * The exact endpoint a daemon owns. `birthtimeMs` is not redundant: Linux reuses inode numbers
+ * as soon as the inode is freed, so dev+ino alone will happily match a replacement socket that
+ * landed on the recycled number — the entry we must never mistake for our own.
  */
 export type DaemonSocketIdentity = { dev: bigint; ino: bigint; birthtimeMs: number }
 
@@ -26,37 +28,127 @@ export function getDaemonSocketBindPath(socketPath: string): string {
 }
 
 /**
+ * The endpoint belongs to someone else. The caller must adopt that daemon rather than fork
+ * beside it — a second daemon on a name it cannot reach is exactly the split brain this
+ * design exists to prevent.
+ */
+export class DaemonEndpointUnavailableError extends Error {
+  constructor(readonly reason: 'occupied' | 'lost' | 'inconclusive') {
+    super(`Daemon endpoint unavailable: ${reason}`)
+    this.name = 'DaemonEndpointUnavailableError'
+  }
+}
+
+export type DaemonEndpointPublishOutcome =
+  /** The endpoint name is ours. */
+  | { status: 'published'; identity: DaemonSocketIdentity | null }
+  /** A live daemon owns it. Adopt that daemon; never fork beside it. */
+  | { status: 'occupied' }
+  /** We published, and another daemon replaced us moments later. We must not serve. */
+  | { status: 'lost' }
+  /** The incumbent could not be classified, so it must be left alone. */
+  | { status: 'inconclusive' }
+
+/**
  * Publishes a bound listener under the canonical endpoint name.
  *
- * Why: Node/libuv unlinks the pathname a server bound to when that server closes,
- * with no ownership check — a daemon exiting late therefore deletes whichever socket
- * currently sits at that path, including a live replacement's. Binding a unique path
- * and hard-linking it into place instead means libuv only ever unlinks the private
- * bind name, and the exclusive link doubles as the kernel-enforced endpoint claim.
+ * Why bind privately and link rather than bind the canonical name directly: Node/libuv unlinks
+ * the pathname a server bound to when that server closes, with no ownership check — a daemon
+ * exiting late therefore deleted whichever socket then sat at that path, including a live
+ * replacement's. Binding a unique name means libuv can only ever unlink our own bind name.
+ *
+ * Why link first and rename second: `rename` replaces whatever it finds, so using it
+ * unconditionally would let a starting daemon destroy a healthy one's endpoint. `link` fails
+ * with EEXIST instead, which forces the liveness question to be asked before anything is
+ * replaced — and on the common path it is itself the kernel-enforced exclusive claim.
  */
-export function publishDaemonSocketPath(
+export async function publishDaemonEndpoint(
   boundPath: string,
-  canonicalPath: string
-): DaemonSocketIdentity | null {
+  canonicalPath: string,
+  probeEndpoint: (path: string) => Promise<SocketProbeOutcome>
+): Promise<DaemonEndpointPublishOutcome> {
   if (process.platform === 'win32') {
-    // Named pipes are not directory entries; the pipe name itself is exclusive.
-    return null
+    // Named pipes are not directory entries; the pipe name itself is exclusive, and a dead
+    // daemon's pipe simply ceases to exist. A successful listen is the whole protocol.
+    return { status: 'published', identity: null }
   }
-  // Why: stat the bound name first — the link shares the inode, so a racing unlink of the
-  // canonical name cannot erase our identity and leave the endpoint unwatched and uncleanable.
+  // Why stat the bound name: the link shares the inode, so reading identity here cannot be
+  // raced by anything happening to the canonical name.
   const identity = readDaemonSocketIdentity(boundPath)
-  // Why no fallback: the previous one checked for an absent canonical name and then renamed
-  // over it, which is check-then-act with an operation that replaces whatever it finds — a
-  // daemon publishing in that gap was silently overwritten and stranded. Requiring the link
-  // also guarantees restore works later, since publishing proves the filesystem supports it.
-  // userData is always local, so this is not a reachable limitation in practice.
-  linkSync(boundPath, canonicalPath)
+  try {
+    linkSync(boundPath, canonicalPath)
+  } catch (error) {
+    if (!isFileExistsError(error)) {
+      throw error
+    }
+    const blocked = await replaceProvenDeadEndpoint(boundPath, canonicalPath, probeEndpoint)
+    if (blocked) {
+      return blocked
+    }
+    return confirmPublishedEndpoint(canonicalPath, identity)
+  }
   try {
     unlinkSync(boundPath)
   } catch {
     // Inert: clients resolve the canonical link, and the bind name is unique to us.
   }
-  return identity
+  return confirmPublishedEndpoint(canonicalPath, identity)
+}
+
+/**
+ * Replaces an occupied endpoint name, but only once nothing can be serving it.
+ *
+ * Why `rename` and not unlink-then-link: unlink-then-link leaves the canonical name absent
+ * between the two calls, and every concurrent observer — a connecting client, another daemon's
+ * publish, the ownership watchdog — can land in that gap and conclude something false. Measured
+ * across a live handover, rename exposed no gap in thousands of probes where unlink-then-link
+ * gapped on essentially every observation.
+ */
+async function replaceProvenDeadEndpoint(
+  boundPath: string,
+  canonicalPath: string,
+  probeEndpoint: (path: string) => Promise<SocketProbeOutcome>
+): Promise<DaemonEndpointPublishOutcome | null> {
+  let outcome: SocketProbeOutcome = 'unknown'
+  try {
+    outcome = await probeEndpoint(canonicalPath)
+  } catch {
+    // A probe that threw classified nothing, which is not proof of death.
+  }
+  if (outcome === 'connected') {
+    return { status: 'occupied' }
+  }
+  if (!endpointIsProvenDead(outcome)) {
+    // Why: a timed-out or EPERM probe is not a second opinion. Collapsing "could not classify"
+    // into "dead" is what deletes an endpoint that is still serving every terminal on the host.
+    return { status: 'inconclusive' }
+  }
+  renameSync(boundPath, canonicalPath)
+  // null means "the name is ours now" — the caller still has to confirm it kept it.
+  return null
+}
+
+/**
+ * Confirms the name we just took is still ours.
+ *
+ * Why: two daemons can prove the same dead entry dead and both replace it; the second wins.
+ * The loser must never serve, because nothing resolves to it. Checking here bounds that window
+ * to the gap between two syscalls instead of a watchdog poll — and dev+ino alone is decisive
+ * because our own listener still holds the inode open, so its number cannot be recycled while
+ * we are asking.
+ */
+function confirmPublishedEndpoint(
+  canonicalPath: string,
+  identity: DaemonSocketIdentity | null
+): DaemonEndpointPublishOutcome {
+  const published = readDaemonSocketIdentity(canonicalPath)
+  if (!identity || !published) {
+    // Nothing to compare against; the ownership watchdog remains the backstop.
+    return { status: 'published', identity }
+  }
+  return published.dev === identity.dev && published.ino === identity.ino
+    ? { status: 'published', identity }
+    : { status: 'lost' }
 }
 
 function isFileExistsError(error: unknown): boolean {
@@ -73,19 +165,6 @@ export function readDaemonSocketIdentity(socketPath: string): DaemonSocketIdenti
   } catch {
     return null
   }
-}
-
-export function daemonSocketIdentityMatches(
-  a: DaemonSocketIdentity | null,
-  b: DaemonSocketIdentity | null
-): boolean {
-  return (
-    a !== null &&
-    b !== null &&
-    a.dev === b.dev &&
-    a.ino === b.ino &&
-    a.birthtimeMs === b.birthtimeMs
-  )
 }
 
 /** 'indeterminate' is deliberately distinct from 'lost': only positive evidence may retire a daemon. */
@@ -114,129 +193,4 @@ export function readDaemonEndpointOwnershipState(
 
 function isMissingFileError(error: unknown): boolean {
   return typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT'
-}
-
-/**
- * Reclaims a canonical endpoint name on behalf of a daemon that is not us.
- *
- * Why liveness rather than identity: the inode we meant to remove has already been freed, and
- * Linux hands the same inode number straight back to the next socket — `birthtimeMs` is often
- * unavailable there too, so identity can silently match a live replacement. What actually
- * distinguishes a dead endpoint from a live one is whether anything answers it. Renaming
- * claims the entry atomically first; connecting through the claimed name still reaches the
- * original listener, because the binding is to the inode, not to the name.
- */
-export type DaemonEndpointReclaimOutcome =
-  /** The entry was proven dead and removed. */
-  | 'reclaimed'
-  /** Something is serving it; the entry was put back untouched. */
-  | 'live-owner'
-  /** There was nothing to claim. */
-  | 'absent'
-  /** Could not be classified; the entry was put back and must be left alone. */
-  | 'inconclusive'
-  /** The claim is retained because its canonical name could not be restored. */
-  | 'restoration-failed'
-
-export async function reclaimDeadDaemonSocketPath(
-  socketPath: string,
-  probeEndpoint: (path: string) => Promise<'alive' | 'dead' | 'unknown'>
-): Promise<DaemonEndpointReclaimOutcome> {
-  if (process.platform === 'win32') {
-    return 'absent'
-  }
-  const claimedPath = join(dirname(socketPath), `.c${randomBytes(5).toString('hex')}`)
-  try {
-    renameSync(socketPath, claimedPath)
-  } catch (error) {
-    // Why: only a missing source proves there was nothing to claim. Reporting EACCES or EIO as
-    // absent tells the caller the name is free, and its exclusive publish then fails EEXIST.
-    return isMissingFileError(error) ? 'absent' : 'inconclusive'
-  }
-  // Why tri-state: collapsing this to a boolean makes an unclassifiable probe read as "dead",
-  // which deletes an endpoint that may well be serving. Only proof of death may remove it.
-  let liveness: 'alive' | 'dead' | 'unknown' = 'unknown'
-  try {
-    liveness = await probeEndpoint(claimedPath)
-  } catch {
-    // A failed probe still owes the claimed endpoint its canonical name back.
-  }
-  if (liveness === 'dead') {
-    try {
-      unlinkSync(claimedPath)
-      return 'reclaimed'
-    } catch {
-      return restoreClaimedDaemonSocketPath(claimedPath, socketPath)
-        ? 'inconclusive'
-        : 'restoration-failed'
-    }
-  }
-  if (!restoreClaimedDaemonSocketPath(claimedPath, socketPath)) {
-    return 'restoration-failed'
-  }
-  return liveness === 'alive' ? 'live-owner' : 'inconclusive'
-}
-
-/**
- * Puts a claimed entry back without ever overwriting a newer one.
- *
- * Why link and not rename: rename replaces whatever is at the target, so a daemon that
- * published while we held the claim would be silently swapped out for the older entry we
- * took. Link fails with EEXIST instead, which is the correct outcome — the newer publisher
- * owns the name and our claim is simply dropped.
- */
-function restoreClaimedDaemonSocketPath(claimedPath: string, socketPath: string): boolean {
-  try {
-    linkSync(claimedPath, socketPath)
-  } catch (error) {
-    if (!(isFileExistsError(error) && existsSync(socketPath))) {
-      // Keep the sole reachable name for a later recovery attempt.
-      return false
-    }
-  }
-  try {
-    unlinkSync(claimedPath)
-  } catch {
-    // A uniquely named leftover is inert and is swept by age.
-  }
-  return true
-}
-
-/**
- * Removes the canonical endpoint name only while it still resolves to our own listener.
- *
- * Why the rename: checking identity and then unlinking are two syscalls, and no amount of
- * re-checking between them is atomic — a replacement publishing in the gap gets deleted.
- * Renaming claims the directory entry in one operation, so from that point nobody else's
- * entry can be at the canonical path. Only then is it safe to inspect what we took: ours
- * gets dropped, anyone else's gets linked back, and a replacement that published while we
- * held the claim wins the restore by EEXIST.
- */
-export function unlinkOwnedDaemonSocketPath(
-  socketPath: string,
-  owned: DaemonSocketIdentity | null
-): boolean {
-  if (process.platform === 'win32' || !owned) {
-    return false
-  }
-  // Why claim first: stat-then-unlink is two syscalls, so a replacement publishing between
-  // them gets deleted — the same race as third-party reclaim, and reverting to it because
-  // inode recycling is impossible here was addressing the wrong failure mode.
-  const claimedPath = join(dirname(socketPath), `.c${randomBytes(5).toString('hex')}`)
-  try {
-    renameSync(socketPath, claimedPath)
-  } catch {
-    return false
-  }
-  if (daemonSocketIdentityMatches(readDaemonSocketIdentity(claimedPath), owned)) {
-    try {
-      unlinkSync(claimedPath)
-      return true
-    } catch {
-      restoreClaimedDaemonSocketPath(claimedPath, socketPath)
-      return false
-    }
-  }
-  restoreClaimedDaemonSocketPath(claimedPath, socketPath)
-  return false
 }
