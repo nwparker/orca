@@ -9,6 +9,9 @@ import { endpointIsProvenDead, type SocketProbeOutcome } from './daemon-endpoint
 
 export { sweepAbandonedDaemonClaims } from './daemon-endpoint-claim-sweep'
 
+// Why bounded: each attempt is only retried when another publisher demonstrably took the name.
+const PUBLISH_ATTEMPTS = 3
+
 /**
  * The exact endpoint a daemon owns. `birthtimeMs` is not redundant: Linux reuses inode numbers
  * as soon as the inode is freed, so dev+ino alone will happily match a replacement socket that
@@ -73,26 +76,38 @@ export async function publishDaemonEndpoint(
     return { status: 'published', identity: null }
   }
   // Why stat the bound name: the link shares the inode, so reading identity here cannot be
-  // raced by anything happening to the canonical name.
+  // raced by anything happening to the canonical name. Why it must not fail: without it we
+  // could neither verify the publish nor arm the ownership watchdog, so we would serve a name
+  // we can never check. Startup has nothing to protect yet, so failing here is the cheap option.
   const identity = readDaemonSocketIdentity(boundPath)
-  try {
-    linkSync(boundPath, canonicalPath)
-  } catch (error) {
-    if (!isFileExistsError(error)) {
-      throw error
+  if (!identity) {
+    throw new Error(`Cannot identify the bound daemon endpoint at ${boundPath}`)
+  }
+  // Why a loop: losing the name to another publisher mid-protocol is not an error, it just
+  // invalidates the evidence. Re-running the whole sequence is the correct response, and a
+  // small bound keeps a pathological directory from spinning forever.
+  for (let attempt = 0; attempt < PUBLISH_ATTEMPTS; attempt++) {
+    try {
+      linkSync(boundPath, canonicalPath)
+    } catch (error) {
+      if (!isFileExistsError(error)) {
+        throw error
+      }
+      const blocked = await replaceProvenDeadEndpoint(boundPath, canonicalPath, probeEndpoint)
+      if (blocked === 'evidence-stale') {
+        continue
+      }
+      return blocked ?? confirmPublishedEndpoint(canonicalPath, identity)
     }
-    const blocked = await replaceProvenDeadEndpoint(boundPath, canonicalPath, probeEndpoint)
-    if (blocked) {
-      return blocked
+    try {
+      unlinkSync(boundPath)
+    } catch {
+      // Inert: clients resolve the canonical link, and the bind name is unique to us.
     }
     return confirmPublishedEndpoint(canonicalPath, identity)
   }
-  try {
-    unlinkSync(boundPath)
-  } catch {
-    // Inert: clients resolve the canonical link, and the bind name is unique to us.
-  }
-  return confirmPublishedEndpoint(canonicalPath, identity)
+  // Repeatedly outrun by other publishers: one of them owns the name, so behave as if occupied.
+  return { status: 'occupied' }
 }
 
 /**
@@ -108,7 +123,11 @@ async function replaceProvenDeadEndpoint(
   boundPath: string,
   canonicalPath: string,
   probeEndpoint: (path: string) => Promise<SocketProbeOutcome>
-): Promise<DaemonEndpointPublishOutcome | null> {
+): Promise<DaemonEndpointPublishOutcome | null | 'evidence-stale'> {
+  // Why capture this first: the proof we are about to gather describes one particular entry,
+  // and the rename replaces whatever is at the name. Without something to compare, a probe that
+  // stalled while another daemon published would license destroying that daemon.
+  const proven = readDaemonSocketIdentity(canonicalPath)
   let outcome: SocketProbeOutcome = 'unknown'
   try {
     outcome = await probeEndpoint(canonicalPath)
@@ -123,9 +142,35 @@ async function replaceProvenDeadEndpoint(
     // into "dead" is what deletes an endpoint that is still serving every terminal on the host.
     return { status: 'inconclusive' }
   }
+  if (!isSameEndpointEntry(proven, readDaemonSocketIdentity(canonicalPath))) {
+    // The name changed hands while we were probing, so our death proof describes an entry that
+    // is no longer there. Start over rather than act on it — this is the one interleaving in
+    // which a publisher could otherwise replace an established daemon it never proved dead.
+    return 'evidence-stale'
+  }
   renameSync(boundPath, canonicalPath)
   // null means "the name is ours now" — the caller still has to confirm it kept it.
   return null
+}
+
+/**
+ * Absent-and-still-absent counts as unchanged; one side absent does not.
+ *
+ * Why birthtime here but not in the post-publish check: the entry being compared is one we
+ * believe is dead, so its inode can be freed and Linux hands the number straight back — a
+ * replacement landing on the recycled number would compare equal and we would rename over a
+ * live daemon we never proved dead. Where birthtime is unavailable it is 0 on both sides and
+ * simply adds nothing; it can only ever make this stricter, and a false "changed" costs one
+ * cheap retry.
+ */
+function isSameEndpointEntry(
+  a: DaemonSocketIdentity | null,
+  b: DaemonSocketIdentity | null
+): boolean {
+  if (!a || !b) {
+    return !a && !b
+  }
+  return a.dev === b.dev && a.ino === b.ino && a.birthtimeMs === b.birthtimeMs
 }
 
 /**
@@ -139,12 +184,17 @@ async function replaceProvenDeadEndpoint(
  */
 function confirmPublishedEndpoint(
   canonicalPath: string,
-  identity: DaemonSocketIdentity | null
+  identity: DaemonSocketIdentity
 ): DaemonEndpointPublishOutcome {
-  const published = readDaemonSocketIdentity(canonicalPath)
-  if (!identity || !published) {
-    // Nothing to compare against; the ownership watchdog remains the backstop.
-    return { status: 'published', identity }
+  let published: DaemonSocketIdentity | null = null
+  try {
+    const stats = statSync(canonicalPath, { bigint: true })
+    published = { dev: stats.dev, ino: stats.ino, birthtimeMs: Number(stats.birthtimeMs) }
+  } catch (error) {
+    // Why not "published": the name we just took is gone, or we cannot read it. Either way we
+    // have no evidence we are reachable, and a starting daemon has no sessions to protect — so
+    // declining costs nothing, while serving a name that resolves elsewhere is the whole bug.
+    return isMissingFileError(error) ? { status: 'lost' } : { status: 'inconclusive' }
   }
   return published.dev === identity.dev && published.ino === identity.ino
     ? { status: 'published', identity }

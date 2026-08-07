@@ -1,5 +1,6 @@
 import type * as NodeFs from 'node:fs'
 import {
+  chmodSync,
   linkSync,
   mkdtempSync,
   renameSync,
@@ -12,7 +13,11 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createConnection, createServer, type Server } from 'node:net'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { getDaemonSocketBindPath, publishDaemonEndpoint } from './daemon-endpoint-ownership'
+import {
+  getDaemonSocketBindPath,
+  publishDaemonEndpoint,
+  readDaemonSocketIdentity
+} from './daemon-endpoint-ownership'
 import { probeSocketConnect } from './daemon-endpoint-probe'
 
 const unixIt = it.skipIf(process.platform === 'win32')
@@ -129,6 +134,53 @@ describe('publishDaemonEndpoint', () => {
     }
   })
 
+  unixIt(
+    'never replaces a daemon that published while the death proof was being gathered',
+    async () => {
+      // Why: the proof describes the entry that was probed, not whatever holds the name by the
+      // time we act on it. A publisher stalled between the two would otherwise destroy an
+      // established daemon it never proved dead — the original bug, reached by a narrow window.
+      const directory = makeTempDir()
+      const canonicalPath = join(directory, 'd')
+      const stalePath = getDaemonSocketBindPath(canonicalPath)
+      const winnerPath = getDaemonSocketBindPath(canonicalPath)
+      const latecomerPath = getDaemonSocketBindPath(canonicalPath)
+      const stale = await listen(stalePath)
+      const winner = await listen(winnerPath)
+      const latecomer = await listen(latecomerPath)
+      try {
+        // A dead entry both publishers will legitimately prove dead.
+        await publishListener(stalePath, canonicalPath)
+        await close(stale.server)
+
+        // The winner takes the name while the latecomer is still probing the dead entry. Only on
+        // the first probe: the retry must see a live incumbent, which is the point.
+        const winnerIdentity = readDaemonSocketIdentity(winnerPath)
+        let raced = false
+        const probe = async (path: string) => {
+          const outcome = await probeSocketConnect(path)
+          if (!raced) {
+            raced = true
+            renameSync(winnerPath, canonicalPath)
+          }
+          return outcome
+        }
+        const outcome = await publishDaemonEndpoint(latecomerPath, canonicalPath, probe)
+
+        // The latecomer must back off, and the winner must still own a reachable endpoint.
+        // Two connections to the winner: the latecomer's retry probe, then expectReachable.
+        expect(outcome).toEqual({ status: 'occupied' })
+        await expectReachable(canonicalPath)
+        expect(winner.connections()).toBe(2)
+        expect(latecomer.connections()).toBe(0)
+        expect(readDaemonSocketIdentity(canonicalPath)).toEqual(winnerIdentity)
+      } finally {
+        await Promise.all([close(stale.server), close(winner.server), close(latecomer.server)])
+        rmSync(directory, { recursive: true, force: true })
+      }
+    }
+  )
+
   unixIt('leaves an incumbent untouched when probing is inconclusive', async () => {
     const directory = makeTempDir()
     const canonicalPath = join(directory, 'd')
@@ -194,6 +246,90 @@ describe('publishDaemonEndpoint', () => {
     }
   })
 
+  unixIt('refuses to serve a bound endpoint it cannot identify', async () => {
+    // Why: without the bound identity we can neither verify the publish nor arm the ownership
+    // watchdog, so we would serve a name we could never check. Startup has nothing to protect.
+    const directory = makeTempDir()
+    try {
+      await expect(
+        publishDaemonEndpoint(
+          join(directory, '.bmissing'),
+          join(directory, 'd'),
+          probeSocketConnect
+        )
+      ).rejects.toThrow(/Cannot identify the bound daemon endpoint/)
+    } finally {
+      rmSync(directory, { recursive: true, force: true })
+    }
+  })
+
+  unixIt('reports lost when the name it took disappears before verification', async () => {
+    // Why not 'published': the entry we took is gone, so nothing resolves to this listener.
+    const directory = makeTempDir()
+    const canonicalPath = join(directory, 'd')
+    const boundPath = getDaemonSocketBindPath(canonicalPath)
+    const newcomer = await listen(boundPath)
+    try {
+      vi.doMock('node:fs', async () => {
+        const actual = await vi.importActual<typeof NodeFs>('node:fs')
+        return {
+          ...actual,
+          unlinkSync: (target: string) => {
+            actual.unlinkSync(target)
+            if (target === boundPath) {
+              actual.unlinkSync(canonicalPath)
+            }
+          }
+        }
+      })
+      vi.resetModules()
+      const { publishDaemonEndpoint: publishWithRemover } =
+        await import('./daemon-endpoint-ownership')
+
+      await expect(
+        publishWithRemover(boundPath, canonicalPath, probeSocketConnect)
+      ).resolves.toEqual({ status: 'lost' })
+    } finally {
+      await close(newcomer.server)
+      rmSync(directory, { recursive: true, force: true })
+    }
+  })
+
+  unixIt('declines rather than publishes when the endpoint cannot be verified', async () => {
+    // Why fail closed: an unreadable canonical entry is not evidence we are reachable, and a
+    // starting daemon loses nothing by declining.
+    const directory = makeTempDir()
+    const canonicalPath = join(directory, 'd')
+    const boundPath = getDaemonSocketBindPath(canonicalPath)
+    const newcomer = await listen(boundPath)
+    try {
+      vi.doMock('node:fs', async () => {
+        const actual = await vi.importActual<typeof NodeFs>('node:fs')
+        return {
+          ...actual,
+          unlinkSync: (target: string) => {
+            actual.unlinkSync(target)
+            if (target === boundPath) {
+              // Drop search permission on the directory so the verifying stat fails EACCES.
+              actual.chmodSync(directory, 0o600)
+            }
+          }
+        }
+      })
+      vi.resetModules()
+      const { publishDaemonEndpoint: publishWithBlockedStat } =
+        await import('./daemon-endpoint-ownership')
+
+      await expect(
+        publishWithBlockedStat(boundPath, canonicalPath, probeSocketConnect)
+      ).resolves.toEqual({ status: 'inconclusive' })
+    } finally {
+      chmodSync(directory, 0o700)
+      await close(newcomer.server)
+      rmSync(directory, { recursive: true, force: true })
+    }
+  })
+
   unixIt('reports lost when another listener replaces it before verification', async () => {
     const directory = makeTempDir()
     const canonicalPath = join(directory, 'd')
@@ -219,9 +355,11 @@ describe('publishDaemonEndpoint', () => {
       vi.resetModules()
       const { publishDaemonEndpoint: publishWithRacer } =
         await import('./daemon-endpoint-ownership')
+      // Why the competitor only takes the name from inside our own rename: publishing during
+      // the probe is caught earlier now, by the pre-rename evidence check. 'lost' is
+      // specifically the window between taking the name and verifying we still hold it.
       const probe = async () => {
         linkSync(competitorPath, competitorLink)
-        renameSync(competitorPath, canonicalPath)
         return 'refused' as const
       }
 

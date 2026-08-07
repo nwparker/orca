@@ -23,7 +23,7 @@ never run it, app-wide, until the process is killed by hand.
 
 That specific mechanism is fixed: daemons bind a private name and hard-link it into place, so
 libuv can only ever unlink the private name. But the fix left the surrounding shape intact — a
-launcher still decided that *another* process was dead and reclaimed its name on its behalf.
+launcher still decided that _another_ process was dead and reclaimed its name on its behalf.
 
 Seven review rounds against that shape produced twenty-three distinct defects. Every one was an
 interleaving of the same pattern: **a third party observing liveness at time T and acting on the
@@ -58,15 +58,21 @@ A starting daemon runs exactly this:
    - anything else, including a timeout → **not** proof. Report `inconclusive` and leave it
      alone. A probe that merely timed out is not a second opinion.
 
-4. **Replace it.** `rename(bind, canonical)`. One syscall. The dead entry is replaced by our
-   live one with **no instant at which the canonical name is absent**, so no client and no
-   concurrent daemon can observe a gap.
+4. **Check the proof still describes the entry, then replace it.** Re-`stat` the canonical path
+   and compare against what was there when step 3 began. If it changed hands while we were
+   probing, our death proof describes an entry that is no longer present — start the whole
+   protocol over rather than act on it. Only then `rename(bind, canonical)`. One syscall. The
+   dead entry is replaced by our live one with **no instant at which the canonical name is
+   absent**, so no client and no concurrent daemon can observe a gap.
 
 5. **Verify we kept it.** `stat` the canonical path and compare against the identity of the
    inode we bound. If it is not ours, another daemon replaced us in the microseconds after our
-   rename — exit immediately, before accepting a single connection.
+   rename — exit immediately, before accepting a single connection. If the `stat` itself fails,
+   **decline**: `ENOENT` means the name we took is gone, and any other error means we cannot
+   show we are reachable. A starting daemon has no sessions to protect, so declining costs
+   nothing, while serving a name that resolves elsewhere is the entire bug.
 
-   `dev`+`ino` alone is sufficient *here*, unlike everywhere else in this file: our own listener
+   `dev`+`ino` alone is sufficient _here_, unlike everywhere else in this file: our own listener
    still holds the inode open, so the kernel cannot recycle its number while we are asking. The
    `birthtimeMs` tiebreak exists for the third-party case, where the inode being compared was
    already freed and Linux hands the number straight back to the next socket.
@@ -81,10 +87,10 @@ dead; `rename` clears either and publishes.
 
 The decisive measurement is step 4's gaplessness. Hammering `connect` across a live handover:
 
-| handover primitive | probes | saw the name absent |
-| --- | --- | --- |
-| `rename` (this design) | 6,525 darwin / 8,004 linux | **0** |
-| `unlink`-then-`link` (control) | 200 | **200** |
+| handover primitive             | probes                     | saw the name absent |
+| ------------------------------ | -------------------------- | ------------------- |
+| `rename` (this design)         | 6,525 darwin / 8,004 linux | **0**               |
+| `unlink`-then-`link` (control) | 200                        | **200**             |
 
 The control is the shape the code used before this change. It does not narrowly race; it gaps
 essentially every time it is observed.
@@ -106,23 +112,34 @@ no gap.
 classify" into "dead" is how a live daemon's endpoint gets deleted, and it is the single most
 recurrent defect across all seven review rounds.
 
-**Why the losing racer is now harmless.** Two daemons can still both prove the same dead entry
-and both rename over it; the second wins. But the daemon that loses is, by construction, one
-that is *still starting up and has zero sessions*. It detects the loss at step 5 and exits. The
-catastrophic outcome — live sessions stranded on an unreachable daemon — requires the loser to
-be a long-lived daemon hosting the user's terminals, and that can no longer happen, because the
-entry is only ever replaced by the process that will own the result, at the moment it publishes,
-before any session exists.
+**Why the losing racer is usually harmless.** Two daemons can both prove the same dead entry
+dead and both rename over it; the second wins. The loser detects it at step 5 and exits, and in
+the ordinary case it is _still starting up with zero sessions_, so nothing is lost.
 
-This is the crux. The redesign does not eliminate the race. It moves the race to a point in the
-lifecycle where losing it costs nothing.
+This is the crux. The redesign does not eliminate the race. It moves it to a point in the
+lifecycle where losing it normally costs nothing.
+
+**Where that stops being true, and what step 4 is for.** The claim above is not free. Without
+step 4's re-check, a publisher could gather its death proof, stall arbitrarily long before
+acting on it, and then rename over a daemon that had meanwhile published, started serving, and
+acquired sessions. The victim would be an _established_ daemon, not a zero-session racer — the
+original bug, reached through a narrow window. Step 4 exists precisely to reject a proof that no
+longer describes the entry it was gathered about.
+
+Step 4 shrinks that window; it does not close it. Two adjacent syscalls still separate the
+re-check from the rename, and POSIX has no "rename only if the target is still inode X". Closing
+it completely would require serialising the whole protocol behind a publication lock among
+cooperating publishers. That is a real option if this ever proves reachable in the field, and it
+is why `endpoint-publish-declined` is logged — but a two-syscall window is on the same order as
+any lock-free protocol's residual, and paying for a lock now would add a stale-lock problem of
+exactly the kind this design set out to remove.
 
 **Why the departing daemon leaves its entry behind.** Deleting it requires fencing the delete
 against a replacement that published in the meantime, which reintroduces observe-then-act — and
 that fencing (`unlinkOwnedDaemonSocketPath`, the `.c<hex>` claim, `restoreClaimedDaemonSocketPath`)
 accounted for roughly half of the defects found. A stale socket entry costs zero bytes in the
 app's own runtime directory, and every startup already handles an occupied-but-dead name
-natively via steps 2–4. Leaving it also makes the occupied path the *hot* path, exercised on
+natively via steps 2–4. Leaving it also makes the occupied path the _hot_ path, exercised on
 every single start rather than only in rare races.
 
 **Why the launcher's decisions stop being correctness-critical.** `killStaleDaemon` still kills
@@ -145,7 +162,7 @@ shape. Seven review rounds never surfaced them because every round was scoped to
 checker and the ownership module, and these live in the launcher. They are reachable only on the
 pre-`CLEAN_DISCONNECT` protocol path, so they bite during an upgrade from an old daemon — which
 is precisely when a mixed-version race is most likely. Stating the invariant as a property of
-the *system* rather than of one module is what made them findable: under "only a publisher
+the _system_ rather than of one module is what made them findable: under "only a publisher
 mutates the entry", they are deletions with nothing to replace them.
 
 ## Why there is no fallback for filesystems without hard links
@@ -212,5 +229,11 @@ change recovers them.
 
 Two starting daemons can interleave so that the loser briefly holds a live listener no name
 resolves to. It exits at step 5, or failing that within one poll of the ownership watchdog. It
-has no sessions, so nothing is lost. This is the only interleaving the design does not remove,
-and it is bounded and non-catastrophic by construction.
+has no sessions, so nothing is lost.
+
+The sharper residual is the one described under step 4: a publisher preempted between its
+re-check and its `rename` can still replace an entry that changed hands in those two syscalls.
+Unlike the pre-step-4 behaviour, this no longer widens with probe duration or scheduling delay,
+so the victim is overwhelmingly likely to be another zero-session racer rather than an
+established daemon. It is bounded rather than eliminated, and it is the honest limit of a
+lock-free protocol here.
