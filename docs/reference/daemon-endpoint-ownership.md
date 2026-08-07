@@ -111,6 +111,23 @@ The timeout is never reached in any of these: a dead endpoint refuses immediatel
 hanging. The 500 ms budget exists for a genuinely unresponsive host, where waiting is correct —
 and where the outcome is `inconclusive`, which declines rather than replaces.
 
+### A planted symlink cannot be turned into a write primitive
+
+Leaving the entry on disk means a hostile local process could try to plant something at the
+canonical name. Measured on darwin and linux, with a symlink pointing at a live socket that
+does not belong to us:
+
+- `link` refuses it (`EEXIST`), so the name is never silently taken.
+- The probe follows the symlink, finds the target alive, and reports `occupied` — so a
+  publisher will not clobber a socket that is still serving, even someone else's.
+- Once the target is dead, `rename` replaces **the symlink itself**, not its target. This is the
+  load-bearing property: `rename` does not follow symlinks, so there is no path by which
+  publishing writes through an attacker-chosen link into an attacker-chosen location.
+- The symlink's target is left byte-for-byte alone throughout.
+
+The runtime directory is inside the user's own `userData`, so this is defence in depth rather
+than a reachable threat, but the primitive is worth knowing is absent.
+
 ## Why each step is load-bearing
 
 **Why link before rename, rather than rename always.** `rename` replaces whatever it finds.
