@@ -113,8 +113,11 @@ export async function publishDaemonEndpoint(
     }
     return confirmPublishedEndpoint(canonicalPath, identity)
   }
-  // Repeatedly outrun by other publishers: one of them owns the name, so behave as if occupied.
-  return { status: 'occupied' }
+  // Why inconclusive and not occupied: being outrun repeatedly says the name keeps changing
+  // hands, not that anything is serving it — no probe ever connected. Reporting a live owner
+  // would send the caller off to adopt an endpoint that may by now be dead, and it would lose a
+  // perfectly good bound listener to do it. Declining is the honest answer.
+  return { status: 'inconclusive' }
 }
 
 /**

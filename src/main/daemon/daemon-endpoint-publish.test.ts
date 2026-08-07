@@ -320,8 +320,9 @@ describe('publishDaemonEndpoint', () => {
 
       const outcome = await publishWithRecycle(boundPath, canonicalPath, probeSocketConnect)
 
-      // The publisher must back off rather than replace an entry it cannot still identify.
-      expect(outcome).toEqual({ status: 'occupied' })
+      // Why inconclusive and not occupied: nothing ever connected, so no live owner was proven.
+      // The publisher backs off rather than replace an entry it cannot still identify.
+      expect(outcome).toEqual({ status: 'inconclusive' })
       const after = statSync(canonicalPath, { bigint: true })
       expect({ dev: after.dev, ino: after.ino }).toEqual({ dev: deadEntry.dev, ino: deadEntry.ino })
       expect(newcomer.connections()).toBe(0)
