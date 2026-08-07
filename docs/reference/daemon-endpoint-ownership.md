@@ -187,6 +187,20 @@ If `link` does fail with something other than `EEXIST`, the error propagates and
 fails to start cleanly. Terminals fall back to the local provider without daemon persistence —
 a visible degradation, not a silent split brain.
 
+## Crash debris and the sweeper
+
+A crash between step 1 and step 4 leaves a `.b<hex>` bind name behind. Publishing consumes that
+name — by `unlink` after a successful link, or by the `rename` itself — and libuv removes it when
+a daemon closes cleanly, so one that outlives its owner is debris.
+
+The sweeper removes those, and pid `.cleanup-`/`.replace-` scratch names, after an hour. Age
+alone is **not** the rule, and the tempting version of this is a bug: between `listen` and
+publish, a bind name is the *only* name its daemon has, and an old mtime does not prove the
+process died — one stopped by a debugger or caught in a host suspend is still listening on it.
+So an aged bind socket is asked whether anything answers before it is removed. Getting this
+wrong would destroy a live listener's sole reachable name, which is the same defect as the
+original bug wearing a different hat.
+
 ## Platform notes
 
 Windows named pipes are not directory entries, and a pipe name is exclusive to the process
