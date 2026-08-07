@@ -13,6 +13,7 @@ import { warmWindowsConptyOnce } from './windows-conpty-warmup'
 import { warmPwshAvailabilityCache } from '../pwsh'
 import { createDaemonFileLog, createNoopDaemonFileLog } from './daemon-file-log'
 import { PROTOCOL_VERSION } from './types'
+import { DaemonEndpointUnavailableError } from './daemon-endpoint-ownership'
 import {
   prepareMacosTccLoginShell,
   probeMacosLoginSessionAlive
@@ -328,6 +329,12 @@ const isDirectExecution = !process.env.VITEST
 if (isDirectExecution) {
   main().catch((err) => {
     console.error('[daemon] Fatal:', err)
+    // Why structured: losing the endpoint race is an expected outcome, not a crash. Without a
+    // typed signal the parent sees only "exited with code 1" and gives up, leaving the app on
+    // local non-persistent PTYs beside a perfectly healthy daemon it should have adopted.
+    if (process.send && err instanceof DaemonEndpointUnavailableError) {
+      process.send({ type: 'endpoint-unavailable', reason: err.reason })
+    }
     process.exit(1)
   })
 }

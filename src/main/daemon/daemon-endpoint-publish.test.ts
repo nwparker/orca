@@ -246,6 +246,34 @@ describe('publishDaemonEndpoint', () => {
     }
   })
 
+  unixIt('treats a probe that throws as inconclusive rather than as proof of death', async () => {
+    // Why: a probe that failed classified nothing. Letting a thrown error fall through to the
+    // dead branch would replace an endpoint that may well be serving.
+    const directory = makeTempDir()
+    const canonicalPath = join(directory, 'd')
+    const incumbentPath = getDaemonSocketBindPath(canonicalPath)
+    const newcomerPath = getDaemonSocketBindPath(canonicalPath)
+    const incumbent = await listen(incumbentPath)
+    const newcomer = await listen(newcomerPath)
+    try {
+      await publishListener(incumbentPath, canonicalPath)
+      const before = readDaemonSocketIdentity(canonicalPath)
+      const probe = vi.fn(async () => {
+        throw new Error('probe blew up')
+      })
+
+      const outcome = await publishDaemonEndpoint(newcomerPath, canonicalPath, probe)
+
+      expect(outcome).toEqual({ status: 'inconclusive' })
+      expect(readDaemonSocketIdentity(canonicalPath)).toEqual(before)
+      await expectReachable(canonicalPath)
+      expect(newcomer.connections()).toBe(0)
+    } finally {
+      await Promise.all([close(incumbent.server), close(newcomer.server)])
+      rmSync(directory, { recursive: true, force: true })
+    }
+  })
+
   unixIt('does not replace an entry whose inode number was recycled', async () => {
     // Why birthtime and not just dev+ino here: the entry being compared is one we believe is
     // dead, so its inode can be freed — and Linux hands the number straight back. A replacement

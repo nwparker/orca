@@ -124,6 +124,8 @@ export class DaemonServer {
   private appVersion: string | null
   private spawnerExecPath: string | null
   private ownedSocketIdentity: DaemonSocketIdentity | null = null
+  /** Set once start() has been rejected, so async publication can tell it is no longer wanted. */
+  private startupFailure: Error | null = null
   private endpointOwnershipTimer: ReturnType<typeof setInterval> | null = null
   private endpointOwnershipLossStreak = 0
   private protocolVersion: number
@@ -236,11 +238,29 @@ export class DaemonServer {
   async start(): Promise<void> {
     return new Promise((resolve, reject) => {
       this.server = createServer((socket) => this.handleConnection(socket))
-      const onListenError = (err: Error): void => {
+      // Why a permanent handler and not `once`: an unhandled 'error' on a net.Server is an
+      // uncaught exception, so a post-startup accept failure (EMFILE under fd exhaustion) would
+      // kill a daemon that is hosting every terminal on the machine. A one-shot listener also
+      // left the publish window unguarded against a second error after the first rejected.
+      let startupSettled = false
+      const onServerError = (err: Error): void => {
+        if (startupSettled) {
+          // Why only log: the daemon is serving. Operational errors after startup — a failed
+          // accept under fd exhaustion — must not become an uncaught exception, and must not
+          // be mistaken for a startup failure that tears down live sessions.
+          this.log.log('server-error', { message: err.message })
+          console.warn(`[daemon] Socket server error: ${err.message}`)
+          return
+        }
+        startupSettled = true
+        // Why record it: publishing is async, so the rejection alone cannot stop work already
+        // in flight. The publish continuation reads this and tears down instead of arming a
+        // daemon whose caller was told startup failed.
+        this.startupFailure = err
         reject(err)
       }
 
-      this.server.once('error', onListenError)
+      this.server.on('error', onServerError)
 
       // Why: bind a private name and hard-link it into place, so libuv's close-time unlink
       // can only ever remove our own bind name — never a replacement daemon's endpoint.
@@ -255,32 +275,37 @@ export class DaemonServer {
         } catch {
           // Best-effort on platforms that support it
         }
-        // Why the error listener outlives bind now: publishing awaits a liveness probe, so the
-        // window between listening and settling is milliseconds rather than instant, and an
-        // unhandled 'error' on a net.Server throws. It is detached once start() settles so it
-        // does not retain this closure.
-        void this.publishAndArm(bindPath).then(
-          () => {
-            this.server?.off('error', onListenError)
-            resolve()
-          },
-          (error: unknown) => {
-            const server = this.server
-            server?.off('error', onListenError)
-            this.server = null
-            // Why: settle before close — an already-accepted connection defers the close
-            // callback indefinitely, and start() has no timeout of its own.
-            reject(error)
-            server?.close()
-            if (process.platform !== 'win32') {
-              try {
-                unlinkSync(bindPath)
-              } catch {
-                // Already consumed by a successful link or rename, or never created.
-              }
+        const abandonStartup = (error: unknown): void => {
+          startupSettled = true
+          const server = this.server
+          this.server = null
+          // Why: settle before close — an already-accepted connection defers the close
+          // callback indefinitely, and start() has no timeout of its own.
+          reject(error)
+          server?.close()
+          if (process.platform !== 'win32') {
+            try {
+              unlinkSync(bindPath)
+            } catch {
+              // Already consumed by a successful link or rename, or never created.
             }
           }
-        )
+        }
+        void this.publishAndArm(bindPath).then(() => {
+          // Why re-check: the server can fail while publishing awaits its liveness probe. The
+          // rejection has already been delivered, so resolving here would leave a live,
+          // published daemon behind a caller that was told startup failed — and a caller that
+          // responds by launching a replacement would recreate the split brain.
+          if (this.startupFailure) {
+            this.retireUnstartedDaemon()
+            abandonStartup(this.startupFailure)
+            return
+          }
+          // From here the daemon is serving, so later server errors are logged rather than
+          // treated as a startup failure that would tear down live sessions.
+          startupSettled = true
+          resolve()
+        }, abandonStartup)
       })
     })
   }
@@ -323,6 +348,20 @@ export class DaemonServer {
       this.armInitialAdoptionTimeout()
     }
     this.startEndpointOwnershipWatch()
+  }
+
+  /**
+   * Stands down a daemon that finished publishing after its startup was already reported failed.
+   *
+   * Why the endpoint is still not removed: the same rule as every other exit path. Once this
+   * listener closes the entry is dead, and the next publisher replaces it in one rename —
+   * whereas deleting it here would be a departing daemon removing a name a replacement may
+   * already own.
+   */
+  private retireUnstartedDaemon(): void {
+    this.stopEndpointOwnershipWatch()
+    this.cancelInitialAdoptionTimer()
+    this.unlinkOwnedEndpointArtifacts()
   }
 
   async shutdown(): Promise<void> {
@@ -466,9 +505,9 @@ export class DaemonServer {
     return new Promise<void>((resolve) => {
       // Why: close synchronously before any awaited cleanup so no new transport enters after the empty proof.
       server.close(() => {
-        // Why: libuv unlinks the path this server bound, which is our private bind name and
-        // is already gone. The canonical endpoint is removed by unlinkOwnedEndpointArtifacts,
-        // under an ownership check, so closing late cannot delete a replacement's endpoint.
+        // Why: libuv unlinks the path this server bound, which is our private bind name and is
+        // already gone. Nothing removes the canonical endpoint — a departing daemon leaves it
+        // for the next publisher to replace — so closing late cannot delete a replacement's.
         resolve()
       })
     })

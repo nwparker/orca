@@ -729,7 +729,8 @@ function createOutOfProcessLauncher(
 
       // Wait for the daemon to signal readiness via IPC
       let launchedIdentity: DaemonEndpointIdentity | null = null
-      await new Promise<void>((resolve, reject) => {
+      let endpointUnavailableReason: string | null = null
+      const startupSignal = new Promise<void>((resolve, reject) => {
         let timer: ReturnType<typeof setTimeout> | undefined
         let settled = false
         function cleanupStartupListeners(): void {
@@ -772,6 +773,17 @@ function createOutOfProcessLauncher(
           reject(startupError)
         }
         function onReadyMessage(msg: unknown): void {
+          if (
+            msg &&
+            typeof msg === 'object' &&
+            (msg as { type?: string }).type === 'endpoint-unavailable'
+          ) {
+            // Why: the child lost the endpoint race rather than crashing. Record it so the
+            // launcher can adopt the winner instead of reporting a generic startup failure.
+            endpointUnavailableReason = (msg as { reason?: string }).reason ?? 'occupied'
+            void fail(new Error(`Daemon could not take the endpoint: ${endpointUnavailableReason}`))
+            return
+          }
           if (msg && typeof msg === 'object' && (msg as { type?: string }).type === 'ready') {
             if (settled) {
               return
@@ -815,6 +827,25 @@ function createOutOfProcessLauncher(
       })
 
       try {
+        await startupSignal
+      } catch (error) {
+        if (endpointUnavailableReason !== 'occupied') {
+          throw error
+        }
+        // Why adopt rather than retry: another daemon proved it owns the endpoint and is
+        // answering on it. Forking again would lose the same race, and reporting a startup
+        // failure strands this app on local non-persistent PTYs beside a healthy daemon.
+        console.warn(
+          '[daemon] Endpoint was taken by another daemon during startup — adopting it instead'
+        )
+        return await holdDaemonAdoptionLease(
+          createPreservedDaemonHandle(runtimeDir),
+          socketPath,
+          tokenPath
+        )
+      }
+
+      try {
         if (!launchedIdentity) {
           throw new Error('Daemon readiness identity is incomplete')
         }
@@ -855,6 +886,23 @@ function createOutOfProcessLauncher(
       }
     } catch (error) {
       adoptionClient?.disconnect()
+      adoptionClient = null
+      // Why: the launcher may now fork onto an endpoint it could not classify, because the
+      // publisher is the real guard — and that guard works by refusing to overwrite what it
+      // cannot prove dead, so the child exits instead of splitting the brain. Correct, but
+      // giving up here costs the user every persistent session for the whole run. Something
+      // answering the endpoint now is a daemon worth adopting, not a reason to fall back to
+      // local PTYs.
+      if (await probeSocket(socketPath)) {
+        console.warn(
+          '[daemon] DEGRADED MODE: adopting the daemon that owns the endpoint after a replacement could not publish onto it. Existing sessions keep working; fresh terminals run on the local provider WITHOUT daemon persistence until you restart the daemon (Manage Sessions → Restart).'
+        )
+        try {
+          return await preserveDaemon('degraded-new-pty-fallback')
+        } catch {
+          // It stopped answering between the probe and the adoption; report the launch failure.
+        }
+      }
       throw error
     }
   }
@@ -873,9 +921,9 @@ export async function initDaemonPtyProvider(
   const runtimeDir = getRuntimeDir()
 
   // Why: a bind name lives only between listen and publish, and libuv unlinks it when a daemon
-  // closes — so one that outlives its owner is crash debris. Sweep before launching, age-gated
-  // so a bind still in flight is never disturbed.
-  sweepAbandonedDaemonClaims(runtimeDir)
+  // closes — so one that outlives its owner is crash debris. Sweep before launching; age-gated
+  // and, for anything still listening, left alone regardless of age.
+  await sweepAbandonedDaemonClaims(runtimeDir)
 
   const newSpawner = new DaemonSpawner({
     runtimeDir,

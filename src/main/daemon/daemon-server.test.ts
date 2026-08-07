@@ -157,13 +157,6 @@ describe('DaemonServer', () => {
       expect(token.length).toBeGreaterThan(0)
     })
 
-    it('removes the startup error listener after listening', async () => {
-      await startServer()
-
-      const daemon = server as unknown as DaemonServerPrivate
-      expect(daemon.server?.listenerCount('error')).toBe(0)
-    })
-
     it('accepts client connections', async () => {
       await startServer()
       const c = await connectClient()
