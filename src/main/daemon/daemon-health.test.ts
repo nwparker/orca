@@ -872,9 +872,11 @@ describe('killStaleDaemon endpoint reclamation', () => {
           return this
         })
       try {
+        // The file still occupies the name, so reporting no owner would send the caller off
+        // to fork onto it and fail the exclusive publish.
         await expect(killStaleDaemon(dir, socketPath, tokenPath)).resolves.toEqual({
           killed: false,
-          liveOwnerSurvived: false
+          liveOwnerSurvived: true
         })
         expect(existsSync(socketPath)).toBe(true)
       } finally {

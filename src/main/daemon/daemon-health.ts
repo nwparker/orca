@@ -927,30 +927,36 @@ export async function killStaleDaemon(
   // Why: capture the endpoint we are about to judge, then remove only that exact entry. The
   // probe and the unlink are separate syscalls, so a replacement can publish in between —
   // an unfenced unlink then deletes the live replacement's only reachable name.
-  // Why the same rule for both probes: a live replacement found by the first probe is the
-  // same situation as one found by the second, and treating them differently left the caller
-  // forking beside an endpoint it could never publish onto. 'unknown' is deliberately not
-  // treated as a live owner — it keeps the endpoint file, but it must not block a cold start
-  // where nothing was ever running.
+  // Why 'missing' is the only outcome that frees the caller to fork: an endpoint file we
+  // cannot classify still occupies the name, so forking onto it fails the exclusive publish
+  // with EEXIST and the user gets no daemon at all. Absent means nothing is there — a cold
+  // start — and must not be confused with unclassifiable.
   const firstOutcome = await probeEndpoint(socketPath)
   if (firstOutcome === 'connected') {
     return { killed: killedDaemon, liveOwnerSurvived: true }
   }
-  if (endpointIsProvenDead(firstOutcome)) {
-    await testHooks?.afterEndpointProbe?.()
-    const secondOutcome = await probeEndpoint(socketPath)
-    if (secondOutcome === 'connected') {
-      console.warn('[daemon] Endpoint was republished during cleanup — preserving the new owner')
-      return { killed: killedDaemon, liveOwnerSurvived: true }
+  if (firstOutcome === 'unknown') {
+    console.warn('[daemon] Endpoint could not be classified — leaving it to its owner')
+    return { killed: killedDaemon, liveOwnerSurvived: true }
+  }
+  if (firstOutcome === 'missing') {
+    return { killed: killedDaemon, liveOwnerSurvived }
+  }
+  await testHooks?.afterEndpointProbe?.()
+  // Why liveness, not identity: this inode was freed, and Linux hands the number straight
+  // back, so a replacement can match what we captured. Only "nothing answers" is decisive.
+  const reclaim = await reclaimDeadDaemonSocketPath(socketPath, async (path) => {
+    const outcome = await probeEndpoint(path)
+    if (outcome === 'connected') {
+      return 'alive'
     }
-    if (endpointIsProvenDead(secondOutcome)) {
-      // Why liveness, not identity: this inode was freed, and Linux hands the number straight
-      // back, so a replacement can match what we captured. Only "nothing answers" is decisive.
-      await reclaimDeadDaemonSocketPath(
-        socketPath,
-        async (path) => (await probeEndpoint(path)) === 'connected'
-      )
-    }
+    return outcome === 'unknown' ? 'unknown' : 'dead'
+  })
+  if (reclaim === 'live-owner' || reclaim === 'inconclusive') {
+    // Why: the claim found something serving, or could not tell. Reporting no owner sends the
+    // caller off to fork onto a name it cannot publish, so the working daemon is preserved.
+    console.warn('[daemon] Endpoint was republished during cleanup — preserving the new owner')
+    return { killed: killedDaemon, liveOwnerSurvived: true }
   }
   return { killed: killedDaemon, liveOwnerSurvived }
 }

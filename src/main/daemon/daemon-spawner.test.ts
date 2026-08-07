@@ -16,6 +16,7 @@ import {
 import {
   getDaemonSocketBindPath,
   publishDaemonSocketPath,
+  readDaemonSocketIdentity,
   reclaimDeadDaemonSocketPath,
   sweepAbandonedDaemonClaims,
   unlinkOwnedDaemonSocketPath
@@ -416,8 +417,10 @@ describe('reclaimDeadDaemonSocketPath', () => {
       await closeSocketServer(server)
 
       await expect(
-        reclaimDeadDaemonSocketPath(canonicalPath, async (path) => connectsToSocketPath(path))
-      ).resolves.toBe(true)
+        reclaimDeadDaemonSocketPath(canonicalPath, async (path) =>
+          (await connectsToSocketPath(path)) ? 'alive' : 'dead'
+        )
+      ).resolves.toBe('reclaimed')
       expect(existsSync(canonicalPath)).toBe(false)
     } finally {
       rmSync(dir, { recursive: true, force: true })
@@ -438,12 +441,73 @@ describe('reclaimDeadDaemonSocketPath', () => {
         publishDaemonSocketPath(bindPath, canonicalPath)
 
         await expect(
-          reclaimDeadDaemonSocketPath(canonicalPath, async (path) => connectsToSocketPath(path))
-        ).resolves.toBe(false)
+          reclaimDeadDaemonSocketPath(canonicalPath, async (path) =>
+            (await connectsToSocketPath(path)) ? 'alive' : 'dead'
+          )
+        ).resolves.toBe('live-owner')
         expect(existsSync(canonicalPath)).toBe(true)
         await expect(connectsToSocketPath(canonicalPath)).resolves.toBe(true)
       } finally {
         await closeSocketServer(server)
+        rmSync(dir, { recursive: true, force: true })
+      }
+    }
+  )
+})
+
+describe('daemon endpoint claim safety', () => {
+  it.skipIf(process.platform === 'win32')('keeps an endpoint it cannot classify', async () => {
+    // Why: an unclassifiable probe is not proof of death. Collapsing it to "dead" deletes
+    // an endpoint that may well be serving.
+    const dir = createTestDir()
+    const canonicalPath = join(dir, 'daemon.sock')
+    const server = createServer((socket) => socket.end())
+    try {
+      const bindPath = getDaemonSocketBindPath(canonicalPath)
+      await listenOnSocketPath(server, bindPath)
+      publishDaemonSocketPath(bindPath, canonicalPath)
+
+      await expect(reclaimDeadDaemonSocketPath(canonicalPath, async () => 'unknown')).resolves.toBe(
+        'inconclusive'
+      )
+      expect(existsSync(canonicalPath)).toBe(true)
+      await expect(connectsToSocketPath(canonicalPath)).resolves.toBe(true)
+    } finally {
+      await closeSocketServer(server)
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it.skipIf(process.platform === 'win32')(
+    'never overwrites a daemon that published while the claim was held',
+    async () => {
+      // Why: restoring with rename replaces whatever is at the target, so a newer publisher
+      // would be silently swapped out for the older entry we took.
+      const dir = createTestDir()
+      const canonicalPath = join(dir, 'daemon.sock')
+      const held = createServer((socket) => socket.end())
+      const newcomer = createServer((socket) => socket.end())
+      try {
+        const heldBind = getDaemonSocketBindPath(canonicalPath)
+        await listenOnSocketPath(held, heldBind)
+        const heldIdentity = publishDaemonSocketPath(heldBind, canonicalPath)
+
+        await expect(
+          reclaimDeadDaemonSocketPath(canonicalPath, async () => {
+            // Daemon C publishes onto the freed name while we hold the claim.
+            const newcomerBind = getDaemonSocketBindPath(canonicalPath)
+            await listenOnSocketPath(newcomer, newcomerBind)
+            publishDaemonSocketPath(newcomerBind, canonicalPath)
+            return 'alive'
+          })
+        ).resolves.toBe('live-owner')
+
+        // The newcomer must still own the name, not the entry we had claimed.
+        expect(readDaemonSocketIdentity(canonicalPath)).not.toEqual(heldIdentity)
+        await expect(connectsToSocketPath(canonicalPath)).resolves.toBe(true)
+      } finally {
+        await closeSocketServer(held)
+        await closeSocketServer(newcomer)
         rmSync(dir, { recursive: true, force: true })
       }
     }

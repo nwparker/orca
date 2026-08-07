@@ -134,49 +134,60 @@ function isMissingFileError(error: unknown): boolean {
  * claims the entry atomically first; connecting through the claimed name still reaches the
  * original listener, because the binding is to the inode, not to the name.
  */
+export type DaemonEndpointReclaimOutcome =
+  /** The entry was proven dead and removed. */
+  | 'reclaimed'
+  /** Something is serving it; the entry was put back untouched. */
+  | 'live-owner'
+  /** There was nothing to claim. */
+  | 'absent'
+  /** Could not be classified; the entry was put back and must be left alone. */
+  | 'inconclusive'
+
 export async function reclaimDeadDaemonSocketPath(
   socketPath: string,
-  isEndpointAlive: (path: string) => Promise<boolean>
-): Promise<boolean> {
+  probeEndpoint: (path: string) => Promise<'alive' | 'dead' | 'unknown'>
+): Promise<DaemonEndpointReclaimOutcome> {
   if (process.platform === 'win32') {
-    return false
+    return 'absent'
   }
   const claimedPath = join(dirname(socketPath), `.c${randomBytes(5).toString('hex')}`)
   try {
     renameSync(socketPath, claimedPath)
   } catch {
-    return false
+    return 'absent'
   }
-  if (!(await isEndpointAlive(claimedPath))) {
+  // Why tri-state: collapsing this to a boolean makes an unclassifiable probe read as "dead",
+  // which deletes an endpoint that may well be serving. Only proof of death may remove it.
+  const liveness = await probeEndpoint(claimedPath)
+  if (liveness === 'dead') {
     try {
       unlinkSync(claimedPath)
-      return true
+      return 'reclaimed'
     } catch {
-      return false
+      restoreClaimedDaemonSocketPath(claimedPath, socketPath)
+      return 'inconclusive'
     }
   }
-  // Something is serving it after all. Put it back and leave it alone.
   restoreClaimedDaemonSocketPath(claimedPath, socketPath)
-  return false
+  return liveness === 'alive' ? 'live-owner' : 'inconclusive'
 }
 
 /**
- * Why the narrow predicate: only a confirmed EEXIST with a canonical entry present proves a
- * replacement won the name. Any other failure means the restore did not happen, and dropping
- * the claim then would destroy the endpoint rather than hand it over.
+ * Puts a claimed entry back without ever overwriting a newer one.
+ *
+ * Why link and not rename: rename replaces whatever is at the target, so a daemon that
+ * published while we held the claim would be silently swapped out for the older entry we
+ * took. Link fails with EEXIST instead, which is the correct outcome — the newer publisher
+ * owns the name and our claim is simply dropped.
  */
 function restoreClaimedDaemonSocketPath(claimedPath: string, socketPath: string): void {
   try {
     linkSync(claimedPath, socketPath)
   } catch (error) {
     if (!(isFileExistsError(error) && existsSync(socketPath))) {
-      // Restore failed and nobody replaced it — a rename cannot fail on an absent target,
-      // and keeping the claim on disk is better than deleting the only copy.
-      try {
-        renameSync(claimedPath, socketPath)
-      } catch {
-        // Leave the claim in place for the age-gated sweep rather than losing the endpoint.
-      }
+      // The restore did not happen and nobody replaced the name. Keep the claim on disk —
+      // the age-gated sweep can reclaim it later, and losing the only copy is worse.
       return
     }
   }
@@ -204,17 +215,26 @@ export function unlinkOwnedDaemonSocketPath(
   if (process.platform === 'win32' || !owned) {
     return false
   }
-  // Safe here precisely because the caller still holds the socket open: a bound inode cannot
-  // be freed, so its number cannot be recycled under us the way a dead endpoint's can.
-  if (!daemonSocketIdentityMatches(readDaemonSocketIdentity(socketPath), owned)) {
-    return false
-  }
+  // Why claim first: stat-then-unlink is two syscalls, so a replacement publishing between
+  // them gets deleted — the same race as third-party reclaim, and reverting to it because
+  // inode recycling is impossible here was addressing the wrong failure mode.
+  const claimedPath = join(dirname(socketPath), `.c${randomBytes(5).toString('hex')}`)
   try {
-    unlinkSync(socketPath)
-    return true
+    renameSync(socketPath, claimedPath)
   } catch {
     return false
   }
+  if (daemonSocketIdentityMatches(readDaemonSocketIdentity(claimedPath), owned)) {
+    try {
+      unlinkSync(claimedPath)
+      return true
+    } catch {
+      restoreClaimedDaemonSocketPath(claimedPath, socketPath)
+      return false
+    }
+  }
+  restoreClaimedDaemonSocketPath(claimedPath, socketPath)
+  return false
 }
 
 const ABANDONED_DAEMON_CLAIM_PATTERN =
