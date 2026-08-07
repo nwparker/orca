@@ -17,7 +17,10 @@ import {
   type DaemonPidFile,
   type DaemonProcessHandle
 } from './daemon-spawner'
-import { sweepAbandonedDaemonClaims } from './daemon-endpoint-ownership'
+import {
+  DAEMON_EXIT_ENDPOINT_OCCUPIED,
+  sweepAbandonedDaemonClaims
+} from './daemon-endpoint-ownership'
 import { DaemonPtyAdapter, type DaemonRespawnReason } from './daemon-pty-adapter'
 import { DaemonPtyRouter } from './daemon-pty-router'
 import { DaemonClient } from './client'
@@ -814,6 +817,11 @@ function createOutOfProcessLauncher(
         }
 
         function onStartupExit(code: number | null): void {
+          if (code === DAEMON_EXIT_ENDPOINT_OCCUPIED) {
+            // Why here and not only on the IPC message: the exit is the event this wait settles
+            // on, so keying off it cannot lose to a notification still in the channel.
+            endpointUnavailableReason = 'occupied'
+          }
           void fail(new Error(`Daemon exited during startup with code ${code}`))
         }
 

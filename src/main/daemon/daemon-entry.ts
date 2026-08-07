@@ -13,7 +13,10 @@ import { warmWindowsConptyOnce } from './windows-conpty-warmup'
 import { warmPwshAvailabilityCache } from '../pwsh'
 import { createDaemonFileLog, createNoopDaemonFileLog } from './daemon-file-log'
 import { PROTOCOL_VERSION } from './types'
-import { DaemonEndpointUnavailableError } from './daemon-endpoint-ownership'
+import {
+  DAEMON_EXIT_ENDPOINT_OCCUPIED,
+  DaemonEndpointUnavailableError
+} from './daemon-endpoint-ownership'
 import {
   prepareMacosTccLoginShell,
   probeMacosLoginSessionAlive
@@ -22,9 +25,6 @@ import { MacosLoginSessionDeathWatch } from './macos-login-session-death-watch'
 import { readCurrentProcessMacSystemResolverHealth } from '../network/macos-system-resolver-health'
 import { readCurrentDaemonReadyIdentity } from './daemon-ready-identity'
 import { publishDaemonPidFile } from './daemon-spawner'
-
-// Why bounded: a wedged IPC channel must not keep a daemon that already failed from exiting.
-const ENDPOINT_NOTICE_FLUSH_MS = 1_000
 
 export type ParsedDaemonArgs = {
   socketPath: string
@@ -332,24 +332,13 @@ const isDirectExecution = !process.env.VITEST
 if (isDirectExecution) {
   main().catch((err) => {
     console.error('[daemon] Fatal:', err)
-    // Why structured: losing the endpoint race is an expected outcome, not a crash. Without a
-    // typed signal the parent sees only "exited with code 1" and gives up, leaving the app on
-    // local non-persistent PTYs beside a perfectly healthy daemon it should have adopted.
-    if (process.send && err instanceof DaemonEndpointUnavailableError) {
-      // Why wait for the flush: process.send is asynchronous, and the parent settles the launch
-      // the moment it sees this child exit — a notification still in the channel is then
-      // discarded and the app falls back to local PTYs beside the daemon it should adopt.
-      // The bound keeps a wedged channel from holding the exit.
-      let exited = false
-      const exitOnce = (): void => {
-        if (!exited) {
-          exited = true
-          process.exit(1)
-        }
-      }
-      setTimeout(exitOnce, ENDPOINT_NOTICE_FLUSH_MS).unref()
-      process.send({ type: 'endpoint-unavailable', reason: err.reason }, exitOnce)
-      return
+    if (err instanceof DaemonEndpointUnavailableError && err.reason === 'occupied') {
+      // Why an exit code and not the IPC message: process.send only proves the write left this
+      // process, not that the parent dispatched 'message' before it observed the exit — and the
+      // parent settles the launch on exit. A code rides the same event that ends the wait, so it
+      // cannot lose that race. The message is still sent best-effort for log detail.
+      process.send?.({ type: 'endpoint-unavailable', reason: err.reason })
+      process.exit(DAEMON_EXIT_ENDPOINT_OCCUPIED)
     }
     process.exit(1)
   })

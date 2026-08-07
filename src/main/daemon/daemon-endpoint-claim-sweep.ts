@@ -44,7 +44,13 @@ export async function sweepAbandonedDaemonClaims(
   } catch {
     return 0
   }
-  for (const entry of entries) {
+  // Why rotate: the probe budget is spent in iteration order, and readdir order is stable on
+  // most filesystems. Sixteen entries that never classify would otherwise consume every budget
+  // forever, so genuine debris behind them would never be probed. Starting at a different offset
+  // each launch gives every entry a turn.
+  const offset = entries.length > 0 ? Math.floor(Math.random() * entries.length) : 0
+  for (let i = 0; i < entries.length; i++) {
+    const entry = entries[(offset + i) % entries.length] as string
     const bindName = ABANDONED_DAEMON_BIND_PATTERN.test(entry)
     if (!bindName && !ABANDONED_DAEMON_ARTIFACT_CLAIM_PATTERN.test(entry)) {
       continue
@@ -52,7 +58,12 @@ export async function sweepAbandonedDaemonClaims(
     const claimPath = join(runtimeDir, entry)
     try {
       const stats = statSync(claimPath)
-      if (now - stats.mtimeMs < minAgeMs) {
+      // Why ctime and not mtime: a claim is made by renaming a canonical artifact aside, and
+      // rename carries the original mtime over — so a claim on a long-lived token or PID record
+      // looks hours old the instant it is taken, and this sweep would delete it out from under
+      // the process still validating it. rename does update ctime, so it measures what the age
+      // gate actually means: how long this entry has existed under this name.
+      if (now - stats.ctimeMs < minAgeMs) {
         continue
       }
       // Why proof of death rather than merely "did not answer": a timeout on a loaded host, or

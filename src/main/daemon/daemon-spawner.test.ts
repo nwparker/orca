@@ -8,7 +8,9 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  renameSync,
   rmSync,
+  utimesSync,
   writeFileSync
 } from 'node:fs'
 import { createServer, connect, type Server } from 'node:net'
@@ -597,6 +599,28 @@ describe('sweepAbandonedDaemonClaims', () => {
       }
     }
   )
+
+  it('keeps a fresh claim taken over a long-lived artifact', async () => {
+    // Why: a claim is made by renaming the canonical artifact aside, and rename carries the
+    // original mtime across — so a claim on an hours-old token looked instantly ancient and this
+    // sweep would delete it out from under the process still validating it. ctime tracks the
+    // rename, which is what the age gate actually means.
+    const dir = createTestDir()
+    const artifact = join(dir, `daemon-v${PROTOCOL_VERSION}.token`)
+    const claim = join(dir, `daemon-v${PROTOCOL_VERSION}.token.cleanup-123-${randomUUID()}`)
+    try {
+      writeFileSync(artifact, 'token')
+      const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000)
+      utimesSync(artifact, twoHoursAgo, twoHoursAgo)
+      renameSync(artifact, claim)
+
+      // The claim is seconds old even though the file it names is hours old.
+      await expect(sweepAbandonedDaemonClaims(dir)).resolves.toBe(0)
+      expect(existsSync(claim)).toBe(true)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
 
   it('returns zero when the runtime dir does not exist', async () => {
     await expect(

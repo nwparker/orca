@@ -42,6 +42,13 @@ export class DaemonEndpointUnavailableError extends Error {
   }
 }
 
+/**
+ * A live daemon already owns the endpoint, so this one stands down and the launcher should adopt
+ * the incumbent. Carried as a process exit code because that is delivered by the same event the
+ * launcher settles its wait on, unlike an IPC message, which can lose that race.
+ */
+export const DAEMON_EXIT_ENDPOINT_OCCUPIED = 3
+
 export type DaemonEndpointPublishOutcome =
   /** The endpoint name is ours. */
   | { status: 'published'; identity: DaemonSocketIdentity | null }

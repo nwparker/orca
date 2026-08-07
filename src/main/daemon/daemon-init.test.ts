@@ -1338,8 +1338,10 @@ describe('daemon-init: runRestartDaemon (7-step sequence)', () => {
         pid: 24680,
         on(event: string, cb: (arg?: unknown) => void) {
           handlers[event]?.push(cb)
-          if (event === 'message') {
-            queueMicrotask(() => cb({ type: 'endpoint-unavailable', reason: 'occupied' }))
+          // Why the exit code and not the message: the launcher settles on exit, so keying
+          // adoption off the notification alone could lose that race.
+          if (event === 'exit') {
+            queueMicrotask(() => cb(3))
           }
           return this
         },
