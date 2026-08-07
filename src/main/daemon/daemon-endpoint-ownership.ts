@@ -34,12 +34,19 @@ export type DaemonSocketIdentity = { dev: bigint; ino: bigint; birthtimeMs: numb
 /**
  * A private, same-directory name to bind before publishing the canonical endpoint.
  *
+ * Why `.p` and not the `.b` this used to be: released builds carry a sweeper that matches
+ * `^\.b[0-9a-f]{10}$` and unlinks it on age alone, with no liveness check. Deleting our own
+ * sweeper does not un-ship theirs — a new daemon paused between bind and publish for longer than
+ * their age gate would have its only pathname removed by an old build starting alongside it.
+ * Moving the namespace out of their pattern is what actually makes the mixed-version claim true.
+ * The length is unchanged, so the `sockaddr_un` budget below is unaffected.
+ *
  * Why: `sockaddr_un.sun_path` caps a Unix socket path at ~104 bytes, so this must not extend
  * the canonical path — it replaces the basename with a shorter one, which keeps the bind name
  * strictly shorter than the endpoint the caller already requires to fit.
  */
 export function getDaemonSocketBindPath(socketPath: string): string {
-  return join(dirname(socketPath), `.b${randomBytes(5).toString('hex')}`)
+  return join(dirname(socketPath), `.p${randomBytes(5).toString('hex')}`)
 }
 
 /**

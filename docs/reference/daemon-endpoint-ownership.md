@@ -220,19 +220,21 @@ If `link` does fail with something other than `EEXIST`, the error propagates and
 fails to start cleanly. Terminals fall back to the local provider without daemon persistence —
 a visible degradation, not a silent split brain.
 
-## Crash debris and the sweeper
+## Crash debris
 
-A crash between step 1 and step 4 leaves a `.b<hex>` bind name behind. Publishing consumes that
+A crash between step 1 and step 4 leaves a `.p<hex>` bind name behind. Publishing consumes that
 name — by `unlink` after a successful link, or by the `rename` itself — and libuv removes it when
 a daemon closes cleanly, so one that outlives its owner is debris.
 
-The sweeper removes those, and pid `.cleanup-`/`.replace-` scratch names, after an hour. Age
-alone is **not** the rule, and the tempting version of this is a bug: between `listen` and
-publish, a bind name is the _only_ name its daemon has, and an old mtime does not prove the
-process died — one stopped by a debugger or caught in a host suspend is still listening on it.
-So an aged bind socket is asked whether anything answers before it is removed. Getting this
-wrong would destroy a live listener's sole reachable name, which is the same defect as the
-original bug wearing a different hat.
+Nothing collects it. The reasoning, and the measured cost of not collecting it, are below under
+"Nothing sweeps anyone else's leftovers".
+
+The bind namespace is `.p`, not the `.b` it once was, for a mixed-version reason worth stating
+here too: released builds carry a sweeper that matches `^\.b[0-9a-f]{10}$` and unlinks on age
+alone. Removing our own sweeper does not un-ship theirs. A new daemon paused between bind and
+publish for longer than their age gate would have had its only pathname deleted by an old build
+starting beside it — so the namespace had to move out of their pattern, not just the sweeper out
+of ours.
 
 ## Platform notes
 

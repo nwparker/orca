@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer, connect, type Server } from 'node:net'
 import {
@@ -350,6 +350,18 @@ function connectsToSocketPath(socketPath: string): Promise<boolean> {
 }
 
 describe('daemon socket publication', () => {
+  it('keeps the private bind name outside the released sweeper pattern', () => {
+    // Why pinned: builds already in the field sweep `^\.b[0-9a-f]{10}$` on age alone, with no
+    // liveness check. Deleting our sweeper does not un-ship theirs, so a new daemon paused
+    // between bind and publish would lose its only pathname to an old build starting beside it.
+    // Renaming this namespace back into their pattern must fail here, not in the field.
+    const RELEASED_SWEEPER_BIND_PATTERN = /^\.b[0-9a-f]{10}$/
+    for (let i = 0; i < 50; i++) {
+      const bindName = basename(getDaemonSocketBindPath(getDaemonSocketPath('/tmp/orca-daemon')))
+      expect(bindName).not.toMatch(RELEASED_SWEEPER_BIND_PATTERN)
+    }
+  })
+
   it('keeps the bind name shorter than the canonical endpoint', () => {
     // sockaddr_un caps the path, so the private bind name must never extend it.
     const canonicalPath = getDaemonSocketPath('/tmp/orca-daemon-runtime')
