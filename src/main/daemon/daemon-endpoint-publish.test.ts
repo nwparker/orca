@@ -294,6 +294,24 @@ describe('publishDaemonEndpoint', () => {
         const actual = await vi.importActual<typeof NodeFs>('node:fs')
         return {
           ...actual,
+          // The continuity check reads the entry itself, so the recycled identity must come
+          // back through lstat as well as stat.
+          lstatSync: (target: string, options?: { bigint?: boolean }) => {
+            const stats = actual.lstatSync(target, options as never) as unknown as {
+              dev: bigint
+              ino: bigint
+              birthtimeMs: bigint
+            }
+            if (target !== canonicalPath) {
+              return stats
+            }
+            canonicalStats += 1
+            return {
+              dev: stats.dev,
+              ino: stats.ino,
+              birthtimeMs: stats.birthtimeMs + BigInt(canonicalStats)
+            }
+          },
           statSync: (target: string, options?: { bigint?: boolean }) => {
             const stats = actual.statSync(target, options as never) as unknown as {
               dev: bigint
@@ -328,6 +346,112 @@ describe('publishDaemonEndpoint', () => {
       expect(newcomer.connections()).toBe(0)
     } finally {
       await close(newcomer.server)
+      rmSync(directory, { recursive: true, force: true })
+    }
+  })
+
+  unixIt('still publishes on a filesystem that refuses hard links', async () => {
+    // Why: some POSIX and FUSE filesystems accept a bound Unix socket and rename but reject
+    // hard links. Requiring the link would mean no daemon persistence at all there, which is a
+    // capability the previous implementation had. Replacing is safe here only because the
+    // post-publish verification exists to catch a loser — it did not when this was first removed.
+    const directory = makeTempDir()
+    const canonicalPath = join(directory, 'd')
+    const boundPath = getDaemonSocketBindPath(canonicalPath)
+    const newcomer = await listen(boundPath)
+    try {
+      vi.doMock('node:fs', async () => {
+        const actual = await vi.importActual<typeof NodeFs>('node:fs')
+        return {
+          ...actual,
+          linkSync: () => {
+            throw Object.assign(new Error('injected EPERM'), { code: 'EPERM' })
+          }
+        }
+      })
+      vi.resetModules()
+      const { publishDaemonEndpoint: publishWithoutLinks } =
+        await import('./daemon-endpoint-ownership')
+
+      const outcome = await publishWithoutLinks(boundPath, canonicalPath, probeSocketConnect)
+
+      expect(outcome).toMatchObject({ status: 'published' })
+      await expectReachable(canonicalPath)
+      expect(newcomer.connections()).toBe(1)
+    } finally {
+      await close(newcomer.server)
+      rmSync(directory, { recursive: true, force: true })
+    }
+  })
+
+  unixIt('does not fall back to replacing when a link fails for another reason', async () => {
+    // Why: only "this filesystem cannot do hard links" licenses giving up link's exclusivity.
+    // An ENOSPC or EIO must surface, not silently downgrade to a replace.
+    const directory = makeTempDir()
+    const canonicalPath = join(directory, 'd')
+    const boundPath = getDaemonSocketBindPath(canonicalPath)
+    const newcomer = await listen(boundPath)
+    try {
+      vi.doMock('node:fs', async () => {
+        const actual = await vi.importActual<typeof NodeFs>('node:fs')
+        return {
+          ...actual,
+          linkSync: () => {
+            throw Object.assign(new Error('injected EIO'), { code: 'EIO' })
+          }
+        }
+      })
+      vi.resetModules()
+      const { publishDaemonEndpoint: publishWithBrokenLink } =
+        await import('./daemon-endpoint-ownership')
+
+      await expect(
+        publishWithBrokenLink(boundPath, canonicalPath, probeSocketConnect)
+      ).rejects.toMatchObject({ code: 'EIO' })
+    } finally {
+      await close(newcomer.server)
+      rmSync(directory, { recursive: true, force: true })
+    }
+  })
+
+  unixIt('will not replace an occupied entry whose continuity it could not read', async () => {
+    // Why: every stat failure collapses to null, so two unreadable reads bracketing a positive
+    // death probe would otherwise compare equal and authorise a rename with no evidence the
+    // entry is still the one proven dead. The probe is injected here so the only entry reads
+    // are the continuity ones, which makes the failure unambiguous.
+    const directory = makeTempDir()
+    const canonicalPath = join(directory, 'd')
+    const deadBind = getDaemonSocketBindPath(canonicalPath)
+    const newcomerPath = getDaemonSocketBindPath(canonicalPath)
+    const dead = await listen(deadBind)
+    const newcomer = await listen(newcomerPath)
+    try {
+      await publishListener(deadBind, canonicalPath)
+      await close(dead.server)
+      const occupant = statSync(canonicalPath, { bigint: true })
+
+      vi.doMock('node:fs', async () => {
+        const actual = await vi.importActual<typeof NodeFs>('node:fs')
+        return {
+          ...actual,
+          lstatSync: (target: string, options?: { bigint?: boolean }) => {
+            if (target === canonicalPath) {
+              throw Object.assign(new Error('injected EIO'), { code: 'EIO' })
+            }
+            return actual.lstatSync(target, options as never)
+          }
+        }
+      })
+      vi.resetModules()
+      const { publishDaemonEndpoint: publishBlind } = await import('./daemon-endpoint-ownership')
+
+      const outcome = await publishBlind(newcomerPath, canonicalPath, async () => 'refused')
+
+      expect(outcome).toEqual({ status: 'inconclusive' })
+      const after = statSync(canonicalPath, { bigint: true })
+      expect({ dev: after.dev, ino: after.ino }).toEqual({ dev: occupant.dev, ino: occupant.ino })
+    } finally {
+      await Promise.all([close(dead.server), close(newcomer.server)])
       rmSync(directory, { recursive: true, force: true })
     }
   })

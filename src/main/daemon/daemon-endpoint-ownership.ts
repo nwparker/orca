@@ -3,7 +3,7 @@
    directory entry, and only by replacing an entry it has itself just proven dead.
    See docs/reference/daemon-endpoint-ownership.md. */
 import { randomBytes } from 'node:crypto'
-import { linkSync, renameSync, statSync, unlinkSync } from 'node:fs'
+import { linkSync, lstatSync, renameSync, statSync, unlinkSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { endpointIsProvenDead, type SocketProbeOutcome } from './daemon-endpoint-probe'
 
@@ -128,10 +128,21 @@ export async function publishDaemonEndpoint(
     try {
       linkSync(boundPath, canonicalPath)
     } catch (error) {
-      if (!isFileExistsError(error)) {
+      const noHardLinks = isLinkUnsupportedError(error)
+      if (!isFileExistsError(error) && !noHardLinks) {
         throw error
       }
-      const blocked = await replaceProvenDeadEndpoint(boundPath, canonicalPath, probeEndpoint)
+      // Why the same path either way: without hard links we lose `link`'s exclusivity, but not
+      // the rest of the protocol. The death proof, the continuity re-check and the post-publish
+      // verification all still apply, and it is that verification — absent when this fallback
+      // was first removed — that makes replacing an unclaimable name safe rather than a silent
+      // overwrite. Two publishers can both rename onto an absent name; the loser sees it.
+      const blocked = await replaceProvenDeadEndpoint(
+        boundPath,
+        canonicalPath,
+        probeEndpoint,
+        noHardLinks
+      )
       if (blocked === 'evidence-stale') {
         continue
       }
@@ -163,12 +174,13 @@ export async function publishDaemonEndpoint(
 async function replaceProvenDeadEndpoint(
   boundPath: string,
   canonicalPath: string,
-  probeEndpoint: (path: string) => Promise<SocketProbeOutcome>
+  probeEndpoint: (path: string) => Promise<SocketProbeOutcome>,
+  absentIsStable: boolean
 ): Promise<DaemonEndpointPublishOutcome | null | 'evidence-stale'> {
   // Why capture this first: the proof we are about to gather describes one particular entry,
   // and the rename replaces whatever is at the name. Without something to compare, a probe that
   // stalled while another daemon published would license destroying that daemon.
-  const proven = readDaemonSocketIdentity(canonicalPath)
+  const proven = readDaemonEndpointEntryIdentity(canonicalPath)
   let outcome: SocketProbeOutcome = 'unknown'
   try {
     outcome = await probeEndpoint(canonicalPath)
@@ -183,7 +195,9 @@ async function replaceProvenDeadEndpoint(
     // into "dead" is what deletes an endpoint that is still serving every terminal on the host.
     return { status: 'inconclusive' }
   }
-  if (!isSameEndpointEntry(proven, readDaemonSocketIdentity(canonicalPath))) {
+  if (
+    !isSameEndpointEntry(proven, readDaemonEndpointEntryIdentity(canonicalPath), absentIsStable)
+  ) {
     // The name changed hands while we were probing, so our death proof describes an entry that
     // is no longer there. Start over rather than act on it — this is the one interleaving in
     // which a publisher could otherwise replace an established daemon it never proved dead.
@@ -206,10 +220,15 @@ async function replaceProvenDeadEndpoint(
  */
 function isSameEndpointEntry(
   a: DaemonSocketIdentity | null,
-  b: DaemonSocketIdentity | null
+  b: DaemonSocketIdentity | null,
+  absentIsStable: boolean
 ): boolean {
   if (!a || !b) {
-    return !a && !b
+    // Why this is a caller's decision: where an entry demonstrably existed, two unreadable stats
+    // prove nothing and must not authorise a rename. Where publishing is replacing an absent
+    // name because the filesystem has no hard links, absent-then-absent is the stable state we
+    // are relying on, and there is nothing there to destroy.
+    return absentIsStable && !a && !b
   }
   return a.dev === b.dev && a.ino === b.ino && a.birthtimeMs === b.birthtimeMs
 }
@@ -240,6 +259,39 @@ function confirmPublishedEndpoint(
   return published.dev === identity.dev && published.ino === identity.ino
     ? { status: 'published', identity }
     : { status: 'lost' }
+}
+
+/**
+ * Whether `link` failed because the filesystem cannot do it at all, rather than because the name
+ * was taken. Some POSIX and FUSE filesystems accept a bound Unix socket and `rename` but refuse
+ * hard links; on those, requiring the link would mean no daemon persistence at all.
+ */
+/**
+ * Identity of the directory entry itself, not of whatever it resolves to.
+ *
+ * Why `lstat` here and `stat` elsewhere: the continuity check asks "is this still the entry I
+ * proved dead", and a dangling symlink is an entry — `stat` follows it, fails, and reports the
+ * name as absent even though it demonstrably occupies the name. Reading the link itself keeps
+ * absent (`ENOENT`) distinct from present-but-unresolvable, which is what the check needs.
+ */
+function readDaemonEndpointEntryIdentity(socketPath: string): DaemonSocketIdentity | null {
+  if (process.platform === 'win32') {
+    return null
+  }
+  try {
+    const stats = lstatSync(socketPath, { bigint: true })
+    return { dev: stats.dev, ino: stats.ino, birthtimeMs: Number(stats.birthtimeMs) }
+  } catch {
+    return null
+  }
+}
+
+function isLinkUnsupportedError(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null || !('code' in error)) {
+    return false
+  }
+  const code = (error as NodeJS.ErrnoException).code
+  return code === 'EPERM' || code === 'EOPNOTSUPP' || code === 'ENOTSUP' || code === 'ENOSYS'
 }
 
 function isFileExistsError(error: unknown): boolean {

@@ -198,60 +198,28 @@ is precisely when a mixed-version race is most likely. Stating the invariant as 
 the _system_ rather than of one module is what made them findable: under "only a publisher
 mutates the entry", they are deletions with nothing to replace them.
 
-## Why there is no fallback for filesystems without hard links
+## Filesystems without hard links
 
-Step 2 requires `link` to work, and the previous rename-based fallback was deleted rather than
-kept, so a filesystem that refuses hard links means the daemon does not start. That is a real
-single point of failure and worth stating why it is acceptable.
+Step 2 needs `link` for its exclusivity, and some POSIX and FUSE filesystems accept a bound Unix
+socket and `rename` while refusing hard links. Requiring the link there would mean no daemon
+persistence at all, which is a capability the previous implementation had — so a `link` failure
+that means _this filesystem cannot do it_ (`EPERM`, `EOPNOTSUPP`, `ENOTSUP`, `ENOSYS`) falls back
+to publishing by replacement.
 
-The link's source is a Unix domain socket **we have just successfully bound in that same
-directory**. A filesystem that can host a bound socket is one with full POSIX file semantics —
-network filesystems that lack hard links generally refuse to create the socket at all, so the
-bind in step 1 fails first and the link is never reached. The two failures are therefore not
-independent: any filesystem that gets us to step 2 supports step 2.
+The fallback runs the rest of the protocol unchanged: the death proof, the continuity re-check
+and the post-publish verification all still apply. Only `link`'s exclusivity is lost, and step 5
+is what covers its absence — two publishers can both replace an absent name, and the loser finds
+out immediately. An earlier version of this design deleted this fallback because the version it
+inherited was a bare "if absent, rename" with nothing verifying the result. That objection was
+correct then and does not apply now.
 
-The fallback also cannot be kept safely. It checked for an absent canonical name and then
-renamed over it — check-then-act with an operation that replaces whatever it finds, so a daemon
-publishing in that gap was silently overwritten and stranded. Requiring the link additionally
-guarantees that publishing proves the filesystem supports the operation, rather than discovering
-it later at a point where failing is worse.
+Any other `link` failure still propagates. `ENOSPC` or `EIO` must surface rather than silently
+downgrade to a replace, and a test pins that boundary.
 
-If `link` does fail with something other than `EEXIST`, the error propagates and the daemon
-fails to start cleanly. Terminals fall back to the local provider without daemon persistence —
-a visible degradation, not a silent split brain.
-
-## Crash debris
-
-A crash between step 1 and step 4 leaves a `.p<hex>` bind name behind. Publishing consumes that
-name — by `unlink` after a successful link, or by the `rename` itself — and libuv removes it when
-a daemon closes cleanly, so one that outlives its owner is debris.
-
-Nothing collects it. The reasoning, and the measured cost of not collecting it, are below under
-"Nothing sweeps anyone else's leftovers".
-
-### Every scratch namespace had to move, not just the sweeper
-
-Removing our own sweeper does not un-ship the one already in the field. Released builds sweep
-`^\.b[0-9a-f]{10}$` and `\.(?:cleanup|replace)-\d+-<uuid>$` on age alone, with no liveness or
-ownership check, before they adopt or launch. So every name this code creates that an old build
-would match had to move out of their pattern:
-
-| was                      | now                   | what an old build could otherwise destroy                 |
-| ------------------------ | --------------------- | --------------------------------------------------------- |
-| `.b<hex>`                | `.p<hex>`             | a paused daemon's only pathname, between bind and publish |
-| `*.replace-<pid>-<uuid>` | `*.swap-<pid>-<uuid>` | the only copy of a live daemon's PID record, mid-claim    |
-| `*.cleanup-<pid>-<uuid>` | `*.hold-<pid>-<uuid>` | the only copy of a live daemon's token, mid-claim         |
-
-The claim cases are the sharper ones: a claim exists precisely because the protocol has renamed
-the canonical artifact aside and holds the sole copy while validating it. An old build deleting
-that leaves the claimant unable to restore what it took. A test pins all three namespaces against
-the released regex, so reintroducing any of them fails in CI rather than in the field.
-
-**What this cannot fix.** An already-released build's own stale-cleanup can still delete a socket
-or PID record that a new daemon published during its kill window — it removes whatever occupies
-the path rather than what it proved dead. That behaviour is in shipped code, reachable only while
-two versions run concurrently, and it exists old-against-old too. Nothing in this branch can fence
-a process that is already deployed; landing this is what stops the behaviour going forward.
+Note that absent-then-absent counts as a stable entry **only** on this path. Where an entry
+demonstrably existed, two unreadable reads prove nothing and must not authorise a rename — the
+continuity check takes that as a parameter rather than a global rule, and reads the directory
+entry with `lstat` so a dangling symlink is seen as occupying the name rather than as absent.
 
 ## Platform notes
 
