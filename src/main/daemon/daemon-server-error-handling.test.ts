@@ -289,6 +289,49 @@ describe('daemon server error handling', () => {
     }
   )
 
+  it.skipIf(process.platform === 'win32')(
+    'records endpoint loss even when already retiring for another reason',
+    async () => {
+      // Why: a daemon can already be retiring because its last authenticated client dropped
+      // while a session runs. Losing the endpoint is a different fact, and gating one on the
+      // other meant the loss went unrecorded — after which a later hello cleared the retirement
+      // and put a daemon that demonstrably could not be reached back into ordinary service.
+      server = new DaemonServer({
+        socketPath,
+        tokenPath,
+        spawnSubprocess: () => createMockSubprocess()
+      })
+      await server.start()
+      client = new DaemonClient({ socketPath, tokenPath })
+      await client.ensureConnected()
+      await client.request('createOrAttach', { sessionId: 'keepalive', cols: 80, rows: 24 })
+
+      const usurper = createServer()
+      const usurperBind = join(dir, '.u6')
+      await new Promise<void>((resolve) => usurper.listen(usurperBind, resolve))
+      try {
+        unlinkSync(socketPath)
+        linkSync(usurperBind, socketPath)
+
+        const daemon = server as unknown as {
+          retirementRequested: boolean
+          endpointOwnershipLost: boolean
+          checkEndpointOwnership: () => void
+        }
+        // Retirement is already pending for an unrelated reason.
+        daemon.retirementRequested = true
+
+        daemon.checkEndpointOwnership()
+        daemon.checkEndpointOwnership()
+
+        // The loss must be recorded regardless, so a later hello cannot undo it.
+        expect(daemon.endpointOwnershipLost).toBe(true)
+      } finally {
+        await new Promise<void>((resolve) => usurper.close(() => resolve()))
+      }
+    }
+  )
+
   it('keeps serving after an operational server error instead of dying', async () => {
     // Why: an unhandled 'error' on a net.Server is an uncaught exception. Detaching the startup
     // listener once start() settled left a daemon hosting every terminal on the machine one

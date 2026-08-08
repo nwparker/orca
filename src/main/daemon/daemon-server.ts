@@ -467,9 +467,6 @@ export class DaemonServer {
     if (this.endpointOwnershipLossStreak < DaemonServer.ENDPOINT_OWNERSHIP_LOSS_CONFIRMATIONS) {
       return
     }
-    if (this.retirementRequested) {
-      return
-    }
     this.requestRetirementForLostEndpoint()
   }
 
@@ -490,15 +487,21 @@ export class DaemonServer {
   }
 
   private requestRetirementForLostEndpoint(): void {
-    if (this.retirementRequested) {
-      return
-    }
+    // Why the flag is recorded before any dedup, and not gated on retirement: a daemon can
+    // already be retiring for an unrelated reason — the last authenticated client disconnecting
+    // while a session runs, say. Losing the endpoint is a different fact about it, and treating
+    // the two as one meant the loss went unrecorded whenever a retirement was already pending.
+    // A later hello then found no remembered loss, cleared the retirement, and put a daemon that
+    // demonstrably could not be reached back into ordinary service.
+    const alreadyLost = this.endpointOwnershipLost
     this.endpointOwnershipLost = true
-    this.log.log('endpoint-ownership-lost', { socketPath: this.socketPath })
-    console.warn(
-      '[daemon] Endpoint ownership lost to another daemon — retiring once existing sessions end'
-    )
     this.ownedSocketIdentity = null
+    if (!alreadyLost) {
+      this.log.log('endpoint-ownership-lost', { socketPath: this.socketPath })
+      console.warn(
+        '[daemon] Endpoint ownership lost to another daemon — retiring once existing sessions end'
+      )
+    }
     this.retirementRequested = true
     this.reevaluateIdleShutdown()
   }
