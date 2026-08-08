@@ -214,9 +214,14 @@ async function replaceProvenDeadEndpoint(
  * Why birthtime here but not in the post-publish check: the entry being compared is one we
  * believe is dead, so its inode can be freed and Linux hands the number straight back — a
  * replacement landing on the recycled number would compare equal and we would rename over a
- * live daemon we never proved dead. Where birthtime is unavailable it is 0 on both sides and
- * simply adds nothing; it can only ever make this stricter, and a false "changed" costs one
- * cheap retry.
+ * live daemon we never proved dead.
+ *
+ * Why comparing it is safe *here* specifically: both readings bracket a probe and nothing
+ * between them mutates the inode, so the field is stable whatever it actually holds, and a false
+ * "changed" costs one cheap retry. That is not a general licence. Node documents birthtimeMs as
+ * sometimes holding the ctime rather than a birth time — libuv fills it from st_ctim on Linux
+ * kernels without statx — and link, rename and unlink all bump ctime. Any comparison spanning
+ * one of those must read both sides after it, not before.
  */
 function isSameEndpointEntry(
   a: DaemonSocketIdentity | null,
@@ -256,8 +261,15 @@ function confirmPublishedEndpoint(
     // declining costs nothing, while serving a name that resolves elsewhere is the whole bug.
     return isMissingFileError(error) ? { status: 'lost' } : { status: 'inconclusive' }
   }
+  // Why the fresh reading is recorded and not the one taken before publishing: this identity
+  // becomes what the ownership watchdog compares the entry against, and that comparison includes
+  // birthtimeMs. Node documents birthtimeMs as sometimes holding the ctime instead — libuv fills
+  // it from st_ctim on Linux kernels without statx, or where seccomp blocks it. link and rename
+  // both bump ctime, so a pre-publish reading could never match the entry again on such a host,
+  // and the daemon would declare itself lost on its first session and stand down for good.
+  // dev+ino still bind this to our own inode, so nothing is given up by reading it after.
   return published.dev === identity.dev && published.ino === identity.ino
-    ? { status: 'published', identity }
+    ? { status: 'published', identity: published }
     : { status: 'lost' }
 }
 

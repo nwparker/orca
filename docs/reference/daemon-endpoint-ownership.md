@@ -77,6 +77,14 @@ A starting daemon runs exactly this:
    `birthtimeMs` tiebreak exists for the third-party case, where the inode being compared was
    already freed and Linux hands the number straight back to the next socket.
 
+   The identity recorded at this step is the one read **after** publishing, not the one read
+   before it. That matters because this value is what the ownership watchdog later compares the
+   entry against, and that comparison does include `birthtimeMs` — which Node documents as
+   sometimes holding the ctime instead, on Linux kernels without `statx`. `link` and `rename`
+   both bump ctime, so a pre-publish reading could never match again on such a host, and the
+   daemon would declare itself lost on its first session and stand down permanently. Invisible on
+   APFS and on CI, which is why it is asserted by a test that simulates the ctime fallback.
+
 ## Empirical validation
 
 The protocol's load-bearing claims were measured against real kernels rather than reasoned
@@ -274,6 +282,12 @@ from any one being wrong.
 
 Only positive evidence triggers any of this. An unreadable stat leaves the daemon serving,
 because treating `EACCES` as loss would take down a daemon hosting every terminal on the machine.
+
+The two detectors deliberately use different bars. The watchdog wants two _consecutive_ losses
+before retiring a daemon that is still serving; admission refuses on a single observation,
+because there the cost of waiting is a session nobody can reach, and publishing by `rename` is
+gapless so there is no transient-absence window to guard against. Only the streak accounting is
+shared between them, so a positive reading through either path breaks the run.
 
 The refusal in rule 2 is a shared constant the client's retry predicate recognises, so the caller
 reconnects to whoever owns the endpoint instead of surfacing an error. Rule 4 means that refusal

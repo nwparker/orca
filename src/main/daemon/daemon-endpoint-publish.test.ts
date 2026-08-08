@@ -456,6 +456,50 @@ describe('publishDaemonEndpoint', () => {
     }
   })
 
+  unixIt('records an identity the ownership watchdog can still match afterwards', async () => {
+    // Why this matters and why no ordinary test catches it: the recorded identity is what the
+    // watchdog later compares the entry against, and that comparison includes birthtimeMs. Node
+    // documents birthtimeMs as sometimes holding the ctime instead — libuv fills it from st_ctim
+    // on Linux kernels without statx. link and rename both bump ctime, so an identity read
+    // BEFORE publishing could never match the entry again on such a host: the daemon would
+    // declare itself lost on its first session and stand down permanently. Simulated here by
+    // reporting ctime as birthtime, which is exactly what those platforms do.
+    const directory = makeTempDir()
+    const canonicalPath = join(directory, 'd')
+    const boundPath = getDaemonSocketBindPath(canonicalPath)
+    const newcomer = await listen(boundPath)
+    try {
+      vi.doMock('node:fs', async () => {
+        const actual = await vi.importActual<typeof NodeFs>('node:fs')
+        const asCtimeBirthtime = (stats: { ctimeMs: number; ctimeNs?: bigint }) => ({
+          ...stats,
+          birthtimeMs: stats.ctimeMs,
+          ...(stats.ctimeNs === undefined ? {} : { birthtimeNs: stats.ctimeNs })
+        })
+        return {
+          ...actual,
+          statSync: (target: string, options?: { bigint?: boolean }) =>
+            asCtimeBirthtime(actual.statSync(target, options as never) as never),
+          lstatSync: (target: string, options?: { bigint?: boolean }) =>
+            asCtimeBirthtime(actual.lstatSync(target, options as never) as never)
+        }
+      })
+      vi.resetModules()
+      const { publishDaemonEndpoint: publishOnCtimeFs, readDaemonEndpointOwnershipState } =
+        await import('./daemon-endpoint-ownership')
+
+      const outcome = await publishOnCtimeFs(boundPath, canonicalPath, probeSocketConnect)
+      expect(outcome).toMatchObject({ status: 'published' })
+
+      // The watchdog must still recognise the endpoint as ours.
+      const owned = (outcome as { identity: unknown }).identity
+      expect(readDaemonEndpointOwnershipState(canonicalPath, owned as never)).toBe('owned')
+    } finally {
+      await close(newcomer.server)
+      rmSync(directory, { recursive: true, force: true })
+    }
+  })
+
   unixIt('refuses to serve a bound endpoint it cannot identify', async () => {
     // Why: without the bound identity we can neither verify the publish nor arm the ownership
     // watchdog, so we would serve a name we could never check. Startup has nothing to protect.
