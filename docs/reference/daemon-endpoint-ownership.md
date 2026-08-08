@@ -383,12 +383,26 @@ The window requires B to lose the CPU between two adjacent syscalls for long eno
 completes publish, PID, token, arm, accept, and PTY spawn. It is small but not zero, and calling
 it harmless was overclaiming.
 
-**The fix, not yet applied.** Publish the exclusive PID record _before_ the endpoint rename rather
-than after. That record is already an atomic mutual exclusion — `open` with `O_EXCL` — so a
-preempted B would fail it on resume and never reach its rename, leaving A intact. It reuses a
-primitive the design already depends on instead of inventing a lock. It is a real reordering of
-the startup sequence and wants its own review and a test that pauses a publisher between the
-re-check and the rename, which is why it is recorded here rather than done in passing.
+**Why the obvious fix is worse.** Publishing the exclusive PID record _before_ the rename looks
+like the answer — it is already an `O_EXCL` mutual exclusion, so a preempted B would fail it on
+resume and never reach its rename. But it makes the daemon a target while it is still starting: a
+concurrent `killStaleDaemon` reads the fresh record, finds the process alive and the identity
+matching, and SIGTERMs a daemon that is mid-publish. That trades a narrow race for a worse one.
+
+**What is done instead: make the harm unreachable rather than the race impossible.** The race
+only damages anything because the loser might be hosting a session nobody can reach. So no
+session is ever created on an endpoint this daemon does not currently hold — `createOrAttach`
+checks ownership first, refuses if the endpoint demonstrably resolves elsewhere, and stands the
+daemon down. A late publisher can still overwrite us; we simply never accept a session we cannot
+keep, and the client reconnects to whoever owns the name.
+
+Only positive evidence refuses. An unreadable stat leaves the daemon serving, because treating
+`EACCES` as loss would take a healthy daemon hosting every terminal on the machine offline. Both
+directions are pinned by tests.
+
+The cost is one `stat` per session creation — per terminal, not per keystroke. What remains is
+that a starting daemon can still lose the name to a preempted publisher, but it has no sessions
+to strand at that point, which is the property the earlier text wrongly claimed for every case.
 
 **What cannot be fixed from this branch.** An already-released build's stale cleanup unlinks the
 canonical socket on the strength of an earlier kill result, even when its own probe just
