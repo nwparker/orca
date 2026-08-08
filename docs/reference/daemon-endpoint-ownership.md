@@ -248,6 +248,38 @@ and it is the reason declining is cheap: the failure mode of being too cautious 
 work but do not survive an app restart, while the failure mode of being too eager is terminals
 that acknowledge input and never run it.
 
+## What a daemon does after it loses the endpoint
+
+The race above means a serving daemon can find that the canonical name no longer resolves to it.
+Four rules govern what happens then. They are stated together here because they were arrived at
+one at a time, and every defect in this area came from an interaction between them rather than
+from any one being wrong.
+
+1. **Loss is remembered, and never un-remembered.** A later client completing its handshake used
+   to cancel a pending retirement. It must not cancel this one: a client that connected before
+   the takeover cannot make the daemon reachable again, and treating it as re-ownership reopens
+   session creation on a daemon nothing can find.
+
+2. **No new session is created on an endpoint we do not hold.** This is what makes the race
+   harmless rather than merely narrow. A session accepted after loss would be reachable by
+   nobody, which is the original bug.
+
+3. **Attaching is still allowed.** An attach reaches a session already here, over a connection
+   already established. Refusing it would break the drain, and it strands nothing.
+
+4. **Once drained, it stands down — without waiting for its clients.** Idleness normally waits
+   for every connection to close. After loss it must not: a pre-takeover client can hold one open
+   indefinitely, and the daemon would outlive its last session as an orphan. Live sessions and
+   in-flight creates still hold it open, so it never exits out from under real work.
+
+Only positive evidence triggers any of this. An unreadable stat leaves the daemon serving,
+because treating `EACCES` as loss would take down a daemon hosting every terminal on the machine.
+
+The refusal in rule 2 is a shared constant the client's retry predicate recognises, so the caller
+reconnects to whoever owns the endpoint instead of surfacing an error. Rule 4 means that refusal
+can begin a shutdown in the same call that sends it; the reply still reaches the client, and a
+test pins that.
+
 ## Upgrades and mixed versions
 
 Users update the app while a daemon from the previous version may still be running and hosting
