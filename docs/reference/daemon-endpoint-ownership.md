@@ -416,9 +416,9 @@ Earlier versions of this document said the loser of a publish race is always a s
 with no sessions. That is wrong, and it is worth being precise about why, because it is the
 sharpest thing known about this design.
 
-Step 4's re-check and its `rename` are two syscalls. A publisher preempted between them can
-resume and replace an entry it never probed. The victim is **not** necessarily a zero-session
-racer: if A published, verified, armed, and accepted a terminal in that gap, then B's rename
+Step 4 ends with a probe and then a `rename`, and those are two syscalls. A publisher preempted
+between them can resume and replace an entry that went live in the gap. The victim is **not**
+necessarily a zero-session racer: if A published, verified, armed, and accepted a terminal in that gap, then B's rename
 destroys A's directory entry. B then fails its own exclusive PID publish — A already holds it —
 and aborts, leaving the canonical name pointing at B's dead socket. A stays alive with the user's
 terminal but is unreachable until the ownership watchdog retires it, and the user's session is
@@ -427,6 +427,19 @@ stranded in the meantime. That is the original symptom reached through a much na
 The window requires B to lose the CPU between two adjacent syscalls for long enough that A
 completes publish, PID, token, arm, accept, and PTY spawn. It is small but not zero, and calling
 it harmless was overclaiming.
+
+**What the second probe bought, precisely.** Not a smaller window — the gap between the last
+check and the `rename` is the same one syscall either way. What changed is that the check inside
+it became sound. The birth-time comparison it replaced could fail to notice a replacement that
+had _already_ arrived, because the field it compared is unreliable; the probe cannot, because it
+asks whether anything is serving rather than inferring it from metadata. So the residual is now
+genuinely just the one-syscall preemption above, rather than that plus an unknown rate of missed
+detections.
+
+It also costs almost nothing. The second probe runs only after the first proved the entry dead,
+and a dead endpoint refuses immediately — measured at ~0.02 ms — so the 500 ms budget is not
+doubled on any ordinary start. An unresponsive endpoint returns `unknown` from the first probe
+and declines before the second is ever reached.
 
 **Why the obvious fix is worse.** Publishing the exclusive PID record _before_ the rename looks
 like the answer — it is already an `O_EXCL` mutual exclusion, so a preempted B would fail it on
