@@ -208,6 +208,33 @@ async function replaceProvenDeadEndpoint(
   return null
 }
 
+/*
+ * Two comparison rules, named, because there are exactly two and picking the wrong one is how a
+ * healthy daemon gets declared lost forever.
+ *
+ * `birthtimeMs` is NOT reliably a birth time. Node documents it as sometimes holding the ctime
+ * instead — libuv fills it from `st_ctim` on Linux kernels without `statx`. `link`, `rename` and
+ * `unlink` all bump ctime. So the field is only meaningful between two readings with no such
+ * syscall between them.
+ */
+
+/**
+ * Same inode, ignoring birth time. Use when the two readings straddle a `link` or `rename`, or
+ * when the inode is held open so its number cannot be recycled.
+ */
+function isSameInode(a: DaemonSocketIdentity, b: DaemonSocketIdentity): boolean {
+  return a.dev === b.dev && a.ino === b.ino
+}
+
+/**
+ * Same inode *and* same incarnation of it. Use when the inode being compared may have been freed
+ * between the readings — Linux hands the number straight back — and nothing between them mutates
+ * it. Strictly stronger than `isSameInode`, and wrong to use across a publish.
+ */
+function isSameInodeIncarnation(a: DaemonSocketIdentity, b: DaemonSocketIdentity): boolean {
+  return isSameInode(a, b) && a.birthtimeMs === b.birthtimeMs
+}
+
 /**
  * Absent-and-still-absent counts as unchanged; one side absent does not.
  *
@@ -235,7 +262,7 @@ function isSameEndpointEntry(
     // are relying on, and there is nothing there to destroy.
     return absentIsStable && !a && !b
   }
-  return a.dev === b.dev && a.ino === b.ino && a.birthtimeMs === b.birthtimeMs
+  return isSameInodeIncarnation(a, b)
 }
 
 /**
@@ -268,7 +295,10 @@ function confirmPublishedEndpoint(
   // both bump ctime, so a pre-publish reading could never match the entry again on such a host,
   // and the daemon would declare itself lost on its first session and stand down for good.
   // dev+ino still bind this to our own inode, so nothing is given up by reading it after.
-  return published.dev === identity.dev && published.ino === identity.ino
+  // isSameInode, not the incarnation rule: these readings straddle the link or rename that
+  // published the name, which bumps ctime — and birthtimeMs may BE ctime. Our own listener holds
+  // the inode open, so its number cannot be recycled and dev+ino is decisive on its own.
+  return isSameInode(published, identity)
     ? { status: 'published', identity: published }
     : { status: 'lost' }
 }
@@ -334,9 +364,12 @@ export function readDaemonEndpointOwnershipState(
   }
   try {
     const stats = statSync(socketPath, { bigint: true })
-    return stats.dev === owned.dev &&
-      stats.ino === owned.ino &&
-      Number(stats.birthtimeMs) === owned.birthtimeMs
+    // The incarnation rule: nothing here straddles a publish, and the entry we are matching
+    // against can have been replaced by a socket that landed on a recycled inode number.
+    return isSameInodeIncarnation(
+      { dev: stats.dev, ino: stats.ino, birthtimeMs: Number(stats.birthtimeMs) },
+      owned
+    )
       ? 'owned'
       : 'lost'
   } catch (error) {

@@ -15,7 +15,11 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DaemonServer } from './daemon-server'
 import { getDaemonSocketPath, publishDaemonPidFile } from './daemon-spawner'
-import { getDaemonSocketBindPath, readDaemonSocketIdentity } from './daemon-endpoint-ownership'
+import {
+  getDaemonSocketBindPath,
+  readDaemonEndpointOwnershipState,
+  readDaemonSocketIdentity
+} from './daemon-endpoint-ownership'
 import type { SubprocessHandle } from './session'
 
 function connectsTo(socketPath: string): Promise<boolean> {
@@ -43,6 +47,37 @@ function createMockSubprocess(): SubprocessHandle {
     dispose() {}
   }
 }
+
+describe('endpoint ownership identity rules', () => {
+  it.skipIf(process.platform === 'win32')(
+    'reports lost when the endpoint is a different incarnation of the same inode number',
+    async () => {
+      // Why birthtime is load-bearing here, unlike in the post-publish check: this compares
+      // against an inode that may have been freed, and Linux hands the number straight back to
+      // the next socket. Inode-only would report a recycled replacement as still ours, so the
+      // daemon would keep serving sessions on an endpoint it no longer owns — the original bug.
+      const dir = mkdtempSync(join(tmpdir(), 'endpoint-incarnation-'))
+      const socketPath = join(dir, 'daemon.sock')
+      const server = createServer((socket) => socket.end())
+      try {
+        const bindPath = getDaemonSocketBindPath(socketPath)
+        await new Promise<void>((resolve) => server.listen(bindPath, resolve))
+        linkSync(bindPath, socketPath)
+        unlinkSync(bindPath)
+        const owned = readDaemonSocketIdentity(socketPath)
+
+        expect(readDaemonEndpointOwnershipState(socketPath, owned)).toBe('owned')
+
+        // Same device and inode number, different incarnation — what recycling looks like.
+        const recycled = { ...(owned as NonNullable<typeof owned>), birthtimeMs: 0 }
+        expect(readDaemonEndpointOwnershipState(socketPath, recycled)).toBe('lost')
+      } finally {
+        await new Promise<void>((resolve) => server.close(() => resolve()))
+        rmSync(dir, { recursive: true, force: true })
+      }
+    }
+  )
+})
 
 describe('daemon endpoint ownership publication', () => {
   let dir: string
