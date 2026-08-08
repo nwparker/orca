@@ -116,6 +116,17 @@ describe('endpoint ownership identity rules', () => {
     }
   )
 
+  it('does not treat a missing birth time as a match', () => {
+    // Why: an absent field on both sides compares equal, which would silently turn the
+    // incarnation rule back into the inode-only rule — the exact failure it exists to prevent.
+    const base = { dev: 1n, ino: 2n, birthtimeNs: 3n }
+    const noBirthTime = { dev: 1n, ino: 2n } as unknown as typeof base
+
+    expect(daemonEndpointEntriesMatch(base, base)).toBe(true)
+    expect(daemonEndpointEntriesMatch(noBirthTime, noBirthTime)).toBe(false)
+    expect(daemonEndpointEntriesMatch(base, noBirthTime)).toBe(false)
+  })
+
   it.skipIf(process.platform === 'win32')(
     'reports lost when the name resolves to a different inode',
     async () => {

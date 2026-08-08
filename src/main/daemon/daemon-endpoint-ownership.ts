@@ -233,7 +233,13 @@ function isSameInode(a: DaemonSocketIdentity, b: DaemonSocketIdentity): boolean 
 /**
  * Same inode *and* same incarnation of it. Nanoseconds, not milliseconds: Linux can recycle an
  * inode number well inside a millisecond, and at that resolution a replacement would compare
- * equal to the entry it replaced — which is the one thing this rule exists to catch. Use when the inode being compared may have been freed
+ * equal to the entry it replaced — which is the one thing this rule exists to catch.
+ *
+ * Nanoseconds narrow that window rather than closing it. Filesystem timestamp granularity is
+ * often coarser than the field: measured on overlayfs, entries created at visibly different
+ * moments reported an identical birth time. So this makes a same-incarnation collision much less
+ * likely, not impossible, and the protocol does not rely on it alone — a collision here costs a
+ * missed retry, while the exclusive publish and the post-publish verification still stand. Use when the inode being compared may have been freed
  * between the readings — Linux hands the number straight back — and the interval is short and
  * under this code's control. Strictly stronger than `isSameInode`, and wrong across a publish or
  * across any interval long enough for another process to touch the inode's metadata.
@@ -246,6 +252,12 @@ export function daemonEndpointEntriesMatch(
 }
 
 function isSameInodeIncarnation(a: DaemonSocketIdentity, b: DaemonSocketIdentity): boolean {
+  if (typeof a.birthtimeNs !== 'bigint' || typeof b.birthtimeNs !== 'bigint') {
+    // Why not just compare: an absent field on both sides would compare equal and silently turn
+    // this back into the inode-only rule, which is the failure it exists to prevent. Refusing to
+    // match instead costs a retry at the one call site that uses it.
+    return false
+  }
   return isSameInode(a, b) && a.birthtimeNs === b.birthtimeNs
 }
 
@@ -303,13 +315,13 @@ function confirmPublishedEndpoint(
   }
   // Why the fresh reading is recorded and not the one taken before publishing: this identity
   // becomes what the ownership watchdog compares the entry against, and that comparison includes
-  // birthtimeMs. Node documents birthtimeMs as sometimes holding the ctime instead — libuv fills
+  // the birth time. Node documents it as sometimes holding the ctime instead — libuv fills
   // it from st_ctim on Linux kernels without statx, or where seccomp blocks it. link and rename
   // both bump ctime, so a pre-publish reading could never match the entry again on such a host,
   // and the daemon would declare itself lost on its first session and stand down for good.
   // dev+ino still bind this to our own inode, so nothing is given up by reading it after.
   // isSameInode, not the incarnation rule: these readings straddle the link or rename that
-  // published the name, which bumps ctime — and birthtimeMs may BE ctime. Our own listener holds
+  // published the name, which bumps ctime — and the birth time may BE ctime. Our own listener holds
   // the inode open, so its number cannot be recycled and dev+ino is decisive on its own.
   return isSameInode(published, identity)
     ? { status: 'published', identity: published }
@@ -381,7 +393,7 @@ export function readDaemonEndpointOwnershipState(
     // listener is still open whenever this runs, so the kernel cannot free that inode or hand
     // its number to anything else. Recycling — the only thing birthtime guards against — is
     // impossible here, while comparing it would add a way to report a false loss if anything
-    // bumps our inode's ctime, since birthtimeMs may BE ctime. A false loss is the expensive
+    // bumps our inode's ctime, since the birth time may BE ctime. A false loss is the expensive
     // direction: it is sticky, and it retires a daemon that is serving perfectly well.
     return isSameInode({ dev: stats.dev, ino: stats.ino, birthtimeNs: stats.birthtimeNs }, owned)
       ? 'owned'
