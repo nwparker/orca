@@ -73,6 +73,13 @@ export class DaemonEndpointUnavailableError extends Error {
  */
 export const DAEMON_EXIT_ENDPOINT_OCCUPIED = 20
 
+/**
+ * Refusal sent when a daemon is asked to create a session on an endpoint that no longer resolves
+ * to it. Shared so the client's retry allowlist cannot drift from the server's wording — a
+ * refusal the client does not recognise dead-ends at the user instead of reconnecting.
+ */
+export const DAEMON_ENDPOINT_LOST_MESSAGE = 'Daemon no longer owns its endpoint; reconnect'
+
 export type DaemonEndpointPublishOutcome =
   /** The endpoint name is ours. */
   | { status: 'published'; identity: DaemonSocketIdentity | null }

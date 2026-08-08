@@ -24,6 +24,7 @@ import { isTuiAgent } from '../../shared/tui-agent-config'
 import { parsePtyStartupIngressIntent } from '../../shared/pty-startup-ingress'
 import { unlinkOwnedDaemonPidFile, unlinkOwnedDaemonTokenFile } from './daemon-spawner'
 import {
+  DAEMON_ENDPOINT_LOST_MESSAGE,
   DaemonEndpointUnavailableError,
   getDaemonSocketBindPath,
   publishDaemonEndpoint,
@@ -128,6 +129,16 @@ export class DaemonServer {
   private startupFailure: Error | null = null
   private endpointOwnershipTimer: ReturnType<typeof setInterval> | null = null
   private endpointOwnershipLossStreak = 0
+  /**
+   * Set once the endpoint demonstrably resolved elsewhere, and never cleared.
+   *
+   * Why sticky, and why not inferred from `ownedSocketIdentity`: retiring nulls that identity,
+   * which would make the ownership check answer "not lost" forever after. A stream socket
+   * accepted before the takeover can then complete its hello, clear the pending retirement, and
+   * reopen session creation on a daemon nothing can reach — the exact outcome the check exists
+   * to prevent. Losing the endpoint is not something a later client can undo.
+   */
+  private endpointOwnershipLost = false
   private protocolVersion: number
   private onIdleShutdown: () => void
   private onRpcShutdown: () => void
@@ -469,6 +480,9 @@ export class DaemonServer {
    * loss would refuse sessions on a daemon that is serving perfectly well.
    */
   private hasLostEndpointOwnership(): boolean {
+    if (this.endpointOwnershipLost) {
+      return true
+    }
     if (process.platform === 'win32' || !this.ownedSocketIdentity) {
       return false
     }
@@ -479,6 +493,7 @@ export class DaemonServer {
     if (this.retirementRequested) {
       return
     }
+    this.endpointOwnershipLost = true
     this.log.log('endpoint-ownership-lost', { socketPath: this.socketPath })
     console.warn(
       '[daemon] Endpoint ownership lost to another daemon — retiring once existing sessions end'
@@ -740,10 +755,15 @@ export class DaemonServer {
       client.authenticatedPairEstablished = true
       // Why: one-shot health probes authenticate only a control socket; they are not fresh app activity.
       this.onAuthenticatedClientPair()
-      // A complete app connection (unlike a probe) re-owns the endpoint and cancels pending retirement.
+      // A complete app connection (unlike a probe) re-owns the endpoint and cancels pending
+      // retirement — but not a retirement caused by losing the endpoint itself. A client that
+      // connected before the takeover cannot make this daemon reachable again, and treating it
+      // as re-ownership would reopen session creation on a daemon nothing can find.
       this.initialAdoptionDeadlineMs = null
-      this.retirementRequested = false
       this.cancelInitialAdoptionTimer()
+      if (!this.endpointOwnershipLost) {
+        this.retirementRequested = false
+      }
     }
   }
 
@@ -981,7 +1001,7 @@ export class DaemonServer {
         // depends on, and it strands nothing — the session is already here.
         if (!attachOnly && this.hasLostEndpointOwnership()) {
           this.requestRetirementForLostEndpoint()
-          throw new Error('Daemon no longer owns its endpoint; reconnect')
+          throw new Error(DAEMON_ENDPOINT_LOST_MESSAGE)
         }
         this.createOrAttachInFlight++
         let routedSessionId = p.sessionId

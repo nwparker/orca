@@ -5,6 +5,8 @@ import { join } from 'node:path'
 import { createServer, type Server } from 'node:net'
 import { DaemonServer } from './daemon-server'
 import { DaemonClient } from './client'
+import { isDaemonGoneError } from './daemon-pty-adapter'
+import { DAEMON_ENDPOINT_LOST_MESSAGE } from './daemon-endpoint-ownership'
 import { getDaemonSocketPath } from './daemon-spawner'
 import type { SubprocessHandle } from './session'
 import { waitForEndpointUnreachable } from './daemon-endpoint-reachability-test-harness'
@@ -157,6 +159,59 @@ describe('daemon server error handling', () => {
       }
     }
   )
+
+  it.skipIf(process.platform === 'win32')(
+    'never reopens session creation after the endpoint was lost',
+    async () => {
+      // Why: retiring nulls the owned identity, so an ownership check inferred from it answers
+      // "not lost" forever after. A stream socket accepted before the takeover can then finish
+      // its hello, clear the pending retirement, and reopen creation on a daemon nothing can
+      // reach — reinstating the exact outcome the guard exists to prevent.
+      server = new DaemonServer({
+        socketPath,
+        tokenPath,
+        spawnSubprocess: () => createMockSubprocess()
+      })
+      await server.start()
+      client = new DaemonClient({ socketPath, tokenPath })
+      await client.ensureConnected()
+
+      const usurper = createServer()
+      const usurperBind = join(dir, '.u3')
+      await new Promise<void>((resolve) => usurper.listen(usurperBind, resolve))
+      try {
+        unlinkSync(socketPath)
+        linkSync(usurperBind, socketPath)
+
+        await expect(
+          client.request('createOrAttach', { sessionId: 'a', cols: 80, rows: 24 })
+        ).rejects.toThrow(/no longer owns its endpoint/)
+
+        // Simulate a late client completing its handshake and clearing pending retirement.
+        const daemon = server as unknown as {
+          retirementRequested: boolean
+          hasLostEndpointOwnership: () => boolean
+        }
+        daemon.retirementRequested = false
+
+        // The loss must still be remembered, so creation stays closed.
+        expect(daemon.hasLostEndpointOwnership()).toBe(true)
+        await expect(
+          client.request('createOrAttach', { sessionId: 'b', cols: 80, rows: 24 })
+        ).rejects.toThrow(/no longer owns its endpoint/)
+      } finally {
+        await new Promise<void>((resolve) => usurper.close(() => resolve()))
+      }
+    }
+  )
+
+  it('treats the endpoint-lost refusal as a reconnectable error', () => {
+    // Why pinned: the server refuses so the client can reconnect to whoever owns the endpoint.
+    // If the client's retry predicate does not recognise the refusal, it surfaces to the user
+    // and the request dead-ends — barely better than the strand the refusal exists to avoid.
+    expect(isDaemonGoneError(new Error(DAEMON_ENDPOINT_LOST_MESSAGE))).toBe(true)
+    expect(isDaemonGoneError(new Error('something else entirely'))).toBe(false)
+  })
 
   it('keeps serving after an operational server error instead of dying', async () => {
     // Why: an unhandled 'error' on a net.Server is an uncaught exception. Detaching the startup
