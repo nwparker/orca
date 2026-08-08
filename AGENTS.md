@@ -22,10 +22,6 @@ Never use vague names like `helpers`, `utils`, `common`, `misc`, or `shared-stuf
 
 Always use the primary working directory (the worktree) for all file reads and edits. Never follow absolute paths from subagent results that point to the main repo.
 
-## Daemon Endpoint Ownership
-
-The detached terminal daemon's socket path has one rule: only a daemon publishing itself onto the canonical endpoint may mutate that directory entry, and only by replacing an entry it has itself just proven dead. No launcher, sweeper, or departing daemon ever removes it. Before changing anything that links, renames, unlinks or stats the daemon socket — or that treats its existence as evidence a daemon is running — read [`docs/reference/daemon-endpoint-ownership.md`](./docs/reference/daemon-endpoint-ownership.md).
-
 ## Cross-Platform Support
 
 Orca targets macOS, Linux, and Windows. Keep all platform-dependent behavior behind runtime checks:
