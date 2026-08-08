@@ -513,6 +513,40 @@ describe('publishDaemonEndpoint', () => {
     }
   })
 
+  unixIt('declines on an unclassifiable first probe even if the second proves death', async () => {
+    // Why pinned: the second probe re-establishes death immediately before the rename, so the
+    // first probe's guard is no longer what makes replacing safe — it is what keeps the protocol
+    // conservative. Without it an endpoint that could not be classified at all would still be
+    // replaced, on the strength of one later reading. Declining on any doubt is the contract.
+    const directory = makeTempDir()
+    const canonicalPath = join(directory, 'd')
+    const deadBind = getDaemonSocketBindPath(canonicalPath)
+    const newcomerPath = getDaemonSocketBindPath(canonicalPath)
+    const dead = await listen(deadBind)
+    const newcomer = await listen(newcomerPath)
+    try {
+      await publishListener(deadBind, canonicalPath)
+      await close(dead.server)
+      const deadEntry = readDaemonSocketIdentity(canonicalPath)
+
+      // Unclassifiable first, decisively dead second.
+      let asked = 0
+      const probe = async () => {
+        asked += 1
+        return asked === 1 ? ('unknown' as const) : ('refused' as const)
+      }
+
+      const outcome = await publishDaemonEndpoint(newcomerPath, canonicalPath, probe)
+
+      expect(outcome).toEqual({ status: 'inconclusive' })
+      expect(readDaemonSocketIdentity(canonicalPath)).toEqual(deadEntry)
+      expect(newcomer.connections()).toBe(0)
+    } finally {
+      await Promise.all([close(dead.server), close(newcomer.server)])
+      rmSync(directory, { recursive: true, force: true })
+    }
+  })
+
   unixIt('refuses to serve a bound endpoint it cannot identify', async () => {
     // Why: without the bound identity we can neither verify the publish nor arm the ownership
     // watchdog, so we would serve a name we could never check. Startup has nothing to protect.
