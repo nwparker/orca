@@ -116,6 +116,48 @@ describe('daemon server error handling', () => {
     }
   )
 
+  it.skipIf(process.platform === 'win32')(
+    'still attaches to a session it already hosts after losing the endpoint',
+    async () => {
+      // Why attach is exempt: it reaches a terminal already on this daemon, over a connection
+      // that already exists, so it strands nothing. Refusing it would break the drain a retiring
+      // daemon depends on to let live sessions finish. Note this must run without a prior
+      // refusal, which would null the owned identity and disarm the guard anyway.
+      server = new DaemonServer({
+        socketPath,
+        tokenPath,
+        spawnSubprocess: () => createMockSubprocess()
+      })
+      await server.start()
+      client = new DaemonClient({ socketPath, tokenPath })
+      await client.ensureConnected()
+      await client.request('createOrAttach', { sessionId: 'live', cols: 80, rows: 24 })
+
+      const usurper = createServer()
+      const usurperBind = join(dir, '.u2')
+      await new Promise<void>((resolve) => usurper.listen(usurperBind, resolve))
+      try {
+        unlinkSync(socketPath)
+        linkSync(usurperBind, socketPath)
+
+        // The guard is still armed here — no creation has been refused yet.
+        const daemon = server as unknown as { hasLostEndpointOwnership: () => boolean }
+        expect(daemon.hasLostEndpointOwnership()).toBe(true)
+
+        await expect(
+          client.request('createOrAttach', {
+            sessionId: 'live',
+            cols: 80,
+            rows: 24,
+            attachOnly: true
+          })
+        ).resolves.toMatchObject({ isNew: false })
+      } finally {
+        await new Promise<void>((resolve) => usurper.close(() => resolve()))
+      }
+    }
+  )
+
   it('keeps serving after an operational server error instead of dying', async () => {
     // Why: an unhandled 'error' on a net.Server is an uncaught exception. Detaching the startup
     // listener once start() settled left a daemon hosting every terminal on the machine one

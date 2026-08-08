@@ -396,9 +396,12 @@ checks ownership first, refuses if the endpoint demonstrably resolves elsewhere,
 daemon down. A late publisher can still overwrite us; we simply never accept a session we cannot
 keep, and the client reconnects to whoever owns the name.
 
-Only positive evidence refuses. An unreadable stat leaves the daemon serving, because treating
-`EACCES` as loss would take a healthy daemon hosting every terminal on the machine offline. Both
-directions are pinned by tests.
+Two things narrow it further, and both are pinned by tests. Only positive evidence refuses — an
+unreadable stat leaves the daemon serving, because treating `EACCES` as loss would take a healthy
+daemon hosting every terminal on the machine offline. And only _creation_ is refused: an attach
+reaches a session this daemon already hosts over a connection that already exists, so it strands
+nothing, and refusing it would break the drain a retiring daemon depends on to let live sessions
+finish.
 
 The cost is one `stat` per session creation — per terminal, not per keystroke. What remains is
 that a starting daemon can still lose the name to a preempted publisher, but it has no sessions

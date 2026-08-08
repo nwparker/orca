@@ -965,24 +965,25 @@ export class DaemonServer {
         if (this.idleShutdownState !== 'running') {
           throw new Error('Daemon temporarily unavailable; reconnect')
         }
-        // Why check here and not only on the watchdog: publishing cannot be made atomic against
-        // a publisher preempted between proving an entry dead and replacing it, so this daemon
-        // can lose the endpoint at any moment. The watchdog notices within a poll, which is far
-        // too late if a session was accepted in between — that session becomes reachable by
-        // nobody and the user sees a terminal that acknowledges input and never runs it. A stat
-        // per session creation makes the harmful outcome unreachable: no session is ever created
-        // on an endpoint we do not currently hold.
-        if (this.hasLostEndpointOwnership()) {
-          this.requestRetirementForLostEndpoint()
-          throw new Error('Daemon no longer owns its endpoint; reconnect')
-        }
         if (!client?.authenticatedPairEstablished || client.streamSocket === null) {
           // Why: a control-only replacement can't own terminal admission or erase the prior client's retirement request.
           throw new Error('Daemon client connection is incomplete; reconnect')
         }
-        this.createOrAttachInFlight++
         const p = request.payload
         const attachOnly = p.attachOnly === true
+        // Why check here and not only on the watchdog: publishing cannot be made atomic against
+        // a publisher preempted between proving an entry dead and replacing it, so this daemon
+        // can lose the endpoint at any moment. The watchdog notices within a poll, which is far
+        // too late if a session was accepted in between — that session is then reachable by
+        // nobody, and the user sees a terminal that acknowledges input and never runs it.
+        // Why creation only: an attach reaches a session this daemon already hosts, over a
+        // connection that already exists. Refusing that would break the drain a retiring daemon
+        // depends on, and it strands nothing — the session is already here.
+        if (!attachOnly && this.hasLostEndpointOwnership()) {
+          this.requestRetirementForLostEndpoint()
+          throw new Error('Daemon no longer owns its endpoint; reconnect')
+        }
+        this.createOrAttachInFlight++
         let routedSessionId = p.sessionId
         let result: Awaited<ReturnType<TerminalHost['createOrAttach']>>
         try {
