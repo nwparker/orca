@@ -1,6 +1,7 @@
 import type * as NodeFs from 'node:fs'
 import {
   linkSync,
+  unlinkSync,
   mkdtempSync,
   renameSync,
   rmSync,
@@ -273,82 +274,6 @@ describe('publishDaemonEndpoint', () => {
     }
   })
 
-  unixIt('does not replace an entry whose inode number was recycled', async () => {
-    // Why birthtime and not just dev+ino here: the entry being compared is one we believe is
-    // dead, so its inode can be freed — and Linux hands the number straight back. A replacement
-    // landing on the recycled number compares equal and would license the very rename this
-    // check exists to prevent. Recycling cannot be provoked on demand, so the identity read is
-    // mocked to report the same dev+ino with a later birthtime, which is what recycling looks
-    // like. (The post-publish check is the opposite case: there our own listener holds the
-    // inode open, so dev+ino alone is sound.)
-    const directory = makeTempDir()
-    const canonicalPath = join(directory, 'd')
-    const boundPath = getDaemonSocketBindPath(canonicalPath)
-    const newcomer = await listen(boundPath)
-    try {
-      writeFileSync(canonicalPath, 'dead entry')
-      const deadEntry = statSync(canonicalPath, { bigint: true })
-      let canonicalStats = 0
-      vi.doMock('node:fs', async () => {
-        const actual = await vi.importActual<typeof NodeFs>('node:fs')
-        return {
-          ...actual,
-          // The continuity check reads the entry itself, so the recycled identity must come
-          // back through lstat as well as stat.
-          lstatSync: (target: string, options?: { bigint?: boolean }) => {
-            const stats = actual.lstatSync(target, options as never) as unknown as {
-              dev: bigint
-              ino: bigint
-              birthtimeNs: bigint
-            }
-            if (target !== canonicalPath) {
-              return stats
-            }
-            canonicalStats += 1
-            return {
-              dev: stats.dev,
-              ino: stats.ino,
-              birthtimeNs: stats.birthtimeNs + BigInt(canonicalStats)
-            }
-          },
-          statSync: (target: string, options?: { bigint?: boolean }) => {
-            const stats = actual.statSync(target, options as never) as unknown as {
-              dev: bigint
-              ino: bigint
-              birthtimeNs: bigint
-            }
-            if (target !== canonicalPath) {
-              return stats
-            }
-            // Every read reports a later birthtime than the last, so no two consecutive reads
-            // of the entry agree — what an inode recycled under us looks like.
-            canonicalStats += 1
-            return {
-              dev: stats.dev,
-              ino: stats.ino,
-              birthtimeNs: stats.birthtimeNs + BigInt(canonicalStats)
-            }
-          }
-        }
-      })
-      vi.resetModules()
-      const { publishDaemonEndpoint: publishWithRecycle } =
-        await import('./daemon-endpoint-ownership')
-
-      const outcome = await publishWithRecycle(boundPath, canonicalPath, probeSocketConnect)
-
-      // Why inconclusive and not occupied: nothing ever connected, so no live owner was proven.
-      // The publisher backs off rather than replace an entry it cannot still identify.
-      expect(outcome).toEqual({ status: 'inconclusive' })
-      const after = statSync(canonicalPath, { bigint: true })
-      expect({ dev: after.dev, ino: after.ino }).toEqual({ dev: deadEntry.dev, ino: deadEntry.ino })
-      expect(newcomer.connections()).toBe(0)
-    } finally {
-      await close(newcomer.server)
-      rmSync(directory, { recursive: true, force: true })
-    }
-  })
-
   unixIt('still publishes on a filesystem that refuses hard links', async () => {
     // Why: some POSIX and FUSE filesystems accept a bound Unix socket and rename but reject
     // hard links. Requiring the link would mean no daemon persistence at all there, which is a
@@ -500,6 +425,61 @@ describe('publishDaemonEndpoint', () => {
     }
   })
 
+  unixIt('will not rename over a live daemon indistinguishable by directory entry', async () => {
+    // The case the re-probe exists for: the entry proved dead is unlinked and its inode number
+    // handed straight back to a replacement, so the continuity check sees the same dev+ino and
+    // cannot tell them apart. Birth time was meant to separate them and cannot be relied on —
+    // it may be the ctime, the epoch, or coarser than the events it must separate. Recycling
+    // cannot be provoked on demand, so identity is pinned to a constant here, which is exactly
+    // what a recycled inode number looks like to this code.
+    const directory = makeTempDir()
+    const canonicalPath = join(directory, 'd')
+    const deadBind = getDaemonSocketBindPath(canonicalPath)
+    const livePath = getDaemonSocketBindPath(canonicalPath)
+    const latecomerPath = getDaemonSocketBindPath(canonicalPath)
+    const dead = await listen(deadBind)
+    const live = await listen(livePath)
+    const latecomer = await listen(latecomerPath)
+    try {
+      await publishListener(deadBind, canonicalPath)
+      await close(dead.server)
+      const frozen = statSync(canonicalPath, { bigint: true })
+
+      vi.doMock('node:fs', async () => {
+        const actual = await vi.importActual<typeof NodeFs>('node:fs')
+        return {
+          ...actual,
+          lstatSync: (target: string, options?: { bigint?: boolean }) =>
+            target === canonicalPath ? frozen : actual.lstatSync(target, options as never)
+        }
+      })
+      vi.resetModules()
+      const { publishDaemonEndpoint: publishAgainstRecycled } =
+        await import('./daemon-endpoint-ownership')
+
+      let swapped = false
+      const probe = async (path: string) => {
+        const outcome = await probeSocketConnect(path)
+        if (!swapped) {
+          swapped = true
+          unlinkSync(canonicalPath)
+          linkSync(livePath, canonicalPath)
+        }
+        return outcome
+      }
+
+      const outcome = await publishAgainstRecycled(latecomerPath, canonicalPath, probe)
+
+      // Identity says unchanged; something is serving, so it must not be replaced.
+      expect(outcome).toEqual({ status: 'occupied' })
+      await expectReachable(canonicalPath)
+      expect(latecomer.connections()).toBe(0)
+    } finally {
+      await Promise.all([close(dead.server), close(live.server), close(latecomer.server)])
+      rmSync(directory, { recursive: true, force: true })
+    }
+  })
+
   unixIt('refuses to serve a bound endpoint it cannot identify', async () => {
     // Why: without the bound identity we can neither verify the publish nor arm the ownership
     // watchdog, so we would serve a name we could never check. Startup has nothing to protect.
@@ -620,8 +600,13 @@ describe('publishDaemonEndpoint', () => {
       // Why the competitor only takes the name from inside our own rename: publishing during
       // the probe is caught earlier now, by the pre-rename evidence check. 'lost' is
       // specifically the window between taking the name and verifying we still hold it.
+      // Idempotent: the protocol probes again immediately before replacing, so this runs twice.
+      let linked = false
       const probe = async () => {
-        linkSync(competitorPath, competitorLink)
+        if (!linked) {
+          linked = true
+          linkSync(competitorPath, competitorLink)
+        }
         return 'refused' as const
       }
 

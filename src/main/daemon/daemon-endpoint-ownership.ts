@@ -32,7 +32,7 @@ const PUBLISH_ATTEMPTS = 3
  * two readings. Where a live listener holds it open, dev+ino is already decisive and comparing
  * birth time only adds risk. The two rules below say which is which.
  */
-export type DaemonSocketIdentity = { dev: bigint; ino: bigint; birthtimeNs: bigint }
+export type DaemonSocketIdentity = { dev: bigint; ino: bigint }
 
 /**
  * A private, same-directory name to bind before publishing the canonical endpoint.
@@ -174,6 +174,18 @@ export async function publishDaemonEndpoint(
  * across a live handover, rename exposed no gap in thousands of probes where unlink-then-link
  * gapped on essentially every observation.
  */
+/** A probe that threw classified nothing, which is never proof of death. */
+async function probeEndpointSafely(
+  canonicalPath: string,
+  probeEndpoint: (path: string) => Promise<SocketProbeOutcome>
+): Promise<SocketProbeOutcome> {
+  try {
+    return await probeEndpoint(canonicalPath)
+  } catch {
+    return 'unknown'
+  }
+}
+
 async function replaceProvenDeadEndpoint(
   boundPath: string,
   canonicalPath: string,
@@ -184,12 +196,7 @@ async function replaceProvenDeadEndpoint(
   // and the rename replaces whatever is at the name. Without something to compare, a probe that
   // stalled while another daemon published would license destroying that daemon.
   const proven = readDaemonEndpointEntryIdentity(canonicalPath)
-  let outcome: SocketProbeOutcome = 'unknown'
-  try {
-    outcome = await probeEndpoint(canonicalPath)
-  } catch {
-    // A probe that threw classified nothing, which is not proof of death.
-  }
+  const outcome = await probeEndpointSafely(canonicalPath, probeEndpoint)
   if (outcome === 'connected') {
     return { status: 'occupied' }
   }
@@ -202,75 +209,34 @@ async function replaceProvenDeadEndpoint(
     !isSameEndpointEntry(proven, readDaemonEndpointEntryIdentity(canonicalPath), absentIsStable)
   ) {
     // The name changed hands while we were probing, so our death proof describes an entry that
-    // is no longer there. Start over rather than act on it — this is the one interleaving in
-    // which a publisher could otherwise replace an established daemon it never proved dead.
+    // is no longer there. Start over rather than act on it.
     return 'evidence-stale'
+  }
+  // Why ask again rather than compare metadata: the entry we proved dead can be unlinked and its
+  // inode number handed straight back to a replacement, which then matches on dev+ino and looks
+  // like continuity. Birth time was used to tell those apart and cannot be trusted to — it may
+  // be the ctime, the epoch, or coarser than the events it must separate. Whether something is
+  // serving is the property that actually matters, and connecting answers it directly.
+  if (!endpointIsProvenDead(await probeEndpointSafely(canonicalPath, probeEndpoint))) {
+    return { status: 'occupied' }
   }
   renameSync(boundPath, canonicalPath)
   // null means "the name is ours now" — the caller still has to confirm it kept it.
   return null
 }
 
-/*
- * Two comparison rules, named, because there are exactly two and picking the wrong one is how a
- * healthy daemon gets declared lost forever.
- *
- * The birth time is NOT reliably a birth time. Node documents it as sometimes holding the ctime
- * instead — libuv fills it from `st_ctim` on Linux kernels without `statx`. Anything that
- * changes an inode's metadata then changes it: `link`, `rename` and `unlink` from this code, but
- * equally a `chmod` or a hard link taken by some other process entirely. So it is only worth
- * comparing across a short interval this code fully controls, and never across one it does not.
- */
-
 /**
- * Same inode, ignoring birth time. Use when the two readings straddle a `link` or `rename`, or
- * when the inode is held open so its number cannot be recycled.
+ * Same directory entry, by device and inode number.
+ *
+ * There is deliberately no birth-time term. It was used to distinguish one incarnation of a
+ * recycled inode number from another, and it cannot be relied on for that: Node documents the
+ * field as sometimes holding the ctime, filesystems without a birth time report the epoch, and
+ * granularity is often coarser than the events it would have to separate. Three attempts to
+ * patch around those produced three more defects. The recycling case is now settled by asking
+ * whether anything is serving the name, which is the property that actually matters.
  */
 function isSameInode(a: DaemonSocketIdentity, b: DaemonSocketIdentity): boolean {
   return a.dev === b.dev && a.ino === b.ino
-}
-
-/**
- * Same inode *and* same incarnation of it. Nanoseconds, not milliseconds: Linux can recycle an
- * inode number well inside a millisecond, and at that resolution a replacement would compare
- * equal to the entry it replaced — which is the one thing this rule exists to catch.
- *
- * Nanoseconds narrow that window rather than closing it. Filesystem timestamp granularity is
- * often coarser than the field: measured on overlayfs, entries created at visibly different
- * moments reported an identical birth time. So this makes a same-incarnation collision much less
- * likely, not impossible, and the protocol does not rely on it alone — a collision here costs a
- * missed retry, while the exclusive publish and the post-publish verification still stand. Use when the inode being compared may have been freed
- * between the readings — Linux hands the number straight back — and the interval is short and
- * under this code's control. Strictly stronger than `isSameInode`, and wrong across a publish or
- * across any interval long enough for another process to touch the inode's metadata.
- */
-export function daemonEndpointEntriesMatch(
-  a: DaemonSocketIdentity,
-  b: DaemonSocketIdentity
-): boolean {
-  return isSameInodeIncarnation(a, b)
-}
-
-/**
- * Whether a reported birth time carries information at all.
- *
- * Why zero counts as absent: filesystems without a birth time report it as the epoch, and libuv
- * substitutes ctime elsewhere. Two entries both reporting the epoch would compare equal, which
- * is worse than not comparing — it looks like proof of continuity while proving nothing.
- */
-function isUsableBirthTime(birthtimeNs: bigint): boolean {
-  return typeof birthtimeNs === 'bigint' && birthtimeNs > 0n
-}
-
-function isSameInodeIncarnation(a: DaemonSocketIdentity, b: DaemonSocketIdentity): boolean {
-  if (!isUsableBirthTime(a.birthtimeNs) || !isUsableBirthTime(b.birthtimeNs)) {
-    // Why not just compare: where the field is absent or a sentinel, both sides carry the same
-    // non-value and compare equal — silently turning this back into the inode-only rule, which
-    // is the failure it exists to prevent. Refusing to match instead costs a retry at the one
-    // call site that uses it, and a retry is always the cheap direction here.
-    return false
-  }
-  return isSameInode(a, b) && a.birthtimeNs === b.birthtimeNs
 }
 
 /**
@@ -299,7 +265,7 @@ function isSameEndpointEntry(
     // are relying on, and there is nothing there to destroy.
     return absentIsStable && !a && !b
   }
-  return isSameInodeIncarnation(a, b)
+  return isSameInode(a, b)
 }
 
 /**
@@ -318,7 +284,7 @@ function confirmPublishedEndpoint(
   let published: DaemonSocketIdentity | null = null
   try {
     const stats = statSync(canonicalPath, { bigint: true })
-    published = { dev: stats.dev, ino: stats.ino, birthtimeNs: stats.birthtimeNs }
+    published = { dev: stats.dev, ino: stats.ino }
   } catch (error) {
     // Why not "published": the name we just took is gone, or we cannot read it. Either way we
     // have no evidence we are reachable, and a starting daemon has no sessions to protect — so
@@ -359,7 +325,7 @@ function readDaemonEndpointEntryIdentity(socketPath: string): DaemonSocketIdenti
   }
   try {
     const stats = lstatSync(socketPath, { bigint: true })
-    return { dev: stats.dev, ino: stats.ino, birthtimeNs: stats.birthtimeNs }
+    return { dev: stats.dev, ino: stats.ino }
   } catch {
     return null
   }
@@ -383,7 +349,7 @@ export function readDaemonSocketIdentity(socketPath: string): DaemonSocketIdenti
   }
   try {
     const stats = statSync(socketPath, { bigint: true })
-    return { dev: stats.dev, ino: stats.ino, birthtimeNs: stats.birthtimeNs }
+    return { dev: stats.dev, ino: stats.ino }
   } catch {
     return null
   }
@@ -407,9 +373,7 @@ export function readDaemonEndpointOwnershipState(
     // impossible here, while comparing it would add a way to report a false loss if anything
     // bumps our inode's ctime, since the birth time may BE ctime. A false loss is the expensive
     // direction: it is sticky, and it retires a daemon that is serving perfectly well.
-    return isSameInode({ dev: stats.dev, ino: stats.ino, birthtimeNs: stats.birthtimeNs }, owned)
-      ? 'owned'
-      : 'lost'
+    return isSameInode({ dev: stats.dev, ino: stats.ino }, owned) ? 'owned' : 'lost'
   } catch (error) {
     // Why: a stat that failed for any reason other than "the entry is gone" proves nothing.
     // Treating EACCES or EIO as lost ownership would retire a perfectly healthy daemon.

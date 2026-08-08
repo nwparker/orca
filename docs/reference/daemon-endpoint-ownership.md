@@ -58,12 +58,22 @@ A starting daemon runs exactly this:
    - anything else, including a timeout → **not** proof. Report `inconclusive` and leave it
      alone. A probe that merely timed out is not a second opinion.
 
-4. **Check the proof still describes the entry, then replace it.** Re-`stat` the canonical path
-   and compare against what was there when step 3 began. If it changed hands while we were
-   probing, our death proof describes an entry that is no longer present — start the whole
-   protocol over rather than act on it. Only then `rename(bind, canonical)`. One syscall. The
-   dead entry is replaced by our live one with **no instant at which the canonical name is
-   absent**, so no client and no concurrent daemon can observe a gap.
+4. **Check the proof still describes the entry, ask once more whether anything is serving it,
+   then replace it.** Re-`stat` the canonical path and compare against what was there when step 3
+   began; if it changed hands, start the whole protocol over. Then probe again. Only if that
+   still proves nothing is serving does `rename(bind, canonical)` run — one syscall, with **no
+   instant at which the canonical name is absent**, so no client and no concurrent daemon can
+   observe a gap.
+
+   The second probe is there because the entry proved dead can be unlinked and its inode number
+   handed straight back to a replacement, which then matches on `dev`+`ino` and looks like
+   continuity. An earlier version used the file's birth time to separate those. That cannot be
+   relied on: Node documents the field as sometimes holding the ctime, filesystems without a
+   birth time report the epoch, and granularity is often coarser than the events it would have to
+   separate — measured on overlayfs, entries created at visibly different moments reported an
+   identical birth time. Three attempts to patch around those produced three further defects.
+   Whether something is _serving_ is the property that actually matters, and connecting answers
+   it directly, so that is what the protocol asks.
 
 5. **Verify we kept it.** `stat` the canonical path and compare against the identity of the
    inode we bound. If it is not ours, another daemon replaced us in the microseconds after our
@@ -72,10 +82,8 @@ A starting daemon runs exactly this:
    show we are reachable. A starting daemon has no sessions to protect, so declining costs
    nothing, while serving a name that resolves elsewhere is the entire bug.
 
-   `dev`+`ino` alone is sufficient _here_, unlike everywhere else in this file: our own listener
-   still holds the inode open, so the kernel cannot recycle its number while we are asking. The
-   `birthtimeMs` tiebreak exists for the third-party case, where the inode being compared was
-   already freed and Linux hands the number straight back to the next socket.
+   `dev`+`ino` is the whole identity, here and everywhere in this file. Our own listener holds
+   the inode open, so the kernel cannot recycle its number while we are asking.
 
    The identity recorded at this step is the one read **after** publishing, not the one read
    before it. That matters because this value is what the ownership watchdog later compares the

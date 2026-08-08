@@ -16,7 +16,6 @@ import { join } from 'node:path'
 import { DaemonServer } from './daemon-server'
 import { getDaemonSocketPath, publishDaemonPidFile } from './daemon-spawner'
 import {
-  daemonEndpointEntriesMatch,
   getDaemonSocketBindPath,
   readDaemonEndpointOwnershipState,
   readDaemonSocketIdentity
@@ -50,91 +49,6 @@ function createMockSubprocess(): SubprocessHandle {
 }
 
 describe('endpoint ownership identity rules', () => {
-  it.skipIf(process.platform === 'win32')(
-    'stays owned when only the recorded birth time differs',
-    async () => {
-      // Why birth time must NOT decide this: the identity being matched is this daemon's own
-      // bound socket, whose listener is open, so the kernel cannot free that inode or reuse its
-      // number — recycling, the only thing birth time guards against, cannot happen here. But
-      // the birth time may actually hold the ctime (libuv on Linux without statx), and link, rename
-      // and unlink all bump ctime. Comparing it would let an unrelated ctime bump report a false
-      // loss, which is sticky and retires a daemon that is serving perfectly well.
-      const dir = mkdtempSync(join(tmpdir(), 'endpoint-identity-'))
-      const socketPath = join(dir, 'daemon.sock')
-      const server = createServer((socket) => socket.end())
-      try {
-        const bindPath = getDaemonSocketBindPath(socketPath)
-        await new Promise<void>((resolve) => server.listen(bindPath, resolve))
-        linkSync(bindPath, socketPath)
-        unlinkSync(bindPath)
-        const owned = readDaemonSocketIdentity(socketPath)
-
-        expect(readDaemonEndpointOwnershipState(socketPath, owned)).toBe('owned')
-
-        const staleBirthTime = { ...(owned as NonNullable<typeof owned>), birthtimeNs: 0n }
-        expect(readDaemonEndpointOwnershipState(socketPath, staleBirthTime)).toBe('owned')
-      } finally {
-        await new Promise<void>((resolve) => server.close(() => resolve()))
-        rmSync(dir, { recursive: true, force: true })
-      }
-    }
-  )
-
-  it.skipIf(process.platform === 'win32')(
-    'distinguishes incarnations that differ by less than a millisecond',
-    async () => {
-      // Why nanoseconds: Linux can recycle an inode number well inside a millisecond, so at
-      // millisecond resolution a replacement landing on the recycled number compares equal to
-      // the entry it replaced — exactly what the continuity rule exists to catch, and it would
-      // rename over a live daemon it never proved dead.
-      const dir = mkdtempSync(join(tmpdir(), 'endpoint-incarnation-ns-'))
-      const socketPath = join(dir, 'daemon.sock')
-      const server = createServer((socket) => socket.end())
-      try {
-        const bindPath = getDaemonSocketBindPath(socketPath)
-        await new Promise<void>((resolve) => server.listen(bindPath, resolve))
-        linkSync(bindPath, socketPath)
-        unlinkSync(bindPath)
-        const owned = readDaemonSocketIdentity(socketPath)
-        expect(owned).not.toBeNull()
-
-        // A different incarnation that lands in the same millisecond.
-        // Step toward the middle of the millisecond, so the fabricated value cannot cross the
-        // boundary and make this assertion depend on when the socket happened to be created.
-        const ownedNs = (owned as NonNullable<typeof owned>).birthtimeNs
-        const sameMillisecond = {
-          ...(owned as NonNullable<typeof owned>),
-          birthtimeNs: ownedNs % 1000000n >= 500000n ? ownedNs - 1n : ownedNs + 1n
-        }
-        expect(sameMillisecond.birthtimeNs / 1000000n).toBe(
-          (owned as NonNullable<typeof owned>).birthtimeNs / 1000000n
-        )
-        const ownedEntry = owned as NonNullable<typeof owned>
-        expect(daemonEndpointEntriesMatch(ownedEntry, sameMillisecond)).toBe(false)
-        expect(daemonEndpointEntriesMatch(ownedEntry, ownedEntry)).toBe(true)
-      } finally {
-        await new Promise<void>((resolve) => server.close(() => resolve()))
-        rmSync(dir, { recursive: true, force: true })
-      }
-    }
-  )
-
-  it('does not treat an absent or sentinel birth time as a match', () => {
-    // Why: an absent field on both sides compares equal, which would silently turn the
-    // incarnation rule back into the inode-only rule — the exact failure it exists to prevent.
-    const base = { dev: 1n, ino: 2n, birthtimeNs: 3n }
-    const noBirthTime = { dev: 1n, ino: 2n } as unknown as typeof base
-    // The epoch is what a filesystem without a birth time reports, so it is a non-value too —
-    // and two entries both reporting it would otherwise look like proof of continuity.
-    const epochBirthTime = { dev: 1n, ino: 2n, birthtimeNs: 0n }
-
-    expect(daemonEndpointEntriesMatch(base, base)).toBe(true)
-    expect(daemonEndpointEntriesMatch(noBirthTime, noBirthTime)).toBe(false)
-    expect(daemonEndpointEntriesMatch(base, noBirthTime)).toBe(false)
-    expect(daemonEndpointEntriesMatch(epochBirthTime, epochBirthTime)).toBe(false)
-    expect(daemonEndpointEntriesMatch(base, epochBirthTime)).toBe(false)
-  })
-
   it.skipIf(process.platform === 'win32')(
     'reports lost when the name resolves to a different inode',
     async () => {
