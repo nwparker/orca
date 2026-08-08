@@ -257,6 +257,38 @@ describe('daemon server error handling', () => {
     }
   )
 
+  it.skipIf(process.platform === 'win32')(
+    'still answers the refusal when losing the endpoint also begins shutdown',
+    async () => {
+      // Why: the guard retires synchronously, and with nothing to drain that begins shutdown
+      // before the reply is written. The client must still receive the refusal it can retry on;
+      // a dropped connection here would surface as an opaque failure instead of a reconnect.
+      server = new DaemonServer({
+        socketPath,
+        tokenPath,
+        spawnSubprocess: () => createMockSubprocess()
+      })
+      await server.start()
+      client = new DaemonClient({ socketPath, tokenPath })
+      await client.ensureConnected()
+
+      const usurper = createServer()
+      const usurperBind = join(dir, '.u5')
+      await new Promise<void>((resolve) => usurper.listen(usurperBind, resolve))
+      try {
+        unlinkSync(socketPath)
+        linkSync(usurperBind, socketPath)
+
+        // No sessions, so retiring drains immediately and shutdown starts inside this call.
+        await expect(
+          client.request('createOrAttach', { sessionId: 'x', cols: 80, rows: 24 })
+        ).rejects.toThrow(/no longer owns its endpoint/)
+      } finally {
+        await new Promise<void>((resolve) => usurper.close(() => resolve()))
+      }
+    }
+  )
+
   it('keeps serving after an operational server error instead of dying', async () => {
     // Why: an unhandled 'error' on a net.Server is an uncaught exception. Detaching the startup
     // listener once start() settled left a daemon hosting every terminal on the machine one
