@@ -460,12 +460,9 @@ export class DaemonServer {
   /**
    * Reads endpoint ownership, and keeps the watchdog's loss streak honest while doing it.
    *
-   * Both callers come through here because the watchdog retires on *consecutive* losses: an
-   * admission-time read that skipped the streak let two losses separated by an owned observation
-   * count as consecutive, permanently poisoning a healthy daemon into refusing every session.
-   *
-   * They still act on different thresholds — admission refuses on one loss, the watchdog wants
-   * two — so only the streak accounting is shared.
+   * Both callers come through here because the watchdog retires on *consecutive* losses: a read
+   * that skipped the streak let two losses separated by an owned observation count as consecutive,
+   * poisoning a healthy daemon. Only the accounting is shared — admission refuses on one loss.
    */
   private observeEndpointOwnership(): DaemonEndpointOwnershipState {
     // The running check, not just `shutdownPromise`: both shutdown routes close the server
@@ -486,12 +483,9 @@ export class DaemonServer {
   }
 
   private requestRetirementForLostEndpoint(): void {
-    // Why the flag is recorded before any dedup, and not gated on retirement: a daemon can
-    // already be retiring for an unrelated reason — the last authenticated client disconnecting
-    // while a session runs, say. Losing the endpoint is a different fact about it, and treating
-    // the two as one meant the loss went unrecorded whenever a retirement was already pending.
-    // A later hello then found no remembered loss, cleared the retirement, and put a daemon that
-    // demonstrably could not be reached back into ordinary service.
+    // Recorded before any dedup and not gated on retirement: a daemon can already be retiring for
+    // an unrelated reason, and folding the two together left the loss unrecorded — a later hello
+    // then cleared the retirement and returned an unreachable daemon to service.
     const alreadyLost = this.endpointOwnershipLost
     this.endpointOwnershipLost = true
     this.ownedSocketIdentity = null
@@ -502,8 +496,7 @@ export class DaemonServer {
       )
     }
     this.retirementRequested = true
-    // Why stop it here: the identity it compares against was just cleared, so every later tick
-    // early-returns. Harmless but pointless work on a daemon that is standing down.
+    // The identity it compares against was just cleared, so every later tick early-returns.
     this.stopEndpointOwnershipWatch()
     this.reevaluateIdleShutdown()
   }
