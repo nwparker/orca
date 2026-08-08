@@ -65,6 +65,11 @@ A starting daemon runs exactly this:
    instant at which the canonical name is absent**, so no client and no concurrent daemon can
    observe a gap.
 
+   Both readings classify three ways, exactly as step 3 does: something answered, nothing can be
+   serving, or nothing was established. Only the middle one permits the rename — a probe that
+   timed out proves no more here than it does there, and calling it an owner would send the
+   caller off to adopt a daemon that may not exist.
+
    The second probe is there because the entry proved dead can be unlinked and its inode number
    handed straight back to a replacement, which then matches on `dev`+`ino` and looks like
    continuity. An earlier version used the file's birth time to separate those. That cannot be
@@ -74,6 +79,11 @@ A starting daemon runs exactly this:
    identical birth time. Three attempts to patch around those produced three further defects.
    Whether something is _serving_ is the property that actually matters, and connecting answers
    it directly, so that is what the protocol asks.
+
+   **This narrows the race; it does not close it.** The probe and the `rename` are still two
+   syscalls, and a publisher preempted between them can replace an entry that went live in the
+   gap. What the probe changed is that the check inside that gap became sound — see "The step 4
+   window, stated properly" below for what that does and does not buy.
 
 5. **Verify we kept it.** `stat` the canonical path and compare against the identity of the
    inode we bound. If it is not ours, another daemon replaced us in the microseconds after our
@@ -87,11 +97,8 @@ A starting daemon runs exactly this:
 
    The identity recorded at this step is the one read **after** publishing, not the one read
    before it. That matters because this value is what the ownership watchdog later compares the
-   entry against, and that comparison does include `birthtimeMs` — which Node documents as
-   sometimes holding the ctime instead, on Linux kernels without `statx`. `link` and `rename`
-   both bump ctime, so a pre-publish reading could never match again on such a host, and the
-   daemon would declare itself lost on its first session and stand down permanently. Invisible on
-   APFS and on CI, which is why it is asserted by a test that simulates the ctime fallback.
+   entry against, so it must describe the entry as it now stands rather than as it was before the
+   link or rename that published it.
 
 ## Empirical validation
 

@@ -480,6 +480,39 @@ describe('publishDaemonEndpoint', () => {
     }
   })
 
+  unixIt('declines rather than claims an owner when the second probe proves nothing', async () => {
+    // Why: the probe taken immediately before replacing has exactly the authority of the first
+    // one. A timeout or an EPERM there proves no live incumbent, and reporting 'occupied' would
+    // send the launcher off to adopt a daemon that may not exist.
+    const directory = makeTempDir()
+    const canonicalPath = join(directory, 'd')
+    const deadBind = getDaemonSocketBindPath(canonicalPath)
+    const newcomerPath = getDaemonSocketBindPath(canonicalPath)
+    const dead = await listen(deadBind)
+    const newcomer = await listen(newcomerPath)
+    try {
+      await publishListener(deadBind, canonicalPath)
+      await close(dead.server)
+      const deadEntry = readDaemonSocketIdentity(canonicalPath)
+
+      // Dead on the first ask, unclassifiable on the second.
+      let asked = 0
+      const probe = async () => {
+        asked += 1
+        return asked === 1 ? ('refused' as const) : ('unknown' as const)
+      }
+
+      const outcome = await publishDaemonEndpoint(newcomerPath, canonicalPath, probe)
+
+      expect(outcome).toEqual({ status: 'inconclusive' })
+      expect(readDaemonSocketIdentity(canonicalPath)).toEqual(deadEntry)
+      expect(newcomer.connections()).toBe(0)
+    } finally {
+      await Promise.all([close(dead.server), close(newcomer.server)])
+      rmSync(directory, { recursive: true, force: true })
+    }
+  })
+
   unixIt('refuses to serve a bound endpoint it cannot identify', async () => {
     // Why: without the bound identity we can neither verify the publish nor arm the ownership
     // watchdog, so we would serve a name we could never check. Startup has nothing to protect.

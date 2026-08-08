@@ -25,12 +25,11 @@ const PUBLISH_ATTEMPTS = 3
  */
 
 /**
- * A daemon endpoint, identified well enough to tell one incarnation from another.
+ * A daemon endpoint, identified by its directory entry.
  *
- * The birth time is carried at nanosecond resolution and is not always wanted: it distinguishes a freed-and-recycled inode
- * number from the original, which matters only where the inode could have been freed between the
- * two readings. Where a live listener holds it open, dev+ino is already decisive and comparing
- * birth time only adds risk. The two rules below say which is which.
+ * Deliberately dev+ino and nothing else. Distinguishing one incarnation of a recycled inode
+ * number from another once used the file's birth time; that field cannot carry it, and the one
+ * place needing the distinction now asks whether anything is serving instead.
  */
 export type DaemonSocketIdentity = { dev: bigint; ino: bigint }
 
@@ -217,8 +216,16 @@ async function replaceProvenDeadEndpoint(
   // like continuity. Birth time was used to tell those apart and cannot be trusted to — it may
   // be the ctime, the epoch, or coarser than the events it must separate. Whether something is
   // serving is the property that actually matters, and connecting answers it directly.
-  if (!endpointIsProvenDead(await probeEndpointSafely(canonicalPath, probeEndpoint))) {
+  const stillDead = await probeEndpointSafely(canonicalPath, probeEndpoint)
+  if (stillDead === 'connected') {
     return { status: 'occupied' }
+  }
+  if (!endpointIsProvenDead(stillDead)) {
+    // Why the same three-way split as the first probe: a timeout or an EPERM here proves no more
+    // than it does there. Calling it 'occupied' would tell the launcher a live daemon owns the
+    // name and send it off to adopt one that may not exist; 'inconclusive' declines, which is
+    // what was actually established.
+    return { status: 'inconclusive' }
   }
   renameSync(boundPath, canonicalPath)
   // null means "the name is ours now" — the caller still has to confirm it kept it.
@@ -292,15 +299,10 @@ function confirmPublishedEndpoint(
     return isMissingFileError(error) ? { status: 'lost' } : { status: 'inconclusive' }
   }
   // Why the fresh reading is recorded and not the one taken before publishing: this identity
-  // becomes what the ownership watchdog compares the entry against, and that comparison includes
-  // the birth time. Node documents it as sometimes holding the ctime instead — libuv fills
-  // it from st_ctim on Linux kernels without statx, or where seccomp blocks it. link and rename
-  // both bump ctime, so a pre-publish reading could never match the entry again on such a host,
-  // and the daemon would declare itself lost on its first session and stand down for good.
-  // dev+ino still bind this to our own inode, so nothing is given up by reading it after.
-  // isSameInode, not the incarnation rule: these readings straddle the link or rename that
-  // published the name, which bumps ctime — and the birth time may BE ctime. Our own listener holds
-  // the inode open, so its number cannot be recycled and dev+ino is decisive on its own.
+  // becomes what the ownership watchdog compares the entry against, so it must describe the
+  // entry as it now stands rather than as it was before the link or rename that published it.
+  // Our own listener holds the inode open, so its number cannot be recycled while we ask, which
+  // makes dev+ino decisive here.
   return isSameInode(published, identity)
     ? { status: 'published', identity: published }
     : { status: 'lost' }
@@ -369,10 +371,9 @@ export function readDaemonEndpointOwnershipState(
     const stats = statSync(socketPath, { bigint: true })
     // dev+ino, not the incarnation rule: `owned` is this daemon's own bound socket and its
     // listener is still open whenever this runs, so the kernel cannot free that inode or hand
-    // its number to anything else. Recycling — the only thing birthtime guards against — is
-    // impossible here, while comparing it would add a way to report a false loss if anything
-    // bumps our inode's ctime, since the birth time may BE ctime. A false loss is the expensive
-    // direction: it is sticky, and it retires a daemon that is serving perfectly well.
+    // its number to anything else, so recycling cannot happen here and dev+ino settles it. A
+    // false loss is the expensive direction: it is sticky, and it retires a daemon that is
+    // serving perfectly well.
     return isSameInode({ dev: stats.dev, ino: stats.ino }, owned) ? 'owned' : 'lost'
   } catch (error) {
     // Why: a stat that failed for any reason other than "the entry is gone" proves nothing.
