@@ -11,17 +11,23 @@ import { getDaemonSocketPath } from './daemon-spawner'
 import type { SubprocessHandle } from './session'
 import { waitForEndpointUnreachable } from './daemon-endpoint-reachability-test-harness'
 
+// A killed process must actually report its exit: teardown waits
+// IMMEDIATE_KILL_PHYSICAL_EXIT_TIMEOUT_MS for one that never does.
 function createMockSubprocess(): SubprocessHandle {
+  let notifyExit: ((code: number) => void) | null = null
+  const exit = (): void => notifyExit?.(0)
   return {
     pid: 44444,
     getForegroundProcess: () => null,
     write() {},
     resize() {},
-    kill() {},
-    forceKill() {},
+    kill: exit,
+    forceKill: exit,
     signal() {},
     onData() {},
-    onExit() {},
+    onExit(callback) {
+      notifyExit = callback
+    },
     dispose() {}
   }
 }
