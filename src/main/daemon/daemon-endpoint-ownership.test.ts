@@ -50,13 +50,15 @@ function createMockSubprocess(): SubprocessHandle {
 
 describe('endpoint ownership identity rules', () => {
   it.skipIf(process.platform === 'win32')(
-    'reports lost when the endpoint is a different incarnation of the same inode number',
+    'stays owned when only the recorded birth time differs',
     async () => {
-      // Why birthtime is load-bearing here, unlike in the post-publish check: this compares
-      // against an inode that may have been freed, and Linux hands the number straight back to
-      // the next socket. Inode-only would report a recycled replacement as still ours, so the
-      // daemon would keep serving sessions on an endpoint it no longer owns — the original bug.
-      const dir = mkdtempSync(join(tmpdir(), 'endpoint-incarnation-'))
+      // Why birth time must NOT decide this: the identity being matched is this daemon's own
+      // bound socket, whose listener is open, so the kernel cannot free that inode or reuse its
+      // number — recycling, the only thing birth time guards against, cannot happen here. But
+      // birthtimeMs may actually hold the ctime (libuv on Linux without statx), and link, rename
+      // and unlink all bump ctime. Comparing it would let an unrelated ctime bump report a false
+      // loss, which is sticky and retires a daemon that is serving perfectly well.
+      const dir = mkdtempSync(join(tmpdir(), 'endpoint-identity-'))
       const socketPath = join(dir, 'daemon.sock')
       const server = createServer((socket) => socket.end())
       try {
@@ -68,11 +70,39 @@ describe('endpoint ownership identity rules', () => {
 
         expect(readDaemonEndpointOwnershipState(socketPath, owned)).toBe('owned')
 
-        // Same device and inode number, different incarnation — what recycling looks like.
-        const recycled = { ...(owned as NonNullable<typeof owned>), birthtimeMs: 0 }
-        expect(readDaemonEndpointOwnershipState(socketPath, recycled)).toBe('lost')
+        const staleBirthTime = { ...(owned as NonNullable<typeof owned>), birthtimeMs: 0 }
+        expect(readDaemonEndpointOwnershipState(socketPath, staleBirthTime)).toBe('owned')
       } finally {
         await new Promise<void>((resolve) => server.close(() => resolve()))
+        rmSync(dir, { recursive: true, force: true })
+      }
+    }
+  )
+
+  it.skipIf(process.platform === 'win32')(
+    'reports lost when the name resolves to a different inode',
+    async () => {
+      // The loss that is real: another daemon's socket now holds the name.
+      const dir = mkdtempSync(join(tmpdir(), 'endpoint-identity-lost-'))
+      const socketPath = join(dir, 'daemon.sock')
+      const ours = createServer((socket) => socket.end())
+      const usurper = createServer((socket) => socket.end())
+      try {
+        const ourBind = getDaemonSocketBindPath(socketPath)
+        await new Promise<void>((resolve) => ours.listen(ourBind, resolve))
+        linkSync(ourBind, socketPath)
+        unlinkSync(ourBind)
+        const owned = readDaemonSocketIdentity(socketPath)
+
+        const theirBind = join(dir, '.usurp')
+        await new Promise<void>((resolve) => usurper.listen(theirBind, resolve))
+        unlinkSync(socketPath)
+        linkSync(theirBind, socketPath)
+
+        expect(readDaemonEndpointOwnershipState(socketPath, owned)).toBe('lost')
+      } finally {
+        await new Promise<void>((resolve) => ours.close(() => resolve()))
+        await new Promise<void>((resolve) => usurper.close(() => resolve()))
         rmSync(dir, { recursive: true, force: true })
       }
     }

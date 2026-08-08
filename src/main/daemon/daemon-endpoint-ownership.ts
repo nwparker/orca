@@ -364,9 +364,13 @@ export function readDaemonEndpointOwnershipState(
   }
   try {
     const stats = statSync(socketPath, { bigint: true })
-    // The incarnation rule: nothing here straddles a publish, and the entry we are matching
-    // against can have been replaced by a socket that landed on a recycled inode number.
-    return isSameInodeIncarnation(
+    // dev+ino, not the incarnation rule: `owned` is this daemon's own bound socket and its
+    // listener is still open whenever this runs, so the kernel cannot free that inode or hand
+    // its number to anything else. Recycling — the only thing birthtime guards against — is
+    // impossible here, while comparing it would add a way to report a false loss if anything
+    // bumps our inode's ctime, since birthtimeMs may BE ctime. A false loss is the expensive
+    // direction: it is sticky, and it retires a daemon that is serving perfectly well.
+    return isSameInode(
       { dev: stats.dev, ino: stats.ino, birthtimeMs: Number(stats.birthtimeMs) },
       owned
     )
