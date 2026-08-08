@@ -526,6 +526,9 @@ export class DaemonServer {
       )
     }
     this.retirementRequested = true
+    // Why stop it here: the identity it compares against was just cleared, so every later tick
+    // early-returns. Harmless but pointless work on a daemon that is standing down.
+    this.stopEndpointOwnershipWatch()
     this.reevaluateIdleShutdown()
   }
 

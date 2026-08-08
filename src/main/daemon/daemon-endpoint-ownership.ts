@@ -164,15 +164,6 @@ export async function publishDaemonEndpoint(
   return { status: 'inconclusive' }
 }
 
-/**
- * Replaces an occupied endpoint name, but only once nothing can be serving it.
- *
- * Why `rename` and not unlink-then-link: unlink-then-link leaves the canonical name absent
- * between the two calls, and every concurrent observer — a connecting client, another daemon's
- * publish, the ownership watchdog — can land in that gap and conclude something false. Measured
- * across a live handover, rename exposed no gap in thousands of probes where unlink-then-link
- * gapped on essentially every observation.
- */
 /** A probe that threw classified nothing, which is never proof of death. */
 async function probeEndpointSafely(
   canonicalPath: string,
@@ -185,6 +176,15 @@ async function probeEndpointSafely(
   }
 }
 
+/**
+ * Replaces an occupied endpoint name, but only once nothing can be serving it.
+ *
+ * Why `rename` and not unlink-then-link: unlink-then-link leaves the canonical name absent
+ * between the two calls, and every concurrent observer — a connecting client, another daemon's
+ * publish, the ownership watchdog — can land in that gap and conclude something false. Measured
+ * across a live handover, rename exposed no gap in thousands of probes where unlink-then-link
+ * gapped on essentially every observation.
+ */
 async function replaceProvenDeadEndpoint(
   boundPath: string,
   canonicalPath: string,
@@ -309,11 +309,6 @@ function confirmPublishedEndpoint(
 }
 
 /**
- * Whether `link` failed because the filesystem cannot do it at all, rather than because the name
- * was taken. Some POSIX and FUSE filesystems accept a bound Unix socket and `rename` but refuse
- * hard links; on those, requiring the link would mean no daemon persistence at all.
- */
-/**
  * Identity of the directory entry itself, not of whatever it resolves to.
  *
  * Why `lstat` here and `stat` elsewhere: the continuity check asks "is this still the entry I
@@ -333,6 +328,11 @@ function readDaemonEndpointEntryIdentity(socketPath: string): DaemonSocketIdenti
   }
 }
 
+/**
+ * Whether `link` failed because the filesystem cannot do it at all, rather than because the name
+ * was taken. Some POSIX and FUSE filesystems accept a bound Unix socket and `rename` but refuse
+ * hard links; on those, requiring the link would mean no daemon persistence at all.
+ */
 function isLinkUnsupportedError(error: unknown): boolean {
   if (typeof error !== 'object' || error === null || !('code' in error)) {
     return false

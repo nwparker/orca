@@ -843,10 +843,17 @@ function createOutOfProcessLauncher(
         console.warn(
           '[daemon] Endpoint was taken by another daemon during startup — adopting it instead'
         )
+        // Why pidPath: adopting reconciles the PID record against the identity the daemon
+        // reports over hello, repairing a record that names the wrong incarnation. Every other
+        // adoption path passes it; this one skipped it, so the incumbent we adopt here was the
+        // only one whose record never got that repair.
         return await holdDaemonAdoptionLease(
           createPreservedDaemonHandle(runtimeDir),
           socketPath,
-          tokenPath
+          tokenPath,
+          undefined,
+          undefined,
+          pidPath
         )
       }
 
