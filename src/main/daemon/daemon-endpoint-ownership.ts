@@ -25,9 +25,12 @@ const PUBLISH_ATTEMPTS = 3
  */
 
 /**
- * The exact endpoint a daemon owns. `birthtimeMs` is not redundant: Linux reuses inode numbers
- * as soon as the inode is freed, so dev+ino alone will happily match a replacement socket that
- * landed on the recycled number — the entry we must never mistake for our own.
+ * A daemon endpoint, identified well enough to tell one incarnation from another.
+ *
+ * `birthtimeMs` is carried but is not always wanted: it distinguishes a freed-and-recycled inode
+ * number from the original, which matters only where the inode could have been freed between the
+ * two readings. Where a live listener holds it open, dev+ino is already decisive and comparing
+ * birth time only adds risk. The two rules below say which is which.
  */
 export type DaemonSocketIdentity = { dev: bigint; ino: bigint; birthtimeMs: number }
 
@@ -213,9 +216,10 @@ async function replaceProvenDeadEndpoint(
  * healthy daemon gets declared lost forever.
  *
  * `birthtimeMs` is NOT reliably a birth time. Node documents it as sometimes holding the ctime
- * instead — libuv fills it from `st_ctim` on Linux kernels without `statx`. `link`, `rename` and
- * `unlink` all bump ctime. So the field is only meaningful between two readings with no such
- * syscall between them.
+ * instead — libuv fills it from `st_ctim` on Linux kernels without `statx`. Anything that
+ * changes an inode's metadata then changes it: `link`, `rename` and `unlink` from this code, but
+ * equally a `chmod` or a hard link taken by some other process entirely. So it is only worth
+ * comparing across a short interval this code fully controls, and never across one it does not.
  */
 
 /**
@@ -228,8 +232,9 @@ function isSameInode(a: DaemonSocketIdentity, b: DaemonSocketIdentity): boolean 
 
 /**
  * Same inode *and* same incarnation of it. Use when the inode being compared may have been freed
- * between the readings — Linux hands the number straight back — and nothing between them mutates
- * it. Strictly stronger than `isSameInode`, and wrong to use across a publish.
+ * between the readings — Linux hands the number straight back — and the interval is short and
+ * under this code's control. Strictly stronger than `isSameInode`, and wrong across a publish or
+ * across any interval long enough for another process to touch the inode's metadata.
  */
 function isSameInodeIncarnation(a: DaemonSocketIdentity, b: DaemonSocketIdentity): boolean {
   return isSameInode(a, b) && a.birthtimeMs === b.birthtimeMs
@@ -238,17 +243,16 @@ function isSameInodeIncarnation(a: DaemonSocketIdentity, b: DaemonSocketIdentity
 /**
  * Absent-and-still-absent counts as unchanged; one side absent does not.
  *
- * Why birthtime here but not in the post-publish check: the entry being compared is one we
- * believe is dead, so its inode can be freed and Linux hands the number straight back — a
- * replacement landing on the recycled number would compare equal and we would rename over a
+ * Why the incarnation rule here and not at the post-publish check: the entry being compared is
+ * one we believe is dead, so its inode can be freed — and Linux hands the number straight back.
+ * A replacement landing on the recycled number would compare equal, and we would rename over a
  * live daemon we never proved dead.
  *
- * Why comparing it is safe *here* specifically: both readings bracket a probe and nothing
- * between them mutates the inode, so the field is stable whatever it actually holds, and a false
- * "changed" costs one cheap retry. That is not a general licence. Node documents birthtimeMs as
- * sometimes holding the ctime rather than a birth time — libuv fills it from st_ctim on Linux
- * kernels without statx — and link, rename and unlink all bump ctime. Any comparison spanning
- * one of those must read both sides after it, not before.
+ * Why the ctime hazard is tolerable here: the two readings bracket only a probe, so this code
+ * mutates nothing between them. Another process still could, and on a host where the field is
+ * really ctime that reads as a change — but the cost of being wrong in that direction is a
+ * single retry. That is exactly why the same comparison is wrong at the ownership check, where
+ * being wrong retires a daemon that is serving.
  */
 function isSameEndpointEntry(
   a: DaemonSocketIdentity | null,
