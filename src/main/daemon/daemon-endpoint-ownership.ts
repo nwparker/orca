@@ -251,11 +251,23 @@ export function daemonEndpointEntriesMatch(
   return isSameInodeIncarnation(a, b)
 }
 
+/**
+ * Whether a reported birth time carries information at all.
+ *
+ * Why zero counts as absent: filesystems without a birth time report it as the epoch, and libuv
+ * substitutes ctime elsewhere. Two entries both reporting the epoch would compare equal, which
+ * is worse than not comparing — it looks like proof of continuity while proving nothing.
+ */
+function isUsableBirthTime(birthtimeNs: bigint): boolean {
+  return typeof birthtimeNs === 'bigint' && birthtimeNs > 0n
+}
+
 function isSameInodeIncarnation(a: DaemonSocketIdentity, b: DaemonSocketIdentity): boolean {
-  if (typeof a.birthtimeNs !== 'bigint' || typeof b.birthtimeNs !== 'bigint') {
-    // Why not just compare: an absent field on both sides would compare equal and silently turn
-    // this back into the inode-only rule, which is the failure it exists to prevent. Refusing to
-    // match instead costs a retry at the one call site that uses it.
+  if (!isUsableBirthTime(a.birthtimeNs) || !isUsableBirthTime(b.birthtimeNs)) {
+    // Why not just compare: where the field is absent or a sentinel, both sides carry the same
+    // non-value and compare equal — silently turning this back into the inode-only rule, which
+    // is the failure it exists to prevent. Refusing to match instead costs a retry at the one
+    // call site that uses it, and a retry is always the cheap direction here.
     return false
   }
   return isSameInode(a, b) && a.birthtimeNs === b.birthtimeNs

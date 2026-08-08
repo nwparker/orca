@@ -99,9 +99,12 @@ describe('endpoint ownership identity rules', () => {
         expect(owned).not.toBeNull()
 
         // A different incarnation that lands in the same millisecond.
+        // Step toward the middle of the millisecond, so the fabricated value cannot cross the
+        // boundary and make this assertion depend on when the socket happened to be created.
+        const ownedNs = (owned as NonNullable<typeof owned>).birthtimeNs
         const sameMillisecond = {
           ...(owned as NonNullable<typeof owned>),
-          birthtimeNs: (owned as NonNullable<typeof owned>).birthtimeNs + 1n
+          birthtimeNs: ownedNs % 1000000n >= 500000n ? ownedNs - 1n : ownedNs + 1n
         }
         expect(sameMillisecond.birthtimeNs / 1000000n).toBe(
           (owned as NonNullable<typeof owned>).birthtimeNs / 1000000n
@@ -116,15 +119,20 @@ describe('endpoint ownership identity rules', () => {
     }
   )
 
-  it('does not treat a missing birth time as a match', () => {
+  it('does not treat an absent or sentinel birth time as a match', () => {
     // Why: an absent field on both sides compares equal, which would silently turn the
     // incarnation rule back into the inode-only rule — the exact failure it exists to prevent.
     const base = { dev: 1n, ino: 2n, birthtimeNs: 3n }
     const noBirthTime = { dev: 1n, ino: 2n } as unknown as typeof base
+    // The epoch is what a filesystem without a birth time reports, so it is a non-value too —
+    // and two entries both reporting it would otherwise look like proof of continuity.
+    const epochBirthTime = { dev: 1n, ino: 2n, birthtimeNs: 0n }
 
     expect(daemonEndpointEntriesMatch(base, base)).toBe(true)
     expect(daemonEndpointEntriesMatch(noBirthTime, noBirthTime)).toBe(false)
     expect(daemonEndpointEntriesMatch(base, noBirthTime)).toBe(false)
+    expect(daemonEndpointEntriesMatch(epochBirthTime, epochBirthTime)).toBe(false)
+    expect(daemonEndpointEntriesMatch(base, epochBirthTime)).toBe(false)
   })
 
   it.skipIf(process.platform === 'win32')(
