@@ -26,6 +26,7 @@ import { unlinkOwnedDaemonPidFile, unlinkOwnedDaemonTokenFile } from './daemon-s
 import {
   DAEMON_ENDPOINT_LOST_MESSAGE,
   DaemonEndpointUnavailableError,
+  type DaemonEndpointOwnershipState,
   getDaemonSocketBindPath,
   publishDaemonEndpoint,
   readDaemonEndpointOwnershipState,
@@ -447,16 +448,9 @@ export class DaemonServer {
     if (process.platform === 'win32' || !this.ownedSocketIdentity || this.shutdownPromise) {
       return
     }
-    const state = readDaemonEndpointOwnershipState(this.socketPath, this.ownedSocketIdentity)
-    if (state === 'owned') {
-      this.endpointOwnershipLossStreak = 0
-      return
-    }
-    if (state === 'indeterminate') {
-      // Why: an inconclusive stat proves nothing. Retiring on EACCES or EIO would take down a
-      // daemon that is still serving every terminal on the machine. Reset the streak too, so
-      // the confirmations we act on are consecutive rather than merely cumulative.
-      this.endpointOwnershipLossStreak = 0
+    // Why an inconclusive stat also resets: it proves nothing, and retiring on EACCES or EIO
+    // would take down a daemon still serving every terminal on the machine.
+    if (this.observeEndpointOwnership() !== 'lost') {
       return
     }
     this.endpointOwnershipLossStreak++
@@ -480,10 +474,27 @@ export class DaemonServer {
     if (this.endpointOwnershipLost) {
       return true
     }
+    return this.observeEndpointOwnership() === 'lost'
+  }
+
+  /**
+   * Reads endpoint ownership, and keeps the watchdog's loss streak honest while doing it.
+   *
+   * Why both callers come through here: the watchdog retires on *consecutive* losses, but an
+   * admission-time read is exactly as authoritative and used to return its answer without
+   * touching the streak. A positive reading taken outside the watchdog therefore did not break
+   * the run, so two losses separated by a demonstrably owned observation counted as consecutive
+   * — permanently poisoning a healthy, reachable daemon into refusing every later session.
+   */
+  private observeEndpointOwnership(): DaemonEndpointOwnershipState {
     if (process.platform === 'win32' || !this.ownedSocketIdentity) {
-      return false
+      return 'indeterminate'
     }
-    return readDaemonEndpointOwnershipState(this.socketPath, this.ownedSocketIdentity) === 'lost'
+    const state = readDaemonEndpointOwnershipState(this.socketPath, this.ownedSocketIdentity)
+    if (state !== 'lost') {
+      this.endpointOwnershipLossStreak = 0
+    }
+    return state
   }
 
   private requestRetirementForLostEndpoint(): void {

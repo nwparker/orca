@@ -332,6 +332,57 @@ describe('daemon server error handling', () => {
     }
   )
 
+  it.skipIf(process.platform === 'win32')(
+    'does not retire on losses separated by a demonstrably owned observation',
+    async () => {
+      // Why: the watchdog retires on CONSECUTIVE losses, but an admission-time ownership read is
+      // just as authoritative. When it did not reset the streak, two losses with a positive
+      // owned reading between them counted as consecutive — permanently poisoning a healthy,
+      // reachable daemon into refusing every later session.
+      server = new DaemonServer({
+        socketPath,
+        tokenPath,
+        spawnSubprocess: () => createMockSubprocess()
+      })
+      await server.start()
+      const daemon = server as unknown as {
+        checkEndpointOwnership: () => void
+        hasLostEndpointOwnership: () => boolean
+        endpointOwnershipLost: boolean
+        endpointOwnershipLossStreak: number
+      }
+      // A second name for our own socket inode, so ownership can be handed back.
+      const ourAlias = join(dir, '.ours')
+      linkSync(socketPath, ourAlias)
+
+      const usurper = createServer()
+      const usurperBind = join(dir, '.u7')
+      await new Promise<void>((resolve) => usurper.listen(usurperBind, resolve))
+      try {
+        // First loss.
+        unlinkSync(socketPath)
+        linkSync(usurperBind, socketPath)
+        daemon.checkEndpointOwnership()
+        expect(daemon.endpointOwnershipLossStreak).toBe(1)
+        expect(daemon.endpointOwnershipLost).toBe(false)
+
+        // Ownership demonstrably returns, observed through the admission path.
+        unlinkSync(socketPath)
+        linkSync(ourAlias, socketPath)
+        expect(daemon.hasLostEndpointOwnership()).toBe(false)
+        expect(daemon.endpointOwnershipLossStreak).toBe(0)
+
+        // A later isolated loss is confirmation #1, not #2, so it must not retire.
+        unlinkSync(socketPath)
+        linkSync(usurperBind, socketPath)
+        daemon.checkEndpointOwnership()
+        expect(daemon.endpointOwnershipLost).toBe(false)
+      } finally {
+        await new Promise<void>((resolve) => usurper.close(() => resolve()))
+      }
+    }
+  )
+
   it('keeps serving after an operational server error instead of dying', async () => {
     // Why: an unhandled 'error' on a net.Server is an uncaught exception. Detaching the startup
     // listener once start() settled left a daemon hosting every terminal on the machine one
