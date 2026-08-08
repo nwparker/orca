@@ -299,7 +299,7 @@ describe('publishDaemonEndpoint', () => {
             const stats = actual.lstatSync(target, options as never) as unknown as {
               dev: bigint
               ino: bigint
-              birthtimeMs: bigint
+              birthtimeNs: bigint
             }
             if (target !== canonicalPath) {
               return stats
@@ -308,14 +308,14 @@ describe('publishDaemonEndpoint', () => {
             return {
               dev: stats.dev,
               ino: stats.ino,
-              birthtimeMs: stats.birthtimeMs + BigInt(canonicalStats)
+              birthtimeNs: stats.birthtimeNs + BigInt(canonicalStats)
             }
           },
           statSync: (target: string, options?: { bigint?: boolean }) => {
             const stats = actual.statSync(target, options as never) as unknown as {
               dev: bigint
               ino: bigint
-              birthtimeMs: bigint
+              birthtimeNs: bigint
             }
             if (target !== canonicalPath) {
               return stats
@@ -326,7 +326,7 @@ describe('publishDaemonEndpoint', () => {
             return {
               dev: stats.dev,
               ino: stats.ino,
-              birthtimeMs: stats.birthtimeMs + BigInt(canonicalStats)
+              birthtimeNs: stats.birthtimeNs + BigInt(canonicalStats)
             }
           }
         }
@@ -470,6 +470,7 @@ describe('publishDaemonEndpoint', () => {
     try {
       vi.doMock('node:fs', async () => {
         const actual = await vi.importActual<typeof NodeFs>('node:fs')
+        // What a host whose birth time is really the ctime reports.
         const asCtimeBirthtime = (stats: { ctimeMs: number; ctimeNs?: bigint }) => ({
           ...stats,
           birthtimeMs: stats.ctimeMs,

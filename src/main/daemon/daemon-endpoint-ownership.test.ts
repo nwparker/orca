@@ -16,6 +16,7 @@ import { join } from 'node:path'
 import { DaemonServer } from './daemon-server'
 import { getDaemonSocketPath, publishDaemonPidFile } from './daemon-spawner'
 import {
+  daemonEndpointEntriesMatch,
   getDaemonSocketBindPath,
   readDaemonEndpointOwnershipState,
   readDaemonSocketIdentity
@@ -55,7 +56,7 @@ describe('endpoint ownership identity rules', () => {
       // Why birth time must NOT decide this: the identity being matched is this daemon's own
       // bound socket, whose listener is open, so the kernel cannot free that inode or reuse its
       // number — recycling, the only thing birth time guards against, cannot happen here. But
-      // birthtimeMs may actually hold the ctime (libuv on Linux without statx), and link, rename
+      // the birth time may actually hold the ctime (libuv on Linux without statx), and link, rename
       // and unlink all bump ctime. Comparing it would let an unrelated ctime bump report a false
       // loss, which is sticky and retires a daemon that is serving perfectly well.
       const dir = mkdtempSync(join(tmpdir(), 'endpoint-identity-'))
@@ -70,8 +71,44 @@ describe('endpoint ownership identity rules', () => {
 
         expect(readDaemonEndpointOwnershipState(socketPath, owned)).toBe('owned')
 
-        const staleBirthTime = { ...(owned as NonNullable<typeof owned>), birthtimeMs: 0 }
+        const staleBirthTime = { ...(owned as NonNullable<typeof owned>), birthtimeNs: 0n }
         expect(readDaemonEndpointOwnershipState(socketPath, staleBirthTime)).toBe('owned')
+      } finally {
+        await new Promise<void>((resolve) => server.close(() => resolve()))
+        rmSync(dir, { recursive: true, force: true })
+      }
+    }
+  )
+
+  it.skipIf(process.platform === 'win32')(
+    'distinguishes incarnations that differ by less than a millisecond',
+    async () => {
+      // Why nanoseconds: Linux can recycle an inode number well inside a millisecond, so at
+      // millisecond resolution a replacement landing on the recycled number compares equal to
+      // the entry it replaced — exactly what the continuity rule exists to catch, and it would
+      // rename over a live daemon it never proved dead.
+      const dir = mkdtempSync(join(tmpdir(), 'endpoint-incarnation-ns-'))
+      const socketPath = join(dir, 'daemon.sock')
+      const server = createServer((socket) => socket.end())
+      try {
+        const bindPath = getDaemonSocketBindPath(socketPath)
+        await new Promise<void>((resolve) => server.listen(bindPath, resolve))
+        linkSync(bindPath, socketPath)
+        unlinkSync(bindPath)
+        const owned = readDaemonSocketIdentity(socketPath)
+        expect(owned).not.toBeNull()
+
+        // A different incarnation that lands in the same millisecond.
+        const sameMillisecond = {
+          ...(owned as NonNullable<typeof owned>),
+          birthtimeNs: (owned as NonNullable<typeof owned>).birthtimeNs + 1n
+        }
+        expect(sameMillisecond.birthtimeNs / 1000000n).toBe(
+          (owned as NonNullable<typeof owned>).birthtimeNs / 1000000n
+        )
+        const ownedEntry = owned as NonNullable<typeof owned>
+        expect(daemonEndpointEntriesMatch(ownedEntry, sameMillisecond)).toBe(false)
+        expect(daemonEndpointEntriesMatch(ownedEntry, ownedEntry)).toBe(true)
       } finally {
         await new Promise<void>((resolve) => server.close(() => resolve()))
         rmSync(dir, { recursive: true, force: true })

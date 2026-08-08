@@ -27,12 +27,12 @@ const PUBLISH_ATTEMPTS = 3
 /**
  * A daemon endpoint, identified well enough to tell one incarnation from another.
  *
- * `birthtimeMs` is carried but is not always wanted: it distinguishes a freed-and-recycled inode
+ * The birth time is carried at nanosecond resolution and is not always wanted: it distinguishes a freed-and-recycled inode
  * number from the original, which matters only where the inode could have been freed between the
  * two readings. Where a live listener holds it open, dev+ino is already decisive and comparing
  * birth time only adds risk. The two rules below say which is which.
  */
-export type DaemonSocketIdentity = { dev: bigint; ino: bigint; birthtimeMs: number }
+export type DaemonSocketIdentity = { dev: bigint; ino: bigint; birthtimeNs: bigint }
 
 /**
  * A private, same-directory name to bind before publishing the canonical endpoint.
@@ -215,7 +215,7 @@ async function replaceProvenDeadEndpoint(
  * Two comparison rules, named, because there are exactly two and picking the wrong one is how a
  * healthy daemon gets declared lost forever.
  *
- * `birthtimeMs` is NOT reliably a birth time. Node documents it as sometimes holding the ctime
+ * The birth time is NOT reliably a birth time. Node documents it as sometimes holding the ctime
  * instead — libuv fills it from `st_ctim` on Linux kernels without `statx`. Anything that
  * changes an inode's metadata then changes it: `link`, `rename` and `unlink` from this code, but
  * equally a `chmod` or a hard link taken by some other process entirely. So it is only worth
@@ -231,13 +231,22 @@ function isSameInode(a: DaemonSocketIdentity, b: DaemonSocketIdentity): boolean 
 }
 
 /**
- * Same inode *and* same incarnation of it. Use when the inode being compared may have been freed
+ * Same inode *and* same incarnation of it. Nanoseconds, not milliseconds: Linux can recycle an
+ * inode number well inside a millisecond, and at that resolution a replacement would compare
+ * equal to the entry it replaced — which is the one thing this rule exists to catch. Use when the inode being compared may have been freed
  * between the readings — Linux hands the number straight back — and the interval is short and
  * under this code's control. Strictly stronger than `isSameInode`, and wrong across a publish or
  * across any interval long enough for another process to touch the inode's metadata.
  */
+export function daemonEndpointEntriesMatch(
+  a: DaemonSocketIdentity,
+  b: DaemonSocketIdentity
+): boolean {
+  return isSameInodeIncarnation(a, b)
+}
+
 function isSameInodeIncarnation(a: DaemonSocketIdentity, b: DaemonSocketIdentity): boolean {
-  return isSameInode(a, b) && a.birthtimeMs === b.birthtimeMs
+  return isSameInode(a, b) && a.birthtimeNs === b.birthtimeNs
 }
 
 /**
@@ -285,7 +294,7 @@ function confirmPublishedEndpoint(
   let published: DaemonSocketIdentity | null = null
   try {
     const stats = statSync(canonicalPath, { bigint: true })
-    published = { dev: stats.dev, ino: stats.ino, birthtimeMs: Number(stats.birthtimeMs) }
+    published = { dev: stats.dev, ino: stats.ino, birthtimeNs: stats.birthtimeNs }
   } catch (error) {
     // Why not "published": the name we just took is gone, or we cannot read it. Either way we
     // have no evidence we are reachable, and a starting daemon has no sessions to protect — so
@@ -326,7 +335,7 @@ function readDaemonEndpointEntryIdentity(socketPath: string): DaemonSocketIdenti
   }
   try {
     const stats = lstatSync(socketPath, { bigint: true })
-    return { dev: stats.dev, ino: stats.ino, birthtimeMs: Number(stats.birthtimeMs) }
+    return { dev: stats.dev, ino: stats.ino, birthtimeNs: stats.birthtimeNs }
   } catch {
     return null
   }
@@ -350,7 +359,7 @@ export function readDaemonSocketIdentity(socketPath: string): DaemonSocketIdenti
   }
   try {
     const stats = statSync(socketPath, { bigint: true })
-    return { dev: stats.dev, ino: stats.ino, birthtimeMs: Number(stats.birthtimeMs) }
+    return { dev: stats.dev, ino: stats.ino, birthtimeNs: stats.birthtimeNs }
   } catch {
     return null
   }
@@ -374,10 +383,7 @@ export function readDaemonEndpointOwnershipState(
     // impossible here, while comparing it would add a way to report a false loss if anything
     // bumps our inode's ctime, since birthtimeMs may BE ctime. A false loss is the expensive
     // direction: it is sticky, and it retires a daemon that is serving perfectly well.
-    return isSameInode(
-      { dev: stats.dev, ino: stats.ino, birthtimeMs: Number(stats.birthtimeMs) },
-      owned
-    )
+    return isSameInode({ dev: stats.dev, ino: stats.ino, birthtimeNs: stats.birthtimeNs }, owned)
       ? 'owned'
       : 'lost'
   } catch (error) {

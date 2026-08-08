@@ -490,7 +490,16 @@ export class DaemonServer {
    * retiring a daemon that is still serving. Only the streak accounting is shared.
    */
   private observeEndpointOwnership(): DaemonEndpointOwnershipState {
-    if (process.platform === 'win32' || !this.ownedSocketIdentity) {
+    // Why the running check and not just `shutdownPromise`: two shutdown routes — the idle
+    // sweep and the shutdown RPC — close the server first and only assign that promise later,
+    // after deferring a reply. In that window the listener is gone while the recorded identity
+    // is not, and the inode-only rule below depends on the listener holding that inode open.
+    // Nothing acts on the answer once shutting down, so decline to give one.
+    if (
+      process.platform === 'win32' ||
+      !this.ownedSocketIdentity ||
+      this.idleShutdownState !== 'running'
+    ) {
       return 'indeterminate'
     }
     const state = readDaemonEndpointOwnershipState(this.socketPath, this.ownedSocketIdentity)
