@@ -131,13 +131,9 @@ export class DaemonServer {
   private endpointOwnershipTimer: ReturnType<typeof setInterval> | null = null
   private endpointOwnershipLossStreak = 0
   /**
-   * Set once the endpoint demonstrably resolved elsewhere, and never cleared.
-   *
-   * Why sticky, and why not inferred from `ownedSocketIdentity`: retiring nulls that identity,
-   * which would make the ownership check answer "not lost" forever after. A stream socket
-   * accepted before the takeover can then complete its hello, clear the pending retirement, and
-   * reopen session creation on a daemon nothing can reach — the exact outcome the check exists
-   * to prevent. Losing the endpoint is not something a later client can undo.
+   * Set once the endpoint demonstrably resolved elsewhere, and never cleared. Not inferred from
+   * `ownedSocketIdentity`: retiring nulls that, so a socket accepted before the takeover could
+   * finish its hello, clear the retirement, and reopen sessions on a daemon nothing can reach.
    */
   private endpointOwnershipLost = false
   private protocolVersion: number
@@ -250,39 +246,34 @@ export class DaemonServer {
   async start(): Promise<void> {
     return new Promise((resolve, reject) => {
       this.server = createServer((socket) => this.handleConnection(socket))
-      // Why a permanent handler and not `once`: an unhandled 'error' on a net.Server is an
-      // uncaught exception, so a post-startup accept failure (EMFILE under fd exhaustion) would
-      // kill a daemon that is hosting every terminal on the machine. A one-shot listener also
-      // left the publish window unguarded against a second error after the first rejected.
+      // Permanent, not `once`: an unhandled 'error' on a net.Server is an uncaught exception, so
+      // a post-startup accept failure (EMFILE) would kill a daemon hosting every terminal.
       let startupSettled = false
       const onServerError = (err: Error): void => {
         if (startupSettled) {
-          // Why only log: the daemon is serving. Operational errors after startup — a failed
-          // accept under fd exhaustion — must not become an uncaught exception, and must not
-          // be mistaken for a startup failure that tears down live sessions.
+          // The daemon is serving; an operational error must not read as a startup failure.
           this.log.log('server-error', { message: err.message })
           console.warn(`[daemon] Socket server error: ${err.message}`)
           return
         }
         startupSettled = true
-        // Why record it: publishing is async, so the rejection alone cannot stop work already
-        // in flight. The publish continuation reads this and tears down instead of arming a
-        // daemon whose caller was told startup failed.
+        // Recorded because publishing is async: the continuation reads this and tears down
+        // rather than arming a daemon whose caller was already told startup failed.
         this.startupFailure = err
         reject(err)
       }
 
       this.server.on('error', onServerError)
 
-      // Why: bind a private name and hard-link it into place, so libuv's close-time unlink
-      // can only ever remove our own bind name — never a replacement daemon's endpoint.
+      // Bind a private name and link it into place, so libuv's close-time unlink can only ever
+      // remove our own bind name — never a replacement daemon's endpoint.
       const bindPath =
         process.platform === 'win32' ? this.socketPath : getDaemonSocketBindPath(this.socketPath)
 
       this.server.listen(bindPath, () => {
         try {
-          // Why: tighten the mode on the private bind name so the endpoint is never reachable
-          // at the canonical path with default permissions, even briefly.
+          // Tighten the private bind name so the endpoint is never briefly reachable at the
+          // canonical path with default permissions.
           chmodSync(bindPath, 0o600)
         } catch {
           // Best-effort on platforms that support it
@@ -291,8 +282,8 @@ export class DaemonServer {
           startupSettled = true
           const server = this.server
           this.server = null
-          // Why: settle before close — an already-accepted connection defers the close
-          // callback indefinitely, and start() has no timeout of its own.
+          // Settle before close: an accepted connection defers the close callback indefinitely
+          // and start() has no timeout of its own.
           reject(error)
           server?.close()
           if (process.platform !== 'win32') {
@@ -304,17 +295,15 @@ export class DaemonServer {
           }
         }
         void this.publishAndArm(bindPath).then(() => {
-          // Why re-check: the server can fail while publishing awaits its liveness probe. The
-          // rejection has already been delivered, so resolving here would leave a live,
-          // published daemon behind a caller that was told startup failed — and a caller that
-          // responds by launching a replacement would recreate the split brain.
+          // Re-checked because the server can fail while publishing awaits its probe: resolving
+          // then would leave a live daemon behind a caller told startup failed, which would
+          // respond by launching a replacement and recreate the split brain.
           if (this.startupFailure) {
             this.retireUnstartedDaemon()
             abandonStartup(this.startupFailure)
             return
           }
-          // From here the daemon is serving, so later server errors are logged rather than
-          // treated as a startup failure that would tear down live sessions.
+          // Serving from here, so later server errors are logged, not treated as startup failure.
           startupSettled = true
           resolve()
         }, abandonStartup)
@@ -325,16 +314,15 @@ export class DaemonServer {
   /**
    * Takes the canonical endpoint, then makes this listener adoptable — in that order.
    *
-   * Why the endpoint is never rolled back: a daemon that aborts after publishing just closes,
-   * and the entry it leaves behind is dead. The next daemon proves that and replaces it in one
-   * rename. Deleting it here would be a third party removing an entry it cannot prove is still
-   * its own, which is the defect class this design retires.
+   * The endpoint is never rolled back: an aborting daemon just closes, and the dead entry it
+   * leaves is replaced by the next publisher in one rename. Deleting it here would be a third
+   * party removing an entry it cannot prove is still its own.
    */
   private async publishAndArm(bindPath: string): Promise<void> {
     const outcome = await publishDaemonEndpoint(bindPath, this.socketPath, probeSocketConnect)
     if (outcome.status !== 'published') {
-      // Why log: this is the only point at which the design can decline to serve, so a field
-      // regression surfaces here rather than as a user reporting terminals that never run.
+      // The only point the design can decline to serve, so a field regression surfaces here
+      // rather than as a user reporting terminals that never run.
       this.log.log('endpoint-publish-declined', { reason: outcome.status })
       console.warn(`[daemon] Endpoint unavailable at startup: reason=${outcome.status}`)
       throw new DaemonEndpointUnavailableError(outcome.status)
@@ -342,13 +330,12 @@ export class DaemonServer {
     this.ownedSocketIdentity = outcome.identity
     let publishedOwnership = false
     try {
-      // Why: the PID/nonce record must exist before the token makes this listener adoptable.
+      // The PID/nonce record must exist before the token makes this listener adoptable.
       this.publishEndpointOwnership()
       publishedOwnership = true
       writeFileSync(this.tokenPath, this.token, { mode: 0o600 })
     } catch (error) {
-      // Why: roll back only a record we actually wrote — anything already at that path
-      // belongs to a daemon that is not us.
+      // Roll back only a record we wrote; anything else at that path belongs to another daemon.
       if (publishedOwnership && this.pidPath && this.launchNonce) {
         unlinkOwnedDaemonPidFile(this.pidPath, process.pid, this.launchNonce)
       }
@@ -356,7 +343,7 @@ export class DaemonServer {
       throw error
     }
     if (this.protocolVersion >= CLEAN_DISCONNECT_PROTOCOL_VERSION) {
-      // Why: a parent crash before the first full client pair must not leave an empty daemon alive forever.
+      // A parent crash before the first client pair must not strand an empty daemon forever.
       this.armInitialAdoptionTimeout()
     }
     this.startEndpointOwnershipWatch()
@@ -364,11 +351,8 @@ export class DaemonServer {
 
   /**
    * Stands down a daemon that finished publishing after its startup was already reported failed.
-   *
-   * Why the endpoint is still not removed: the same rule as every other exit path. Once this
-   * listener closes the entry is dead, and the next publisher replaces it in one rename —
-   * whereas deleting it here would be a departing daemon removing a name a replacement may
-   * already own.
+   * The endpoint stays, as on every exit path: once this listener closes the entry is dead, and
+   * removing it would be a departing daemon deleting a name a replacement may already own.
    */
   private retireUnstartedDaemon(): void {
     this.stopEndpointOwnershipWatch()
@@ -404,15 +388,14 @@ export class DaemonServer {
   }
 
   private unlinkOwnedEndpointArtifacts(): void {
-    // Why: ownership checks prevent removing a late replacement's token or PID record.
+    // Ownership-checked so a late replacement's token or PID record is never removed.
     unlinkOwnedDaemonTokenFile(this.tokenPath, this.token)
     if (this.pidPath && this.launchNonce) {
       unlinkOwnedDaemonPidFile(this.pidPath, process.pid, this.launchNonce)
     }
-    // Why the endpoint is deliberately left behind: removing it means fencing the removal
-    // against a replacement that published in the meantime, and that fencing — claim, probe,
-    // restore — was the single largest source of defects in this component. A dead entry costs
-    // nothing and the next daemon replaces it in one rename, on a path every start exercises.
+    // The endpoint is deliberately left: fencing its removal against a replacement that
+    // published meanwhile was this component's largest source of defects, and a dead entry costs
+    // nothing — the next daemon replaces it in one rename, on a path every start exercises.
     this.ownedSocketIdentity = null
   }
 
@@ -424,7 +407,7 @@ export class DaemonServer {
       () => this.checkEndpointOwnership(),
       DaemonServer.ENDPOINT_OWNERSHIP_POLL_MS
     )
-    // Why: a liveness poll must never be the reason the process cannot exit.
+    // A liveness poll must never be the reason the process cannot exit.
     this.endpointOwnershipTimer.unref()
   }
 
@@ -439,25 +422,22 @@ export class DaemonServer {
   /**
    * Retires a daemon that no longer owns the canonical endpoint.
    *
-   * Why: a daemon whose endpoint name was taken over keeps hosting PTYs that no client can
-   * reach through the socket, which reads to the user as terminals that acknowledge input and
-   * never run it. Retirement drains rather than kills: live sessions finish, and the process
-   * exits once idle instead of surviving as an unreachable orphan.
+   * Such a daemon keeps hosting PTYs no client can reach, which reads to the user as terminals
+   * that acknowledge input and never run it. Retirement drains rather than kills: live sessions
+   * finish and the process exits once idle, instead of surviving as an unreachable orphan.
    */
   private checkEndpointOwnership(): void {
     if (process.platform === 'win32' || !this.ownedSocketIdentity || this.shutdownPromise) {
       return
     }
-    // Why an inconclusive stat also resets: it proves nothing, and retiring on EACCES or EIO
-    // would take down a daemon still serving every terminal on the machine.
+    // An inconclusive stat resets too: retiring on EACCES or EIO would take down a daemon
+    // still serving every terminal on the machine.
     if (this.observeEndpointOwnership() !== 'lost') {
       return
     }
     this.endpointOwnershipLossStreak++
-    // Why still require two: a replacement now publishes by a single rename, so there is no
-    // gap to land in and one observation would do. This stays a backstop rather than the
-    // detector — publishing verifies its own ownership immediately — so the cost of being
-    // sure is one extra poll on a daemon that is by then serving nobody.
+    // Two, though a single rename leaves no gap for one observation to misread: this is a
+    // backstop, not the detector, so the cost of certainty is one poll on an unreachable daemon.
     if (this.endpointOwnershipLossStreak < DaemonServer.ENDPOINT_OWNERSHIP_LOSS_CONFIRMATIONS) {
       return
     }
@@ -467,8 +447,8 @@ export class DaemonServer {
   /**
    * Whether the canonical endpoint demonstrably no longer resolves to this daemon.
    *
-   * Why only positive evidence counts: an unreadable stat proves nothing, and treating it as
-   * loss would refuse sessions on a daemon that is serving perfectly well.
+   * Only positive evidence counts: an unreadable stat proves nothing, and treating it as loss
+   * would refuse sessions on a daemon that is serving perfectly well.
    */
   private hasLostEndpointOwnership(): boolean {
     if (this.endpointOwnershipLost) {
@@ -480,21 +460,17 @@ export class DaemonServer {
   /**
    * Reads endpoint ownership, and keeps the watchdog's loss streak honest while doing it.
    *
-   * Why both callers come through here: the watchdog retires on *consecutive* losses, and an
-   * admission-time read used to return its answer without touching the streak. A positive reading taken outside the watchdog therefore did not break
-   * the run, so two losses separated by a demonstrably owned observation counted as consecutive
-   * — permanently poisoning a healthy, reachable daemon into refusing every later session.
+   * Both callers come through here because the watchdog retires on *consecutive* losses: an
+   * admission-time read that skipped the streak let two losses separated by an owned observation
+   * count as consecutive, permanently poisoning a healthy daemon into refusing every session.
    *
-   * The two callers deliberately act on different thresholds: admission refuses on one loss,
-   * because creating a session it cannot keep is the harm; the watchdog wants two before
-   * retiring a daemon that is still serving. Only the streak accounting is shared.
+   * They still act on different thresholds — admission refuses on one loss, the watchdog wants
+   * two — so only the streak accounting is shared.
    */
   private observeEndpointOwnership(): DaemonEndpointOwnershipState {
-    // Why the running check and not just `shutdownPromise`: two shutdown routes — the idle
-    // sweep and the shutdown RPC — close the server first and only assign that promise later,
-    // after deferring a reply. In that window the listener is gone while the recorded identity
-    // is not, and the inode-only rule below depends on the listener holding that inode open.
-    // Nothing acts on the answer once shutting down, so decline to give one.
+    // The running check, not just `shutdownPromise`: both shutdown routes close the server
+    // before assigning that promise, and in that window the listener is gone while the recorded
+    // identity is not — which the inode-only rule depends on. Nothing acts on the answer by then.
     if (
       process.platform === 'win32' ||
       !this.ownedSocketIdentity ||
