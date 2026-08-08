@@ -52,9 +52,14 @@ export function getDaemonSocketBindPath(socketPath: string): string {
 }
 
 /**
- * The endpoint belongs to someone else. The caller must adopt that daemon rather than fork
- * beside it — a second daemon on a name it cannot reach is exactly the split brain this
- * design exists to prevent.
+ * This daemon did not get the endpoint, and the `reason` says what the caller may conclude.
+ *
+ * Only `occupied` establishes that someone else owns it, and only then may the caller adopt
+ * rather than fork — a second daemon on a name it cannot reach is the split brain this design
+ * exists to prevent. `lost` and `inconclusive` establish no owner at all: nothing was proven to
+ * hold the name, so the caller must decline rather than adopt something that may not be there.
+ * Describing all three as "someone else owns it" is the drift that once turned an inconclusive
+ * probe into a claimed live owner, so the distinction is stated here rather than assumed.
  */
 export class DaemonEndpointUnavailableError extends Error {
   constructor(readonly reason: 'occupied' | 'lost' | 'inconclusive') {
