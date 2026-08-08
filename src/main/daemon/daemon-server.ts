@@ -480,11 +480,14 @@ export class DaemonServer {
   /**
    * Reads endpoint ownership, and keeps the watchdog's loss streak honest while doing it.
    *
-   * Why both callers come through here: the watchdog retires on *consecutive* losses, but an
-   * admission-time read is exactly as authoritative and used to return its answer without
-   * touching the streak. A positive reading taken outside the watchdog therefore did not break
+   * Why both callers come through here: the watchdog retires on *consecutive* losses, and an
+   * admission-time read used to return its answer without touching the streak. A positive reading taken outside the watchdog therefore did not break
    * the run, so two losses separated by a demonstrably owned observation counted as consecutive
    * — permanently poisoning a healthy, reachable daemon into refusing every later session.
+   *
+   * The two callers deliberately act on different thresholds: admission refuses on one loss,
+   * because creating a session it cannot keep is the harm; the watchdog wants two before
+   * retiring a daemon that is still serving. Only the streak accounting is shared.
    */
   private observeEndpointOwnership(): DaemonEndpointOwnershipState {
     if (process.platform === 'win32' || !this.ownedSocketIdentity) {

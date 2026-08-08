@@ -37,7 +37,7 @@ The invariant above removes the pattern rather than narrowing the window.
 
 A starting daemon runs exactly this:
 
-1. **Bind a private name.** `.b<10 hex>` in the same directory. Same directory because
+1. **Bind a private name.** `.p<10 hex>` in the same directory. Same directory because
    `sockaddr_un.sun_path` caps a Unix socket path at ~104 bytes, so the private name replaces
    the basename rather than extending the path — it is always strictly shorter than the
    canonical endpoint the caller already requires to fit.
@@ -169,7 +169,7 @@ exactly the kind this design set out to remove.
 
 **Why the departing daemon leaves its entry behind.** Deleting it requires fencing the delete
 against a replacement that published in the meantime, which reintroduces observe-then-act — and
-that fencing (`unlinkOwnedDaemonSocketPath`, the `.c<hex>` claim, `restoreClaimedDaemonSocketPath`)
+that fencing — a claim-by-rename, a liveness probe, and a restore path —
 accounted for roughly half of the defects found. A stale socket entry costs zero bytes in the
 app's own runtime directory, and every startup already handles an occupied-but-dead name
 natively via steps 2–4. Leaving it also makes the occupied path the _hot_ path, exercised on
@@ -183,20 +183,20 @@ performance hint. A launcher that guesses wrong now costs one extra probe, not a
 
 ## What this deletes
 
-- `reclaimDeadDaemonSocketPath` and its five-way outcome type
-- `unlinkOwnedDaemonSocketPath` and `restoreClaimedDaemonSocketPath`
-- the `.c<hex>` claim protocol and the sweeper's recovery policy for it
-- the endpoint-probe-and-reclaim tail of `killStaleDaemon`
-- three unfenced `unlinkSync(socketPath)` calls in the launcher
+Against `origin/main`, this removes:
 
-Those last three are worth calling out. They were plain check-then-act — `existsSync` and then
-an unlink of whatever is at the path — with no fencing at all, which is the original bug's exact
-shape. Seven review rounds never surfaced them because every round was scoped to the health
-checker and the ownership module, and these live in the launcher. They are reachable only on the
-pre-`CLEAN_DISCONNECT` protocol path, so they bite during an upgrade from an old daemon — which
-is precisely when a mixed-version race is most likely. Stating the invariant as a property of
-the _system_ rather than of one module is what made them findable: under "only a publisher
-mutates the entry", they are deletions with nothing to replace them.
+- the endpoint-probe-and-reclaim tail of `killStaleDaemon` — the launcher no longer touches the
+  endpoint at all
+- three unfenced `unlinkSync(socketPath)` calls in the launcher
+- `unlinkOwnedDaemonSocketPath`, and with it the removal of the endpoint at shutdown
+- the aged-scratch-name sweeper
+
+Those three unfenced unlinks are worth calling out. They were plain check-then-act — `existsSync`
+and then an unlink of whatever is at the path — with no fencing at all, which is the original
+bug's exact shape. Seven review rounds never surfaced them because every round was scoped to the
+health checker and the ownership module, and these live in the launcher. One of them runs over
+every previous protocol version on every app start. Stating the invariant as a property of the
+_system_ rather than of one module is what made them findable.
 
 ## Filesystems without hard links
 
@@ -307,10 +307,33 @@ from being reachable again. Retirement also drains rather than kills, so an orph
 shell that never exits can still linger. That is worth saying plainly rather than claiming this
 change recovers them.
 
+### Every scratch namespace had to move, not just the sweeper
+
+Removing our own sweeper does not un-ship the one already in the field. Released builds sweep
+`^\.b[0-9a-f]{10}$` and `\.(?:cleanup|replace)-\d+-<uuid>$` on age alone, with no liveness or
+ownership check, before they adopt or launch. So every name this code creates that an old build
+would match had to move out of their pattern:
+
+| was                      | now                   | what an old build could otherwise destroy                 |
+| ------------------------ | --------------------- | --------------------------------------------------------- |
+| `.b<hex>`                | `.p<hex>`             | a paused daemon's only pathname, between bind and publish |
+| `*.replace-<pid>-<uuid>` | `*.swap-<pid>-<uuid>` | the only copy of a live daemon's PID record, mid-claim    |
+| `*.cleanup-<pid>-<uuid>` | `*.hold-<pid>-<uuid>` | the only copy of a live daemon's token, mid-claim         |
+
+The claim cases are the sharper ones: a claim exists precisely because the protocol has renamed
+the canonical artifact aside and holds the sole copy while validating it. An old build deleting
+that leaves the claimant unable to restore what it took, and losing the token stops new clients
+authenticating at all. Their age gate is weaker than it looks, too — `rename` carries the
+original mtime across, so a claim on an already-old record is immediately sweep-eligible rather
+than protected for an hour.
+
+A test pins all three namespaces against the released regex, so reintroducing any of them fails
+in CI rather than in the field.
+
 ## Nothing sweeps anyone else's leftovers
 
-The endpoint is not the only name this component creates. Publishing binds a private `.b<hex>`
-socket, and the PID/token claim protocol renames artifacts aside as `.cleanup-*`/`.replace-*`.
+The endpoint is not the only name this component creates. Publishing binds a private `.p<hex>`
+socket, and the PID/token claim protocol renames artifacts aside as `.swap-*`/`.hold-*`.
 A sweeper used to reclaim those by age.
 
 It is gone. Deciding whether someone else's leftover is safe to delete is the same question this

@@ -731,7 +731,6 @@ async function waitForProcessExit(pid: number, timeoutMs: number): Promise<boole
  */
 export type StaleDaemonKillTestHooks = {
   probeEndpoint?: (socketPath: string) => Promise<SocketProbeOutcome>
-  afterEndpointProbe?: () => Promise<void>
 }
 
 export type StaleDaemonKillOutcome = {
@@ -884,7 +883,6 @@ export async function killStaleDaemon(
   // An unclassifiable entry is no longer a reason to refuse: the publisher probes again and
   // will not overwrite anything it cannot prove dead, which makes this judgement a hint
   // rather than a correctness dependency.
-  await testHooks?.afterEndpointProbe?.()
   if ((await probeEndpoint(socketPath)) === 'connected') {
     return { killed: killedDaemon, liveOwnerSurvived: true }
   }

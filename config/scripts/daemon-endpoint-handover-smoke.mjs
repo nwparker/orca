@@ -18,6 +18,15 @@ import { join, resolve } from 'node:path'
 
 const repoRoot = resolve(import.meta.dirname, '..', '..')
 const entryPath = join(repoRoot, 'out', 'main', 'daemon-entry.js')
+
+// Why read it from source: the launcher keys adoption of a live incumbent on this exact code,
+// and hardcoding it here would let the two drift silently — which is the failure the assertion
+// below exists to catch.
+const DAEMON_EXIT_ENDPOINT_OCCUPIED = Number(
+  readFileSync(join(repoRoot, 'src/main/daemon/daemon-endpoint-ownership.ts'), 'utf8').match(
+    /DAEMON_EXIT_ENDPOINT_OCCUPIED = (\d+)/
+  )?.[1]
+)
 const READY_TIMEOUT_MS = 20_000
 const EXIT_TIMEOUT_MS = 15_000
 const REACHABILITY_TIMEOUT_MS = 2_000
@@ -141,15 +150,16 @@ function isDaemonReachable(socketPath, tokenPath, protocolVersion) {
   })
 }
 
+/** Resolves with the child's exit code, so callers can assert on it. */
 function killAndWait(child) {
   if (child.exitCode !== null || child.signalCode !== null) {
-    return Promise.resolve()
+    return Promise.resolve(child.exitCode)
   }
   return new Promise((resolveExit, rejectExit) => {
     const timer = setTimeout(() => rejectExit(new Error('daemon did not exit')), EXIT_TIMEOUT_MS)
-    child.on('exit', () => {
+    child.on('exit', (code) => {
       clearTimeout(timer)
-      resolveExit()
+      resolveExit(code)
     })
     child.kill('SIGTERM')
   })
@@ -239,7 +249,15 @@ async function main() {
         // Expected: it cannot publish onto a live owner's name, so it exits instead.
       }
     )
-    await killAndWait(blocked.child)
+    // Why pin the code: the launcher keys adoption of a live incumbent on exactly this exit
+    // code, so a silent change to it would strand a concurrently starting app on local
+    // non-persistent terminals with nothing failing.
+    const blockedExit = await killAndWait(blocked.child)
+    if (blockedExit !== DAEMON_EXIT_ENDPOINT_OCCUPIED) {
+      throw new Error(
+        `a daemon that lost the endpoint exited ${blockedExit}, not ${DAEMON_EXIT_ENDPOINT_OCCUPIED}`
+      )
+    }
     if (!existsSync(socketPath) || statSync(socketPath).ino !== survivorInodeBeforeBlocked) {
       throw new Error("a daemon that could not publish removed the live owner's endpoint")
     }

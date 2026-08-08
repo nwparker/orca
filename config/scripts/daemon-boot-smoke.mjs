@@ -286,8 +286,10 @@ async function main() {
     if (process.platform !== 'win32' && (await probeEndpoint(socketPath)) === 'connected') {
       throw new Error('daemon still answers its endpoint after shutdown')
     }
-    // The private bind name is consumed by the publish; nothing may linger in the runtime dir.
-    const leaked = readdirSync(userDataDir).filter((entry) => entry.startsWith('.b'))
+    // The private bind name is consumed by the publish, and nothing sweeps the runtime dir any
+    // more, so a leak here is permanent. Match what the code actually generates rather than a
+    // literal prefix: this check silently matched nothing after the namespace moved from .b.
+    const leaked = readdirSync(userDataDir).filter((entry) => /^\.[a-z][0-9a-f]{10}$/.test(entry))
     if (leaked.length > 0) {
       throw new Error(`daemon leaked private bind names: ${leaked.join(', ')}`)
     }

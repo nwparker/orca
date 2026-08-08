@@ -359,7 +359,6 @@ vi.mock('./daemon-spawner', () => ({
     `/fake/daemon/daemon-v${version ?? PROTOCOL_VERSION}.pid`,
   serializeDaemonPidFile: (obj: unknown) => JSON.stringify(obj),
   replaceDaemonPidFile: replaceDaemonPidFileMock,
-  sweepAbandonedDaemonClaims: vi.fn(async () => 0),
   unlinkOwnedDaemonPidFile: unlinkOwnedDaemonPidFileMock
 }))
 
