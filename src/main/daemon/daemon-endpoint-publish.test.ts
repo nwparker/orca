@@ -1,6 +1,5 @@
 import type * as NodeFs from 'node:fs'
 import {
-  chmodSync,
   linkSync,
   mkdtempSync,
   renameSync,
@@ -557,16 +556,25 @@ describe('publishDaemonEndpoint', () => {
     const boundPath = getDaemonSocketBindPath(canonicalPath)
     const newcomer = await listen(boundPath)
     try {
+      // Why inject the failure directly rather than dropping directory permissions: a
+      // permission-based setup induces nothing when the suite runs as root, and the test would
+      // then pass without ever reaching the branch it names.
       vi.doMock('node:fs', async () => {
         const actual = await vi.importActual<typeof NodeFs>('node:fs')
+        let published = false
         return {
           ...actual,
           unlinkSync: (target: string) => {
             actual.unlinkSync(target)
             if (target === boundPath) {
-              // Drop search permission on the directory so the verifying stat fails EACCES.
-              actual.chmodSync(directory, 0o600)
+              published = true
             }
+          },
+          statSync: (target: string, options?: { bigint?: boolean }) => {
+            if (published && target === canonicalPath) {
+              throw Object.assign(new Error('injected EACCES'), { code: 'EACCES' })
+            }
+            return actual.statSync(target, options as never)
           }
         }
       })
@@ -578,7 +586,6 @@ describe('publishDaemonEndpoint', () => {
         publishWithBlockedStat(boundPath, canonicalPath, probeSocketConnect)
       ).resolves.toEqual({ status: 'inconclusive' })
     } finally {
-      chmodSync(directory, 0o700)
       await close(newcomer.server)
       rmSync(directory, { recursive: true, force: true })
     }
