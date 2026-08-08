@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { linkSync, mkdtempSync, rmSync } from 'node:fs'
+import { chmodSync, linkSync, mkdtempSync, rmSync, unlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createServer, type Server } from 'node:net'
@@ -43,6 +43,78 @@ describe('daemon server error handling', () => {
     await server?.shutdown()
     rmSync(dir, { recursive: true, force: true })
   })
+
+  it.skipIf(process.platform === 'win32')(
+    'refuses to create a session on an endpoint it no longer owns',
+    async () => {
+      // Why this matters: publishing cannot be made atomic against a publisher preempted between
+      // proving an entry dead and replacing it, so this daemon can lose the endpoint at any
+      // moment. If it accepted a session in that window the session would be reachable by
+      // nobody — a terminal that acknowledges input and never runs it, which is the original
+      // bug. Refusing makes that outcome unreachable rather than merely short-lived.
+      server = new DaemonServer({
+        socketPath,
+        tokenPath,
+        spawnSubprocess: () => createMockSubprocess()
+      })
+      await server.start()
+
+      client = new DaemonClient({ socketPath, tokenPath })
+      await client.ensureConnected()
+      // Sanity: a session is creatable while ownership holds.
+      await expect(
+        client.request('createOrAttach', { sessionId: 'before', cols: 80, rows: 24 })
+      ).resolves.toMatchObject({ isNew: true })
+
+      // Another daemon takes the canonical name, exactly as a late publisher's rename would.
+      const usurper = createServer()
+      const usurperBind = join(dir, '.u')
+      await new Promise<void>((resolve) => usurper.listen(usurperBind, resolve))
+      try {
+        unlinkSync(socketPath)
+        linkSync(usurperBind, socketPath)
+
+        await expect(
+          client.request('createOrAttach', { sessionId: 'after', cols: 80, rows: 24 })
+        ).rejects.toThrow(/no longer owns its endpoint/)
+
+        // And it stands down rather than lingering as an unreachable host.
+        const daemon = server as unknown as { retirementRequested: boolean }
+        expect(daemon.retirementRequested).toBe(true)
+      } finally {
+        await new Promise<void>((resolve) => usurper.close(() => resolve()))
+      }
+    }
+  )
+
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
+    'keeps serving sessions when endpoint ownership cannot be read',
+    async () => {
+      // Why: an unreadable stat proves nothing. Refusing sessions on it would take a daemon that
+      // is serving every terminal on the machine offline because of a transient EACCES or EIO.
+      // Only positive evidence of loss may refuse.
+      server = new DaemonServer({
+        socketPath,
+        tokenPath,
+        spawnSubprocess: () => createMockSubprocess()
+      })
+      await server.start()
+      const daemon = server as unknown as {
+        hasLostEndpointOwnership: () => boolean
+        retirementRequested: boolean
+      }
+
+      try {
+        // Drop search permission on the directory so the ownership stat fails EACCES.
+        chmodSync(dir, 0o600)
+
+        expect(daemon.hasLostEndpointOwnership()).toBe(false)
+        expect(daemon.retirementRequested).toBe(false)
+      } finally {
+        chmodSync(dir, 0o700)
+      }
+    }
+  )
 
   it('keeps serving after an operational server error instead of dying', async () => {
     // Why: an unhandled 'error' on a net.Server is an uncaught exception. Detaching the startup

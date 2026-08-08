@@ -459,6 +459,26 @@ export class DaemonServer {
     if (this.retirementRequested) {
       return
     }
+    this.requestRetirementForLostEndpoint()
+  }
+
+  /**
+   * Whether the canonical endpoint demonstrably no longer resolves to this daemon.
+   *
+   * Why only positive evidence counts: an unreadable stat proves nothing, and treating it as
+   * loss would refuse sessions on a daemon that is serving perfectly well.
+   */
+  private hasLostEndpointOwnership(): boolean {
+    if (process.platform === 'win32' || !this.ownedSocketIdentity) {
+      return false
+    }
+    return readDaemonEndpointOwnershipState(this.socketPath, this.ownedSocketIdentity) === 'lost'
+  }
+
+  private requestRetirementForLostEndpoint(): void {
+    if (this.retirementRequested) {
+      return
+    }
     this.log.log('endpoint-ownership-lost', { socketPath: this.socketPath })
     console.warn(
       '[daemon] Endpoint ownership lost to another daemon — retiring once existing sessions end'
@@ -944,6 +964,17 @@ export class DaemonServer {
       case 'createOrAttach': {
         if (this.idleShutdownState !== 'running') {
           throw new Error('Daemon temporarily unavailable; reconnect')
+        }
+        // Why check here and not only on the watchdog: publishing cannot be made atomic against
+        // a publisher preempted between proving an entry dead and replacing it, so this daemon
+        // can lose the endpoint at any moment. The watchdog notices within a poll, which is far
+        // too late if a session was accepted in between — that session becomes reachable by
+        // nobody and the user sees a terminal that acknowledges input and never runs it. A stat
+        // per session creation makes the harmful outcome unreachable: no session is ever created
+        // on an endpoint we do not currently hold.
+        if (this.hasLostEndpointOwnership()) {
+          this.requestRetirementForLostEndpoint()
+          throw new Error('Daemon no longer owns its endpoint; reconnect')
         }
         if (!client?.authenticatedPairEstablished || client.streamSocket === null) {
           // Why: a control-only replacement can't own terminal admission or erase the prior client's retirement request.
