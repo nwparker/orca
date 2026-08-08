@@ -175,6 +175,9 @@ describe('daemon server error handling', () => {
       await server.start()
       client = new DaemonClient({ socketPath, tokenPath })
       await client.ensureConnected()
+      // Keep one session alive: with nothing to drain the daemon now stands down the moment it
+      // loses the endpoint, which is correct but would end the test before it can assert.
+      await client.request('createOrAttach', { sessionId: 'draining', cols: 80, rows: 24 })
 
       const usurper = createServer()
       const usurperBind = join(dir, '.u3')
@@ -212,6 +215,47 @@ describe('daemon server error handling', () => {
     expect(isDaemonGoneError(new Error(DAEMON_ENDPOINT_LOST_MESSAGE))).toBe(true)
     expect(isDaemonGoneError(new Error('something else entirely'))).toBe(false)
   })
+
+  it.skipIf(process.platform === 'win32')(
+    'stands down once drained even while a pre-takeover client stays connected',
+    async () => {
+      // Why connections stop counting after loss: retirement drains and then exits, but idleness
+      // normally waits for every client to disconnect. A client that connected before the
+      // takeover can hold that open indefinitely, so the daemon would outlive its last session
+      // as an orphan nothing can route to.
+      server = new DaemonServer({
+        socketPath,
+        tokenPath,
+        spawnSubprocess: () => createMockSubprocess()
+      })
+      await server.start()
+      client = new DaemonClient({ socketPath, tokenPath })
+      await client.ensureConnected()
+
+      const usurper = createServer()
+      const usurperBind = join(dir, '.u4')
+      await new Promise<void>((resolve) => usurper.listen(usurperBind, resolve))
+      try {
+        unlinkSync(socketPath)
+        linkSync(usurperBind, socketPath)
+
+        // Losing the endpoint with nothing left to drain must stand the daemon down, even
+        // though this client is still connected.
+        const daemon = server as unknown as {
+          requestRetirementForLostEndpoint: () => void
+          idleShutdownState: string
+        }
+        expect(daemon.idleShutdownState).toBe('running')
+        daemon.requestRetirementForLostEndpoint()
+
+        // Drained and unreachable: it must begin standing down rather than wait for this
+        // client, which can never make it routable again.
+        expect(daemon.idleShutdownState).not.toBe('running')
+      } finally {
+        await new Promise<void>((resolve) => usurper.close(() => resolve()))
+      }
+    }
+  )
 
   it('keeps serving after an operational server error instead of dying', async () => {
     // Why: an unhandled 'error' on a net.Server is an uncaught exception. Detaching the startup

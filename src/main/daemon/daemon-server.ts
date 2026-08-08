@@ -549,12 +549,17 @@ export class DaemonServer {
   }
 
   private isIdle(): boolean {
-    return (
-      this.transportSockets.size === 0 &&
-      this.clients.size === 0 &&
-      this.createOrAttachInFlight === 0 &&
-      this.host.listSessions().length === 0
-    )
+    if (this.createOrAttachInFlight > 0 || this.host.listSessions().length > 0) {
+      return false
+    }
+    // Why open connections stop counting once the endpoint is lost: they belong to clients that
+    // reached this daemon before the takeover, and holding them open cannot make it reachable to
+    // anyone new. Waiting for them turns a drained retirement into an orphan that outlives its
+    // usefulness — the sessions are gone and nothing can route a new one here.
+    if (this.endpointOwnershipLost) {
+      return true
+    }
+    return this.transportSockets.size === 0 && this.clients.size === 0
   }
 
   private reevaluateIdleShutdown(): void {
