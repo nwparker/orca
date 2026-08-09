@@ -1306,14 +1306,14 @@ export default function SmartWorkspaceNameField({
     isQueryStale,
     sourceIntent
   })
-  // Why: while isQueryStale, cmdk onValueChange is ignored; re-sync the stored arm
-  // when the query settles so commandValue cannot lag resolvedCommandValue.
+  // Why: while isQueryStale, cmdk onValueChange is ignored; keep the stored arm
+  // aligned too so a stale provider cannot reappear when the query settles.
   useEffect(() => {
-    if (isQueryStale || commandValue === resolvedCommandValue) {
+    if (commandValue === resolvedCommandValue) {
       return
     }
     setCommandValue(resolvedCommandValue)
-  }, [commandValue, isQueryStale, resolvedCommandValue])
+  }, [commandValue, resolvedCommandValue])
   const activeEmojiShortcode = useMemo(
     () => getActiveWorkspaceEmojiShortcode(value, emojiCursor),
     [emojiCursor, value]
@@ -1409,6 +1409,12 @@ export default function SmartWorkspaceNameField({
       selectJiraAccount
     ]
   )
+
+  const openSelectedSource = useCallback((): void => {
+    if (selectedSource?.url) {
+      void window.api.shell.openUrl(selectedSource.url)
+    }
+  }, [selectedSource?.url])
 
   const applyEmojiReplacement = useCallback(
     (replacement: WorkspaceEmojiReplacement): void => {
@@ -1681,9 +1687,42 @@ export default function SmartWorkspaceNameField({
                   ref={setSelectedSourceNode}
                   data-workspace-source-pill="true"
                   tabIndex={0}
+                  aria-keyshortcuts={
+                    selectedSource.url ? 'Alt+Enter Backspace Delete' : 'Backspace Delete'
+                  }
                   onKeyDown={(event) => {
+                    if (event.currentTarget !== event.target) {
+                      return
+                    }
                     if (
-                      event.currentTarget !== event.target ||
+                      (event.key === 'Backspace' || event.key === 'Delete') &&
+                      !event.metaKey &&
+                      !event.ctrlKey &&
+                      !event.shiftKey &&
+                      !event.altKey
+                    ) {
+                      event.preventDefault()
+                      onClearSelectedSource()
+                      cancelLocalInputFocusFrame()
+                      localInputFocusFrameRef.current = requestAnimationFrame(() => {
+                        localInputFocusFrameRef.current = null
+                        localInputRef.current?.focus({ preventScroll: true })
+                      })
+                      return
+                    }
+                    if (
+                      event.key === 'Enter' &&
+                      event.altKey &&
+                      !event.metaKey &&
+                      !event.ctrlKey &&
+                      !event.shiftKey &&
+                      selectedSource.url
+                    ) {
+                      event.preventDefault()
+                      openSelectedSource()
+                      return
+                    }
+                    if (
                       event.key !== 'Enter' ||
                       event.metaKey ||
                       event.ctrlKey ||
@@ -1708,7 +1747,8 @@ export default function SmartWorkspaceNameField({
                           type="button"
                           variant="ghost"
                           size="icon-xs"
-                          onClick={() => void window.api.shell.openUrl(selectedSource.url!)}
+                          tabIndex={-1}
+                          onClick={openSelectedSource}
                           className="size-6 shrink-0 rounded-sm text-muted-foreground hover:text-foreground"
                           aria-label={translate(
                             'auto.components.new.workspace.SmartWorkspaceNameField.2c69728c2a',
@@ -1732,6 +1772,7 @@ export default function SmartWorkspaceNameField({
                         type="button"
                         variant="ghost"
                         size="icon-xs"
+                        tabIndex={-1}
                         onClick={onClearSelectedSource}
                         className="size-6 shrink-0 rounded-sm text-muted-foreground hover:text-foreground"
                         aria-label={translate(
