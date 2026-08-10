@@ -280,6 +280,7 @@ describe('electron-builder config', () => {
       await mkdir(join(resourcesDir, 'node_modules', 'zod'), { recursive: true })
 
       const sources = new Map([
+        ['out\\main\\bootstrap.cjs', 'module.exports = require("./index.js")'],
         ['out\\main\\index.js', 'const z = require("zod")'],
         ['out\\main\\agent-hooks\\managed-agent-hook-controls.js', 'const YAML = require("yaml")']
       ])
@@ -295,10 +296,30 @@ describe('electron-builder config', () => {
   })
 
   it('normalizes host-specific asar entry separators', () => {
+    expect(findAsarEntry(['\\out\\main\\bootstrap.cjs'], 'out/main/bootstrap.cjs')).toBe(
+      '\\out\\main\\bootstrap.cjs'
+    )
     expect(findAsarEntry(['\\out\\main\\index.js'], 'out/main/index.js')).toBe(
       '\\out\\main\\index.js'
     )
     expect(findAsarEntry(['/out/main/index.js'], 'out/main/index.js')).toBe('/out/main/index.js')
+  })
+
+  it('rejects a package that omits the main-process bootstrap', async () => {
+    const resourcesDir = await mkdtemp(join(tmpdir(), 'orca-bootstrap-package-'))
+    try {
+      await writeFile(join(resourcesDir, 'app.asar'), '', 'utf8')
+      const asar = {
+        listPackage: () => ['/out/main/index.js'],
+        extractFile: () => Buffer.from('', 'utf8')
+      }
+
+      expect(() => verifyPackagedMainRuntimeDeps(resourcesDir, asar)).toThrow(
+        'Packaged main file out/main/bootstrap.cjs was not found'
+      )
+    } finally {
+      await rm(resourcesDir, { recursive: true, force: true })
+    }
   })
 
   it('prunes non-target node-pty architecture outputs from packaged runtime resources', async () => {

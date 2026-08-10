@@ -40,7 +40,7 @@ import os from 'node:os'
 import { delimiter, join, resolve } from 'node:path'
 
 const scriptDir = import.meta.dirname
-const repoRoot = resolve(scriptDir, '..', '..')
+const repoRoot = resolve(scriptDir, '..', '..', '..')
 const require = createRequire(import.meta.url)
 
 function parseArgs(argv) {
@@ -602,8 +602,8 @@ async function main() {
     ghShimDir
   })
 
-  if (!args.exe && !existsSync(join(repoRoot, 'out', 'main', 'index.js'))) {
-    throw new Error('out/main/index.js missing — run `pnpm build:electron-vite` first')
+  if (!args.exe && !existsSync(join(repoRoot, 'out', 'main', 'bootstrap.cjs'))) {
+    throw new Error('out/main/bootstrap.cjs missing — run `pnpm build:electron-vite` first')
   }
 
   const iterations = []
