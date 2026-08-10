@@ -110,8 +110,7 @@ export class AgentAwakeService {
     const workingAgentCount = this.getEligibleRunningStatusCount()
     return {
       mode: this.mode,
-      active: this.mode === 'on' || (this.mode === 'auto' && workingAgentCount > 0),
-      workingAgentCount
+      active: this.mode === 'on' || (this.mode === 'auto' && workingAgentCount > 0)
     }
   }
 
@@ -141,15 +140,14 @@ export class AgentAwakeService {
       this.stopMacosAssertion(reason)
       this.stopLinuxAssertion(reason)
     }
-    this.publishStatus(runningStatusCount, shouldBlock)
+    this.publishStatus(shouldBlock)
   }
 
-  private publishStatus(workingAgentCount: number, active: boolean): void {
-    const status = { mode: this.mode, active, workingAgentCount }
+  private publishStatus(active: boolean): void {
+    const status = { mode: this.mode, active }
     if (
       this.lastPublishedStatus?.mode === status.mode &&
-      this.lastPublishedStatus.active === status.active &&
-      this.lastPublishedStatus.workingAgentCount === status.workingAgentCount
+      this.lastPublishedStatus.active === status.active
     ) {
       return
     }

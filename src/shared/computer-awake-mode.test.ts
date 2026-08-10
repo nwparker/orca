@@ -7,10 +7,17 @@ describe('computer awake mode', () => {
     expect(normalizeComputerAwakeMode(undefined, false)).toBe('off')
   })
 
-  it('preserves valid explicit modes', () => {
-    expect(normalizeComputerAwakeMode('on', false)).toBe('on')
-    expect(normalizeComputerAwakeMode('off', true)).toBe('off')
-    expect(normalizeComputerAwakeMode('auto', false)).toBe('auto')
+  it('preserves explicit modes when the legacy projection agrees or is absent', () => {
+    expect(normalizeComputerAwakeMode('on')).toBe('on')
+    expect(normalizeComputerAwakeMode('on', true)).toBe('on')
+    expect(normalizeComputerAwakeMode('off', false)).toBe('off')
+    expect(normalizeComputerAwakeMode('auto', true)).toBe('auto')
+  })
+
+  it('honors legacy changes made by a rollback build', () => {
+    expect(normalizeComputerAwakeMode('on', false)).toBe('off')
+    expect(normalizeComputerAwakeMode('auto', false)).toBe('off')
+    expect(normalizeComputerAwakeMode('off', true)).toBe('auto')
   })
 
   it('writes a safe legacy approximation', () => {

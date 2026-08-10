@@ -129,7 +129,7 @@ describe('AgentAwakeService', () => {
     service.setMode('on')
 
     expect(blocker.start).toHaveBeenCalledWith('prevent-display-sleep')
-    expect(service.getStatus()).toEqual({ mode: 'on', active: true, workingAgentCount: 0 })
+    expect(service.getStatus()).toEqual({ mode: 'on', active: true })
   })
 
   it('publishes Auto activity changes to status subscribers', () => {
@@ -139,23 +139,23 @@ describe('AgentAwakeService', () => {
 
     service.setMode('auto')
     service.setStatuses([workingStatus()])
+    service.setStatuses([workingStatus(), workingStatus()])
+    service.setStatuses([workingStatus()])
     service.setStatuses([])
 
     expect(listener).toHaveBeenNthCalledWith(1, {
       mode: 'auto',
-      active: false,
-      workingAgentCount: 0
+      active: false
     })
     expect(listener).toHaveBeenNthCalledWith(2, {
       mode: 'auto',
-      active: true,
-      workingAgentCount: 1
+      active: true
     })
     expect(listener).toHaveBeenNthCalledWith(3, {
       mode: 'auto',
-      active: false,
-      workingAgentCount: 0
+      active: false
     })
+    expect(listener).toHaveBeenCalledTimes(3)
   })
 
   it('starts and stops from settings flips around an already-running status', () => {

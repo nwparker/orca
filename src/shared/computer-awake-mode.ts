@@ -5,18 +5,23 @@ export type ComputerAwakeMode = (typeof COMPUTER_AWAKE_MODES)[number]
 export type ComputerAwakeStatus = {
   mode: ComputerAwakeMode
   active: boolean
-  workingAgentCount: number
 }
 
 export function normalizeComputerAwakeMode(
   mode: unknown,
-  legacyAutoEnabled = false
+  legacyAutoEnabled?: boolean
 ): ComputerAwakeMode {
-  return COMPUTER_AWAKE_MODES.includes(mode as ComputerAwakeMode)
+  const explicitMode = COMPUTER_AWAKE_MODES.includes(mode as ComputerAwakeMode)
     ? (mode as ComputerAwakeMode)
-    : legacyAutoEnabled
-      ? 'auto'
-      : 'off'
+    : null
+  if (!explicitMode) {
+    return legacyAutoEnabled === true ? 'auto' : 'off'
+  }
+  if (typeof legacyAutoEnabled === 'boolean' && legacyAutoEnabled !== (explicitMode !== 'off')) {
+    // Older builds can only change the legacy boolean, so disagreement means it was written later.
+    return legacyAutoEnabled ? 'auto' : 'off'
+  }
+  return explicitMode
 }
 
 export function computerAwakeSettingsForMode(mode: ComputerAwakeMode): {

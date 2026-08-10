@@ -71,7 +71,7 @@ export function registerSettingsHandlers(
 ): void {
   ipcMain.handle(
     'agentAwake:getStatus',
-    () => agentAwakeService?.getStatus() ?? { mode: 'off', active: false, workingAgentCount: 0 }
+    () => agentAwakeService?.getStatus() ?? { mode: 'off', active: false }
   )
   agentAwakeService?.subscribe?.((status) => {
     for (const window of BrowserWindow.getAllWindows()) {

@@ -250,6 +250,18 @@ describe('AgentsPane', () => {
     expect(markup).toContain('>Auto<')
   })
 
+  it('hides desktop-only awake modes in paired web clients', () => {
+    ;(globalThis as { __ORCA_WEB_CLIENT__?: boolean }).__ORCA_WEB_CLIENT__ = true
+    try {
+      expect(renderPane(getDefaultSettings('/tmp'))).not.toContain('Keep computer awake')
+      expect(
+        matchesSettingsSearch('awake', getAgentsPaneSearchEntries({ includeAgentAwake: false }))
+      ).toBe(false)
+    } finally {
+      delete (globalThis as { __ORCA_WEB_CLIENT__?: boolean }).__ORCA_WEB_CLIENT__
+    }
+  })
+
   it('renders the agent runtime control on Windows-class hosts', () => {
     const markup = renderPane(
       {

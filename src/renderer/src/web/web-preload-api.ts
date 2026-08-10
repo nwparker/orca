@@ -724,14 +724,16 @@ function createWebPreloadApi(): Partial<PreloadApi> {
       onChanged: () => noopUnsubscribe
     } satisfies Partial<WebSettingsApi> as unknown as WebSettingsApi,
     agentAwake: {
-      getStatus: async () => ({
-        mode: normalizeComputerAwakeMode(
-          getStoredSettings().computerAwakeMode,
-          getStoredSettings().keepComputerAwakeWhileAgentsRun
-        ),
-        active: false,
-        workingAgentCount: 0
-      }),
+      getStatus: async () => {
+        const settings = getStoredSettings()
+        return {
+          mode: normalizeComputerAwakeMode(
+            settings.computerAwakeMode,
+            settings.keepComputerAwakeWhileAgentsRun
+          ),
+          active: false
+        }
+      },
       onChanged: () => noopUnsubscribe
     },
     keybindings: createWebKeybindingsApi(),

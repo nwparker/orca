@@ -23,8 +23,7 @@ import { STATUS_BAR_CONTEXT_MENU_EXEMPT_PROPS } from './status-bar-context-menu-
 
 const INACTIVE_STATUS: ComputerAwakeStatus = {
   mode: 'off',
-  active: false,
-  workingAgentCount: 0
+  active: false
 }
 
 function modeLabel(mode: ComputerAwakeMode): string {
