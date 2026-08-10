@@ -27,19 +27,6 @@ const GRAPHQL_REACTION_CONTENT: Record<GitHubGraphQLReactionContent, GitHubReact
   EYES: 'eyes'
 }
 
-const GITHUB_REACTION_CONTENT = Object.fromEntries(
-  Object.entries(GRAPHQL_REACTION_CONTENT).map(([graphqlContent, content]) => [
-    content,
-    graphqlContent
-  ])
-) as Record<GitHubReactionContent, GitHubGraphQLReactionContent>
-
-export function getGraphQLReactionContent(
-  content: GitHubReactionContent
-): GitHubGraphQLReactionContent {
-  return GITHUB_REACTION_CONTENT[content]
-}
-
 const REACTION_ORDER: GitHubReactionContent[] = [
   '+1',
   '-1',

@@ -231,7 +231,6 @@ import type {
   GitHubPRRefreshEnqueueResult,
   GitHubPRRefreshEvent,
   GitHubPRRefreshReason,
-  GitHubReactionContent,
   GetRateLimitResult,
   NotificationDispatchRequest,
   NotificationDispatchResult,
@@ -1901,14 +1900,6 @@ export type PreloadApi = {
       resolve: boolean
       prRepo?: GitHubOwnerRepo | null
     }) => Promise<boolean>
-    setPRCommentReaction: (
-      args: GitHubRepoSelectorArgs & {
-        subjectId: string
-        content: GitHubReactionContent
-        add: boolean
-        prRepo?: GitHubOwnerRepo | null
-      }
-    ) => Promise<boolean>
     setPRFileViewed: (
       args: GitHubRepoSelectorArgs & {
         prNumber: number

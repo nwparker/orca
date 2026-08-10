@@ -47,7 +47,6 @@ const mockApi = {
     addPRReviewCommentReply: vi.fn(),
     setPRCommentReaction: vi.fn(),
     resolveReviewThread: vi.fn(),
-    setPRCommentReaction: vi.fn(),
     listWorkItems: vi.fn(),
     countWorkItems: vi.fn().mockResolvedValue(0),
     getProjectViewTable: vi.fn(),

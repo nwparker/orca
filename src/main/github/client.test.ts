@@ -4083,22 +4083,12 @@ describe('GitHub GraphQL rate-limit guard', () => {
         })
       })
       .mockResolvedValueOnce({ stdout: '[]' })
-      .mockResolvedValueOnce({
-        stdout: JSON.stringify([
-          {
-            id: 44,
-            user: { login: 'coderabbitai', avatar_url: 'https://avatar', type: 'Bot' },
-            body: 'Automated review summary',
-            submitted_at: '2026-04-01T00:00:00Z',
-            html_url: 'https://github.com/acme/widgets/pull/7#pullrequestreview-44'
-          }
-        ])
-      })
+      .mockResolvedValueOnce({ stdout: '[]' })
 
     await expect(getPRComments('/repo-root', 7)).resolves.toEqual([
       expect.objectContaining({
         id: 44,
-        nodeId: 'PRR_44',
+        reactionSubjectId: 'PRR_44',
         isBot: true,
         reactions: [{ content: 'rocket', count: 2, viewerHasReacted: true }]
       })
@@ -4780,25 +4770,6 @@ describe('GitHub GraphQL rate-limit guard', () => {
 
     expect(ghExecFileAsyncMock).not.toHaveBeenCalled()
     expect(noteRateLimitSpendMock).not.toHaveBeenCalled()
-  })
-
-  it('adds a thumbs-up reaction through GraphQL', async () => {
-    rateLimitGuardMock.mockReturnValue({ blocked: false })
-    ghExecFileAsyncMock.mockResolvedValue({ stdout: '{}', stderr: '' })
-
-    await expect(
-      setPRCommentReaction('/repo-root', 'PRRC_1', '+1', true, null, {
-        owner: 'acme',
-        repo: 'widgets',
-        host: 'github.com'
-      })
-    ).resolves.toBe(true)
-
-    expect(ghExecFileAsyncMock).toHaveBeenCalledWith(
-      expect.arrayContaining(['subjectId=PRRC_1', 'content=THUMBS_UP']),
-      expect.any(Object)
-    )
-    expect(noteRateLimitSpendMock).toHaveBeenCalledWith('graphql')
   })
 })
 

@@ -1490,7 +1490,6 @@ export type GitHubReaction = {
 
 export type PRComment = {
   id: number
-  nodeId?: string
   author: string
   authorAvatarUrl: string
   body: string

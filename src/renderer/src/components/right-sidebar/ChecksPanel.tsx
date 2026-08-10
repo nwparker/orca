@@ -192,7 +192,6 @@ import { stripBaseRef, useCreatePullRequestDialogFields } from './useCreatePullR
 import { localizedHostedReviewCopy } from '@/i18n/hosted-review-localized-copy'
 import { translate } from '@/i18n/i18n'
 import { groupPRComments, type PRCommentGroup } from '@/lib/pr-comment-groups'
-import { updatePRCommentReaction } from '@/store/slices/pr-comment-reaction-state'
 import {
   openChecksPanelHostedReviewUrl,
   resolveChecksPanelHostedReviewModifierDestination,
@@ -501,7 +500,6 @@ export default function ChecksPanel(): React.JSX.Element {
   const addPRReviewCommentReply = useAppStore((s) => s.addPRReviewCommentReply)
   const setPRCommentReaction = useAppStore((s) => s.setPRCommentReaction)
   const resolveReviewThread = useAppStore((s) => s.resolveReviewThread)
-  const setPRCommentReaction = useAppStore((s) => s.setPRCommentReaction)
   const detectedAgentIds = useAppStore((s) => s.detectedAgentIds)
   const remoteDetectedAgentIds = useAppStore((s) => {
     return typeof activeConnectionId === 'string'
@@ -2809,57 +2807,6 @@ export default function ChecksPanel(): React.JSX.Element {
     ]
   )
 
-  const handleCommentReaction = useCallback(
-    async (comment: PRComment, content: GitHubReactionContent, add: boolean): Promise<boolean> => {
-      if (!repo || !prNumber || !comment.nodeId) {
-        return false
-      }
-      const requestKey = checksPanelAsyncResultKey(
-        prCacheKey,
-        branch,
-        prNumber,
-        pr?.prRepo,
-        pr?.headSha
-      )
-      const ok = await setPRCommentReaction(
-        repo.path,
-        prNumber,
-        comment.id,
-        comment.nodeId,
-        content,
-        add,
-        {
-          repoId: repo.id,
-          prRepo: pr?.prRepo
-        }
-      )
-      if (!isCurrentAsyncResult(requestKey)) {
-        return ok
-      }
-      if (!ok) {
-        toast.error(
-          translate(
-            'auto.components.right.sidebar.ChecksPanel.commentReactionFailed',
-            'Could not update comment reaction.'
-          )
-        )
-        return false
-      }
-      setComments((current) => updatePRCommentReaction(current, comment, content, add))
-      return true
-    },
-    [
-      branch,
-      isCurrentAsyncResult,
-      pr?.headSha,
-      pr?.prRepo,
-      prCacheKey,
-      prNumber,
-      repo,
-      setPRCommentReaction
-    ]
-  )
-
   const canTargetPRComments = Boolean(repo && prNumber && pr?.prRepo)
   const commentsDisabledReason = canTargetPRComments
     ? undefined
@@ -2998,10 +2945,14 @@ export default function ChecksPanel(): React.JSX.Element {
   )
 
   const handleSetReaction = useCallback(
-    async (comment: PRComment, content: GitHubReactionContent, reacted: boolean): Promise<void> => {
+    async (
+      comment: PRComment,
+      content: GitHubReactionContent,
+      reacted: boolean
+    ): Promise<boolean> => {
       const reactionSubjectId = comment.reactionSubjectId
       if (!repo || !prNumber || !pr?.prRepo || !reactionSubjectId) {
-        return
+        return false
       }
       const requestKey = checksPanelAsyncResultKey(
         prCacheKey,
@@ -3021,7 +2972,7 @@ export default function ChecksPanel(): React.JSX.Element {
         { repoId: repo.id, prRepo: pr.prRepo }
       )
       if (!isCurrentAsyncResult(requestKey) || ok) {
-        return
+        return ok
       }
       setComments((current) =>
         restoreReactionOnSubject(current, reactionSubjectId, content, previousReaction)
@@ -3032,6 +2983,7 @@ export default function ChecksPanel(): React.JSX.Element {
           'Failed to update reaction.'
         )
       )
+      return false
     },
     [branch, isCurrentAsyncResult, pr, prCacheKey, prNumber, repo, setPRCommentReaction]
   )
@@ -4598,7 +4550,6 @@ export default function ChecksPanel(): React.JSX.Element {
           sourceControlAiActionsVisible ? handleResolveCommentsWithAI : undefined
         }
         onReply={pr ? handleReplyToComment : undefined}
-        onReact={pr ? handleCommentReaction : undefined}
         onResolve={pr || activeGitLabReview ? handleResolve : undefined}
         onEditComment={pr ? handleEditComment : undefined}
         onDeleteComment={pr ? handleDeleteComment : undefined}

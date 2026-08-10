@@ -171,7 +171,6 @@ import type {
   GitWorktreeInfo,
   GitHubCreateIssueFields,
   GitHubOwnerRepo,
-  GitHubReactionContent,
   GlobalSettings,
   PersistedUIState,
   Project,
@@ -596,7 +595,6 @@ import {
   setPRCommentReaction,
   getIssue,
   resolveReviewThread,
-  setPRCommentReaction,
   setPRFileViewed,
   getWorkItemByOwnerRepo,
   updatePRTitle,
@@ -20202,25 +20200,6 @@ export class OrcaRuntimeService {
       repo.path,
       threadId,
       resolve,
-      repo.connectionId ?? null,
-      prRepo ?? null,
-      ...this.getLocalGitExecutionOptionArgs(repo)
-    )
-  }
-
-  async setRepoPRCommentReaction(
-    repoSelector: string,
-    subjectId: string,
-    content: GitHubReactionContent,
-    add: boolean,
-    prRepo?: GitHubOwnerRepo | null
-  ): Promise<Awaited<ReturnType<typeof setPRCommentReaction>>> {
-    const repo = await this.resolveRepoSelector(repoSelector)
-    return setPRCommentReaction(
-      repo.path,
-      subjectId,
-      content,
-      add,
       repo.connectionId ?? null,
       prRepo ?? null,
       ...this.getLocalGitExecutionOptionArgs(repo)

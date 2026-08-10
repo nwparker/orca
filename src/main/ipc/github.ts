@@ -15,8 +15,7 @@ import type {
   GitHubPRRefreshReason,
   GitHubReactionContent,
   PRRefreshOutcome,
-  GitHubPRFile,
-  GitHubReactionContent
+  GitHubPRFile
 } from '../../shared/types'
 import { getRepoExecutionHostId } from '../../shared/execution-host'
 import type { TaskSourceContext } from '../../shared/task-source-context'
@@ -43,7 +42,6 @@ import {
   getPRComments,
   setPRCommentReaction,
   resolveReviewThread,
-  setPRCommentReaction,
   setPRFileViewed,
   addPRReviewComment,
   addPRReviewCommentReply,
@@ -724,33 +722,6 @@ export function registerGitHubHandlers(store: Store, stats: StatsCollector): voi
         repo.path,
         args.threadId,
         args.resolve,
-        repoConnectionId(repo),
-        args.prRepo ?? null,
-        ...localGitOptionArgs(store, repo)
-      )
-    }
-  )
-
-  ipcMain.handle(
-    'gh:setPRCommentReaction',
-    async (
-      _event,
-      args: {
-        repoPath: string
-        repoId?: string | null
-        sourceContext?: TaskSourceContext | null
-        subjectId: string
-        content: GitHubReactionContent
-        add: boolean
-        prRepo?: GitHubOwnerRepo | null
-      }
-    ) => {
-      const repo = assertRegisteredRepo(args, store)
-      return setPRCommentReaction(
-        repo.path,
-        args.subjectId,
-        args.content,
-        args.add,
         repoConnectionId(repo),
         args.prRepo ?? null,
         ...localGitOptionArgs(store, repo)
