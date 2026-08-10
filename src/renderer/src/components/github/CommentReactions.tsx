@@ -63,13 +63,13 @@ export function CommentReactions({
     }
     mutationPendingRef.current = true
     setPendingContent(content)
+    if (focusTriggerAfterChange) {
+      addReactionButtonRef.current?.focus()
+    }
     try {
       const changed = await onReactionChange(content, reacted)
       if (changed && closePicker) {
         setOpen(false)
-      }
-      if (changed && focusTriggerAfterChange) {
-        window.requestAnimationFrame(() => addReactionButtonRef.current?.focus())
       }
     } finally {
       mutationPendingRef.current = false

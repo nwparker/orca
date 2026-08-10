@@ -201,6 +201,29 @@ test.describe('PR comments sidebar cards view', () => {
     await expect(rocket).toHaveAttribute('aria-disabled', 'false')
     await expect(rocket).toBeFocused()
     await expect(rocket).toHaveAccessibleName('Add rocket reaction')
+
+    await orcaPage.evaluate(() => {
+      window.__store?.setState({ setPRCommentReaction: async () => true })
+    })
+    await rocket.press('Enter')
+    const selectedRocket = reviewThreadCard.getByRole('button', { name: '1 rocket reaction' })
+    await expect(selectedRocket).toHaveAttribute('aria-pressed', 'true')
+    await orcaPage.evaluate(() => {
+      window.__store?.setState({
+        setPRCommentReaction: async () => {
+          await new Promise((resolve) => window.setTimeout(resolve, 300))
+          return false
+        }
+      })
+    })
+    await selectedRocket.focus()
+    await selectedRocket.press('Enter')
+    await expect(addReaction).toBeFocused()
+    await expect(addReaction).toHaveAttribute('aria-disabled', 'true')
+    await expect(selectedRocket).toHaveCount(0)
+    await expect(selectedRocket).toHaveCount(1)
+    await expect(addReaction).toHaveAttribute('aria-disabled', 'false')
+    await expect(addReaction).toBeFocused()
   })
 
   test('queues an open thread for the agent from the visible row action and menu fallback', async ({
