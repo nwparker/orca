@@ -229,6 +229,7 @@ import type {
   GitHubPullRequestStateUpdate,
   GitHubPRFile,
   GitHubPRReviewCommentInput,
+  GitHubReactionContent,
   GitLabIssueUpdate,
   GitLabMRInlineCommentInput,
   GitLabProjectRef,
@@ -592,6 +593,7 @@ import {
   getPRCheckDetails,
   rerunPRChecks,
   getPRComments,
+  setPRCommentReaction,
   getIssue,
   resolveReviewThread,
   setPRCommentReaction,
@@ -20145,6 +20147,25 @@ export class OrcaRuntimeService {
       prNumber,
       { ...options, prRepo: prRepo ?? null },
       repo.connectionId ?? null,
+      ...this.getLocalGitExecutionOptionArgs(repo)
+    )
+  }
+
+  async setRepoPRCommentReaction(
+    repoSelector: string,
+    reactionSubjectId: string,
+    content: GitHubReactionContent,
+    reacted: boolean,
+    prRepo?: GitHubOwnerRepo | null
+  ): Promise<Awaited<ReturnType<typeof setPRCommentReaction>>> {
+    const repo = await this.resolveRepoSelector(repoSelector)
+    return setPRCommentReaction(
+      repo.path,
+      reactionSubjectId,
+      content,
+      reacted,
+      repo.connectionId ?? null,
+      prRepo ?? null,
       ...this.getLocalGitExecutionOptionArgs(repo)
     )
   }

@@ -1497,6 +1497,8 @@ export type PRComment = {
   createdAt: string
   url: string
   reactions?: GitHubReaction[]
+  /** GraphQL node ID for GitHub comments that support reaction mutations. */
+  reactionSubjectId?: string
   /** File path for inline review comments (absent for top-level conversation comments). */
   path?: string
   /** GraphQL node ID of the review thread — present only for inline review comments.

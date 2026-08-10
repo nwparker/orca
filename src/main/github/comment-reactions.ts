@@ -51,6 +51,23 @@ const REACTION_ORDER: GitHubReactionContent[] = [
   'eyes'
 ]
 
+const REACTION_CONTENT_TO_GRAPHQL: Record<GitHubReactionContent, GitHubGraphQLReactionContent> = {
+  '+1': 'THUMBS_UP',
+  '-1': 'THUMBS_DOWN',
+  laugh: 'LAUGH',
+  confused: 'CONFUSED',
+  heart: 'HEART',
+  hooray: 'HOORAY',
+  rocket: 'ROCKET',
+  eyes: 'EYES'
+}
+
+export function toGraphQLReactionContent(
+  content: GitHubReactionContent
+): GitHubGraphQLReactionContent {
+  return REACTION_CONTENT_TO_GRAPHQL[content]
+}
+
 export function mapGraphQLReactionGroups(
   groups?: GitHubGraphQLReactionGroup[] | null
 ): GitHubReaction[] | undefined {
@@ -64,11 +81,14 @@ export function mapGraphQLReactionGroups(
     if (!content || count <= 0) {
       continue
     }
-    const current = reactionsByContent.get(content)
+    const existing = reactionsByContent.get(content)
+    const viewerHasReacted = Boolean(existing?.viewerHasReacted || group.viewerHasReacted)
     reactionsByContent.set(content, {
       content,
-      count: (current?.count ?? 0) + count,
-      viewerHasReacted: Boolean(current?.viewerHasReacted || group.viewerHasReacted)
+      count: (existing?.count ?? 0) + count,
+      ...(existing?.viewerHasReacted !== undefined || group.viewerHasReacted != null
+        ? { viewerHasReacted }
+        : {})
     })
   }
 

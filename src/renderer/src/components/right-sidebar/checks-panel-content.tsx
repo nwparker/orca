@@ -1735,6 +1735,7 @@ function CommentRow({
   onReact,
   onEditComment,
   onDeleteComment,
+  onSetReaction,
   onQueueForAgent
 }: {
   comment: PRComment
@@ -1753,6 +1754,11 @@ function CommentRow({
   onReact?: (comment: PRComment, content: GitHubReactionContent, add: boolean) => Promise<boolean>
   onEditComment?: (comment: PRComment, body: string) => Promise<boolean>
   onDeleteComment?: (comment: PRComment) => void | Promise<void>
+  onSetReaction?: (
+    comment: PRComment,
+    content: GitHubReactionContent,
+    reacted: boolean
+  ) => Promise<void>
   onQueueForAgent?: () => void
 }): React.JSX.Element {
   const automated = isBotPRComment(comment, botAuthorOverrides)
@@ -2011,27 +2017,17 @@ function CommentRow({
             </div>
           </div>
         ) : (
-          <>
-            <CommentMarkdown
-              content={comment.body}
-              className={cn(
-                isReply ? presentation.commentBodyReply : presentation.commentBody,
-                presentation.commentBodyMarkdown
-              )}
-            />
+          <div className={isReply ? presentation.commentBodyReply : presentation.commentBody}>
+            <CommentMarkdown content={comment.body} className={presentation.commentBodyMarkdown} />
             <CommentReactions
               reactions={comment.reactions}
-              className={cn(
-                'mt-0 pb-2.5',
-                presentation.useCardLayout ? 'px-4' : isReply ? 'pl-5' : 'pl-[22px]'
-              )}
-              onToggle={
-                comment.nodeId && onReact
-                  ? (content, add) => onReact(comment, content, add)
+              onReactionChange={
+                comment.reactionSubjectId && onSetReaction
+                  ? (content, reacted) => onSetReaction(comment, content, reacted)
                   : undefined
               }
             />
-          </>
+          </div>
         )}
       </div>
     </div>
@@ -2055,6 +2051,7 @@ function PRCommentGroupView({
   onReact,
   onEditComment,
   onDeleteComment,
+  onSetReaction,
   onQueueForAgent
 }: {
   group: PRCommentGroup
@@ -2073,6 +2070,11 @@ function PRCommentGroupView({
   onReact?: (comment: PRComment, content: GitHubReactionContent, add: boolean) => Promise<boolean>
   onEditComment?: (comment: PRComment, body: string) => Promise<boolean>
   onDeleteComment?: (comment: PRComment) => void | Promise<void>
+  onSetReaction?: (
+    comment: PRComment,
+    content: GitHubReactionContent,
+    reacted: boolean
+  ) => Promise<void>
   onQueueForAgent?: () => void
 }): React.JSX.Element {
   // Reply targets a specific comment id so any comment in a thread — root or
@@ -2120,6 +2122,7 @@ function PRCommentGroupView({
     onReact,
     onEditComment,
     onDeleteComment,
+    onSetReaction,
     onQueueForAgent
   }
 
@@ -2203,7 +2206,8 @@ function ResolvedCommentGroupsSection({
   onReply,
   onReact,
   onEditComment,
-  onDeleteComment
+  onDeleteComment,
+  onSetReaction
 }: {
   groups: PRCommentGroup[]
   botAuthorOverrides: ReadonlySet<string>
@@ -2218,6 +2222,11 @@ function ResolvedCommentGroupsSection({
   onReact?: (comment: PRComment, content: GitHubReactionContent, add: boolean) => Promise<boolean>
   onEditComment?: (comment: PRComment, body: string) => Promise<boolean>
   onDeleteComment?: (comment: PRComment) => void | Promise<void>
+  onSetReaction?: (
+    comment: PRComment,
+    content: GitHubReactionContent,
+    reacted: boolean
+  ) => Promise<void>
 }): React.JSX.Element | null {
   if (groups.length === 0) {
     return null
@@ -2254,6 +2263,7 @@ function ResolvedCommentGroupsSection({
                 onReact={onReact}
                 onEditComment={onEditComment}
                 onDeleteComment={onDeleteComment}
+                onSetReaction={onSetReaction}
               />
             ))}
           </AccordionContent>
@@ -2321,7 +2331,8 @@ export function PRCommentsList({
   onReact,
   onResolve,
   onEditComment,
-  onDeleteComment
+  onDeleteComment,
+  onSetReaction
 }: {
   comments: PRComment[]
   commentsLoading: boolean
@@ -2339,6 +2350,11 @@ export function PRCommentsList({
   onResolve?: (threadId: string, resolve: boolean) => boolean | Promise<boolean>
   onEditComment?: (comment: PRComment, body: string) => Promise<boolean>
   onDeleteComment?: (comment: PRComment) => void | Promise<void>
+  onSetReaction?: (
+    comment: PRComment,
+    content: GitHubReactionContent,
+    reacted: boolean
+  ) => Promise<void>
 }): React.JSX.Element {
   const presentation = React.useMemo(() => getPRCommentPresentationClasses(), [])
   const [commentFilter, setCommentFilter] = useState<PRCommentAudienceFilter>('all')
@@ -2462,6 +2478,7 @@ export function PRCommentsList({
         onReact={onReact}
         onEditComment={onEditComment}
         onDeleteComment={onDeleteComment}
+        onSetReaction={onSetReaction}
         onQueueForAgent={canQueue ? () => addGroupToSelection(groupId) : undefined}
       />
     )
@@ -2793,6 +2810,7 @@ export function PRCommentsList({
                 onReact={onReact}
                 onEditComment={onEditComment}
                 onDeleteComment={onDeleteComment}
+                onSetReaction={onSetReaction}
               />
             </>
           )}

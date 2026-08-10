@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest'
 
-import { getGraphQLReactionContent, mapGraphQLReactionGroups } from './comment-reactions'
+import { mapGraphQLReactionGroups, toGraphQLReactionContent } from './comment-reactions'
 
 describe('mapGraphQLReactionGroups', () => {
   it('normalizes GraphQL reaction groups into GitHub comment reactions', () => {
     expect(
       mapGraphQLReactionGroups([
-        { content: 'EYES', reactors: { totalCount: 1 } },
+        { content: 'EYES', reactors: { totalCount: 1 }, viewerHasReacted: false },
         { content: 'THUMBS_UP', reactors: { totalCount: 2 }, viewerHasReacted: true },
         { content: 'HEART', reactors: { totalCount: 0 } },
         { content: 'UNKNOWN', reactors: { totalCount: 9 } }
@@ -23,8 +23,8 @@ describe('mapGraphQLReactionGroups', () => {
     )
   })
 
-  it('maps reaction content back to the GraphQL enum', () => {
-    expect(getGraphQLReactionContent('+1')).toBe('THUMBS_UP')
-    expect(getGraphQLReactionContent('-1')).toBe('THUMBS_DOWN')
+  it('maps REST reaction content to the GraphQL enum', () => {
+    expect(toGraphQLReactionContent('+1')).toBe('THUMBS_UP')
+    expect(toGraphQLReactionContent('hooray')).toBe('HOORAY')
   })
 })

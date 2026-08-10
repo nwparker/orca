@@ -2415,19 +2415,8 @@
         },
         "CommentReactions": {
           "addReaction": "Add reaction",
-          "reactions": "Reactions",
-          "addNamedReaction": "Add {{value0}} reaction",
           "removeNamedReaction": "Remove {{value0}} reaction",
-          "addNamedReactionWithCount": "Add {{value0}} reaction, {{value1}} total",
-          "removeNamedReactionWithCount": "Remove {{value0}} reaction, {{value1}} total",
-          "thumbsUp": "thumbs up",
-          "thumbsDown": "thumbs down",
-          "laugh": "laugh",
-          "confused": "confused",
-          "heart": "heart",
-          "hooray": "hooray",
-          "rocket": "rocket",
-          "eyes": "eyes"
+          "addNamedReaction": "Add {{value0}} reaction"
         }
       },
       "linear": {
@@ -10583,7 +10572,7 @@
               "branch": "Sync Branch"
             },
             "7e4b2a19c0": "Could not resolve the GitHub PR to reply on.",
-            "commentReactionFailed": "Could not update comment reaction."
+            "updateReactionFailed": "Failed to update reaction."
           },
           "CreatePullRequestDialog": {
             "2bc1b4345e": "Cancel",

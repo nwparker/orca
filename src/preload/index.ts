@@ -76,6 +76,7 @@ import type {
   GitHubReactionContent,
   GitHubCreateIssueResult,
   GitHubOwnerRepo,
+  GitHubReactionContent,
   GitHubWorkItem,
   JiraProjectStatusOrder,
   GitPushTarget,
@@ -1470,6 +1471,16 @@ const api = {
       prRepo?: GitHubOwnerRepo | null
       noCache?: boolean
     }): Promise<unknown[]> => ipcRenderer.invoke('gh:prComments', args),
+
+    setPRCommentReaction: (args: {
+      repoPath: string
+      repoId?: string
+      sourceContext?: TaskSourceContext | null
+      reactionSubjectId: string
+      content: GitHubReactionContent
+      reacted: boolean
+      prRepo?: GitHubOwnerRepo | null
+    }): Promise<boolean> => ipcRenderer.invoke('gh:setPRCommentReaction', args),
 
     resolveReviewThread: (args: {
       repoPath: string

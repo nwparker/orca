@@ -25,6 +25,7 @@ import { useActiveWorktree, useRepoById } from '@/store/selectors'
 import { useChecksPanelTerminalWorktree } from './use-checks-panel-terminal-worktree'
 import { cn } from '@/lib/utils'
 import { openHttpLink } from '@/lib/http-link-routing'
+import { restoreReactionOnSubject, setReactionOnSubject } from '@/lib/pr-comment-reactions'
 import { Button } from '@/components/ui/button'
 import { DetachedHeadBadge } from '@/components/DetachedHeadBadge'
 import {
@@ -498,6 +499,7 @@ export default function ChecksPanel(): React.JSX.Element {
   const fetchPRComments = useAppStore((s) => s.fetchPRComments)
   const addPRConversationComment = useAppStore((s) => s.addPRConversationComment)
   const addPRReviewCommentReply = useAppStore((s) => s.addPRReviewCommentReply)
+  const setPRCommentReaction = useAppStore((s) => s.setPRCommentReaction)
   const resolveReviewThread = useAppStore((s) => s.resolveReviewThread)
   const setPRCommentReaction = useAppStore((s) => s.setPRCommentReaction)
   const detectedAgentIds = useAppStore((s) => s.detectedAgentIds)
@@ -2995,6 +2997,45 @@ export default function ChecksPanel(): React.JSX.Element {
     [pr?.prRepo, confirm]
   )
 
+  const handleSetReaction = useCallback(
+    async (comment: PRComment, content: GitHubReactionContent, reacted: boolean): Promise<void> => {
+      const reactionSubjectId = comment.reactionSubjectId
+      if (!repo || !prNumber || !pr?.prRepo || !reactionSubjectId) {
+        return
+      }
+      const requestKey = checksPanelAsyncResultKey(
+        prCacheKey,
+        branch,
+        prNumber,
+        pr.prRepo,
+        pr.headSha
+      )
+      const previousReaction = comment.reactions?.find((reaction) => reaction.content === content)
+      setComments((current) => setReactionOnSubject(current, reactionSubjectId, content, reacted))
+      const ok = await setPRCommentReaction(
+        repo.path,
+        prNumber,
+        reactionSubjectId,
+        content,
+        reacted,
+        { repoId: repo.id, prRepo: pr.prRepo }
+      )
+      if (!isCurrentAsyncResult(requestKey) || ok) {
+        return
+      }
+      setComments((current) =>
+        restoreReactionOnSubject(current, reactionSubjectId, content, previousReaction)
+      )
+      toast.error(
+        translate(
+          'auto.components.right.sidebar.ChecksPanel.updateReactionFailed',
+          'Failed to update reaction.'
+        )
+      )
+    },
+    [branch, isCurrentAsyncResult, pr, prCacheKey, prNumber, repo, setPRCommentReaction]
+  )
+
   const handleReplyToComment = useCallback(
     async (comment: PRComment, body: string, options: { notifyOnFailure?: boolean } = {}) => {
       const notifyOnFailure = options.notifyOnFailure !== false
@@ -4561,6 +4602,7 @@ export default function ChecksPanel(): React.JSX.Element {
         onResolve={pr || activeGitLabReview ? handleResolve : undefined}
         onEditComment={pr ? handleEditComment : undefined}
         onDeleteComment={pr ? handleDeleteComment : undefined}
+        onSetReaction={canTargetPRComments ? handleSetReaction : undefined}
       />
       <SourceControlAgentActionDialog
         open={sourceControlAiActionsVisible && agentComposerState !== null}

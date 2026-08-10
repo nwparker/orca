@@ -289,6 +289,7 @@ type WebGitHubRouteKey =
   | 'prCheckDetails'
   | 'rerunPRChecks'
   | 'prComments'
+  | 'setPRCommentReaction'
   | 'resolveReviewThread'
   | 'setPRCommentReaction'
   | 'setPRFileViewed'
@@ -338,6 +339,7 @@ type WebGitHubRuntimeMethod =
   | 'github.prCheckDetails'
   | 'github.rerunPRChecks'
   | 'github.prComments'
+  | 'github.setPRCommentReaction'
   | 'github.resolveReviewThread'
   | 'github.setPRCommentReaction'
   | 'github.setPRFileViewed'
@@ -440,6 +442,7 @@ export const GITHUB_WEB_RPC_METHODS = {
   prCheckDetails: 'github.prCheckDetails',
   rerunPRChecks: 'github.rerunPRChecks',
   prComments: 'github.prComments',
+  setPRCommentReaction: 'github.setPRCommentReaction',
   resolveReviewThread: 'github.resolveReviewThread',
   setPRCommentReaction: 'github.setPRCommentReaction',
   setPRFileViewed: 'github.setPRFileViewed',
@@ -2388,6 +2391,11 @@ function createGitHubApi(): WebGitHubApi {
       route<WebGitHubResult<'rerunPRChecks'>>(GITHUB_WEB_RPC_METHODS.rerunPRChecks, args),
     prComments: (args) =>
       route<WebGitHubResult<'prComments'>>(GITHUB_WEB_RPC_METHODS.prComments, args),
+    setPRCommentReaction: (args) =>
+      route<WebGitHubResult<'setPRCommentReaction'>>(
+        GITHUB_WEB_RPC_METHODS.setPRCommentReaction,
+        args
+      ),
     resolveReviewThread: (args) =>
       route<WebGitHubResult<'resolveReviewThread'>>(
         GITHUB_WEB_RPC_METHODS.resolveReviewThread,

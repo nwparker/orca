@@ -45,6 +45,7 @@ const mockApi = {
     prComments: vi.fn().mockResolvedValue([]),
     addIssueComment: vi.fn(),
     addPRReviewCommentReply: vi.fn(),
+    setPRCommentReaction: vi.fn(),
     resolveReviewThread: vi.fn(),
     setPRCommentReaction: vi.fn(),
     listWorkItems: vi.fn(),
@@ -1668,33 +1669,111 @@ describe('createGitHubSlice PR comment mutations', () => {
     ).toMatchObject({ body: 'reply', threadId: 'PRRT_1', path: 'src/a.ts', line: 8 })
   })
 
-  it('routes local comment reactions through IPC', async () => {
+  it('updates cached reactions through local GitHub IPC', async () => {
     const store = createTestStore()
     const repoPath = '/repo'
     const repoId = 'repo-id'
+    const cacheKey = `${repoId}::pr-comments::acme/widgets::12`
     store.setState({
-      repos: [{ id: repoId, path: repoPath, name: 'repo', kind: 'git' }]
+      repos: [{ id: repoId, path: repoPath, name: 'repo', kind: 'git' }],
+      commentsCache: {
+        [cacheKey]: {
+          data: [
+            {
+              id: 10,
+              reactionSubjectId: 'IC_10',
+              author: 'reviewer',
+              authorAvatarUrl: '',
+              body: 'Nice',
+              createdAt: '2026-03-28T00:00:00Z',
+              url: ''
+            }
+          ],
+          fetchedAt: 1
+        }
+      }
     } as unknown as Partial<AppState>)
 
-    await expect(
-      store.getState().setPRCommentReaction(repoPath, 12, 7, 'PRRC_1', '+1', true, {
-        repoId,
-        prRepo: { owner: 'Acme', repo: 'Widgets' }
-      })
-    ).resolves.toBe(true)
+    await store.getState().setPRCommentReaction(repoPath, 12, 'IC_10', 'heart', true, {
+      repoId,
+      prRepo: { owner: 'Acme', repo: 'Widgets' }
+    })
 
     expect(mockApi.gh.setPRCommentReaction).toHaveBeenCalledWith({
       repoPath,
       repoId,
-      subjectId: 'PRRC_1',
-      content: '+1',
-      add: true,
+      reactionSubjectId: 'IC_10',
+      content: 'heart',
+      reacted: true,
       prRepo: { owner: 'Acme', repo: 'Widgets' },
       sourceContext: undefined
     })
+    expect(store.getState().commentsCache[cacheKey]?.data?.[0].reactions).toEqual([
+      { content: 'heart', count: 1, viewerHasReacted: true }
+    ])
   })
 
-  it('routes comment reactions to the owning runtime', async () => {
+  it('rolls back an optimistic reaction when GitHub rejects it', async () => {
+    let resolveReaction!: (ok: boolean) => void
+    mockApi.gh.setPRCommentReaction.mockImplementationOnce(
+      () => new Promise<boolean>((resolve) => (resolveReaction = resolve))
+    )
+    const store = createTestStore()
+    const repoPath = '/repo'
+    const repoId = 'repo-id'
+    const cacheKey = `${repoId}::pr-comments::acme/widgets::12`
+    store.setState({
+      repos: [{ id: repoId, path: repoPath, name: 'repo', kind: 'git' }],
+      commentsCache: {
+        [cacheKey]: {
+          data: [
+            {
+              id: 10,
+              reactionSubjectId: 'IC_10',
+              author: 'reviewer',
+              authorAvatarUrl: '',
+              body: 'Nice',
+              createdAt: '2026-03-28T00:00:00Z',
+              url: '',
+              reactions: [{ content: 'heart', count: 2, viewerHasReacted: false }]
+            }
+          ],
+          fetchedAt: 1
+        }
+      }
+    } as unknown as Partial<AppState>)
+
+    const pending = store.getState().setPRCommentReaction(repoPath, 12, 'IC_10', 'heart', true, {
+      repoId,
+      prRepo: { owner: 'Acme', repo: 'Widgets' }
+    })
+    const optimisticEntry = store.getState().commentsCache[cacheKey]
+    store.setState({
+      commentsCache: {
+        ...store.getState().commentsCache,
+        [cacheKey]: {
+          ...optimisticEntry,
+          data: (optimisticEntry?.data ?? []).map((comment) => ({
+            ...comment,
+            reactions: [
+              ...(comment.reactions ?? []),
+              { content: 'eyes' as const, count: 1, viewerHasReacted: false }
+            ]
+          }))
+        }
+      }
+    })
+    resolveReaction(false)
+    const ok = await pending
+
+    expect(ok).toBe(false)
+    expect(store.getState().commentsCache[cacheKey]?.data?.[0].reactions).toEqual([
+      { content: 'heart', count: 2, viewerHasReacted: false },
+      { content: 'eyes', count: 1, viewerHasReacted: false }
+    ])
+  })
+
+  it('routes reaction mutations through the workspace runtime', async () => {
     runtimeEnvironmentCall.mockResolvedValueOnce({
       id: 'rpc-pr-reaction',
       ok: true,
@@ -1717,25 +1796,24 @@ describe('createGitHubSlice PR comment mutations', () => {
       ]
     } as unknown as Partial<AppState>)
 
-    await expect(
-      store.getState().setPRCommentReaction(repoPath, 12, 7, 'PRRC_1', '-1', true, {
-        repoId,
-        prRepo: { owner: 'Acme', repo: 'Widgets' }
-      })
-    ).resolves.toBe(true)
+    await store.getState().setPRCommentReaction(repoPath, 12, 'PRRC_10', 'rocket', true, {
+      repoId,
+      prRepo: { owner: 'Acme', repo: 'Widgets' }
+    })
 
     expect(runtimeEnvironmentCall).toHaveBeenCalledWith({
       selector: 'env-1',
       method: 'github.setPRCommentReaction',
       params: {
         repo: repoId,
-        subjectId: 'PRRC_1',
-        content: '-1',
-        add: true,
+        reactionSubjectId: 'PRRC_10',
+        content: 'rocket',
+        reacted: true,
         prRepo: { owner: 'Acme', repo: 'Widgets' }
       },
       timeoutMs: 30_000
     })
+    expect(mockApi.gh.setPRCommentReaction).not.toHaveBeenCalled()
   })
 
   it('does not mutate the PR comments cache when GitHub omits the comment payload', async () => {

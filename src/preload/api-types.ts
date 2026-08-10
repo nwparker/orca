@@ -226,6 +226,7 @@ import type {
   MarkdownDocument,
   FloatingTerminalCwdRequest,
   GitHubIssueUpdate,
+  GitHubReactionContent,
   GitHubPRRefreshCandidate,
   GitHubPRRefreshEnqueueResult,
   GitHubPRRefreshEvent,
@@ -1883,6 +1884,15 @@ export type PreloadApi = {
       prRepo?: GitHubOwnerRepo | null
       noCache?: boolean
     }) => Promise<PRComment[]>
+    setPRCommentReaction: (args: {
+      repoPath: string
+      repoId?: string
+      sourceContext?: TaskSourceContext | null
+      reactionSubjectId: string
+      content: GitHubReactionContent
+      reacted: boolean
+      prRepo?: GitHubOwnerRepo | null
+    }) => Promise<boolean>
     resolveReviewThread: (args: {
       repoPath: string
       repoId?: string
