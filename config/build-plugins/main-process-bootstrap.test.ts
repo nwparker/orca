@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events'
 import { posix } from 'node:path'
 import { runInNewContext } from 'node:vm'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import {
   MAIN_PROCESS_BOOTSTRAP_FILE,
   MAIN_PROCESS_COMPILE_CACHE_DIRECTORY,
@@ -10,13 +10,14 @@ import {
 import { BOOTSTRAP_FATAL_EXIT_GUARD_KEY } from '../../src/main/startup/bootstrap-fatal-exit-guard'
 
 function runBootstrap(options: {
+  appImagePath?: string
   compileCacheSupported?: boolean
   enableCompileCache?: (directory: string) => unknown
-  flushCompileCache?: () => void
   getUserDataPath?: () => string
   isPackaged?: boolean
   loadMain?: () => unknown
   nodeCompileCache?: string
+  platform?: NodeJS.Platform
   startupDiagnostics?: '1' | 'trace'
 }): { exports: unknown; timeline: string[] } {
   const timeline: string[] = []
@@ -27,16 +28,19 @@ function runBootstrap(options: {
     exit: (code: number) => void
     exitCode?: number
     pid: number
+    platform: NodeJS.Platform
     ppid: number
   }
   processMock.argv = []
   processMock.env = {
     ...(options.nodeCompileCache ? { NODE_COMPILE_CACHE: options.nodeCompileCache } : {}),
+    ...(options.appImagePath ? { APPIMAGE: options.appImagePath } : {}),
     ...(options.startupDiagnostics ? { ORCA_STARTUP_DIAGNOSTICS: options.startupDiagnostics } : {})
   }
   processMock.execPath = '/electron'
   processMock.exit = () => {}
   processMock.pid = 42
+  processMock.platform = options.platform ?? 'darwin'
   processMock.ppid = 7
   const moduleMock = { exports: undefined as unknown }
   const compileCacheModule =
@@ -46,10 +50,6 @@ function runBootstrap(options: {
           enableCompileCache: (directory: string) => {
             timeline.push(`enable:${directory}`)
             return options.enableCompileCache?.(directory)
-          },
-          flushCompileCache: () => {
-            timeline.push('flush')
-            options.flushCompileCache?.()
           }
         }
   const requireMock = (specifier: string): unknown => {
@@ -86,11 +86,7 @@ function runBootstrap(options: {
     module: moduleMock,
     process: processMock,
     require: requireMock,
-    setImmediate: () => {},
-    setTimeout: (callback: () => void) => {
-      callback()
-      return { unref: () => {} }
-    }
+    setImmediate: () => {}
   })
   return { exports: moduleMock.exports, timeline }
 }
@@ -109,14 +105,33 @@ describe('main-process bootstrap', () => {
     expect(MAIN_PROCESS_BOOTSTRAP_FILE).toBe('bootstrap.cjs')
   })
 
-  it('enables and flushes the compile cache around the real main bundle', () => {
+  it('enables the compile cache before the real main bundle', () => {
     const result = runBootstrap({})
 
     expect(result.timeline).toEqual([
       `enable:/user-data/${MAIN_PROCESS_COMPILE_CACHE_DIRECTORY}`,
-      'main',
-      'flush'
+      'main'
     ])
+    expect(result.exports).toEqual({ loaded: true })
+  })
+
+  it.each<NodeJS.Platform>(['darwin', 'win32', 'linux'])(
+    'enables the cache on supported %s launches',
+    (platform) => {
+      const result = runBootstrap({ platform })
+
+      expect(result.timeline[0]).toBe(`enable:/user-data/${MAIN_PROCESS_COMPILE_CACHE_DIRECTORY}`)
+    }
+  )
+
+  it('skips the path-keyed cache for Linux AppImage launches', () => {
+    const result = runBootstrap({
+      appImagePath: '/tmp/.mount_Orca123/orca',
+      nodeCompileCache: '/user-data/v8-compile-cache',
+      platform: 'linux'
+    })
+
+    expect(result.timeline).toEqual(['main'])
     expect(result.exports).toEqual({ loaded: true })
   })
 
@@ -161,7 +176,7 @@ describe('main-process bootstrap', () => {
       }
     })
 
-    expect(result.timeline).toEqual(['main', 'flush'])
+    expect(result.timeline).toEqual(['main'])
     expect(result.exports).toEqual({ loaded: true })
   })
 
@@ -173,16 +188,19 @@ describe('main-process bootstrap', () => {
   })
 
   it('does not hide a real-main failure behind cache persistence', () => {
-    const flushCompileCache = vi.fn()
-
     expect(() =>
       runBootstrap({
-        flushCompileCache,
         loadMain: () => {
           throw new Error('main failed')
         }
       })
     ).toThrow('main failed')
-    expect(flushCompileCache).not.toHaveBeenCalled()
+  })
+
+  it('relies on Node exit persistence instead of a synchronous flush timer', () => {
+    const source = createMainProcessBootstrap()
+
+    expect(source).not.toContain('flushCompileCache')
+    expect(source).not.toContain('setTimeout')
   })
 })

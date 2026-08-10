@@ -121,44 +121,35 @@ export function createStartupDiagnosticsBanner(chunkName: string): string {
 
 export function createMainProcessBootstrap(mainFileName = MAIN_PROCESS_BUNDLE_FILE): string {
   return `${createBootstrapFatalExitBanner()}${createStartupDiagnosticsBanner(mainFileName)}
-let compileCacheModule
 try {
-  compileCacheModule = require('node:module')
-  if (typeof compileCacheModule.enableCompileCache === 'function') {
-    let cacheDirectory = process.env.NODE_COMPILE_CACHE
-    if (typeof cacheDirectory !== 'string' || cacheDirectory.length === 0) {
-      const electronApp = require('electron').app
-      const path = require('node:path')
-      let userDataDirectory = process.env.ORCA_E2E_USER_DATA_DIR
-      if (typeof userDataDirectory !== 'string' || userDataDirectory.length === 0) {
-        const devOverride = process.env.ORCA_DEV_USER_DATA_PATH
-        userDataDirectory = electronApp.isPackaged
-          ? electronApp.getPath('userData')
-          : typeof devOverride === 'string' && devOverride.length > 0
-            ? devOverride
-            : path.join(electronApp.getPath('appData'), 'orca-dev')
+  // Why: macOS, Windows, and installed Linux have stable paths; AppImage FUSE paths change each run.
+  const isLinuxAppImage = process.platform === 'linux' && typeof process.env.APPIMAGE === 'string' && process.env.APPIMAGE.length > 0
+  if (!isLinuxAppImage) {
+    const compileCacheModule = require('node:module')
+    if (typeof compileCacheModule.enableCompileCache === 'function') {
+      let cacheDirectory = process.env.NODE_COMPILE_CACHE
+      if (typeof cacheDirectory !== 'string' || cacheDirectory.length === 0) {
+        const electronApp = require('electron').app
+        const path = require('node:path')
+        let userDataDirectory = process.env.ORCA_E2E_USER_DATA_DIR
+        if (typeof userDataDirectory !== 'string' || userDataDirectory.length === 0) {
+          const devOverride = process.env.ORCA_DEV_USER_DATA_PATH
+          userDataDirectory = electronApp.isPackaged
+            ? electronApp.getPath('userData')
+            : typeof devOverride === 'string' && devOverride.length > 0
+              ? devOverride
+              : path.join(electronApp.getPath('appData'), 'orca-dev')
+        }
+        cacheDirectory = path.join(userDataDirectory, ${JSON.stringify(MAIN_PROCESS_COMPILE_CACHE_DIRECTORY)})
       }
-      cacheDirectory = path.join(userDataDirectory, ${JSON.stringify(MAIN_PROCESS_COMPILE_CACHE_DIRECTORY)})
+      compileCacheModule.enableCompileCache(cacheDirectory)
     }
-    compileCacheModule.enableCompileCache(cacheDirectory)
   }
 } catch {
   // Why: compile caching is an optimization and must never prevent launch.
 }
 
 module.exports = require(${JSON.stringify(`./${mainFileName}`)})
-try {
-  const flushTimer = setTimeout(() => {
-    try {
-      compileCacheModule?.flushCompileCache?.()
-    } catch {
-      // Why: an unwritable cache must not affect a running main process.
-    }
-  }, 5000)
-  flushTimer.unref?.()
-} catch {
-  // Why: cache persistence must never replace the main bundle's outcome.
-}
 `
 }
 
