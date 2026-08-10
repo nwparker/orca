@@ -110,8 +110,8 @@ describe('DispatcherWriterAdmission', () => {
     const replacement = createEntry('liveness', 3)
 
     admitOrThrow(admission, first)
-    expect(shiftOrThrow(admission, 'liveness')).toBe(first)
     admitOrThrow(admission, queued)
+    expect(shiftOrThrow(admission, 'liveness')).toBe(first)
     expect(admission.admit(replacement, Number.MAX_SAFE_INTEGER)).toEqual({
       accepted: true,
       replaced: queued
