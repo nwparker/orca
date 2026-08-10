@@ -1,7 +1,7 @@
 import { createElement } from 'react'
 import { act, create, type ReactTestRenderer } from 'react-test-renderer'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import type { AskPrompt } from './mobile-native-chat-ask'
+import type { AskPrompt } from '../../../src/shared/native-chat-ask'
 import { useMobileNativeChatAskDismiss } from './use-mobile-native-chat-ask-dismiss'
 
 describe('useMobileNativeChatAskDismiss', () => {

@@ -1,8 +1,8 @@
 import { createElement } from 'react'
 import { act, create, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { MAX_TOOL_DETAIL_LENGTH } from '../../../src/shared/native-chat-tool-summary'
 import type { NativeChatMessage } from '../../../src/shared/native-chat-types'
-import { MAX_TOOL_DETAIL_LENGTH } from './mobile-native-chat-tool-summary'
 
 vi.mock('react-native', async () => {
   const React = await import('react')
