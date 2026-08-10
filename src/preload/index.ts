@@ -4,6 +4,7 @@ import { electronAPI } from '@electron-toolkit/preload'
 import { preloadE2EConfig } from './e2e-config'
 import { glApi } from './gitlab'
 import type { AppIdentity } from '../shared/app-identity'
+import type { ComputerAwakeStatus } from '../shared/computer-awake-mode'
 import type {
   DashboardRevealAgentArgs,
   DashboardSleepWorkspaceArgs,
@@ -2035,6 +2036,16 @@ const api = {
       return () => ipcRenderer.removeListener('settings:changed', listener)
     }
   },
+
+  agentAwake: {
+    getStatus: (): Promise<ComputerAwakeStatus> => ipcRenderer.invoke('agentAwake:getStatus'),
+    onChanged: (callback: (status: ComputerAwakeStatus) => void): (() => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, status: ComputerAwakeStatus): void =>
+        callback(status)
+      ipcRenderer.on('agentAwake:changed', listener)
+      return () => ipcRenderer.removeListener('agentAwake:changed', listener)
+    }
+  } satisfies PreloadApi['agentAwake'],
 
   localhostWorktreeLabels: {
     register: (args: LocalhostWorktreeLabelRoute): Promise<LocalhostWorktreeLabelResult> =>
