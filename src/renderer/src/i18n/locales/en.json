@@ -10389,6 +10389,7 @@
           "devOnly": "Dev only",
           "channelAriaLabel": "Update channel",
           "hourlyWarning": "Hourly builds are macOS-only and ship straight from main with no test gate. Keep a stable build handy.",
+          "dailyWarning": "Daily builds are macOS-only and ship straight from main with no test gate. Keep a stable build handy.",
           "adhocWarning": "Adhoc builds are macOS-only and come from a branch that has not landed. Whoever cut one may abandon it — keep a stable build handy.",
           "loadingBuilds": "Loading builds…",
           "noBuilds": "No builds found",
