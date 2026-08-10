@@ -2,13 +2,18 @@ import { resolve } from 'node:path'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
+import {
+  createRendererSourceMapCompactionPlugin,
+  rendererProductionBuild,
+  rendererProductionMinifyOptions
+} from './config/build-plugins/renderer-production-minification'
 
 export default defineConfig({
   root: resolve('src/renderer'),
   // Why: pairing URLs may live under a reverse-proxy path prefix like
   // /orca/web-index.html, so built assets must resolve relative to the page.
   base: './',
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), createRendererSourceMapCompactionPlugin()],
   define: {
     ORCA_FEATURE_WALL_ENABLED: 'true'
   },
@@ -19,10 +24,12 @@ export default defineConfig({
     }
   },
   build: {
+    ...rendererProductionBuild,
     outDir: resolve('out/web'),
     emptyOutDir: true,
     rollupOptions: {
-      input: resolve('src/renderer/web-index.html')
+      input: resolve('src/renderer/web-index.html'),
+      output: { minify: rendererProductionMinifyOptions }
     }
   },
   worker: {

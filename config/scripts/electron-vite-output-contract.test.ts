@@ -195,6 +195,21 @@ describe('Electron Vite output contract', () => {
     )
   })
 
+  it('minifies production renderers while retaining names and hidden source maps', () => {
+    const rendererBuild = electronViteConfig.renderer?.build
+    const output = rendererBuild?.rollupOptions?.output
+    if (!output || Array.isArray(output)) {
+      throw new Error('Expected one renderer output')
+    }
+
+    expect(rendererBuild?.minify).toBe('oxc')
+    expect(rendererBuild?.sourcemap).toBe('hidden')
+    expect(output.minify).toMatchObject({
+      compress: { keepNames: { function: true, class: true } },
+      mangle: { keepNames: { function: true, class: true } }
+    })
+  })
+
   it('rejects prototype properties as build targets', () => {
     expect(targetConfig).toContain('Object.prototype.hasOwnProperty.call(configByTarget, target)')
   })

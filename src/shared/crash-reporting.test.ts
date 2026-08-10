@@ -10,6 +10,22 @@ import {
 } from './crash-reporting'
 
 describe('crash-reporting shared helpers', () => {
+  it('preserves renderer asset coordinates while redacting install paths', () => {
+    const stack = [
+      'TypeError: renderer failed',
+      '    at fail (file:///Applications/Orca.app/Contents/Resources/app.asar/out/renderer/assets/App-AbC_123.js:7:19)',
+      '    at https://orca.example/client/assets/web-Z9.mjs:11:3'
+    ].join('\n')
+
+    expect(sanitizeCrashReportString(stack, 4_000)).toBe(
+      [
+        'TypeError: renderer failed',
+        '    at fail (renderer-asset:App-AbC_123.js:7:19)',
+        '    at renderer-asset:web-Z9.mjs:11:3'
+      ].join('\n')
+    )
+  })
+
   it('redacts paths and common secret-shaped strings', () => {
     const text =
       'file /Users/alice/My Project/.env /tmp/build log C:\\Users\\bob\\My Project token=abc123 ghp_abcdefghijklmnopqrstuvwxyz'

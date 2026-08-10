@@ -1,15 +1,5 @@
-import {
-  cpSync,
-  mkdirSync,
-  readFileSync,
-  readdirSync,
-  renameSync,
-  rmSync,
-  statSync,
-  writeFileSync
-} from 'node:fs'
+import { cpSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync } from 'node:fs'
 import { dirname, join, posix, resolve, sep } from 'node:path'
-import { transform } from 'esbuild'
 
 const rendererOutput = resolve('out/renderer')
 const webOutput = resolve('out/web')
@@ -119,27 +109,19 @@ function includeReferencedOutputs() {
   }
 }
 
-async function minifyWebOutput() {
-  await Promise.all(
-    [...selectedFiles]
-      .filter((outputPath) => /\.(?:css|m?js)$/.test(outputPath))
-      .map(async (outputPath) => {
-        const targetPath = join(stagingOutput, outputPath)
-        const loader = outputPath.endsWith('.css') ? 'css' : 'js'
-        const result = await transform(readFileSync(targetPath, 'utf8'), {
-          legalComments: 'none',
-          loader,
-          minify: true,
-          target: 'es2020'
-        })
-        writeFileSync(targetPath, result.code)
-      })
-  )
+function includeSelectedSourceMaps() {
+  const outputs = new Set(listOutputFiles(rendererOutput))
+  for (const selectedFile of selectedFiles) {
+    if (/\.m?js$/.test(selectedFile) && outputs.has(`${selectedFile}.map.gz`)) {
+      selectedFiles.add(`${selectedFile}.map.gz`)
+    }
+  }
 }
 
 assertEntryIsolation()
 visitManifestEntry('web-index.html')
 includeReferencedOutputs()
+includeSelectedSourceMaps()
 
 rmSync(stagingOutput, { force: true, recursive: true })
 try {
@@ -148,8 +130,6 @@ try {
     mkdirSync(dirname(targetPath), { recursive: true })
     cpSync(join(rendererOutput, outputPath), targetPath)
   }
-  await minifyWebOutput()
-
   rmSync(webOutput, { force: true, recursive: true })
   renameSync(stagingOutput, webOutput)
 } finally {

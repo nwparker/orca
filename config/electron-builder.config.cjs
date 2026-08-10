@@ -15,6 +15,9 @@ const { verifyLinuxGlibcFloor } = require('./scripts/verify-linux-glibc-floor.cj
 const { writeMacBuildCompatibility } = require('./scripts/mac-build-compatibility.cjs')
 const { verifyPackagedPluginResources } = require('./scripts/verify-packaged-plugin-resources.cjs')
 const { verifySkillsCliRuntime } = require('./scripts/verify-skills-cli-runtime.cjs')
+const {
+  verifyPackagedRendererSourceMaps
+} = require('./scripts/verify-packaged-renderer-source-maps.cjs')
 
 // Why: dev-channel builds must carry the *release* identity — same bundle id,
 // Developer ID signature, and notarization ticket — or Squirrel.Mac refuses to
@@ -211,6 +214,9 @@ module.exports = {
         : join(context.appOutDir, 'resources')
     if (!existsSync(resourcesDir)) {
       throw new Error(`Missing packaged resources directory: ${resourcesDir}`)
+    }
+    if (existsSync(join(resourcesDir, 'app.asar'))) {
+      verifyPackagedRendererSourceMaps(resourcesDir, require('@electron/asar'))
     }
     if (context.electronPlatformName === 'darwin') {
       const architectureByEnum = { 1: 'x64', 3: 'arm64' }

@@ -43,15 +43,18 @@ function createRendererFixture() {
     'out/renderer/assets/web-entry.js',
     'import "./web-shared.js"; new Worker(new URL("editor.worker-fixture.js", import.meta.url));'
   )
-  writeFixtureFile(root, 'out/renderer/assets/web-shared.js', 'export const value = 1;')
+  writeFixtureFile(root, 'out/renderer/assets/web-shared.js', 'export const value=1;\n')
   writeFixtureFile(root, 'out/renderer/assets/lazy.js', 'export const lazyValue = true;')
-  writeFixtureFile(root, 'out/renderer/assets/web.css', '.root { color: red; }')
+  writeFixtureFile(root, 'out/renderer/assets/web.css', '.root{color:red}\n')
   writeFixtureFile(root, 'out/renderer/assets/logo.png', 'fixture-logo')
   writeFixtureFile(
     root,
     'out/renderer/assets/editor.worker-fixture.js',
     'self.onmessage = function (event) { self.postMessage(event.data) }'
   )
+  for (const fileName of ['web-entry.js', 'web-shared.js', 'lazy.js', 'editor.worker-fixture.js']) {
+    writeFixtureFile(root, `out/renderer/assets/${fileName}.map.gz`, 'compressed-map-fixture')
+  }
   writeFixtureFile(root, 'out/renderer/assets/desktop-entry.js', 'export const desktop = true;')
   writeFixtureFile(root, 'out/web/stale.js', 'stale')
   return root
@@ -70,7 +73,7 @@ describe('renderer web client projection', () => {
     expect(builderConfig).toContain("'!out/renderer/.vite{,/**/*}'")
   })
 
-  it('copies and minifies only the web dependency closure', () => {
+  it('copies the already-minified web dependency closure without a second pass', () => {
     const root = createRendererFixture()
     const result = spawnSync(process.execPath, [scriptPath], {
       cwd: root,
@@ -78,13 +81,17 @@ describe('renderer web client projection', () => {
     })
 
     expect(result.status, result.stderr).toBe(0)
-    expect(result.stdout).toContain('Projected web client: 7 files')
+    expect(result.stdout).toContain('Projected web client: 11 files')
     expect(existsSync(join(root, 'out/web/web-index.html'))).toBe(true)
     expect(existsSync(join(root, 'out/web/assets/editor.worker-fixture.js'))).toBe(true)
+    expect(existsSync(join(root, 'out/web/assets/editor.worker-fixture.js.map.gz'))).toBe(true)
     expect(existsSync(join(root, 'out/web/assets/logo.png'))).toBe(true)
     expect(existsSync(join(root, 'out/web/assets/desktop-entry.js'))).toBe(false)
     expect(existsSync(join(root, 'out/web/stale.js'))).toBe(false)
     expect(readFileSync(join(root, 'out/web/assets/web.css'), 'utf8')).toBe('.root{color:red}\n')
+    expect(readFileSync(join(root, 'out/web/assets/web-shared.js'), 'utf8')).toBe(
+      'export const value=1;\n'
+    )
   })
 
   it('fails when the renderer manifest omits the web entry', () => {

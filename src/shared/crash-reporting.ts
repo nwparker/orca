@@ -143,6 +143,18 @@ const PATH_PATTERNS = [
   /[A-Za-z]:\\(?:(?!\s+(?:\/|[A-Za-z]:\\|\\\\|gh[pousr]_|sk-|(?:token|api[_-]?key|secret|password)=))[^"'`<>\n\r)])+/gi,
   /\\\\[^\\\s"'`<>\n\r)]+\\(?:(?!\s+(?:\/|[A-Za-z]:\\|\\\\|gh[pousr]_|sk-|(?:token|api[_-]?key|secret|password)=))[^"'`<>\n\r)])+/gi
 ]
+
+const RENDERER_ASSET_LOCATION_PATTERN =
+  /(?:file|https?):\/\/[^\s)]+?\/assets\/([A-Za-z0-9._-]+\.m?js)(?::(\d+):(\d+))?/gi
+
+function preserveRendererAssetLocations(value: string): string {
+  return value.replace(
+    RENDERER_ASSET_LOCATION_PATTERN,
+    (_location, fileName: string, line: string | undefined, column: string | undefined) =>
+      `renderer-asset:${fileName}${line && column ? `:${line}:${column}` : ''}`
+  )
+}
+
 export function isCrashReportReason(reason: string): boolean {
   return [
     'abnormal-exit',
@@ -167,7 +179,7 @@ export function sanitizeCrashReportString(
   value: string,
   maxLength = MAX_STRING_DETAIL_LENGTH
 ): string {
-  let sanitized = value
+  let sanitized = preserveRendererAssetLocations(value)
   for (const pattern of PATH_PATTERNS) {
     sanitized = sanitized.replace(pattern, '[redacted-path]')
   }

@@ -5,6 +5,11 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { createBootstrapFatalExitBanner } from './config/build-plugins/bootstrap-fatal-exit-banner'
 import { createPlainNodeEntryGuardPlugin } from './config/build-plugins/plain-node-entry-guard'
+import {
+  createRendererSourceMapCompactionPlugin,
+  rendererProductionBuild,
+  rendererProductionMinifyOptions
+} from './config/build-plugins/renderer-production-minification'
 import packageJson from './package.json' with { type: 'json' }
 
 const BUNDLED_MAIN_DEPENDENCIES = new Set([
@@ -290,11 +295,12 @@ export const electronViteConfig: UserConfig = {
         '@': resolve('src/renderer/src')
       }
     },
-    plugins: [react(), tailwindcss()],
+    plugins: [react(), tailwindcss(), createRendererSourceMapCompactionPlugin()],
     worker: {
       format: 'es'
     },
     build: {
+      ...rendererProductionBuild,
       manifest: true,
       modulePreload: { polyfill: true },
       target: 'es2020',
@@ -311,7 +317,8 @@ export const electronViteConfig: UserConfig = {
           index: resolve('src/renderer/index.html'),
           popout: resolve('src/renderer/popout.html'),
           web: resolve('src/renderer/web-index.html')
-        }
+        },
+        output: { minify: rendererProductionMinifyOptions }
       }
     }
   }
