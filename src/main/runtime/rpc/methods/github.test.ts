@@ -279,6 +279,30 @@ describe('github RPC methods', () => {
     expect(response).toMatchObject({ ok: true, result: true })
   })
 
+  it('sets PR comment reactions on the runtime server', async () => {
+    const runtime = {
+      getRuntimeId: () => 'test-runtime',
+      setRepoPRCommentReaction: vi.fn().mockResolvedValue(true)
+    } as unknown as OrcaRuntimeService
+    const dispatcher = new RpcDispatcher({ runtime, methods: GITHUB_METHODS })
+
+    const response = await dispatcher.dispatch(
+      makeRequest('github.setPRCommentReaction', {
+        repo: 'repo-1',
+        subjectId: 'PRRC_1',
+        content: '+1',
+        add: true,
+        prRepo: { owner: 'acme', repo: 'widgets' }
+      })
+    )
+
+    expect(runtime.setRepoPRCommentReaction).toHaveBeenCalledWith('repo-1', 'PRRC_1', '+1', true, {
+      owner: 'acme',
+      repo: 'widgets'
+    })
+    expect(response).toMatchObject({ ok: true, result: true })
+  })
+
   it('marks PR files viewed on the runtime server', async () => {
     const runtime = {
       getRuntimeId: () => 'test-runtime',

@@ -23,6 +23,7 @@ const {
   getPRCheckDetailsMock,
   getPRCommentsMock,
   resolveReviewThreadMock,
+  setPRCommentReactionMock,
   setPRFileViewedMock,
   addPRReviewCommentMock,
   addPRReviewCommentReplyMock,
@@ -65,6 +66,7 @@ const {
   getPRCheckDetailsMock: vi.fn(),
   getPRCommentsMock: vi.fn(),
   resolveReviewThreadMock: vi.fn(),
+  setPRCommentReactionMock: vi.fn(),
   setPRFileViewedMock: vi.fn(),
   addPRReviewCommentMock: vi.fn(),
   addPRReviewCommentReplyMock: vi.fn(),
@@ -124,6 +126,7 @@ vi.mock('../github/client', () => ({
   getPRCheckDetails: getPRCheckDetailsMock,
   getPRComments: getPRCommentsMock,
   resolveReviewThread: resolveReviewThreadMock,
+  setPRCommentReaction: setPRCommentReactionMock,
   setPRFileViewed: setPRFileViewedMock,
   addPRReviewComment: addPRReviewCommentMock,
   addPRReviewCommentReply: addPRReviewCommentReplyMock,
@@ -213,6 +216,7 @@ describe('registerGitHubHandlers', () => {
     getPRCheckDetailsMock.mockReset()
     getPRCommentsMock.mockReset()
     resolveReviewThreadMock.mockReset()
+    setPRCommentReactionMock.mockReset()
     setPRFileViewedMock.mockReset()
     addPRReviewCommentMock.mockReset()
     addPRReviewCommentReplyMock.mockReset()
@@ -970,6 +974,13 @@ describe('registerGitHubHandlers', () => {
       resolve: true,
       prRepo
     })
+    await handlers['gh:setPRCommentReaction'](null, {
+      repoPath: '/workspace/repo',
+      subjectId: 'PRRC_1',
+      content: '+1',
+      add: true,
+      prRepo
+    })
     await handlers['gh:setPRFileViewed'](
       { sender: { id: 1 } },
       {
@@ -1127,6 +1138,15 @@ describe('registerGitHubHandlers', () => {
     expect(resolveReviewThreadMock).toHaveBeenCalledWith(
       '/workspace/repo',
       'thread-1',
+      true,
+      null,
+      prRepo,
+      localGitOptions
+    )
+    expect(setPRCommentReactionMock).toHaveBeenCalledWith(
+      '/workspace/repo',
+      'PRRC_1',
+      '+1',
       true,
       null,
       prRepo,

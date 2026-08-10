@@ -55,6 +55,7 @@ import {
 } from '@/components/ui/context-menu'
 import { cn } from '@/lib/utils'
 import CommentMarkdown from '@/components/sidebar/CommentMarkdown'
+import { CommentReactions } from '@/components/github/CommentReactions'
 import { CheckJobLogTail } from './check-job-log-tail'
 import {
   filterPRCommentsByAudience,
@@ -86,6 +87,7 @@ import type {
   PRCheckDetail,
   PRCheckRunDetails,
   PRComment,
+  GitHubReactionContent,
   PRConflictSummary,
   PRMergeableState
 } from '../../../../shared/types'
@@ -1730,6 +1732,7 @@ function CommentRow({
   presentation,
   onResolve,
   onReply,
+  onReact,
   onEditComment,
   onDeleteComment,
   onQueueForAgent
@@ -1747,6 +1750,7 @@ function CommentRow({
   presentation: PRCommentPresentationClasses
   onResolve?: (threadId: string, resolve: boolean) => boolean | Promise<boolean>
   onReply?: (comment: PRComment) => void
+  onReact?: (comment: PRComment, content: GitHubReactionContent, add: boolean) => Promise<boolean>
   onEditComment?: (comment: PRComment, body: string) => Promise<boolean>
   onDeleteComment?: (comment: PRComment) => void | Promise<void>
   onQueueForAgent?: () => void
@@ -2007,13 +2011,27 @@ function CommentRow({
             </div>
           </div>
         ) : (
-          <CommentMarkdown
-            content={comment.body}
-            className={cn(
-              isReply ? presentation.commentBodyReply : presentation.commentBody,
-              presentation.commentBodyMarkdown
-            )}
-          />
+          <>
+            <CommentMarkdown
+              content={comment.body}
+              className={cn(
+                isReply ? presentation.commentBodyReply : presentation.commentBody,
+                presentation.commentBodyMarkdown
+              )}
+            />
+            <CommentReactions
+              reactions={comment.reactions}
+              className={cn(
+                'mt-0 pb-2.5',
+                presentation.useCardLayout ? 'px-4' : isReply ? 'pl-5' : 'pl-[22px]'
+              )}
+              onToggle={
+                comment.nodeId && onReact
+                  ? (content, add) => onReact(comment, content, add)
+                  : undefined
+              }
+            />
+          </>
         )}
       </div>
     </div>
@@ -2034,6 +2052,7 @@ function PRCommentGroupView({
   onStartReply,
   onCancelReply,
   onReply,
+  onReact,
   onEditComment,
   onDeleteComment,
   onQueueForAgent
@@ -2051,6 +2070,7 @@ function PRCommentGroupView({
   onStartReply?: (commentId: number) => void
   onCancelReply?: (commentId: number) => void
   onReply?: (comment: PRComment, body: string) => Promise<RightPanelCommentSubmitResult>
+  onReact?: (comment: PRComment, content: GitHubReactionContent, add: boolean) => Promise<boolean>
   onEditComment?: (comment: PRComment, body: string) => Promise<boolean>
   onDeleteComment?: (comment: PRComment) => void | Promise<void>
   onQueueForAgent?: () => void
@@ -2097,6 +2117,7 @@ function PRCommentGroupView({
     replyDisabledReason,
     presentation,
     onResolve,
+    onReact,
     onEditComment,
     onDeleteComment,
     onQueueForAgent
@@ -2180,6 +2201,7 @@ function ResolvedCommentGroupsSection({
   onStartReply,
   onCancelReply,
   onReply,
+  onReact,
   onEditComment,
   onDeleteComment
 }: {
@@ -2193,6 +2215,7 @@ function ResolvedCommentGroupsSection({
   onStartReply?: (commentId: number) => void
   onCancelReply?: (commentId: number) => void
   onReply?: (comment: PRComment, body: string) => Promise<RightPanelCommentSubmitResult>
+  onReact?: (comment: PRComment, content: GitHubReactionContent, add: boolean) => Promise<boolean>
   onEditComment?: (comment: PRComment, body: string) => Promise<boolean>
   onDeleteComment?: (comment: PRComment) => void | Promise<void>
 }): React.JSX.Element | null {
@@ -2228,6 +2251,7 @@ function ResolvedCommentGroupsSection({
                 onStartReply={onStartReply}
                 onCancelReply={onCancelReply}
                 onReply={onReply}
+                onReact={onReact}
                 onEditComment={onEditComment}
                 onDeleteComment={onDeleteComment}
               />
@@ -2294,6 +2318,7 @@ export function PRCommentsList({
   onAddComment,
   onResolveSelectedCommentsWithAI,
   onReply,
+  onReact,
   onResolve,
   onEditComment,
   onDeleteComment
@@ -2310,6 +2335,7 @@ export function PRCommentsList({
   onAddComment?: (body: string) => Promise<RightPanelCommentSubmitResult>
   onResolveSelectedCommentsWithAI?: (groups: PRCommentGroup[]) => void
   onReply?: (comment: PRComment, body: string) => Promise<RightPanelCommentSubmitResult>
+  onReact?: (comment: PRComment, content: GitHubReactionContent, add: boolean) => Promise<boolean>
   onResolve?: (threadId: string, resolve: boolean) => boolean | Promise<boolean>
   onEditComment?: (comment: PRComment, body: string) => Promise<boolean>
   onDeleteComment?: (comment: PRComment) => void | Promise<void>
@@ -2433,6 +2459,7 @@ export function PRCommentsList({
           setReplyingCommentId((current) => (current === commentId ? null : current))
         }
         onReply={onReply}
+        onReact={onReact}
         onEditComment={onEditComment}
         onDeleteComment={onDeleteComment}
         onQueueForAgent={canQueue ? () => addGroupToSelection(groupId) : undefined}
@@ -2763,6 +2790,7 @@ export function PRCommentsList({
                   setReplyingCommentId((current) => (current === commentId ? null : current))
                 }
                 onReply={onReply}
+                onReact={onReact}
                 onEditComment={onEditComment}
                 onDeleteComment={onDeleteComment}
               />

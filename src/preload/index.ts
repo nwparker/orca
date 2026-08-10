@@ -73,6 +73,7 @@ import type {
   GitHubPRRefreshReason,
   GitHubAssignableUser,
   GitHubCommentResult,
+  GitHubReactionContent,
   GitHubCreateIssueResult,
   GitHubOwnerRepo,
   GitHubWorkItem,
@@ -1478,6 +1479,16 @@ const api = {
       resolve: boolean
       prRepo?: GitHubOwnerRepo | null
     }): Promise<boolean> => ipcRenderer.invoke('gh:resolveReviewThread', args),
+
+    setPRCommentReaction: (args: {
+      repoPath: string
+      repoId?: string
+      sourceContext?: TaskSourceContext | null
+      subjectId: string
+      content: GitHubReactionContent
+      add: boolean
+      prRepo?: GitHubOwnerRepo | null
+    }): Promise<boolean> => ipcRenderer.invoke('gh:setPRCommentReaction', args),
 
     setPRFileViewed: (args: {
       repoPath: string

@@ -46,6 +46,7 @@ const mockApi = {
     addIssueComment: vi.fn(),
     addPRReviewCommentReply: vi.fn(),
     resolveReviewThread: vi.fn(),
+    setPRCommentReaction: vi.fn(),
     listWorkItems: vi.fn(),
     countWorkItems: vi.fn().mockResolvedValue(0),
     getProjectViewTable: vi.fn(),
@@ -1503,6 +1504,7 @@ describe('createGitHubSlice PR comment mutations', () => {
         url: ''
       }
     })
+    mockApi.gh.setPRCommentReaction.mockResolvedValue(true)
   })
 
   it('deduplicates merged PR comments and preserves existing thread metadata', () => {
@@ -1664,6 +1666,76 @@ describe('createGitHubSlice PR comment mutations', () => {
       store.getState().commentsCache[`runtime:env-1::${repoId}::pr-comments::acme/widgets::12`]
         ?.data?.[0]
     ).toMatchObject({ body: 'reply', threadId: 'PRRT_1', path: 'src/a.ts', line: 8 })
+  })
+
+  it('routes local comment reactions through IPC', async () => {
+    const store = createTestStore()
+    const repoPath = '/repo'
+    const repoId = 'repo-id'
+    store.setState({
+      repos: [{ id: repoId, path: repoPath, name: 'repo', kind: 'git' }]
+    } as unknown as Partial<AppState>)
+
+    await expect(
+      store.getState().setPRCommentReaction(repoPath, 12, 7, 'PRRC_1', '+1', true, {
+        repoId,
+        prRepo: { owner: 'Acme', repo: 'Widgets' }
+      })
+    ).resolves.toBe(true)
+
+    expect(mockApi.gh.setPRCommentReaction).toHaveBeenCalledWith({
+      repoPath,
+      repoId,
+      subjectId: 'PRRC_1',
+      content: '+1',
+      add: true,
+      prRepo: { owner: 'Acme', repo: 'Widgets' },
+      sourceContext: undefined
+    })
+  })
+
+  it('routes comment reactions to the owning runtime', async () => {
+    runtimeEnvironmentCall.mockResolvedValueOnce({
+      id: 'rpc-pr-reaction',
+      ok: true,
+      result: true,
+      _meta: { runtimeId: 'remote-runtime' }
+    })
+    const store = createTestStore()
+    const repoPath = '/repo'
+    const repoId = 'repo-id'
+    store.setState({
+      settings: { activeRuntimeEnvironmentId: 'env-1' } as AppState['settings'],
+      repos: [
+        {
+          id: repoId,
+          path: repoPath,
+          name: 'repo',
+          kind: 'git',
+          executionHostId: 'runtime:env-1'
+        }
+      ]
+    } as unknown as Partial<AppState>)
+
+    await expect(
+      store.getState().setPRCommentReaction(repoPath, 12, 7, 'PRRC_1', '-1', true, {
+        repoId,
+        prRepo: { owner: 'Acme', repo: 'Widgets' }
+      })
+    ).resolves.toBe(true)
+
+    expect(runtimeEnvironmentCall).toHaveBeenCalledWith({
+      selector: 'env-1',
+      method: 'github.setPRCommentReaction',
+      params: {
+        repo: repoId,
+        subjectId: 'PRRC_1',
+        content: '-1',
+        add: true,
+        prRepo: { owner: 'Acme', repo: 'Widgets' }
+      },
+      timeoutMs: 30_000
+    })
   })
 
   it('does not mutate the PR comments cache when GitHub omits the comment payload', async () => {

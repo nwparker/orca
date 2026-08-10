@@ -1485,10 +1485,12 @@ export type GitHubReactionContent =
 export type GitHubReaction = {
   content: GitHubReactionContent
   count: number
+  viewerHasReacted?: boolean
 }
 
 export type PRComment = {
   id: number
+  nodeId?: string
   author: string
   authorAvatarUrl: string
   body: string

@@ -57,7 +57,7 @@ test.describe('PR comments sidebar cards view', () => {
 
     await expect(orcaPage.getByText('Needs review · 1')).toBeVisible()
     await expect(orcaPage.getByText('Please update this handler before merge.')).toBeVisible()
-    await expect(orcaPage.getByText('alice')).toBeVisible()
+    await expect(orcaPage.getByText('coderabbitai')).toBeVisible()
     await expect(orcaPage.getByText('LGTM on the overall approach.')).toBeVisible()
 
     const openThreadCard = orcaPage.getByTestId('pr-comment-group').filter({
@@ -75,7 +75,7 @@ test.describe('PR comments sidebar cards view', () => {
       'Please update this handler before merge.',
       'LGTM on the overall approach.'
     )
-    await expectOpenTextNotShiftedLeft(openThreadCard, conversationCard, 'alice', 'bob')
+    await expectOpenTextNotShiftedLeft(openThreadCard, conversationCard, 'coderabbitai', 'bob')
 
     const resolvedTrigger = orcaPage.getByRole('button', { name: 'Resolved · 1' })
     await expect(resolvedTrigger).toBeVisible()
@@ -92,6 +92,45 @@ test.describe('PR comments sidebar cards view', () => {
     ).toBeVisible()
 
     await expect(orcaPage.getByRole('button', { name: /^Add$/ })).toHaveCount(0)
+  })
+
+  test('adds and removes thumbs reactions on GitHub comments', async ({ orcaPage }, testInfo) => {
+    const { worktreeId } = await seedPRCommentsSidebarFixture(orcaPage)
+
+    const codeRabbitCard = orcaPage.getByTestId('pr-comment-group').filter({
+      hasText: 'Please update this handler before merge.'
+    })
+    const thumbsUp = codeRabbitCard.getByRole('button', { name: 'Add thumbs up reaction' })
+    const thumbsDown = codeRabbitCard.getByRole('button', { name: 'Add thumbs down reaction' })
+    await expect
+      .poll(
+        async () => {
+          if ((await thumbsUp.isVisible()) && (await thumbsDown.isVisible())) {
+            return true
+          }
+          await openChecks(orcaPage, worktreeId)
+          const checksButton = orcaPage.getByRole('button', { name: /^Checks(?: |$)/ }).first()
+          if (await checksButton.isVisible()) {
+            await checksButton.click()
+          }
+          return (await thumbsUp.isVisible()) && (await thumbsDown.isVisible())
+        },
+        { timeout: 15_000 }
+      )
+      .toBe(true)
+
+    await orcaPage.screenshot({ path: testInfo.outputPath('reaction-before.png') })
+    await thumbsUp.click()
+    const selectedThumbsUp = codeRabbitCard.getByRole('button', {
+      name: 'Remove thumbs up reaction'
+    })
+    await expect(selectedThumbsUp).toHaveAttribute('aria-pressed', 'true')
+    await expect(selectedThumbsUp).toContainText('1')
+    await orcaPage.screenshot({ path: testInfo.outputPath('reaction-after.png') })
+
+    await selectedThumbsUp.click()
+    await expect(thumbsUp).toHaveAttribute('aria-pressed', 'false')
+    await expect(thumbsUp).not.toContainText('1')
   })
 
   test('can switch from grouped to chronological timeline order', async ({ orcaPage }) => {

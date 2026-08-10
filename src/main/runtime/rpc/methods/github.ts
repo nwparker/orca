@@ -113,6 +113,13 @@ const ReviewThread = RepoSelector.extend({
   resolve: z.boolean()
 })
 
+const PRCommentReaction = RepoSelector.extend({
+  subjectId: requiredString('Missing comment subject ID'),
+  content: z.enum(['+1', '-1', 'laugh', 'confused', 'heart', 'hooray', 'rocket', 'eyes']),
+  add: z.boolean(),
+  prRepo: SlugRepo.nullable().optional()
+})
+
 const UpdatePrTitle = RepoSelector.extend({
   prNumber: z.number().int().positive(),
   title: requiredString('Missing title'),
@@ -481,6 +488,18 @@ export const GITHUB_METHODS: RpcMethod[] = [
         params.repo,
         params.threadId,
         params.resolve,
+        params.prRepo ?? null
+      )
+  }),
+  defineMethod({
+    name: 'github.setPRCommentReaction',
+    params: PRCommentReaction,
+    handler: async (params, { runtime }) =>
+      runtime.setRepoPRCommentReaction(
+        params.repo,
+        params.subjectId,
+        params.content,
+        params.add,
         params.prRepo ?? null
       )
   }),

@@ -178,6 +178,7 @@ import {
   getPullRequestPushTarget,
   mergePR,
   resolveReviewThread,
+  setPRCommentReaction,
   setPRAutoMerge,
   updatePRState,
   updatePRTitle,
@@ -4608,6 +4609,25 @@ describe('GitHub GraphQL rate-limit guard', () => {
 
     expect(ghExecFileAsyncMock).not.toHaveBeenCalled()
     expect(noteRateLimitSpendMock).not.toHaveBeenCalled()
+  })
+
+  it('adds a thumbs-up reaction through GraphQL', async () => {
+    rateLimitGuardMock.mockReturnValue({ blocked: false })
+    ghExecFileAsyncMock.mockResolvedValue({ stdout: '{}', stderr: '' })
+
+    await expect(
+      setPRCommentReaction('/repo-root', 'PRRC_1', '+1', true, null, {
+        owner: 'acme',
+        repo: 'widgets',
+        host: 'github.com'
+      })
+    ).resolves.toBe(true)
+
+    expect(ghExecFileAsyncMock).toHaveBeenCalledWith(
+      expect.arrayContaining(['subjectId=PRRC_1', 'content=THUMBS_UP']),
+      expect.any(Object)
+    )
+    expect(noteRateLimitSpendMock).toHaveBeenCalledWith('graphql')
   })
 })
 

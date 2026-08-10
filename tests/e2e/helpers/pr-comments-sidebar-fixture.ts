@@ -10,17 +10,20 @@ export type PRCommentsSidebarSeed = {
 export const FIXTURE_COMMENTS: PRComment[] = [
   {
     id: 101,
-    author: 'alice',
+    nodeId: 'PRRC_101',
+    author: 'coderabbitai',
     authorAvatarUrl: '',
     body: 'Please update this handler before merge.',
     createdAt: '2026-05-14T10:00:00.000Z',
     url: 'https://github.com/acme/orca/pull/73#discussion_r101',
     threadId: 'thread-open',
     path: 'src/handler.ts',
-    isResolved: false
+    isResolved: false,
+    isBot: true
   },
   {
     id: 102,
+    nodeId: 'IC_102',
     author: 'bob',
     authorAvatarUrl: '',
     body: 'LGTM on the overall approach.',
@@ -29,6 +32,7 @@ export const FIXTURE_COMMENTS: PRComment[] = [
   },
   {
     id: 103,
+    nodeId: 'PRRC_103',
     author: 'carol',
     authorAvatarUrl: '',
     body: 'Already fixed upstream.',
@@ -131,6 +135,7 @@ export async function seedPRCommentsSidebarFixture(page: Page): Promise<PRCommen
       },
       fetchPRChecks: async () => [],
       fetchPRComments: async () => comments,
+      setPRCommentReaction: async () => true,
       fetchUpstreamStatus: async () => undefined,
       setUpstreamStatus: () => undefined
     }))

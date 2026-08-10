@@ -2412,6 +2412,12 @@
             "label": "Close as duplicate",
             "description": "Duplicate of another issue"
           }
+        },
+        "CommentReactions": {
+          "addThumbsUp": "Add thumbs up reaction",
+          "removeThumbsUp": "Remove thumbs up reaction",
+          "addThumbsDown": "Add thumbs down reaction",
+          "removeThumbsDown": "Remove thumbs down reaction"
         }
       },
       "linear": {
@@ -10566,7 +10572,8 @@
               "pending": "Syncing…",
               "branch": "Sync Branch"
             },
-            "7e4b2a19c0": "Could not resolve the GitHub PR to reply on."
+            "7e4b2a19c0": "Could not resolve the GitHub PR to reply on.",
+            "commentReactionFailed": "Could not update comment reaction."
           },
           "CreatePullRequestDialog": {
             "2bc1b4345e": "Cancel",

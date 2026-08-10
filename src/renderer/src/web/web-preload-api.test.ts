@@ -3768,6 +3768,7 @@ describe('web GitHub preload API', () => {
         'requestPRReviewers',
         'resolveProjectRef',
         'resolveReviewThread',
+        'setPRCommentReaction',
         'setPRAutoMerge',
         'setPRFileViewed',
         'starOrca',
@@ -3955,6 +3956,17 @@ describe('web GitHub preload API', () => {
         args: { repoPath, threadId: 'thread-1', resolve: true },
         expectedMethod: 'github.resolveReviewThread',
         expectedParams: withRepo({ repoPath, threadId: 'thread-1', resolve: true })
+      },
+      {
+        key: 'setPRCommentReaction',
+        args: { repoPath, subjectId: 'PRRC_1', content: '+1', add: true },
+        expectedMethod: 'github.setPRCommentReaction',
+        expectedParams: withRepo({
+          repoPath,
+          subjectId: 'PRRC_1',
+          content: '+1',
+          add: true
+        })
       },
       {
         key: 'setPRFileViewed',

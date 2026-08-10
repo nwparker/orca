@@ -21,6 +21,7 @@ import type {
   PRCheckDetail,
   PRCheckRunDetails,
   PRComment,
+  GitHubReactionContent,
   Repo,
   Worktree,
   GitHubWorkItem,
@@ -74,6 +75,7 @@ import {
   type TaskSourceContext
 } from '../../../../shared/task-source-context'
 import { normalizeGitHubPRForBranchOutcome } from '../../../../shared/github-pr-for-branch-outcome'
+import { updatePRCommentReaction } from './pr-comment-reaction-state'
 
 // ─── ProjectV2 cache types ────────────────────────────────────────────
 // Why: separate from CacheEntry<T> — project-view has a single GraphQL source (no issue/PR fallback) and a distinct error union.
@@ -1895,6 +1897,15 @@ export type GitHubSlice = {
     prNumber: number,
     threadId: string,
     resolve: boolean,
+    options?: RepoScopedFetchOptions & { prRepo?: GitHubOwnerRepo | null }
+  ) => Promise<boolean>
+  setPRCommentReaction: (
+    repoPath: string,
+    prNumber: number,
+    commentId: number,
+    subjectId: string,
+    content: GitHubReactionContent,
+    add: boolean,
     options?: RepoScopedFetchOptions & { prRepo?: GitHubOwnerRepo | null }
   ) => Promise<boolean>
   initGitHubCache: () => Promise<void>
@@ -3918,6 +3929,86 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
       }))
     }
     return ok
+  },
+
+  setPRCommentReaction: async (repoPath, prNumber, commentId, subjectId, content, add, options) => {
+    const repo = get().repos?.find((candidate) =>
+      options?.repoId ? candidate.id === options.repoId : candidate.path === repoPath
+    )
+    const repoId = options?.repoId ?? repo?.id
+    const requestSettings = getGitHubRepoSourceSettings(
+      get().settings,
+      repo,
+      options?.sourceContext
+    )
+    const requestContext = getGitHubWorkItemRequestContext(
+      get(),
+      requestSettings,
+      repoId ?? repoPath,
+      repoPath,
+      options?.sourceContext
+    )
+    const cacheKey = sourceScopedRepoCacheKey(
+      repoPath,
+      repoId,
+      prCommentsCacheSuffix(prNumber, options?.prRepo),
+      requestSettings,
+      repo?.connectionId,
+      repo?.executionHostId,
+      options?.sourceContext,
+      repo !== undefined
+    )
+    try {
+      const ok =
+        requestContext.target.kind === 'environment'
+          ? await callRuntimeRpc<boolean>(
+              { kind: 'environment', environmentId: requestContext.target.environmentId },
+              'github.setPRCommentReaction',
+              {
+                repo: requestContext.target.runtimeRepoId,
+                subjectId,
+                content,
+                add,
+                prRepo: options?.prRepo ?? null
+              },
+              { timeoutMs: 30_000 }
+            )
+          : await window.api.gh.setPRCommentReaction({
+              repoPath,
+              repoId,
+              subjectId,
+              content,
+              add,
+              prRepo: options?.prRepo ?? null,
+              sourceContext: options?.sourceContext
+            })
+      if (ok) {
+        set((state) => {
+          const entry = state.commentsCache[cacheKey]
+          if (!entry?.data) {
+            return state
+          }
+          return {
+            commentsCache: {
+              ...state.commentsCache,
+              [cacheKey]: {
+                ...entry,
+                data: updatePRCommentReaction(
+                  entry.data,
+                  { id: commentId, nodeId: subjectId },
+                  content,
+                  add
+                )
+              }
+            }
+          }
+        })
+      }
+      return ok
+    } catch (err) {
+      console.error('Failed to update comment reaction:', err)
+      return false
+    }
   },
 
   enqueueGitHubPRRefresh: (worktreeId, reason, priority = 0) => {
