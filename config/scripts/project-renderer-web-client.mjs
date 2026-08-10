@@ -9,6 +9,9 @@ import {
   writeFileSync
 } from 'node:fs'
 import { dirname, join, posix, resolve, sep } from 'node:path'
+import javascriptOutput from './renderer-javascript-output.cjs'
+
+const { isJavaScriptOutputPath } = javascriptOutput
 
 const rendererOutput = resolve('out/renderer')
 const webOutput = resolve('out/web')
@@ -18,13 +21,7 @@ const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
 const selectedFiles = new Set(['web-index.html'])
 const visitedEntries = new Set()
 const projectedProvenancePath = 'source-map-provenance/projected-web.json'
-const sourceMapModes = new Set([
-  'mapped',
-  'mappingless-json',
-  'source-less-asset',
-  'source-less-facade',
-  'source-less-generated'
-])
+const sourceMapModes = new Set(['identity-generated', 'mapped'])
 
 function assertEntryIsolation() {
   const entryKeys = new Set(
@@ -108,7 +105,7 @@ function includeReferencedOutputs() {
   while (foundReference) {
     foundReference = false
     for (const selectedFile of selectedFiles) {
-      if (!/\.(?:css|html|m?js|svg)$/.test(selectedFile)) {
+      if (!/\.(?:css|html|svg)$/.test(selectedFile) && !isJavaScriptOutputPath(selectedFile)) {
         continue
       }
       const contents = readFileSync(join(rendererOutput, selectedFile), 'utf8')
@@ -129,7 +126,7 @@ function includeReferencedOutputs() {
 function includeSelectedSourceMaps() {
   const outputs = new Set(listOutputFiles(rendererOutput))
   for (const selectedFile of selectedFiles) {
-    if (/\.m?js$/.test(selectedFile) && outputs.has(`${selectedFile}.map.gz`)) {
+    if (isJavaScriptOutputPath(selectedFile) && outputs.has(`${selectedFile}.map.gz`)) {
       selectedFiles.add(`${selectedFile}.map.gz`)
     }
   }
@@ -157,7 +154,7 @@ function createProjectedSourceMapProvenance() {
     }
   }
   const chunks = [...selectedFiles]
-    .filter((outputPath) => /\.m?js$/.test(outputPath))
+    .filter(isJavaScriptOutputPath)
     .sort()
     .map((file) => {
       const sourceMap = chunksByFile.get(file)

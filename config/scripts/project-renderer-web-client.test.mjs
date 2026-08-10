@@ -41,7 +41,7 @@ function createRendererFixture() {
   writeFixtureFile(
     root,
     'out/renderer/assets/web-entry.js',
-    'import "./web-shared.js"; new Worker(new URL("editor.worker-fixture.js", import.meta.url));'
+    'import "./web-shared.js"; new Worker(new URL("editor.worker-fixture.js", import.meta.url)); void "plugin.cjs";'
   )
   writeFixtureFile(root, 'out/renderer/assets/web-shared.js', 'export const value=1;\n')
   writeFixtureFile(root, 'out/renderer/assets/lazy.js', 'export const lazyValue = true;')
@@ -52,7 +52,14 @@ function createRendererFixture() {
     'out/renderer/assets/editor.worker-fixture.js',
     'self.onmessage = function (event) { self.postMessage(event.data) }'
   )
-  for (const fileName of ['web-entry.js', 'web-shared.js', 'lazy.js', 'editor.worker-fixture.js']) {
+  writeFixtureFile(root, 'out/renderer/assets/plugin.cjs', 'module.exports = true\n')
+  for (const fileName of [
+    'web-entry.js',
+    'web-shared.js',
+    'lazy.js',
+    'editor.worker-fixture.js',
+    'plugin.cjs'
+  ]) {
     writeFixtureFile(root, `out/renderer/assets/${fileName}.map.gz`, 'compressed-map-fixture')
   }
   writeFixtureFile(root, 'out/renderer/assets/desktop-entry.js', 'export const desktop = true;')
@@ -62,11 +69,14 @@ function createRendererFixture() {
     JSON.stringify({
       version: 1,
       chunks: [
-        ...['web-entry.js', 'web-shared.js', 'lazy.js', 'editor.worker-fixture.js'].map((file) => ({
-          file: `assets/${file}`,
-          sourceMap: 'mapped'
-        })),
-        { file: 'assets/desktop-entry.js', sourceMap: 'source-less-facade' }
+        ...[
+          'web-entry.js',
+          'web-shared.js',
+          'lazy.js',
+          'editor.worker-fixture.js',
+          'plugin.cjs'
+        ].map((file) => ({ file: `assets/${file}`, sourceMap: 'mapped' })),
+        { file: 'assets/desktop-entry.js', sourceMap: 'identity-generated' }
       ]
     })
   )
@@ -95,11 +105,12 @@ describe('renderer web client projection', () => {
     })
 
     expect(result.status, result.stderr).toBe(0)
-    expect(result.stdout).toContain('Projected web client: 12 files')
+    expect(result.stdout).toContain('Projected web client: 14 files')
     expect(existsSync(join(root, 'out/web/web-index.html'))).toBe(true)
     expect(existsSync(join(root, 'out/web/assets/editor.worker-fixture.js'))).toBe(true)
     expect(existsSync(join(root, 'out/web/assets/editor.worker-fixture.js.map.gz'))).toBe(true)
     expect(existsSync(join(root, 'out/web/assets/logo.png'))).toBe(true)
+    expect(existsSync(join(root, 'out/web/assets/plugin.cjs.map.gz'))).toBe(true)
     expect(existsSync(join(root, 'out/web/assets/desktop-entry.js'))).toBe(false)
     expect(existsSync(join(root, 'out/web/stale.js'))).toBe(false)
     expect(readFileSync(join(root, 'out/web/assets/web.css'), 'utf8')).toBe('.root{color:red}\n')
@@ -109,10 +120,10 @@ describe('renderer web client projection', () => {
     const provenance = JSON.parse(
       readFileSync(join(root, 'out/web/source-map-provenance/projected-web.json'), 'utf8')
     )
-    expect(provenance.chunks).toHaveLength(4)
+    expect(provenance.chunks).toHaveLength(5)
     expect(provenance.chunks).not.toContainEqual({
       file: 'assets/desktop-entry.js',
-      sourceMap: 'source-less-facade'
+      sourceMap: 'identity-generated'
     })
   })
 

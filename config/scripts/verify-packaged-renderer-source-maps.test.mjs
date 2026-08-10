@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { gzipSync } from 'node:zlib'
 import { afterEach, describe, expect, it } from 'vitest'
+import { createRendererIdentitySourceMap } from '../build-plugins/renderer-identity-source-map'
 import {
   normalizeAsarEntry,
   verifyPackagedRendererSourceMaps
@@ -10,7 +11,8 @@ import {
 
 const outputNames = ['renderer', 'web']
 const temporaryRoots = []
-const mappedAssets = ['index-entry.js', 'shared.js', 'dynamic.js']
+const mappedAssets = ['index-entry.js', 'shared.js', 'dynamic.js', 'plugin.cjs']
+const identityAsset = 'identity.js'
 
 function sourceMap(file, overrides = {}) {
   const sources = overrides.sources ?? [`src/${file}.ts`]
@@ -25,6 +27,16 @@ function sourceMap(file, overrides = {}) {
       ...overrides
     })
   )
+}
+
+function sectionSourceMap() {
+  return {
+    version: 3,
+    names: [],
+    sources: ['src/section.ts'],
+    sourcesContent: ['const section = true'],
+    mappings: 'AAAA'
+  }
 }
 
 function writeOutputFile(outputDir, relativePath, contents) {
@@ -42,7 +54,7 @@ function createFixture(mutate = () => {}) {
   const archiveFiles = new Map()
   for (const outputName of outputNames) {
     const outputDir = outputDirectories[outputName]
-    for (const asset of [...mappedAssets, 'source-less-facade.js']) {
+    for (const asset of [...mappedAssets, identityAsset]) {
       const contents = Buffer.from(`${outputName} fixture JavaScript`)
       writeOutputFile(outputDir, `assets/${asset}`, contents)
       archiveFiles.set(`out/${outputName}/assets/${asset}`, contents)
@@ -52,12 +64,18 @@ function createFixture(mutate = () => {}) {
       writeOutputFile(outputDir, `assets/${asset}.map.gz`, contents)
       archiveFiles.set(`out/${outputName}/assets/${asset}.map.gz`, contents)
     }
+    const identityJavascript = archiveFiles.get(`out/${outputName}/assets/${identityAsset}`)
+    const identityMap = gzipSync(
+      createRendererIdentitySourceMap(`assets/${identityAsset}`, identityJavascript.toString())
+    )
+    writeOutputFile(outputDir, `assets/${identityAsset}.map.gz`, identityMap)
+    archiveFiles.set(`out/${outputName}/assets/${identityAsset}.map.gz`, identityMap)
     const provenance = Buffer.from(
       `${JSON.stringify({
         version: 1,
         chunks: [
           ...mappedAssets.map((file) => ({ file: `assets/${file}`, sourceMap: 'mapped' })),
-          { file: 'assets/source-less-facade.js', sourceMap: 'source-less-facade' }
+          { file: `assets/${identityAsset}`, sourceMap: 'identity-generated' }
         ]
       })}\n`
     )
@@ -122,7 +140,7 @@ afterEach(() => {
 })
 
 describe('packaged renderer source maps', () => {
-  it('accepts exact Windows-style maps with embedded sources plus source-less facades', () => {
+  it('accepts exact Windows-style maps with embedded sources and identity maps', () => {
     const { asar, outputDirectories } = createFixture()
 
     expect(() =>
@@ -205,6 +223,16 @@ describe('packaged renderer source maps', () => {
       )
     })
 
+    it('rejects a packaged raw CommonJS map', () => {
+      const { asar, outputDirectories } = createFixture((fixture) => {
+        fixture.writePackaged(outputName, 'assets/plugin.cjs.map', Buffer.from('{}'))
+      })
+
+      expect(() => verifyPackagedRendererSourceMaps('resources', asar, outputDirectories)).toThrow(
+        `Packaged ${outputName} output contains raw source maps: assets/plugin.cjs.map`
+      )
+    })
+
     it('rejects a packaged raw map', () => {
       const { asar, outputDirectories } = createFixture((fixture) => {
         fixture.writePackaged(outputName, 'assets/index-entry.js.map', Buffer.from('{}'))
@@ -242,6 +270,37 @@ describe('packaged renderer source maps', () => {
 
       expect(() => verifyPackagedRendererSourceMaps('resources', asar, outputDirectories)).toThrow(
         `Local ${outputName} source map assets/shared.js.map.gz has source-map version 2 instead of 3`
+      )
+    })
+
+    it('rejects a basic map beyond the adjacent JavaScript column', () => {
+      const { asar, outputDirectories } = createFixture((fixture) => {
+        fixture.writeMapPair(
+          outputName,
+          'shared.js',
+          sourceMap('shared.js', { mappings: 'u+BAAA' })
+        )
+      })
+
+      expect(() => verifyPackagedRendererSourceMaps('resources', asar, outputDirectories)).toThrow(
+        `Local ${outputName} source map assets/shared.js.map.gz has out-of-range generated position`
+      )
+    })
+
+    it('rejects an indexed map beyond the adjacent JavaScript line', () => {
+      const invalidMap = sourceMap('shared.js', {
+        names: undefined,
+        sources: undefined,
+        sourcesContent: undefined,
+        mappings: undefined,
+        sections: [{ offset: { line: 1, column: 0 }, map: sectionSourceMap() }]
+      })
+      const { asar, outputDirectories } = createFixture((fixture) => {
+        fixture.writeMapPair(outputName, 'shared.js', invalidMap)
+      })
+
+      expect(() => verifyPackagedRendererSourceMaps('resources', asar, outputDirectories)).toThrow(
+        `Local ${outputName} source map assets/shared.js.map.gz has out-of-range indexed-map offset`
       )
     })
 
@@ -344,19 +403,18 @@ describe('packaged renderer source maps', () => {
       )
     })
 
-    it('does not let mappingless provenance bless ordinary executable source', () => {
+    it('does not let identity provenance bless an ordinary non-identity map', () => {
       const { asar, outputDirectories } = createFixture((fixture) => {
-        fixture.setSourceMapMode(outputName, 'dynamic.js', 'mappingless-json')
-        fixture.writeMapPair(outputName, 'dynamic.js', sourceMap('dynamic.js', { mappings: '' }))
+        fixture.setSourceMapMode(outputName, 'dynamic.js', 'identity-generated')
       })
 
       expect(() => verifyPackagedRendererSourceMaps('resources', asar, outputDirectories)).toThrow(
-        `Local ${outputName} source map assets/dynamic.js.map.gz is not a JSON-only mappingless map`
+        `Local ${outputName} source map assets/dynamic.js.map.gz is not an exact self-contained identity map`
       )
     })
   })
 
-  it('accepts aligned indexed maps, source-less maps, and generated source text', () => {
+  it('accepts aligned indexed maps and exact generated identity source text', () => {
     const { asar, outputDirectories } = createFixture((fixture) => {
       fixture.writeMapPair(
         'renderer',
@@ -380,21 +438,6 @@ describe('packaged renderer source maps', () => {
           ]
         })
       )
-      fixture.writeMapPair(
-        'renderer',
-        'dynamic.js',
-        sourceMap('dynamic.js', { sources: [], sourcesContent: undefined, mappings: '' })
-      )
-      fixture.writeMapPair(
-        'web',
-        'dynamic.js',
-        sourceMap('dynamic.js', {
-          sources: ['src/generated-data.json'],
-          sourcesContent: ['{"generated":true}'],
-          mappings: ''
-        })
-      )
-      fixture.setSourceMapMode('web', 'dynamic.js', 'mappingless-json')
     })
 
     expect(() =>

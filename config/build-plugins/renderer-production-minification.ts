@@ -1,22 +1,23 @@
 import { createHash } from 'node:crypto'
-import { existsSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  readFileSync,
+  readdirSync,
+  realpathSync,
+  unlinkSync,
+  writeFileSync
+} from 'node:fs'
+import { createRequire } from 'node:module'
 import { isAbsolute, join, resolve } from 'node:path'
 import { gzipSync } from 'node:zlib'
 import type { BuildOptions, Plugin, Rollup } from 'vite'
+import { createRendererIdentitySourceMap } from './renderer-identity-source-map'
 
-export type RendererSourceMapMode =
-  | 'mapped'
-  | 'mappingless-json'
-  | 'source-less-asset'
-  | 'source-less-facade'
-  | 'source-less-generated'
+export type RendererSourceMapMode = 'identity-generated' | 'mapped'
 
 const sourceMapModePriority: Record<RendererSourceMapMode, number> = {
-  'source-less-asset': 0,
-  'source-less-facade': 1,
-  'source-less-generated': 2,
-  'mappingless-json': 3,
-  mapped: 4
+  'identity-generated': 0,
+  mapped: 1
 }
 
 export const rendererProductionBuild: Pick<BuildOptions, 'minify' | 'sourcemap'> = {
@@ -33,6 +34,16 @@ export const rendererProductionMinifyOptions = {
   }
 } as const
 
+const nodeRequire = createRequire(import.meta.url)
+const { isJavaScriptOutputPath, isRawJavaScriptSourceMapPath } = nodeRequire(
+  '../scripts/renderer-javascript-output.cjs'
+) as {
+  isJavaScriptOutputPath: (fileName: string) => boolean
+  isRawJavaScriptSourceMapPath: (fileName: string) => boolean
+}
+const pdfWorkerPath = realpathSync(nodeRequire.resolve('pdfjs-dist/build/pdf.worker.min.mjs'))
+const pdfWorkerSource = readFileSync(pdfWorkerPath)
+
 export const rendererProductionOutput = {
   keepNames: true,
   minify: rendererProductionMinifyOptions
@@ -42,43 +53,80 @@ function isJsonModule(moduleId: string): boolean {
   return moduleId.split('?', 1)[0].endsWith('.json')
 }
 
-function classifySourceMap(output: Rollup.OutputAsset | Rollup.OutputChunk): RendererSourceMapMode {
+function isPdfWorkerAsset(output: Rollup.OutputAsset, root: string): boolean {
+  if (
+    output.names.length !== 1 ||
+    output.names[0] !== 'pdf.worker.min.mjs' ||
+    output.originalFileNames.length !== 1 ||
+    !output.fileName.endsWith('.mjs')
+  ) {
+    return false
+  }
+  const originalFileName = output.originalFileNames[0].replaceAll('\\', '/')
+  if (originalFileName.includes('\0') || isAbsolute(originalFileName)) {
+    return false
+  }
+  try {
+    const originalPath = realpathSync(resolve(root, ...originalFileName.split('/')))
+    const source =
+      typeof output.source === 'string' ? Buffer.from(output.source) : Buffer.from(output.source)
+    return originalPath === pdfWorkerPath && source.equals(pdfWorkerSource)
+  } catch {
+    return false
+  }
+}
+
+function hasUsableToolchainMap(output: Rollup.OutputChunk): boolean {
+  return Boolean(output.map?.mappings && output.map.sources.length > 0)
+}
+
+function classifySourceMap(
+  output: Rollup.OutputAsset | Rollup.OutputChunk,
+  root: string
+): RendererSourceMapMode {
   if (output.type === 'asset') {
-    return 'source-less-asset'
+    return isPdfWorkerAsset(output, root) ? 'identity-generated' : 'mapped'
   }
   const moduleIds = Object.keys(output.modules)
   if (
     output.code.length === 0 ||
-    moduleIds.length === 0 ||
-    Object.values(output.modules).every((module) => module.renderedLength === 0)
+    (output.facadeModuleId !== null &&
+      (moduleIds.length === 0 ||
+        Object.values(output.modules).every((module) => module.renderedLength === 0)))
   ) {
-    return 'source-less-facade'
+    return 'identity-generated'
   }
-  if (moduleIds.every((moduleId) => moduleId.startsWith('\0') || moduleId === 'rolldown:runtime')) {
-    return 'source-less-generated'
+  if (hasUsableToolchainMap(output)) {
+    return 'mapped'
   }
   if (
-    moduleIds.every(isJsonModule) &&
-    output.map?.mappings === '' &&
-    output.map.sources.length > 0
+    moduleIds.length > 0 &&
+    moduleIds.every((moduleId) => moduleId.startsWith('\0') || moduleId === 'rolldown:runtime')
   ) {
-    return 'mappingless-json'
+    return 'identity-generated'
+  }
+  if (moduleIds.length > 0 && moduleIds.every(isJsonModule)) {
+    return 'identity-generated'
   }
   return 'mapped'
 }
 
 export function createRendererSourceMapProvenancePlugin(): Plugin {
+  let root = ''
   return {
     name: 'orca-renderer-source-map-provenance',
     apply: 'build',
+    configResolved: (config) => {
+      root = config.root
+    },
     generateBundle: function (_options, bundle) {
       const chunks = Object.values(bundle)
         .flatMap((output) =>
-          /\.m?js$/.test(output.fileName)
+          isJavaScriptOutputPath(output.fileName)
             ? [
                 {
                   file: output.fileName.replaceAll('\\', '/'),
-                  sourceMap: classifySourceMap(output)
+                  sourceMap: classifySourceMap(output, root)
                 }
               ]
             : []
@@ -125,7 +173,7 @@ function finalizeSourceMapProvenance(directory: string): void {
     }
   }
   const chunks = listOutputFiles(directory)
-    .filter((outputPath) => /\.m?js$/.test(outputPath))
+    .filter(isJavaScriptOutputPath)
     .sort()
     .map((file) => {
       const sourceMap = sourceMapByFile.get(file)
@@ -134,14 +182,18 @@ function finalizeSourceMapProvenance(directory: string): void {
       }
       return { file, sourceMap }
     })
-  for (const provenanceFile of provenanceFiles) {
-    unlinkSync(join(provenanceDirectory, provenanceFile))
-  }
   for (const chunk of chunks) {
     const mapPath = join(directory, `${chunk.file}.map.gz`)
-    if (chunk.sourceMap.startsWith('source-less-') && existsSync(mapPath)) {
-      unlinkSync(mapPath)
+    if (chunk.sourceMap === 'identity-generated') {
+      const source = readFileSync(join(directory, chunk.file), 'utf8')
+      const identityMap = createRendererIdentitySourceMap(chunk.file, source)
+      writeFileSync(mapPath, gzipSync(identityMap, { level: 9 }))
+    } else if (!existsSync(mapPath)) {
+      throw new Error(`Missing compressed source map for ${chunk.file}`)
     }
+  }
+  for (const provenanceFile of provenanceFiles) {
+    unlinkSync(join(provenanceDirectory, provenanceFile))
   }
   writeFileSync(
     join(provenanceDirectory, 'complete.json'),
@@ -154,7 +206,7 @@ function compactSourceMaps(directory: string): void {
     const filePath = join(directory, entry.name)
     if (entry.isDirectory()) {
       compactSourceMaps(filePath)
-    } else if (entry.name.endsWith('.js.map')) {
+    } else if (isRawJavaScriptSourceMapPath(entry.name)) {
       const source = readFileSync(filePath)
       writeFileSync(`${filePath}.gz`, gzipSync(source, { level: 9 }))
       unlinkSync(filePath)

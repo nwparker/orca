@@ -1,6 +1,7 @@
 import { spawnSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { isAbsolute, join, resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { gunzipSync } from 'node:zlib'
 import { originalPositionFor, sourceContentFor, TraceMap } from '@jridgewell/trace-mapping'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -103,6 +104,47 @@ function createGeneratedDataFixture(): string {
   return root
 }
 
+function createJavascriptAssetFixture(assetImport: string): string {
+  const fixtureParent = resolve('out', 'test-fixtures')
+  mkdirSync(fixtureParent, { recursive: true })
+  const root = mkdtempSync(join(fixtureParent, 'renderer-javascript-asset-'))
+  temporaryRoots.push(root)
+  mkdirSync(join(root, 'src'))
+  writeFileSync(
+    join(root, 'index.html'),
+    '<script type="module" src="/src/main.ts"></script>',
+    'utf8'
+  )
+  writeFileSync(
+    join(root, 'src', 'main.ts'),
+    `import assetUrl from ${JSON.stringify(assetImport)}\nvoid import(/* @vite-ignore */ assetUrl)\n`,
+    'utf8'
+  )
+  return root
+}
+
+function createFacadeFixture(): string {
+  const fixtureParent = resolve('out', 'test-fixtures')
+  mkdirSync(fixtureParent, { recursive: true })
+  const root = mkdtempSync(join(fixtureParent, 'renderer-facade-'))
+  temporaryRoots.push(root)
+  mkdirSync(join(root, 'src'))
+  writeFileSync(join(root, 'package.json'), '{"type":"module"}\n')
+  for (const entry of ['first', 'second']) {
+    writeFileSync(
+      join(root, 'src', `${entry}.ts`),
+      "export { facadeValue } from './facade-implementation'\n",
+      'utf8'
+    )
+  }
+  writeFileSync(
+    join(root, 'src', 'facade-implementation.ts'),
+    'export function facadeValue(): string { return "facade" }\n',
+    'utf8'
+  )
+  return root
+}
+
 function readProvenanceChunks(
   outputDir: string
 ): { file: string; sourceMap: RendererSourceMapMode }[] {
@@ -126,7 +168,52 @@ function stripOrdinaryChunkMap(): Plugin {
           Object.keys(output.modules).some((id) => id.endsWith('probe.ts'))
         ) {
           output.map = null
+          delete bundle[`${output.fileName}.map`]
         }
+      }
+    }
+  }
+}
+
+function appendExecutableFacadeCode(): Plugin {
+  return {
+    name: 'append-executable-facade-code',
+    generateBundle: (_options, bundle) => {
+      const facade = Object.values(bundle).find(
+        (output) =>
+          output.type === 'chunk' &&
+          output.code.length > 0 &&
+          Object.keys(output.modules).length > 0 &&
+          Object.values(output.modules).every((module) => module.renderedLength === 0)
+      )
+      if (!facade || facade.type !== 'chunk') {
+        return
+      }
+      facade.code +=
+        ';function injectedFirstPartyFacadeCrash(){throw new Error("injected-facade-crash")}injectedFirstPartyFacadeCrash();'
+      facade.map = null
+    }
+  }
+}
+
+function facadeBuild(root: string, plugins: Plugin[]): Parameters<typeof build>[0] {
+  return {
+    root,
+    configFile: false,
+    logLevel: 'silent',
+    plugins,
+    build: {
+      ...rendererProductionBuild,
+      outDir: 'out',
+      emptyOutDir: true,
+      modulePreload: false,
+      rollupOptions: {
+        preserveEntrySignatures: 'strict',
+        input: {
+          first: join(root, 'src', 'first.ts'),
+          second: join(root, 'src', 'second.ts')
+        },
+        output: rendererProductionOutput
       }
     }
   }
@@ -177,7 +264,7 @@ describe('renderer production minification', () => {
 
     const escapedOutputFile = outputFile!.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
     const frame = execution.stderr.match(new RegExp(`${escapedOutputFile}:(\\d+):(\\d+)`))
-    expect(frame).not.toBeNull()
+    expect(frame, execution.stderr).not.toBeNull()
     expect(() => readFileSync(`${outputPath}.map`)).toThrow()
     const mapContents = gunzipSync(readFileSync(`${outputPath}.map.gz`)).toString('utf8')
     const sourceMap = JSON.parse(mapContents) as {
@@ -260,7 +347,7 @@ describe('renderer production minification', () => {
     })
   })
 
-  it('preserves an honest mappingless map for a generated JSON data chunk', async () => {
+  it('replaces a mappingless JSON map with an exact identity map', async () => {
     const root = createGeneratedDataFixture()
     const outDir = 'out'
     await build({
@@ -280,42 +367,94 @@ describe('renderer production minification', () => {
       }
     })
 
-    const assetsDir = join(root, outDir, 'assets')
-    const mapFile = readdirSync(assetsDir).find((fileName) => {
-      if (!fileName.endsWith('.js.map.gz')) {
-        return false
-      }
-      const sourceMap = JSON.parse(
-        gunzipSync(readFileSync(join(assetsDir, fileName))).toString('utf8')
-      ) as { sources: string[] }
-      return sourceMap.sources.some((source) => source.endsWith('src/strings.json'))
-    })
-    expect(mapFile).toBeDefined()
+    const identityChunk = readProvenanceChunks(join(root, outDir)).find(
+      (chunk) => chunk.sourceMap === 'identity-generated'
+    )
+    expect(identityChunk).toBeDefined()
+    const javascript = readFileSync(join(root, outDir, identityChunk!.file), 'utf8')
     const sourceMap = JSON.parse(
-      gunzipSync(readFileSync(join(assetsDir, mapFile!))).toString('utf8')
-    ) as { mappings: string }
-    expect(sourceMap.mappings).toBe('')
-    expect(readProvenanceChunks(join(root, outDir))).toContainEqual({
-      file: `assets/${mapFile!.slice(0, -'.map.gz'.length)}`,
-      sourceMap: 'mappingless-json'
-    })
+      gunzipSync(readFileSync(join(root, outDir, `${identityChunk!.file}.map.gz`))).toString('utf8')
+    ) as { mappings: string; sources: string[]; sourcesContent: string[] }
+    expect(sourceMap.mappings).not.toBe('')
+    expect(sourceMap.sources).toEqual([
+      `source-map-identity/${identityChunk!.file.split('/').at(-1)}`
+    ])
+    expect(sourceMap.sourcesContent).toEqual([javascript])
     expect(() => verifyLocalRendererSourceMaps('renderer', join(root, outDir))).not.toThrow()
   })
 
   it('requires a map when another plugin strips one from an ordinary chunk', async () => {
     const root = createFixture()
     const outDir = 'out'
+    await expect(
+      build({
+        root,
+        configFile: false,
+        logLevel: 'silent',
+        plugins: [
+          stripOrdinaryChunkMap(),
+          createRendererSourceMapProvenancePlugin(),
+          createRendererSourceMapCompactionPlugin()
+        ],
+        build: {
+          ...rendererProductionBuild,
+          outDir,
+          emptyOutDir: true,
+          modulePreload: false,
+          rollupOptions: { output: rendererProductionOutput }
+        }
+      })
+    ).rejects.toThrow(/Missing compressed source map for assets\/index-[^/]+\.js/)
+  })
+
+  it.each(['js', 'cjs'])(
+    'rejects a dynamically imported first-party .%s OutputAsset without a map',
+    async (extension) => {
+      const root = createJavascriptAssetFixture(`./lazy-first-party.${extension}?url`)
+      writeFileSync(
+        join(root, 'src', `lazy-first-party.${extension}`),
+        'export function firstPartyLazyModule() { return "first-party" }\n',
+        'utf8'
+      )
+
+      await expect(
+        build({
+          root,
+          configFile: false,
+          logLevel: 'silent',
+          plugins: [
+            createRendererSourceMapProvenancePlugin(),
+            createRendererSourceMapCompactionPlugin()
+          ],
+          build: {
+            ...rendererProductionBuild,
+            assetsInlineLimit: 0,
+            outDir: 'out',
+            emptyOutDir: true,
+            modulePreload: false,
+            rollupOptions: { output: rendererProductionOutput }
+          }
+        })
+      ).rejects.toThrow(
+        new RegExp(`Missing compressed source map for assets/lazy-first-party-[^/]+\\.${extension}`)
+      )
+    }
+  )
+
+  it('gives the metadata-verified prebuilt PDF worker an exact identity map', async () => {
+    const root = createJavascriptAssetFixture('pdfjs-dist/build/pdf.worker.min.mjs?url')
+    const outDir = 'out'
     await build({
       root,
       configFile: false,
       logLevel: 'silent',
       plugins: [
-        stripOrdinaryChunkMap(),
         createRendererSourceMapProvenancePlugin(),
         createRendererSourceMapCompactionPlugin()
       ],
       build: {
         ...rendererProductionBuild,
+        assetsInlineLimit: 0,
         outDir,
         emptyOutDir: true,
         modulePreload: false,
@@ -323,15 +462,77 @@ describe('renderer production minification', () => {
       }
     })
 
-    expect(readProvenanceChunks(join(root, outDir))).toContainEqual(
-      expect.objectContaining({ sourceMap: 'mapped' })
+    const pdfWorker = readProvenanceChunks(join(root, outDir)).find(
+      (chunk) => chunk.sourceMap === 'identity-generated' && chunk.file.endsWith('.mjs')
     )
-    const assetsDir = join(root, outDir, 'assets')
-    const mapFile = readdirSync(assetsDir).find((fileName) => fileName.endsWith('.js.map.gz'))
-    expect(mapFile).toBeDefined()
-    rmSync(join(assetsDir, mapFile!))
-    expect(() => verifyLocalRendererSourceMaps('renderer', join(root, outDir))).toThrow(
-      'source-map coverage differs from provenance (missing:'
+    expect(pdfWorker?.file).toMatch(/assets\/pdf\.worker\.min-[^/]+\.mjs$/)
+    const javascript = readFileSync(join(root, outDir, pdfWorker!.file), 'utf8')
+    const sourceMap = JSON.parse(
+      gunzipSync(readFileSync(join(root, outDir, `${pdfWorker!.file}.map.gz`))).toString('utf8')
+    ) as { sourcesContent: string[] }
+    expect(sourceMap.sourcesContent).toEqual([javascript])
+    expect(() => verifyLocalRendererSourceMaps('renderer', join(root, outDir))).not.toThrow()
+  })
+
+  it('gives a physical-module facade an exact identity map', async () => {
+    const root = createFacadeFixture()
+    await build(
+      facadeBuild(root, [
+        createRendererSourceMapProvenancePlugin(),
+        createRendererSourceMapCompactionPlugin()
+      ])
     )
+
+    const facade = readProvenanceChunks(join(root, 'out')).find(
+      (chunk) => chunk.sourceMap === 'identity-generated'
+    )
+    expect(facade).toBeDefined()
+    const facadeCode = readFileSync(join(root, 'out', facade!.file), 'utf8')
+    expect(facadeCode).toMatch(/^(?:import|export)/)
+    expect(() => verifyLocalRendererSourceMaps('renderer', join(root, 'out'))).not.toThrow()
+  })
+
+  it('identity-maps executable code appended to a physical-module facade', async () => {
+    const root = createFacadeFixture()
+    await build(
+      facadeBuild(root, [
+        appendExecutableFacadeCode(),
+        createRendererSourceMapProvenancePlugin(),
+        createRendererSourceMapCompactionPlugin()
+      ])
+    )
+
+    const assetsDir = join(root, 'out', 'assets')
+    const mutatedFacade = readdirSync(assetsDir).find((fileName) =>
+      readFileSync(join(assetsDir, fileName), 'utf8').includes('injected-facade-crash')
+    )
+    expect(mutatedFacade).toBeDefined()
+    const moduleUrl = pathToFileURL(join(assetsDir, mutatedFacade!)).href
+    const execution = spawnSync(
+      process.execPath,
+      ['--input-type=module', '--eval', `import(${JSON.stringify(moduleUrl)})`],
+      { encoding: 'utf8' }
+    )
+    expect(execution.status).not.toBe(0)
+    expect(execution.stderr).toContain('injected-facade-crash')
+    const escapedFileName = mutatedFacade!.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const frame = execution.stderr.match(new RegExp(`${escapedFileName}:(\\d+):(\\d+)`))
+    expect(frame, execution.stderr).not.toBeNull()
+    expect(() => verifyLocalRendererSourceMaps('renderer', join(root, 'out'))).not.toThrow()
+    const javascript = readFileSync(join(assetsDir, mutatedFacade!), 'utf8')
+    const mapContents = gunzipSync(
+      readFileSync(join(assetsDir, `${mutatedFacade}.map.gz`))
+    ).toString('utf8')
+    const sourceMap = JSON.parse(mapContents) as { sourcesContent: string[] }
+    const original = originalPositionFor(new TraceMap(mapContents), {
+      line: Number(frame![1]),
+      column: Number(frame![2]) - 1
+    })
+    expect(original).toMatchObject({
+      source: `source-map-identity/${mutatedFacade}`,
+      line: Number(frame![1]),
+      column: Number(frame![2]) - 1
+    })
+    expect(sourceMap.sourcesContent).toEqual([javascript])
   })
 })

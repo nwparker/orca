@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { gzipSync } from 'node:zlib'
 import { afterEach, describe, expect, it } from 'vitest'
+import { createRendererIdentitySourceMap } from '../build-plugins/renderer-identity-source-map'
 import { verifyLocalRendererSourceMaps } from './renderer-source-map-contract.cjs'
 
 const temporaryRoots = []
@@ -34,28 +35,28 @@ function writeFixtureFile(root, relativePath, contents) {
   writeFileSync(filePath, contents)
 }
 
-function createFixture(sourceMap = basicMap(), sourceMapMode = 'mapped') {
+function createFixture(
+  sourceMap = basicMap(),
+  sourceMapMode = 'mapped',
+  javascript = 'throw new Error("contract")'
+) {
   const root = mkdtempSync(join(tmpdir(), 'orca-source-map-contract-'))
   temporaryRoots.push(root)
-  writeFixtureFile(root, 'assets/app.js', 'throw new Error("contract")')
-  writeFixtureFile(root, 'assets/source-less-facade.js', '')
+  writeFixtureFile(root, 'assets/app.js', javascript)
   writeFixtureFile(
     root,
     'source-map-provenance/bundle-fixture.json',
     `${JSON.stringify({
       version: 1,
-      chunks: [
-        { file: 'assets/app.js', sourceMap: sourceMapMode },
-        { file: 'assets/source-less-facade.js', sourceMap: 'source-less-facade' }
-      ]
+      chunks: [{ file: 'assets/app.js', sourceMap: sourceMapMode }]
     })}\n`
   )
   writeFixtureFile(root, 'assets/app.js.map.gz', gzipSync(JSON.stringify(sourceMap)))
   return root
 }
 
-function verifyFixture(sourceMap, sourceMapMode = 'mapped') {
-  const root = createFixture(sourceMap, sourceMapMode)
+function verifyFixture(sourceMap, sourceMapMode = 'mapped', javascript) {
+  const root = createFixture(sourceMap, sourceMapMode, javascript)
   return () => verifyLocalRendererSourceMaps('renderer', root)
 }
 
@@ -66,36 +67,32 @@ afterEach(() => {
 })
 
 describe('renderer source-map contract', () => {
-  it('constructs a basic map and permits a provenance-backed source-less facade', () => {
+  it('constructs a basic mapped map', () => {
     expect(verifyFixture(basicMap())).not.toThrow()
   })
 
-  it('keeps a zero-source basic map valid', () => {
+  it('rejects a zero-source basic map as mapped provenance', () => {
     expect(
       verifyFixture(basicMap({ sources: [], sourcesContent: undefined, mappings: '' }))
-    ).not.toThrow()
+    ).toThrow('has no usable source mappings')
   })
 
   it('keeps duplicate generated columns emitted by the toolchain valid', () => {
     expect(verifyFixture(basicMap({ mappings: 'AAAA,AAAA' }))).not.toThrow()
   })
 
-  it('accepts a provenance-backed mappingless JSON data map', () => {
-    expect(
-      verifyFixture(
-        basicMap({
-          sources: ['src/data.json'],
-          sourcesContent: ['{"message":"data"}'],
-          mappings: ''
-        }),
-        'mappingless-json'
-      )
-    ).not.toThrow()
+  it('accepts an exact self-contained identity map', () => {
+    const javascript = 'throw new Error("identity")\r\n'
+    const sourceMap = JSON.parse(createRendererIdentitySourceMap('assets/app.js', javascript))
+    expect(verifyFixture(sourceMap, 'identity-generated', javascript)).not.toThrow()
   })
 
-  it('does not let mappingless provenance bless ordinary executable source', () => {
-    expect(verifyFixture(basicMap({ mappings: '' }), 'mappingless-json')).toThrow(
-      'is not a JSON-only mappingless map'
+  it('rejects identity provenance backed by inexact source text or coordinates', () => {
+    const javascript = 'throw new Error("identity")'
+    const sourceMap = JSON.parse(createRendererIdentitySourceMap('assets/app.js', javascript))
+    sourceMap.sourcesContent[0] = `${javascript} changed`
+    expect(verifyFixture(sourceMap, 'identity-generated', javascript)).toThrow(
+      'is not an exact self-contained identity map'
     )
   })
 
@@ -141,6 +138,25 @@ describe('renderer source-map contract', () => {
     expect(verifyFixture(basicMap({ sourcesContent: ['x'], mappings: 'AAAE' }))).toThrow(
       'has out-of-range original position'
     )
+  })
+
+  it.each([
+    ['IAAA', 'column'],
+    [';;AAAA', 'line']
+  ])('rejects a generated position beyond the adjacent JavaScript %s', (mappings) => {
+    expect(verifyFixture(basicMap({ mappings }), 'mapped', 'abc')).toThrow(
+      'has out-of-range generated position'
+    )
+  })
+
+  it('accepts generated positions on UTF-16 CRLF boundaries', () => {
+    expect(
+      verifyFixture(
+        basicMap({ sourcesContent: ['abc\r\nx'], mappings: 'GAAA;CACC' }),
+        'mapped',
+        'abc\r\nx'
+      )
+    ).not.toThrow()
   })
 
   it('rejects an absolute sourceRoot', () => {
@@ -194,7 +210,7 @@ describe('renderer source-map contract', () => {
   it.each([
     [
       [
-        { offset: { line: 1, column: 0 }, map: sectionMap() },
+        { offset: { line: 0, column: 1 }, map: sectionMap() },
         { offset: { line: 0, column: 0 }, map: sectionMap() }
       ],
       'unordered'
@@ -229,6 +245,39 @@ describe('renderer source-map contract', () => {
     expect(verifyFixture(indexedMap([], { mappings: '' }))).toThrow(
       'mixes indexed sections with basic field mappings'
     )
+  })
+
+  it('rejects a zero-source indexed map as mapped provenance', () => {
+    expect(
+      verifyFixture(
+        indexedMap([
+          {
+            offset: { line: 0, column: 0 },
+            map: { version: 3, names: [], sources: [], mappings: 'A' }
+          }
+        ])
+      )
+    ).toThrow('has no usable source mappings')
+  })
+
+  it.each([
+    [{ line: 1, column: 0 }, sectionMap(), 'line'],
+    [{ line: 0, column: 4 }, sectionMap(), 'column'],
+    [{ line: 0, column: 3 }, { ...sectionMap(), mappings: 'CAAA' }, 'mapped column']
+  ])('rejects an indexed generated position beyond the adjacent JavaScript (%s)', (offset, map) => {
+    expect(verifyFixture(indexedMap([{ offset, map }]), 'mapped', 'abc')).toThrow(
+      /out-of-range (?:indexed-map offset|generated position)/
+    )
+  })
+
+  it('accepts an indexed section on the adjacent JavaScript boundary', () => {
+    expect(
+      verifyFixture(
+        indexedMap([{ offset: { line: 0, column: 3 }, map: sectionMap() }]),
+        'mapped',
+        'abc'
+      )
+    ).not.toThrow()
   })
 
   it('rejects null source text for a relative source', () => {

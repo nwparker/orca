@@ -2,16 +2,15 @@ const { readFileSync, readdirSync } = require('node:fs')
 const { basename, join, relative, sep } = require('node:path')
 const { gunzipSync } = require('node:zlib')
 const { AnyMap, decodedMappings } = require('@jridgewell/trace-mapping')
+const {
+  isCompressedJavaScriptSourceMapPath,
+  isJavaScriptOutputPath,
+  isRawJavaScriptSourceMapPath
+} = require('./renderer-javascript-output.cjs')
 const { verifyBasicMappingsStrict } = require('./renderer-source-map-vlq.cjs')
 
 const PROVENANCE_PREFIX = 'source-map-provenance/'
-const SOURCE_MAP_MODES = new Set([
-  'mapped',
-  'mappingless-json',
-  'source-less-asset',
-  'source-less-facade',
-  'source-less-generated'
-])
+const SOURCE_MAP_MODES = new Set(['identity-generated', 'mapped'])
 const BASIC_MAP_FIELDS = [
   'mappings',
   'names',
@@ -84,7 +83,11 @@ function constructSourceMap(sourceMap, mapLabel) {
   }
 }
 
-function verifyDecodedMappings(traceMap, decoded, mapLabel, requireMappedSegment) {
+function javascriptLines(source) {
+  return source.split('\n').map((line) => (line.endsWith('\r') ? line.slice(0, -1) : line))
+}
+
+function verifyDecodedMappings(traceMap, decoded, mapLabel, requireMappedSegment, generatedLines) {
   let hasMappedSegment = false
   decoded.forEach((line, lineIndex) => {
     let previousColumn = -1
@@ -94,6 +97,14 @@ function verifyDecodedMappings(traceMap, decoded, mapLabel, requireMappedSegment
       }
       if (!segment.every(Number.isInteger) || segment[0] < 0 || segment[0] < previousColumn) {
         throw new Error(`${mapLabel} has invalid generated column at ${lineIndex}:${segmentIndex}`)
+      }
+      if (
+        generatedLines &&
+        (lineIndex >= generatedLines.length || segment[0] > generatedLines[lineIndex].length)
+      ) {
+        throw new Error(
+          `${mapLabel} has out-of-range generated position at ${lineIndex}:${segmentIndex}`
+        )
       }
       previousColumn = segment[0]
       if (segment.length === 1) {
@@ -118,7 +129,46 @@ function verifyDecodedMappings(traceMap, decoded, mapLabel, requireMappedSegment
   }
 }
 
-function verifyBasicMap(sourceMap, mapLabel, sourceMapMode) {
+function verifyIdentityMap(sourceMap, decoded, mapLabel, javascriptEntry, javascriptSource) {
+  const expectedSource = `source-map-identity/${basename(javascriptEntry)}`
+  if (
+    sourceMap.sources.length !== 1 ||
+    sourceMap.sources[0] !== expectedSource ||
+    sourceMap.names.length !== 0 ||
+    sourceMap.sourceRoot !== undefined ||
+    sourceMap.sourcesContent[0] !== javascriptSource
+  ) {
+    throw new Error(`${mapLabel} is not an exact self-contained identity map`)
+  }
+  const lines = javascriptLines(javascriptSource)
+  if (decoded.length !== lines.length) {
+    throw new Error(`${mapLabel} does not map every generated line exactly`)
+  }
+  decoded.forEach((line, lineIndex) => {
+    if (
+      line.length !== lines[lineIndex].length + 1 ||
+      line.some(
+        (segment, column) =>
+          segment.length !== 4 ||
+          segment[0] !== column ||
+          segment[1] !== 0 ||
+          segment[2] !== lineIndex ||
+          segment[3] !== column
+      )
+    ) {
+      throw new Error(`${mapLabel} does not preserve generated coordinates exactly`)
+    }
+  })
+}
+
+function verifyBasicMap(
+  sourceMap,
+  mapLabel,
+  sourceMapMode,
+  javascriptEntry,
+  javascriptSource,
+  requireMappedSegment
+) {
   if (typeof sourceMap.mappings !== 'string') {
     throw new Error(`${mapLabel} does not contain string mappings`)
   }
@@ -163,34 +213,27 @@ function verifyBasicMap(sourceMap, mapLabel, sourceMapMode) {
       }
     })
   }
-  if (sourceMapMode === 'mappingless-json') {
-    if (
-      sourceMap.mappings !== '' ||
-      sourceMap.sources.length === 0 ||
-      sourceMap.names.length !== 0 ||
-      !sourceMap.sources.every((source) => source.endsWith('.json'))
-    ) {
-      throw new Error(`${mapLabel} is not a JSON-only mappingless map`)
-    }
-    sourceMap.sourcesContent.forEach((content, index) => {
-      try {
-        JSON.parse(content)
-      } catch {
-        throw new Error(`${mapLabel} has non-JSON mappingless source ${sourceMap.sources[index]}`)
-      }
-    })
-  }
   const { traceMap, decoded } = constructSourceMap(sourceMap, mapLabel)
   verifyBasicMappingsStrict(sourceMap, decoded, mapLabel)
   verifyDecodedMappings(
     traceMap,
     decoded,
     mapLabel,
-    sourceMap.sources.length > 0 && sourceMapMode !== 'mappingless-json'
+    requireMappedSegment,
+    javascriptSource === undefined ? undefined : javascriptLines(javascriptSource)
   )
+  if (sourceMapMode === 'identity-generated') {
+    verifyIdentityMap(sourceMap, decoded, mapLabel, javascriptEntry, javascriptSource)
+  }
 }
 
-function verifyIndexedMap(sourceMap, mapLabel) {
+function verifyIndexedMap(
+  sourceMap,
+  mapLabel,
+  javascriptEntry,
+  javascriptSource,
+  requireMappedSegment
+) {
   const mixedField = BASIC_MAP_FIELDS.find((field) => Object.hasOwn(sourceMap, field))
   if (mixedField) {
     throw new Error(`${mapLabel} mixes indexed sections with basic field ${mixedField}`)
@@ -199,6 +242,8 @@ function verifyIndexedMap(sourceMap, mapLabel) {
     throw new Error(`${mapLabel} has non-array indexed-map sections`)
   }
   let previousOffset
+  const generatedLines =
+    javascriptSource === undefined ? undefined : javascriptLines(javascriptSource)
   sourceMap.sections.forEach((section, index) => {
     if (
       !isObject(section) ||
@@ -221,13 +266,30 @@ function verifyIndexedMap(sourceMap, mapLabel) {
       throw new Error(`${mapLabel} has unordered indexed-map offset at section ${index}`)
     }
     previousOffset = { line, column }
-    verifySourceMapObject(section.map, `${mapLabel} section ${index}`, 'mapped')
+    if (generatedLines && (line >= generatedLines.length || column > generatedLines[line].length)) {
+      throw new Error(`${mapLabel} has out-of-range indexed-map offset at section ${index}`)
+    }
+    verifySourceMapObject(
+      section.map,
+      `${mapLabel} section ${index}`,
+      'mapped',
+      javascriptEntry,
+      undefined,
+      false
+    )
   })
   const { traceMap, decoded } = constructSourceMap(sourceMap, mapLabel)
-  verifyDecodedMappings(traceMap, decoded, mapLabel, traceMap.sources.length > 0)
+  verifyDecodedMappings(traceMap, decoded, mapLabel, requireMappedSegment, generatedLines)
 }
 
-function verifySourceMapObject(sourceMap, mapLabel, sourceMapMode = 'mapped') {
+function verifySourceMapObject(
+  sourceMap,
+  mapLabel,
+  sourceMapMode = 'mapped',
+  javascriptEntry = 'app.js',
+  javascriptSource,
+  requireMappedSegment = sourceMapMode === 'mapped'
+) {
   if (!isObject(sourceMap)) {
     throw new Error(`${mapLabel} is not a JSON object`)
   }
@@ -235,12 +297,19 @@ function verifySourceMapObject(sourceMap, mapLabel, sourceMapMode = 'mapped') {
     throw new Error(`${mapLabel} has source-map version ${String(sourceMap.version)} instead of 3`)
   }
   if (Object.hasOwn(sourceMap, 'sections')) {
-    if (sourceMapMode === 'mappingless-json') {
-      throw new Error(`${mapLabel} uses indexed sections for a mappingless map`)
+    if (sourceMapMode === 'identity-generated') {
+      throw new Error(`${mapLabel} uses indexed sections for an identity map`)
     }
-    verifyIndexedMap(sourceMap, mapLabel)
+    verifyIndexedMap(sourceMap, mapLabel, javascriptEntry, javascriptSource, requireMappedSegment)
   } else {
-    verifyBasicMap(sourceMap, mapLabel, sourceMapMode)
+    verifyBasicMap(
+      sourceMap,
+      mapLabel,
+      sourceMapMode,
+      javascriptEntry,
+      javascriptSource,
+      requireMappedSegment
+    )
   }
 }
 
@@ -249,7 +318,8 @@ function verifySourceMapBytes(
   mapEntry,
   javascriptEntries,
   scope,
-  sourceMapMode = 'mapped'
+  sourceMapMode = 'mapped',
+  javascriptBytes
 ) {
   const javascriptEntry = mapEntry.slice(0, -'.map.gz'.length)
   const mapLabel = `${scope} source map ${mapEntry}`
@@ -265,7 +335,13 @@ function verifySourceMapBytes(
       `${mapLabel} identifies ${String(sourceMap.file)} instead of ${basename(javascriptEntry)}`
     )
   }
-  verifySourceMapObject(sourceMap, mapLabel, sourceMapMode)
+  verifySourceMapObject(
+    sourceMap,
+    mapLabel,
+    sourceMapMode,
+    javascriptEntry,
+    javascriptBytes.toString('utf8')
+  )
 }
 
 function readSourceMapProvenance(outputDir, files, label) {
@@ -288,7 +364,7 @@ function readSourceMapProvenance(outputDir, files, label) {
       if (
         !isObject(chunk) ||
         typeof chunk.file !== 'string' ||
-        !/\.m?js$/.test(chunk.file) ||
+        !isJavaScriptOutputPath(chunk.file) ||
         chunk.file.startsWith('/') ||
         chunk.file.includes('\\') ||
         chunk.file.split('/').includes('..') ||
@@ -318,7 +394,7 @@ function describeSetDifference(expected, actual) {
 }
 
 function verifyOutputCoverage(files, provenance, label) {
-  const javascript = new Set(files.filter((entry) => /\.m?js$/.test(entry)))
+  const javascript = new Set(files.filter(isJavaScriptOutputPath))
   const provenanceJavascript = new Set(provenance.chunks.keys())
   const javascriptDifference = describeSetDifference(provenanceJavascript, javascript)
   if (javascriptDifference) {
@@ -326,12 +402,8 @@ function verifyOutputCoverage(files, provenance, label) {
       `${label} JavaScript set differs from source-map provenance (${javascriptDifference})`
     )
   }
-  const expectedMaps = new Set(
-    [...provenance.chunks]
-      .filter(([, sourceMap]) => !sourceMap.startsWith('source-less-'))
-      .map(([entry]) => `${entry}.map.gz`)
-  )
-  const maps = new Set(files.filter((entry) => /\.m?js\.map\.gz$/.test(entry)))
+  const expectedMaps = new Set([...provenance.chunks.keys()].map((entry) => `${entry}.map.gz`))
+  const maps = new Set(files.filter(isCompressedJavaScriptSourceMapPath))
   const mapDifference = describeSetDifference(expectedMaps, maps)
   if (mapDifference) {
     throw new Error(`${label} source-map coverage differs from provenance (${mapDifference})`)
@@ -342,7 +414,7 @@ function verifyOutputCoverage(files, provenance, label) {
 function verifyLocalRendererSourceMaps(outputName, outputDir) {
   const label = `Local ${outputName}`
   const files = listOutputFiles(outputDir)
-  const rawMaps = files.filter((entry) => /\.m?js\.map$/.test(entry))
+  const rawMaps = files.filter(isRawJavaScriptSourceMapPath)
   if (rawMaps.length > 0) {
     throw new Error(`${label} output contains raw source maps: ${rawMaps.join(', ')}`)
   }
@@ -355,7 +427,8 @@ function verifyLocalRendererSourceMaps(outputName, outputDir) {
       mapEntry,
       coverage.javascript,
       label,
-      provenance.chunks.get(javascriptEntry)
+      provenance.chunks.get(javascriptEntry),
+      readFileSync(join(outputDir, ...javascriptEntry.split('/')))
     )
   }
   return { files, provenance, ...coverage }

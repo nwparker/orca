@@ -145,7 +145,7 @@ const PATH_PATTERNS = [
 ]
 
 const RENDERER_ASSET_LOCATION_PATTERN =
-  /(?:file|https?):\/\/[^\s)]+?\/assets\/([A-Za-z0-9._-]+\.m?js)(?::(\d+):(\d+))?/gi
+  /(?:file|https?):\/\/[^\s)]+?\/assets\/([A-Za-z0-9._-]+\.(?:[cm]?js))(?=$|[?#:\s)])(?:[?#][^\s)]*?)?(?::(\d+):(\d+))?(?=$|[\s)])/gi
 
 function preserveRendererAssetLocations(value: string): string {
   return value.replace(

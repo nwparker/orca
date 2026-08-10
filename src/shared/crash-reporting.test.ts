@@ -26,6 +26,30 @@ describe('crash-reporting shared helpers', () => {
     )
   })
 
+  it('drops renderer URL queries and fragments without broad script-prefix matches', () => {
+    const stack = [
+      'at query (https://orca.example/client/assets/App.js?workspace=private&bearer=secret:7:19)',
+      'at fragment (file:///Applications/Orca.app/out/renderer/assets/web.mjs#api_key=private:11:3)',
+      'at commonjs (https://orca.example/client/assets/worker.cjs?custom_secret=private:9:4)',
+      'at map (https://orca.example/client/assets/App.js.map?token=private:4:2)',
+      'at commonjs map (https://orca.example/client/assets/worker.cjs.map#workspace=private:8:2)',
+      'at json (https://orca.example/client/assets/App.json#workspace=private:5:1)'
+    ].join('\n')
+    const sanitized = sanitizeCrashReportString(stack, 4_000)
+
+    expect(sanitized).toContain('renderer-asset:App.js:7:19')
+    expect(sanitized).toContain('renderer-asset:web.mjs:11:3')
+    expect(sanitized).toContain('renderer-asset:worker.cjs:9:4')
+    expect(sanitized).not.toContain('workspace=private')
+    expect(sanitized).not.toContain('bearer=secret')
+    expect(sanitized).not.toContain('api_key=private')
+    expect(sanitized).not.toContain('custom_secret=private')
+    expect(sanitized).not.toContain('token=private')
+    expect(sanitized).not.toContain('renderer-asset:App.js.map')
+    expect(sanitized).not.toContain('renderer-asset:worker.cjs.map')
+    expect(sanitized).not.toContain('renderer-asset:App.js.json')
+  })
+
   it('redacts paths and common secret-shaped strings', () => {
     const text =
       'file /Users/alice/My Project/.env /tmp/build log C:\\Users\\bob\\My Project token=abc123 ghp_abcdefghijklmnopqrstuvwxyz'

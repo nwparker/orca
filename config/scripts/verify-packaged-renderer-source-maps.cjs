@@ -7,6 +7,7 @@ const {
   verifyOutputCoverage,
   verifySourceMapBytes
 } = require('./renderer-source-map-contract.cjs')
+const { isRawJavaScriptSourceMapPath } = require('./renderer-javascript-output.cjs')
 
 const OUTPUT_NAMES = ['renderer', 'web']
 
@@ -38,7 +39,7 @@ function verifyOutputSourceMaps({
     .filter((entry) => entry.startsWith(archivePrefix))
     .map((entry) => entry.slice(archivePrefix.length))
     .sort()
-  const packagedRawMaps = archiveEntries.filter((entry) => /\.m?js\.map$/.test(entry))
+  const packagedRawMaps = archiveEntries.filter(isRawJavaScriptSourceMapPath)
   if (packagedRawMaps.length > 0) {
     throw new Error(
       `Packaged ${outputName} output contains raw source maps: ${packagedRawMaps.join(', ')}`
@@ -106,7 +107,12 @@ function verifyOutputSourceMaps({
       mapEntry,
       packagedCoverage.javascript,
       `Packaged ${outputName}`,
-      local.provenance.chunks.get(javascriptEntry)
+      local.provenance.chunks.get(javascriptEntry),
+      extractArchiveFile(
+        asar,
+        asarPath,
+        archiveEntryByNormalizedPath.get(`${archivePrefix}${javascriptEntry}`)
+      )
     )
   }
 }
