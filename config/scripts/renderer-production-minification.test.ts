@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { build } from 'vite'
 import {
   createRendererSourceMapCompactionPlugin,
+  createRendererSourceMapProvenancePlugin,
   rendererProductionBuild,
   rendererProductionOutput
 } from '../build-plugins/renderer-production-minification'
@@ -84,6 +85,31 @@ function createWorkerCollisionFixture(): string {
   return root
 }
 
+function createGeneratedDataFixture(): string {
+  const fixtureParent = resolve('out', 'test-fixtures')
+  mkdirSync(fixtureParent, { recursive: true })
+  const root = mkdtempSync(join(fixtureParent, 'renderer-generated-data-'))
+  temporaryRoots.push(root)
+  mkdirSync(join(root, 'src'))
+  writeFileSync(
+    join(root, 'index.html'),
+    '<script type="module" src="/src/main.ts"></script>',
+    'utf8'
+  )
+  writeFileSync(join(root, 'src', 'main.ts'), "void import('./strings.json')\n", 'utf8')
+  writeFileSync(join(root, 'src', 'strings.json'), '{"message":"diagnostic text"}\n', 'utf8')
+  return root
+}
+
+function readProvenanceChunks(outputDir: string): { file: string; sourceMap: boolean }[] {
+  return readdirSync(join(outputDir, 'source-map-provenance')).flatMap((fileName) => {
+    const provenance = JSON.parse(
+      readFileSync(join(outputDir, 'source-map-provenance', fileName), 'utf8')
+    ) as { chunks: { file: string; sourceMap: boolean }[] }
+    return provenance.chunks
+  })
+}
+
 afterEach(() => {
   for (const root of temporaryRoots.splice(0)) {
     rmSync(root, { recursive: true, force: true })
@@ -98,7 +124,10 @@ describe('renderer production minification', () => {
       root,
       configFile: false,
       logLevel: 'silent',
-      plugins: [createRendererSourceMapCompactionPlugin()],
+      plugins: [
+        createRendererSourceMapProvenancePlugin(),
+        createRendererSourceMapCompactionPlugin()
+      ],
       build: {
         ...rendererProductionBuild,
         outDir,
@@ -135,6 +164,10 @@ describe('renderer production minification', () => {
     }
     expect(sourceMap.sources.every((source) => !isAbsolute(source))).toBe(true)
     expect(sourceMap.sourcesContent).toHaveLength(sourceMap.sources.length)
+    expect(readProvenanceChunks(join(root, outDir))).toContainEqual({
+      file: `assets/${outputFile}`,
+      sourceMap: true
+    })
     const map = new TraceMap(mapContents)
     const original = originalPositionFor(map, {
       line: Number(frame![1]),
@@ -154,9 +187,13 @@ describe('renderer production minification', () => {
       root,
       configFile: false,
       logLevel: 'silent',
-      plugins: [createRendererSourceMapCompactionPlugin()],
+      plugins: [
+        createRendererSourceMapProvenancePlugin(),
+        createRendererSourceMapCompactionPlugin()
+      ],
       worker: {
         format: 'es',
+        plugins: () => [createRendererSourceMapProvenancePlugin()],
         rollupOptions: { output: rendererProductionOutput }
       },
       build: {
@@ -195,5 +232,46 @@ describe('renderer production minification', () => {
     expect(workerSourceIndex).toBeGreaterThanOrEqual(0)
     expect(workerMap.sourcesContent).toHaveLength(workerMap.sources.length)
     expect(workerMap.sourcesContent[workerSourceIndex]).toContain('worker-collision:')
+    expect(readProvenanceChunks(join(root, outDir))).toContainEqual({
+      file: `assets/${workerFile}`,
+      sourceMap: true
+    })
+  })
+
+  it('emits a usable mapping for a generated data chunk', async () => {
+    const root = createGeneratedDataFixture()
+    const outDir = 'out'
+    await build({
+      root,
+      configFile: false,
+      logLevel: 'silent',
+      plugins: [
+        createRendererSourceMapProvenancePlugin(),
+        createRendererSourceMapCompactionPlugin()
+      ],
+      build: {
+        ...rendererProductionBuild,
+        outDir,
+        emptyOutDir: true,
+        modulePreload: false,
+        rollupOptions: { output: rendererProductionOutput }
+      }
+    })
+
+    const assetsDir = join(root, outDir, 'assets')
+    const mapFile = readdirSync(assetsDir).find((fileName) => {
+      if (!fileName.endsWith('.js.map.gz')) {
+        return false
+      }
+      const sourceMap = JSON.parse(
+        gunzipSync(readFileSync(join(assetsDir, fileName))).toString('utf8')
+      ) as { sources: string[] }
+      return sourceMap.sources.some((source) => source.endsWith('src/strings.json'))
+    })
+    expect(mapFile).toBeDefined()
+    const sourceMap = JSON.parse(
+      gunzipSync(readFileSync(join(assetsDir, mapFile!))).toString('utf8')
+    ) as { mappings: string }
+    expect(sourceMap.mappings).toBe('AAAA')
   })
 })

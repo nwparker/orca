@@ -7,6 +7,7 @@ import { createBootstrapFatalExitBanner } from './config/build-plugins/bootstrap
 import { createPlainNodeEntryGuardPlugin } from './config/build-plugins/plain-node-entry-guard'
 import {
   createRendererSourceMapCompactionPlugin,
+  createRendererSourceMapProvenancePlugin,
   rendererProductionBuild,
   rendererProductionOutput
 } from './config/build-plugins/renderer-production-minification'
@@ -295,9 +296,15 @@ export const electronViteConfig: UserConfig = {
         '@': resolve('src/renderer/src')
       }
     },
-    plugins: [react(), tailwindcss(), createRendererSourceMapCompactionPlugin()],
+    plugins: [
+      react(),
+      tailwindcss(),
+      createRendererSourceMapProvenancePlugin(),
+      createRendererSourceMapCompactionPlugin()
+    ],
     worker: {
       format: 'es',
+      plugins: () => [createRendererSourceMapProvenancePlugin()],
       rollupOptions: { output: rendererProductionOutput }
     },
     build: {

@@ -1,4 +1,13 @@
-import { cpSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync } from 'node:fs'
+import {
+  cpSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync
+} from 'node:fs'
 import { dirname, join, posix, resolve, sep } from 'node:path'
 
 const rendererOutput = resolve('out/renderer')
@@ -8,6 +17,7 @@ const manifestPath = join(rendererOutput, '.vite', 'manifest.json')
 const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
 const selectedFiles = new Set(['web-index.html'])
 const visitedEntries = new Set()
+const projectedProvenancePath = 'source-map-provenance/projected-web.json'
 
 function assertEntryIsolation() {
   const entryKeys = new Set(
@@ -118,17 +128,57 @@ function includeSelectedSourceMaps() {
   }
 }
 
+function createProjectedSourceMapProvenance() {
+  const chunksByFile = new Map()
+  for (const outputPath of listOutputFiles(rendererOutput)) {
+    if (!outputPath.startsWith('source-map-provenance/') || !outputPath.endsWith('.json')) {
+      continue
+    }
+    const provenance = JSON.parse(readFileSync(join(rendererOutput, outputPath), 'utf8'))
+    if (provenance?.version !== 1 || !Array.isArray(provenance.chunks)) {
+      throw new Error(`Invalid renderer source-map provenance: ${outputPath}`)
+    }
+    for (const chunk of provenance.chunks) {
+      if (typeof chunk?.file !== 'string' || typeof chunk.sourceMap !== 'boolean') {
+        throw new Error(`Invalid renderer source-map provenance chunk: ${outputPath}`)
+      }
+      const previous = chunksByFile.get(chunk.file)
+      if (previous !== undefined && previous !== chunk.sourceMap) {
+        throw new Error(`Conflicting renderer source-map provenance for ${chunk.file}`)
+      }
+      chunksByFile.set(chunk.file, chunk.sourceMap)
+    }
+  }
+  const chunks = [...selectedFiles]
+    .filter((outputPath) => /\.m?js$/.test(outputPath))
+    .sort()
+    .map((file) => {
+      const sourceMap = chunksByFile.get(file)
+      if (sourceMap === undefined) {
+        throw new Error(`Renderer source-map provenance is missing ${file}`)
+      }
+      return { file, sourceMap }
+    })
+  return `${JSON.stringify({ version: 1, chunks })}\n`
+}
+
 assertEntryIsolation()
 visitManifestEntry('web-index.html')
 includeReferencedOutputs()
+const projectedProvenance = createProjectedSourceMapProvenance()
 includeSelectedSourceMaps()
+selectedFiles.add(projectedProvenancePath)
 
 rmSync(stagingOutput, { force: true, recursive: true })
 try {
   for (const outputPath of selectedFiles) {
     const targetPath = join(stagingOutput, outputPath)
     mkdirSync(dirname(targetPath), { recursive: true })
-    cpSync(join(rendererOutput, outputPath), targetPath)
+    if (outputPath === projectedProvenancePath) {
+      writeFileSync(targetPath, projectedProvenance)
+    } else {
+      cpSync(join(rendererOutput, outputPath), targetPath)
+    }
   }
   rmSync(webOutput, { force: true, recursive: true })
   renameSync(stagingOutput, webOutput)

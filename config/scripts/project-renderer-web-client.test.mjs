@@ -56,6 +56,20 @@ function createRendererFixture() {
     writeFixtureFile(root, `out/renderer/assets/${fileName}.map.gz`, 'compressed-map-fixture')
   }
   writeFixtureFile(root, 'out/renderer/assets/desktop-entry.js', 'export const desktop = true;')
+  writeFixtureFile(
+    root,
+    'out/renderer/source-map-provenance/bundle-fixture.json',
+    JSON.stringify({
+      version: 1,
+      chunks: [
+        ...['web-entry.js', 'web-shared.js', 'lazy.js', 'editor.worker-fixture.js'].map((file) => ({
+          file: `assets/${file}`,
+          sourceMap: true
+        })),
+        { file: 'assets/desktop-entry.js', sourceMap: false }
+      ]
+    })
+  )
   writeFixtureFile(root, 'out/web/stale.js', 'stale')
   return root
 }
@@ -81,7 +95,7 @@ describe('renderer web client projection', () => {
     })
 
     expect(result.status, result.stderr).toBe(0)
-    expect(result.stdout).toContain('Projected web client: 11 files')
+    expect(result.stdout).toContain('Projected web client: 12 files')
     expect(existsSync(join(root, 'out/web/web-index.html'))).toBe(true)
     expect(existsSync(join(root, 'out/web/assets/editor.worker-fixture.js'))).toBe(true)
     expect(existsSync(join(root, 'out/web/assets/editor.worker-fixture.js.map.gz'))).toBe(true)
@@ -92,6 +106,14 @@ describe('renderer web client projection', () => {
     expect(readFileSync(join(root, 'out/web/assets/web-shared.js'), 'utf8')).toBe(
       'export const value=1;\n'
     )
+    const provenance = JSON.parse(
+      readFileSync(join(root, 'out/web/source-map-provenance/projected-web.json'), 'utf8')
+    )
+    expect(provenance.chunks).toHaveLength(4)
+    expect(provenance.chunks).not.toContainEqual({
+      file: 'assets/desktop-entry.js',
+      sourceMap: false
+    })
   })
 
   it('fails when the renderer manifest omits the web entry', () => {

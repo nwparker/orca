@@ -212,6 +212,11 @@ describe('Electron Vite output contract', () => {
     expect(output.keepNames).toBe(true)
     expect(workerOutput.keepNames).toBe(true)
     expect(workerOutput.minify).toBe(output.minify)
+    expect(electronViteConfig.renderer?.worker?.plugins?.()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'orca-renderer-source-map-provenance' })
+      ])
+    )
     expect(output.minify).toMatchObject({
       compress: { keepNames: { function: true, class: true } },
       mangle: { keepNames: { function: true, class: true } }
@@ -224,6 +229,11 @@ describe('Electron Vite output contract', () => {
       throw new Error('Expected one direct web worker output')
     }
     expect(workerOutput.keepNames).toBe(true)
+    expect(webViteConfig.worker?.plugins?.()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'orca-renderer-source-map-provenance' })
+      ])
+    )
     expect(workerOutput.minify).toMatchObject({
       compress: { keepNames: { function: true, class: true } },
       mangle: { keepNames: { function: true, class: true } }

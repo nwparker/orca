@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { build } from 'vite'
 import {
   createRendererSourceMapCompactionPlugin,
+  createRendererSourceMapProvenancePlugin,
   rendererProductionBuild,
   rendererProductionOutput
 } from '../build-plugins/renderer-production-minification'
@@ -59,7 +60,10 @@ describe('packaged renderer symbolication', () => {
       root,
       configFile: false,
       logLevel: 'silent',
-      plugins: [createRendererSourceMapCompactionPlugin()],
+      plugins: [
+        createRendererSourceMapProvenancePlugin(),
+        createRendererSourceMapCompactionPlugin()
+      ],
       build: {
         ...rendererProductionBuild,
         outDir: buildDir,

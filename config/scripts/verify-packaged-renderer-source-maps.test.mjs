@@ -21,7 +21,7 @@ function sourceMap(file, overrides = {}) {
       names: [],
       sources,
       sourcesContent: sources.map((source) => `source text for ${source}`),
-      mappings: '',
+      mappings: 'AAAA',
       ...overrides
     })
   )
@@ -52,6 +52,17 @@ function createFixture(mutate = () => {}) {
       writeOutputFile(outputDir, `assets/${asset}.map.gz`, contents)
       archiveFiles.set(`out/${outputName}/assets/${asset}.map.gz`, contents)
     }
+    const provenance = Buffer.from(
+      `${JSON.stringify({
+        version: 1,
+        chunks: [
+          ...mappedAssets.map((file) => ({ file: `assets/${file}`, sourceMap: true })),
+          { file: 'assets/source-less-facade.js', sourceMap: false }
+        ]
+      })}\n`
+    )
+    writeOutputFile(outputDir, 'source-map-provenance/bundle-fixture.json', provenance)
+    archiveFiles.set(`out/${outputName}/source-map-provenance/bundle-fixture.json`, provenance)
   }
 
   const fixture = {
@@ -135,7 +146,18 @@ describe('packaged renderer source maps', () => {
       })
 
       expect(() => verifyPackagedRendererSourceMaps('resources', asar, outputDirectories)).toThrow(
-        `Packaged ${outputName} source-map set differs from local output (missing: assets/dynamic.js.map.gz)`
+        `Packaged ${outputName} source-map coverage differs from provenance (missing: assets/dynamic.js.map.gz)`
+      )
+    })
+
+    it('rejects an ordinary map removed from both local and packaged output', () => {
+      const { asar, outputDirectories } = createFixture((fixture) => {
+        fixture.deleteLocal(outputName, 'assets/dynamic.js.map.gz')
+        fixture.deletePackaged(outputName, 'assets/dynamic.js.map.gz')
+      })
+
+      expect(() => verifyPackagedRendererSourceMaps('resources', asar, outputDirectories)).toThrow(
+        `Local ${outputName} source-map coverage differs from provenance (missing: assets/dynamic.js.map.gz)`
       )
     })
 
@@ -146,7 +168,7 @@ describe('packaged renderer source maps', () => {
       })
 
       expect(() => verifyPackagedRendererSourceMaps('resources', asar, outputDirectories)).toThrow(
-        `Packaged ${outputName} source-map set differs from local output (stale: assets/stale.js.map.gz)`
+        `Packaged ${outputName} JavaScript set differs from source-map provenance (stale: assets/stale.js)`
       )
     })
 
@@ -216,7 +238,7 @@ describe('packaged renderer source maps', () => {
       })
 
       expect(() => verifyPackagedRendererSourceMaps('resources', asar, outputDirectories)).toThrow(
-        `Local ${outputName} source map assets/shared.js.map.gz has no adjacent JavaScript asset assets/shared.js`
+        `Local ${outputName} JavaScript set differs from source-map provenance (missing: assets/shared.js)`
       )
     })
 
@@ -226,7 +248,7 @@ describe('packaged renderer source maps', () => {
       })
 
       expect(() => verifyPackagedRendererSourceMaps('resources', asar, outputDirectories)).toThrow(
-        `Packaged ${outputName} source map assets/shared.js.map.gz has no adjacent JavaScript asset assets/shared.js`
+        `Packaged ${outputName} JavaScript set differs from source-map provenance (missing: assets/shared.js)`
       )
     })
 
@@ -274,6 +296,7 @@ describe('packaged renderer source maps', () => {
 
     it('recursively enforces embedded sources in indexed maps', () => {
       const indexedMap = sourceMap('shared.js', {
+        names: undefined,
         sources: undefined,
         sourcesContent: undefined,
         mappings: undefined,
@@ -284,7 +307,7 @@ describe('packaged renderer source maps', () => {
               version: 3,
               names: [],
               sources: ['src/section.ts'],
-              mappings: ''
+              mappings: 'AAAA'
             }
           }
         ]
@@ -299,12 +322,13 @@ describe('packaged renderer source maps', () => {
     })
   })
 
-  it('accepts aligned indexed maps, source-less maps, and generated null content', () => {
+  it('accepts aligned indexed maps, source-less maps, and generated source text', () => {
     const { asar, outputDirectories } = createFixture((fixture) => {
       fixture.writeMapPair(
         'renderer',
         'shared.js',
         sourceMap('shared.js', {
+          names: undefined,
           sources: undefined,
           sourcesContent: undefined,
           mappings: undefined,
@@ -316,7 +340,7 @@ describe('packaged renderer source maps', () => {
                 names: [],
                 sources: ['src/section.ts'],
                 sourcesContent: ['const section = true'],
-                mappings: ''
+                mappings: 'AAAA'
               }
             }
           ]
@@ -325,12 +349,15 @@ describe('packaged renderer source maps', () => {
       fixture.writeMapPair(
         'renderer',
         'dynamic.js',
-        sourceMap('dynamic.js', { sources: [], sourcesContent: undefined })
+        sourceMap('dynamic.js', { sources: [], sourcesContent: undefined, mappings: '' })
       )
       fixture.writeMapPair(
         'web',
         'dynamic.js',
-        sourceMap('dynamic.js', { sources: ['\0generated'], sourcesContent: [null] })
+        sourceMap('dynamic.js', {
+          sources: ['\0generated'],
+          sourcesContent: ['const generated = true']
+        })
       )
     })
 
