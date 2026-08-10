@@ -40886,6 +40886,57 @@ describe('OrcaRuntimeService', () => {
     ])
   })
 
+  it('hydrates inferred lineage once for the combined lineage snapshot', async () => {
+    const lineage = {
+      worktreeId: 'repo-1::/tmp/child',
+      worktreeInstanceId: 'child-instance',
+      parentWorktreeId: 'repo-1::/tmp/parent',
+      parentWorktreeInstanceId: 'parent-instance',
+      origin: 'manual',
+      capture: { source: 'manual-action', confidence: 'explicit' },
+      createdAt: 1
+    } satisfies WorktreeLineage
+    const workspaceLineage = {
+      childWorkspaceKey: 'worktree:repo-1::/tmp/child',
+      childInstanceId: 'child-instance',
+      parentWorkspaceKey: 'folder:folder-1',
+      parentInstanceId: null,
+      origin: 'manual',
+      capture: { source: 'manual-action', confidence: 'explicit' },
+      createdAt: 1
+    } satisfies WorkspaceLineage
+    const getAllWorktreeLineage = vi.fn(() => ({ [lineage.worktreeId]: lineage }))
+    const getAllWorkspaceLineage = vi.fn(() => ({
+      [workspaceLineage.childWorkspaceKey]: workspaceLineage
+    }))
+    const runtime = new OrcaRuntimeService({
+      ...store,
+      getAllWorktreeLineage,
+      getAllWorkspaceLineage
+    } as never)
+    const hydrateInferredWorktreeLineage = vi
+      .spyOn(runtime, 'hydrateInferredWorktreeLineage')
+      .mockResolvedValue(undefined)
+
+    await expect(runtime.listWorktreeLineageSnapshot()).resolves.toEqual({
+      lineage: { [lineage.worktreeId]: lineage },
+      workspaceLineage: { [workspaceLineage.childWorkspaceKey]: workspaceLineage }
+    })
+
+    expect(hydrateInferredWorktreeLineage).toHaveBeenCalledOnce()
+    expect(getAllWorktreeLineage).toHaveBeenCalledOnce()
+    expect(getAllWorkspaceLineage).toHaveBeenCalledOnce()
+
+    const hydrationError = new Error('lineage hydration failed')
+    hydrateInferredWorktreeLineage.mockRejectedValueOnce(hydrationError)
+    getAllWorktreeLineage.mockClear()
+    getAllWorkspaceLineage.mockClear()
+
+    await expect(runtime.listWorktreeLineageSnapshot()).rejects.toBe(hydrationError)
+    expect(getAllWorktreeLineage).not.toHaveBeenCalled()
+    expect(getAllWorkspaceLineage).not.toHaveBeenCalled()
+  })
+
   it('infers orchestration lineage from task-id comments when dispatch is completed', async () => {
     const workerPath = '/tmp/worktree-worker'
     const childPath = '/tmp/workspaces/worker-child'

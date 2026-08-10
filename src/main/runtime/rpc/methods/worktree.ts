@@ -60,10 +60,7 @@ export const WORKTREE_METHODS: RpcMethod[] = [
   defineMethod({
     name: 'worktree.lineageList',
     params: null,
-    handler: async (_params, { runtime }) => ({
-      lineage: await runtime.listWorktreeLineage(),
-      workspaceLineage: await runtime.listWorkspaceLineage()
-    })
+    handler: async (_params, { runtime }) => runtime.listWorktreeLineageSnapshot()
   }),
   defineMethod({
     name: 'worktree.show',

@@ -831,15 +831,16 @@ describe('worktree RPC methods', () => {
     const runtime = {
       getRuntimeId: () => 'test-runtime',
       dedupeWorktreeCreate: passthroughDedupe,
-      listWorktreeLineage: vi.fn().mockResolvedValue(lineage),
-      listWorkspaceLineage: vi.fn().mockResolvedValue({})
+      listWorktreeLineageSnapshot: vi.fn().mockResolvedValue({
+        lineage,
+        workspaceLineage: {}
+      })
     } as unknown as OrcaRuntimeService
     const dispatcher = new RpcDispatcher({ runtime, methods: WORKTREE_METHODS })
 
     const response = await dispatcher.dispatch(makeRequest('worktree.lineageList'))
 
-    expect(runtime.listWorktreeLineage).toHaveBeenCalled()
-    expect(runtime.listWorkspaceLineage).toHaveBeenCalled()
+    expect(runtime.listWorktreeLineageSnapshot).toHaveBeenCalledOnce()
     expect(response).toMatchObject({ ok: true, result: { lineage, workspaceLineage: {} } })
   })
 

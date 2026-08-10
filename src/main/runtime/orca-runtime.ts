@@ -28559,6 +28559,17 @@ export class OrcaRuntimeService {
     return this.store?.getAllWorktreeLineage?.() ?? {}
   }
 
+  async listWorktreeLineageSnapshot(): Promise<{
+    lineage: Record<string, WorktreeLineage>
+    workspaceLineage: Record<WorkspaceKey, WorkspaceLineage>
+  }> {
+    await this.hydrateInferredWorktreeLineage()
+    return {
+      lineage: this.store?.getAllWorktreeLineage?.() ?? {},
+      workspaceLineage: this.store?.getAllWorkspaceLineage?.() ?? {}
+    }
+  }
+
   async listWorkspaceLineage(): Promise<Record<WorkspaceKey, WorkspaceLineage>> {
     await this.hydrateInferredWorktreeLineage()
     return this.store?.getAllWorkspaceLineage?.() ?? {}
