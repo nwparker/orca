@@ -4157,6 +4157,23 @@ query($owner: String!, $repo: String!, $pr: Int!) {
           }
         }
       }
+      reviews(first: 100) {
+        nodes {
+          id
+          databaseId
+          author { __typename login avatarUrl(size: 48) }
+          body
+          createdAt
+          url
+          reactionGroups {
+            content
+            viewerHasReacted
+            reactors {
+              totalCount
+            }
+          }
+        }
+      }
     }
   }
 }`
@@ -4284,6 +4301,7 @@ export async function getPRComments(
         url: string
         reactionGroups?: GitHubGraphQLReactionGroup[] | null
       }
+      let graphQLReviewSummaries: PRComment[] | undefined
       const reviewComments: PRComment[] = []
       if (threadsResult.status === 'fulfilled' && threadsResult.value) {
         const threadsData = JSON.parse(threadsResult.value.stdout) as {
@@ -4292,6 +4310,7 @@ export async function getPRComments(
               pullRequest: {
                 reviewThreads: { nodes: GQLThread[] }
                 comments?: { nodes: GQLIssueComment[] }
+                reviews?: { nodes: GQLIssueComment[] }
               }
             }
           }
@@ -4313,6 +4332,21 @@ export async function getPRComments(
         if (graphQLIssueComments.length > 0) {
           issueComments = graphQLIssueComments
         }
+        graphQLReviewSummaries = (pullRequest.reviews?.nodes ?? [])
+          .filter((review) => review.body?.trim())
+          .map(
+            (review): PRComment => ({
+              id: review.databaseId,
+              nodeId: review.id,
+              author: review.author?.login ?? 'ghost',
+              authorAvatarUrl: review.author?.avatarUrl ?? '',
+              body: review.body,
+              createdAt: review.createdAt,
+              url: review.url,
+              isBot: review.author?.__typename === 'Bot',
+              reactions: mapGraphQLReactionGroups(review.reactionGroups)
+            })
+          )
 
         const threads = pullRequest.reviewThreads.nodes
         for (const thread of threads) {
@@ -4353,7 +4387,9 @@ export async function getPRComments(
         html_url: string
       }
       let reviewSummaries: PRComment[] = []
-      if (reviewsResult.status === 'fulfilled') {
+      if (graphQLReviewSummaries) {
+        reviewSummaries = graphQLReviewSummaries
+      } else if (reviewsResult.status === 'fulfilled') {
         reviewSummaries = (JSON.parse(reviewsResult.value.stdout) as RESTReview[])
           .filter((r) => r.body?.trim())
           .map(
@@ -4554,6 +4590,7 @@ export async function setPRCommentReaction(
 function mapReviewCommentResponse(
   data: {
     id?: number
+    node_id?: string
     user: { login: string; avatar_url: string; type?: string } | null
     body?: string
     created_at?: string
@@ -4569,6 +4606,7 @@ function mapReviewCommentResponse(
 ): PRComment {
   return {
     id: data.id ?? Date.now(),
+    nodeId: data.node_id,
     author: data.user?.login ?? 'You',
     authorAvatarUrl: data.user?.avatar_url ?? '',
     body: data.body ?? body,

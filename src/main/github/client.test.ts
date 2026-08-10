@@ -4044,6 +4044,70 @@ describe('GitHub GraphQL rate-limit guard', () => {
     expect(noteRateLimitSpendMock).not.toHaveBeenCalledWith('graphql')
   })
 
+  it('maps review summary reaction subjects from GraphQL', async () => {
+    getOwnerRepoMock.mockResolvedValueOnce({ owner: 'acme', repo: 'widgets' })
+    ghExecFileAsyncMock
+      .mockResolvedValueOnce({
+        stdout: JSON.stringify({
+          data: {
+            repository: {
+              pullRequest: {
+                reviewThreads: { nodes: [] },
+                comments: { nodes: [] },
+                reviews: {
+                  nodes: [
+                    {
+                      id: 'PRR_44',
+                      databaseId: 44,
+                      author: {
+                        __typename: 'Bot',
+                        login: 'coderabbitai',
+                        avatarUrl: 'https://avatar'
+                      },
+                      body: 'Automated review summary',
+                      createdAt: '2026-04-01T00:00:00Z',
+                      url: 'https://github.com/acme/widgets/pull/7#pullrequestreview-44',
+                      reactionGroups: [
+                        {
+                          content: 'ROCKET',
+                          viewerHasReacted: true,
+                          reactors: { totalCount: 2 }
+                        }
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        })
+      })
+      .mockResolvedValueOnce({ stdout: '[]' })
+      .mockResolvedValueOnce({
+        stdout: JSON.stringify([
+          {
+            id: 44,
+            user: { login: 'coderabbitai', avatar_url: 'https://avatar', type: 'Bot' },
+            body: 'Automated review summary',
+            submitted_at: '2026-04-01T00:00:00Z',
+            html_url: 'https://github.com/acme/widgets/pull/7#pullrequestreview-44'
+          }
+        ])
+      })
+
+    await expect(getPRComments('/repo-root', 7)).resolves.toEqual([
+      expect.objectContaining({
+        id: 44,
+        nodeId: 'PRR_44',
+        isBot: true,
+        reactions: [{ content: 'rocket', count: 2, viewerHasReacted: true }]
+      })
+    ])
+    expect(ghExecFileAsyncMock.mock.calls[0]?.[0]).toEqual(
+      expect.arrayContaining([expect.stringContaining('reviews(first: 100)')])
+    )
+  })
+
   it('uses explicit PR repo for comments when a fork PR is discovered', async () => {
     rateLimitGuardMock.mockImplementation(((bucket: string) =>
       bucket === 'graphql'

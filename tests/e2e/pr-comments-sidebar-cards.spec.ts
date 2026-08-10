@@ -155,9 +155,10 @@ test.describe('PR comments sidebar cards view', () => {
     await orcaPage.waitForTimeout(100)
     await orcaPage.screenshot({ path: testInfo.outputPath('reaction-after.png') })
 
-    await selectedRocket.click()
+    await selectedRocket.focus()
+    await selectedRocket.press('Enter')
     await expect(selectedRocket).toHaveCount(0)
-    await expect(addReaction).toBeVisible()
+    await expect(addReaction).toBeFocused()
   })
 
   test('keeps reaction picker focus when a remote mutation fails', async ({ orcaPage }) => {

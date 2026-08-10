@@ -473,6 +473,7 @@ export async function addIssueComment(
     )
     const data = JSON.parse(stdout) as {
       id?: number
+      node_id?: string
       user: { login: string; avatar_url: string; type?: string } | null
       body?: string
       created_at?: string
@@ -483,6 +484,7 @@ export async function addIssueComment(
     }
     const comment: PRComment = {
       id: data.id,
+      nodeId: data.node_id,
       author: data.user?.login ?? 'You',
       authorAvatarUrl: data.user?.avatar_url ?? '',
       body: data.body ?? body,

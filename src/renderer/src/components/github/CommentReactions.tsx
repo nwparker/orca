@@ -85,6 +85,7 @@ export function CommentReactions({
   onToggle?: (content: GitHubReactionContent, add: boolean) => Promise<boolean>
 }): React.JSX.Element | null {
   const visibleReactions = (reactions ?? []).filter((reaction) => reaction.count > 0)
+  const addReactionButtonRef = useRef<HTMLButtonElement>(null)
   const pickerGroupRef = useRef<HTMLDivElement>(null)
   const mutationPendingRef = useRef(false)
   const [pendingContent, setPendingContent] = useState<GitHubReactionContent | null>(null)
@@ -107,7 +108,8 @@ export function CommentReactions({
   const toggleReaction = (
     content: GitHubReactionContent,
     add: boolean,
-    closePicker: boolean
+    closePicker: boolean,
+    focusTriggerAfterChange = false
   ): void => {
     if (!onToggle || mutationPendingRef.current) {
       return
@@ -118,6 +120,9 @@ export function CommentReactions({
       .then((changed) => {
         if (changed && closePicker) {
           setPickerOpen(false)
+        }
+        if (changed && focusTriggerAfterChange) {
+          window.requestAnimationFrame(() => addReactionButtonRef.current?.focus())
         }
       })
       .catch(() => false)
@@ -170,7 +175,7 @@ export function CommentReactions({
                 aria-disabled={pendingContent !== null}
                 onClick={(event) => {
                   event.stopPropagation()
-                  toggleReaction(content, add, false)
+                  toggleReaction(content, add, false, !add && reaction.count === 1)
                 }}
               >
                 {pendingContent === content && showPending ? (
@@ -198,6 +203,7 @@ export function CommentReactions({
             <TooltipTrigger asChild>
               <PopoverTrigger asChild>
                 <Button
+                  ref={addReactionButtonRef}
                   type="button"
                   variant="outline"
                   size="icon-xs"
