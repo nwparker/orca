@@ -25,8 +25,15 @@ function hostRow(hostId: string): RenderRow {
   }
 }
 
-function groupRow(key: string): RenderRow {
-  return { type: 'header', key, label: key, count: 1, tone: 'text-foreground' }
+function groupRow(key: string, hostId?: string): RenderRow {
+  return {
+    type: 'header',
+    key,
+    label: key,
+    count: 1,
+    tone: 'text-foreground',
+    ...(hostId ? { hostId: hostId as never } : {})
+  }
 }
 
 function itemStub(id: string): RenderRow {
@@ -50,6 +57,23 @@ const rows: RenderRow[] = [
 const stickyHeaderIndexes = getStickyHeaderIndexes(rows)
 // Geometry: each row 100px tall for easy math.
 const virtualItems = rows.map((_, index) => virtualItem(index, index * 100))
+
+describe('getRenderRowKey', () => {
+  it('scopes repeated group headers to their host section', () => {
+    expect(getRenderRowKey(groupRow('workspace-status:in-progress', 'local'))).toBe(
+      'hdr:local:workspace-status:in-progress'
+    )
+    expect(getRenderRowKey(groupRow('workspace-status:in-progress', 'ssh:builder'))).toBe(
+      'hdr:ssh:builder:workspace-status:in-progress'
+    )
+  })
+
+  it('preserves unsectioned group header keys', () => {
+    expect(getRenderRowKey(groupRow('workspace-status:in-progress'))).toBe(
+      'hdr:workspace-status:in-progress'
+    )
+  })
+})
 
 describe('getActiveStickyIndexesForScroll', () => {
   it('pins the host and its inner group while scrolled inside a section', () => {
