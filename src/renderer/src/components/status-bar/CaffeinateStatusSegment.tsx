@@ -103,18 +103,12 @@ export function CaffeinateStatusSegment({
             <button
               type="button"
               {...STATUS_BAR_CONTEXT_MENU_EXEMPT_PROPS}
-              className="inline-flex cursor-pointer items-center gap-1.5 rounded px-1 py-0.5 text-muted-foreground transition-colors hover:bg-accent/70 hover:text-foreground"
+              className="inline-flex cursor-pointer items-center gap-1 rounded px-1 py-0.5 text-muted-foreground transition-colors hover:bg-accent/70 hover:text-foreground"
               aria-label={ariaLabel}
             >
-              <Coffee className="size-3" />
+              <Coffee className={`size-3 ${active ? 'text-foreground' : ''}`} />
               {!iconOnly ? (
-                <span className="text-[11px] font-medium">
-                  {translate(
-                    'auto.components.status.bar.CaffeinateStatusSegment.title',
-                    'Caffeinate'
-                  )}
-                  <span className="ml-1 text-muted-foreground">{statusText}</span>
-                </span>
+                <span className="text-[11px] font-medium">{modeLabel(mode)}</span>
               ) : null}
               <span
                 aria-hidden

@@ -36,6 +36,7 @@ test('shows Caffeinate mode and Auto activity in the status bar', async ({
 
   const offStatus = orcaPage.getByRole('button', { name: 'Caffeinate, Off · Inactive' })
   await expect(offStatus).toBeVisible()
+  await expect(offStatus).toHaveText('Off')
   await offStatus.click()
   await expect(orcaPage.getByRole('menuitemradio', { name: /^On/ })).toBeVisible()
   await expect(orcaPage.getByRole('menuitemradio', { name: /^Auto/ })).toBeVisible()
@@ -57,6 +58,7 @@ test('shows Caffeinate mode and Auto activity in the status bar', async ({
     name: 'Caffeinate, Auto · Active'
   })
   await expect(autoActiveStatus).toBeVisible()
+  await expect(autoActiveStatus).toHaveText('Auto')
 
   const proofPath = process.env.ORCA_CAFFEINATE_PROOF_PATH
   if (proofPath) {
