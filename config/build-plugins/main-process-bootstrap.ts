@@ -4,6 +4,7 @@ import { createBootstrapFatalExitBanner } from './bootstrap-fatal-exit-banner'
 export const MAIN_PROCESS_BOOTSTRAP_FILE = 'bootstrap.cjs'
 export const MAIN_PROCESS_BUNDLE_FILE = 'index.js'
 export const MAIN_PROCESS_COMPILE_CACHE_DIRECTORY = 'v8-compile-cache'
+export const MAIN_PROCESS_DEVELOPMENT_CACHE_PARENT_DIRECTORY = '.cache'
 
 export function createStartupDiagnosticsBanner(chunkName: string): string {
   return `
@@ -131,16 +132,17 @@ try {
       if (typeof cacheDirectory !== 'string' || cacheDirectory.length === 0) {
         const electronApp = require('electron').app
         const path = require('node:path')
-        let userDataDirectory = process.env.ORCA_E2E_USER_DATA_DIR
-        if (typeof userDataDirectory !== 'string' || userDataDirectory.length === 0) {
+        let cacheRoot = process.env.ORCA_E2E_USER_DATA_DIR
+        if (typeof cacheRoot !== 'string' || cacheRoot.length === 0) {
           const devOverride = process.env.ORCA_DEV_USER_DATA_PATH
-          userDataDirectory = electronApp.isPackaged
+          // Why: generated source-local storage disappears with its workspace instead of orphaning path-keyed entries in shared app data.
+          cacheRoot = electronApp.isPackaged
             ? electronApp.getPath('userData')
             : typeof devOverride === 'string' && devOverride.length > 0
               ? devOverride
-              : path.join(electronApp.getPath('appData'), 'orca-dev')
+              : path.join(__dirname, '..', ${JSON.stringify(MAIN_PROCESS_DEVELOPMENT_CACHE_PARENT_DIRECTORY)})
         }
-        cacheDirectory = path.join(userDataDirectory, ${JSON.stringify(MAIN_PROCESS_COMPILE_CACHE_DIRECTORY)})
+        cacheDirectory = path.join(cacheRoot, ${JSON.stringify(MAIN_PROCESS_COMPILE_CACHE_DIRECTORY)})
       }
       compileCacheModule.enableCompileCache(cacheDirectory)
     }

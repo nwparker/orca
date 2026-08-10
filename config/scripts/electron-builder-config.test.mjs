@@ -44,6 +44,7 @@ describe('electron-builder config', () => {
         '!Casks{,/**/*}',
         '!{AGENTS.md,CLAUDE.md,DEVELOPING.md,bundle-size-progress.md,ORCHESTRATION_IMPLEMENTATION_CHECKLIST.md,ORCHESTRATION_STRUCTURED_OUTPUT_DESIGN.md}',
         '!out/**/*.test.js',
+        '!out/.cache{,/**/*}',
         '!resources/plugins/launch/**'
       ])
     )
@@ -70,6 +71,16 @@ describe('electron-builder config', () => {
     }
     // The negation stays anchored at the app root, so nested `examples` segments still ship.
     expect(packs('out/main/examples/index.js')).toBe(true)
+  })
+
+  it('keeps source-launch compile caches out of app.asar', () => {
+    const matcher = new FileMatcher('/app', '/dest', (value) => value, electronBuilderConfig.files)
+    matcher.prependPattern('**/*')
+    const isPacked = matcher.createFilter()
+    const packs = (repoPath) => isPacked(join('/app', repoPath), { isDirectory: () => false })
+
+    expect(packs('out/.cache/v8-compile-cache/v24/cache-entry')).toBe(false)
+    expect(packs('out/main/bootstrap.cjs')).toBe(true)
   })
 
   it('keeps runtime resources available through extraResources', () => {

@@ -1,5 +1,6 @@
 import { spawn, spawnSync } from 'node:child_process'
 import { createRequire } from 'node:module'
+import { normalizeStartupBenchmarkOutcome } from './startup-benchmark-sample.mjs'
 
 const require = createRequire(import.meta.url)
 const GRACEFUL_SHUTDOWN_TIMEOUT_MS = 30_000
@@ -58,7 +59,9 @@ export function runElectronStartupBenchmarkIteration(options) {
       clearTimeout(timer)
       clearTimeout(lingerTimer)
       clearTimeout(shutdownTimer)
-      resolvePromise({ outcome, events, exitCode, exitSignal, gracefulShutdownRequested })
+      const result = { outcome, events, exitCode, exitSignal, gracefulShutdownRequested }
+      result.outcome = normalizeStartupBenchmarkOutcome(result)
+      resolvePromise(result)
     }
     const finish = (outcome) => {
       if (finishOutcome !== null) {

@@ -38,6 +38,7 @@ import {
 import os from 'node:os'
 import { delimiter, join, resolve } from 'node:path'
 import { runElectronStartupBenchmarkIteration } from './startup-benchmark-electron-launch.mjs'
+import { assertValidStartupBenchmarkSample } from './startup-benchmark-sample.mjs'
 
 const scriptDir = import.meta.dirname
 const repoRoot = resolve(scriptDir, '..', '..', '..')
@@ -551,6 +552,12 @@ async function main() {
       launchEnv,
       parseStartupLine
     })
+    try {
+      assertValidStartupBenchmarkSample(result)
+    } catch (error) {
+      console.log(result.outcome)
+      throw new Error(`Iteration ${i + 1} rejected: ${error.message}`, { cause: error })
+    }
     const phases = derivePhases(result.events)
     iterations.push({ ...result, phases })
     console.log(

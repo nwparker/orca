@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest'
 import {
   MAIN_PROCESS_BOOTSTRAP_FILE,
   MAIN_PROCESS_COMPILE_CACHE_DIRECTORY,
+  MAIN_PROCESS_DEVELOPMENT_CACHE_PARENT_DIRECTORY,
   createMainProcessBootstrap
 } from './main-process-bootstrap'
 import { BOOTSTRAP_FATAL_EXIT_GUARD_KEY } from '../../src/main/startup/bootstrap-fatal-exit-guard'
@@ -12,6 +13,7 @@ import { BOOTSTRAP_FATAL_EXIT_GUARD_KEY } from '../../src/main/startup/bootstrap
 function runBootstrap(options: {
   appImagePath?: string
   compileCacheSupported?: boolean
+  devUserDataPath?: string
   enableCompileCache?: (directory: string) => unknown
   getUserDataPath?: () => string
   isPackaged?: boolean
@@ -34,6 +36,7 @@ function runBootstrap(options: {
   processMock.argv = []
   processMock.env = {
     ...(options.nodeCompileCache ? { NODE_COMPILE_CACHE: options.nodeCompileCache } : {}),
+    ...(options.devUserDataPath ? { ORCA_DEV_USER_DATA_PATH: options.devUserDataPath } : {}),
     ...(options.appImagePath ? { APPIMAGE: options.appImagePath } : {}),
     ...(options.startupDiagnostics ? { ORCA_STARTUP_DIAGNOSTICS: options.startupDiagnostics } : {})
   }
@@ -82,6 +85,7 @@ function runBootstrap(options: {
   }
 
   runInNewContext(createMainProcessBootstrap(), {
+    __dirname: '/repo/out/main',
     globalThis: {},
     module: moduleMock,
     process: processMock,
@@ -148,15 +152,27 @@ describe('main-process bootstrap', () => {
     expect(result.timeline[0]).toBe('enable:/configured-cache')
   })
 
-  it('keeps development caches out of the packaged profile', () => {
+  it('uses a generated source-local cache for default development launches', () => {
     const result = runBootstrap({
-      getUserDataPath: (name?: string) =>
-        name === 'appData' ? '/app-data' : '/packaged-user-data',
+      getUserDataPath: () => {
+        throw new Error('development cache must not use shared app data')
+      },
       isPackaged: false
     })
 
     expect(result.timeline[0]).toBe(
-      `enable:/app-data/orca-dev/${MAIN_PROCESS_COMPILE_CACHE_DIRECTORY}`
+      `enable:/repo/out/${MAIN_PROCESS_DEVELOPMENT_CACHE_PARENT_DIRECTORY}/${MAIN_PROCESS_COMPILE_CACHE_DIRECTORY}`
+    )
+  })
+
+  it('keeps explicit development user-data overrides authoritative', () => {
+    const result = runBootstrap({
+      devUserDataPath: '/configured-dev-profile',
+      isPackaged: false
+    })
+
+    expect(result.timeline[0]).toBe(
+      `enable:/configured-dev-profile/${MAIN_PROCESS_COMPILE_CACHE_DIRECTORY}`
     )
   })
 
