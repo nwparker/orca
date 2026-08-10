@@ -49,6 +49,41 @@ function createFixture(): string {
   return root
 }
 
+function createWorkerCollisionFixture(): string {
+  const fixtureParent = resolve('out', 'test-fixtures')
+  mkdirSync(fixtureParent, { recursive: true })
+  const root = mkdtempSync(join(fixtureParent, 'renderer-worker-minification-'))
+  temporaryRoots.push(root)
+  mkdirSync(join(root, 'src'))
+  writeFileSync(
+    join(root, 'index.html'),
+    '<script type="module" src="/src/main.ts"></script>',
+    'utf8'
+  )
+  writeFileSync(
+    join(root, 'src', 'main.ts'),
+    "new Worker(new URL('./worker-collision.ts', import.meta.url), { type: 'module' })\n",
+    'utf8'
+  )
+  writeFileSync(
+    join(root, 'src', 'worker-collision.ts'),
+    [
+      "import { Same as AlphaClass, same as alphaFunction } from './worker-alpha'",
+      "import { Same as BetaClass, same as betaFunction } from './worker-beta'",
+      'console.log(`worker-collision:${[alphaFunction.name, betaFunction.name, AlphaClass.name, BetaClass.name].join(",")}`)'
+    ].join('\n'),
+    'utf8'
+  )
+  for (const moduleName of ['worker-alpha', 'worker-beta']) {
+    writeFileSync(
+      join(root, 'src', `${moduleName}.ts`),
+      'export function same(): void {}\nexport class Same {}\n',
+      'utf8'
+    )
+  }
+  return root
+}
+
 afterEach(() => {
   for (const root of temporaryRoots.splice(0)) {
     rmSync(root, { recursive: true, force: true })
@@ -102,5 +137,45 @@ describe('renderer production minification', () => {
     })
     expect(original.source).toMatch(/src\/probe\.ts$/)
     expect(original.line).toBe(7)
+  })
+
+  it('keeps collided function and class names inside a real worker bundle', async () => {
+    const root = createWorkerCollisionFixture()
+    const outDir = 'out'
+    await build({
+      root,
+      configFile: false,
+      logLevel: 'silent',
+      plugins: [createRendererSourceMapCompactionPlugin()],
+      worker: {
+        format: 'es',
+        rollupOptions: { output: rendererProductionOutput }
+      },
+      build: {
+        ...rendererProductionBuild,
+        outDir,
+        emptyOutDir: true,
+        modulePreload: false,
+        rollupOptions: { output: rendererProductionOutput }
+      }
+    })
+
+    const assetsDir = join(root, outDir, 'assets')
+    const workerFile = readdirSync(assetsDir).find((fileName) => {
+      if (!fileName.endsWith('.js')) {
+        return false
+      }
+      return readFileSync(join(assetsDir, fileName), 'utf8').includes('worker-collision:')
+    })
+    expect(workerFile).toBeDefined()
+    const workerSource = readFileSync(join(assetsDir, workerFile!), 'utf8')
+    const workerUrl = `data:text/javascript;base64,${Buffer.from(workerSource).toString('base64')}`
+    const execution = spawnSync(
+      process.execPath,
+      ['--input-type=module', '--eval', `import(${JSON.stringify(workerUrl)})`],
+      { encoding: 'utf8' }
+    )
+    expect(execution.status, execution.stderr).toBe(0)
+    expect(execution.stdout).toContain('worker-collision:same,same,Same,Same')
   })
 })

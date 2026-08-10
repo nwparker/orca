@@ -1,101 +1,176 @@
-const { readdirSync } = require('node:fs')
+const { readFileSync, readdirSync } = require('node:fs')
 const { basename, join, relative, resolve, sep } = require('node:path')
 const { gunzipSync } = require('node:zlib')
 
-const RENDERER_ARCHIVE_PREFIX = 'out/renderer/'
+const OUTPUT_NAMES = ['renderer', 'web']
 
 function normalizeAsarEntry(entry) {
   return entry.replace(/^[/\\]+/, '').replaceAll('\\', '/')
 }
 
-function listRendererSourceMaps(rendererOutputDir) {
-  const maps = []
+function listOutputFiles(outputDir) {
+  const files = []
   function visit(directory) {
     for (const entry of readdirSync(directory, { withFileTypes: true })) {
       const entryPath = join(directory, entry.name)
       if (entry.isDirectory()) {
         visit(entryPath)
-      } else if (entry.name.endsWith('.js.map.gz')) {
-        maps.push(
-          `${RENDERER_ARCHIVE_PREFIX}${relative(rendererOutputDir, entryPath).split(sep).join('/')}`
-        )
+      } else {
+        files.push(relative(outputDir, entryPath).split(sep).join('/'))
       }
     }
   }
-  visit(rendererOutputDir)
-  return maps.sort()
+  visit(outputDir)
+  return files.sort()
 }
 
 function extractArchiveFile(asar, asarPath, archiveEntry) {
   return asar.extractFile(asarPath, archiveEntry.replace(/^[\\/]+/, ''))
 }
 
-function parsePackagedSourceMap(asar, asarPath, mapEntry, archiveEntry) {
+function parseSourceMap(mapBytes, mapLabel) {
+  let json
   try {
-    const contents = extractArchiveFile(asar, asarPath, archiveEntry)
-    return JSON.parse(gunzipSync(contents).toString('utf8'))
+    json = gunzipSync(mapBytes).toString('utf8')
   } catch (error) {
-    const detail = error instanceof Error ? error.message : 'unknown parse error'
-    throw new Error(`Packaged renderer source map ${mapEntry} is not valid gzip JSON: ${detail}`)
+    const detail = error instanceof Error ? error.message : 'unknown gzip error'
+    throw new Error(`${mapLabel} is not valid gzip: ${detail}`)
+  }
+  try {
+    return JSON.parse(json)
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : 'unknown JSON error'
+    throw new Error(`${mapLabel} is not valid JSON: ${detail}`)
+  }
+}
+
+function containsSourcesContent(value) {
+  if (!value || typeof value !== 'object') {
+    return false
+  }
+  if (Array.isArray(value)) {
+    return value.some(containsSourcesContent)
+  }
+  return Object.entries(value).some(
+    ([key, nestedValue]) => key === 'sourcesContent' || containsSourcesContent(nestedValue)
+  )
+}
+
+function verifySourceMap(mapBytes, mapEntry, javascriptEntries, scope) {
+  const javascriptEntry = mapEntry.slice(0, -'.map.gz'.length)
+  const mapLabel = `${scope} source map ${mapEntry}`
+  if (!javascriptEntries.has(javascriptEntry)) {
+    throw new Error(`${mapLabel} has no adjacent JavaScript asset ${javascriptEntry}`)
+  }
+  const sourceMap = parseSourceMap(mapBytes, mapLabel)
+  if (!sourceMap || typeof sourceMap !== 'object' || Array.isArray(sourceMap)) {
+    throw new Error(`${mapLabel} is not a JSON object`)
+  }
+  if (sourceMap.version !== 3) {
+    throw new Error(`${mapLabel} has source-map version ${String(sourceMap.version)} instead of 3`)
+  }
+  if (sourceMap.file !== basename(javascriptEntry)) {
+    throw new Error(
+      `${mapLabel} identifies ${String(sourceMap.file)} instead of ${basename(javascriptEntry)}`
+    )
+  }
+  if (containsSourcesContent(sourceMap)) {
+    throw new Error(`${mapLabel} contains sourcesContent`)
+  }
+}
+
+function verifyOutputSourceMaps({
+  outputName,
+  outputDir,
+  asar,
+  asarPath,
+  archiveEntryByNormalizedPath
+}) {
+  const archivePrefix = `out/${outputName}/`
+  const localFiles = listOutputFiles(outputDir)
+  const localRawMaps = localFiles.filter((entry) => entry.endsWith('.js.map'))
+  if (localRawMaps.length > 0) {
+    throw new Error(
+      `Local ${outputName} output contains raw source maps: ${localRawMaps.join(', ')}`
+    )
+  }
+
+  const archiveEntries = [...archiveEntryByNormalizedPath.keys()]
+    .filter((entry) => entry.startsWith(archivePrefix))
+    .map((entry) => entry.slice(archivePrefix.length))
+    .sort()
+  const packagedRawMaps = archiveEntries.filter((entry) => entry.endsWith('.js.map'))
+  if (packagedRawMaps.length > 0) {
+    throw new Error(
+      `Packaged ${outputName} output contains raw source maps: ${packagedRawMaps.join(', ')}`
+    )
+  }
+
+  const localMaps = localFiles.filter((entry) => entry.endsWith('.js.map.gz'))
+  if (localMaps.length === 0) {
+    throw new Error(`Local ${outputName} output has no compressed source maps: ${outputDir}`)
+  }
+  const packagedMaps = archiveEntries.filter((entry) => entry.endsWith('.js.map.gz'))
+  const packagedMapSet = new Set(packagedMaps)
+  const localMapSet = new Set(localMaps)
+  const missingMaps = localMaps.filter((entry) => !packagedMapSet.has(entry))
+  const staleMaps = packagedMaps.filter((entry) => !localMapSet.has(entry))
+  if (missingMaps.length > 0 || staleMaps.length > 0) {
+    const differences = [
+      missingMaps.length > 0 ? `missing: ${missingMaps.join(', ')}` : '',
+      staleMaps.length > 0 ? `stale: ${staleMaps.join(', ')}` : ''
+    ].filter(Boolean)
+    throw new Error(
+      `Packaged ${outputName} source-map set differs from local output (${differences.join('; ')})`
+    )
+  }
+
+  const localJavaScript = new Set(localFiles.filter((entry) => entry.endsWith('.js')))
+  const packagedJavaScript = new Set(archiveEntries.filter((entry) => entry.endsWith('.js')))
+  for (const mapEntry of localMaps) {
+    const archiveMapEntry = `${archivePrefix}${mapEntry}`
+    const localMapBytes = readFileSync(join(outputDir, ...mapEntry.split('/')))
+    const packagedMapBytes = extractArchiveFile(
+      asar,
+      asarPath,
+      archiveEntryByNormalizedPath.get(archiveMapEntry)
+    )
+    if (!localMapBytes.equals(packagedMapBytes)) {
+      throw new Error(
+        `Packaged ${outputName} source map ${mapEntry} differs from the local build output`
+      )
+    }
+    verifySourceMap(localMapBytes, mapEntry, localJavaScript, `Local ${outputName}`)
+    verifySourceMap(packagedMapBytes, mapEntry, packagedJavaScript, `Packaged ${outputName}`)
   }
 }
 
 function verifyPackagedRendererSourceMaps(
   resourcesDir,
   asar,
-  rendererOutputDir = resolve('out', 'renderer')
+  outputDirectories = {
+    renderer: resolve('out', 'renderer'),
+    web: resolve('out', 'web')
+  }
 ) {
   const asarPath = join(resourcesDir, 'app.asar')
   const archiveEntryByNormalizedPath = new Map(
     asar.listPackage(asarPath).map((entry) => [normalizeAsarEntry(entry), entry])
   )
-  const archiveEntries = [...archiveEntryByNormalizedPath.keys()]
-  const rawMaps = archiveEntries.filter((entry) => /^out\/renderer\/.*\.js\.map$/.test(entry))
-  if (rawMaps.length > 0) {
-    throw new Error(`Packaged renderer contains raw source maps: ${rawMaps.sort().join(', ')}`)
-  }
-
-  const expectedMaps = listRendererSourceMaps(rendererOutputDir)
-  if (expectedMaps.length === 0) {
-    throw new Error(`Renderer output has no compressed source maps: ${rendererOutputDir}`)
-  }
-  const missingMaps = expectedMaps.filter((entry) => !archiveEntryByNormalizedPath.has(entry))
-  if (missingMaps.length > 0) {
-    throw new Error(`Packaged renderer is missing source maps: ${missingMaps.join(', ')}`)
-  }
-
-  const packagedMaps = archiveEntries.filter((entry) =>
-    /^out\/renderer\/.*\.js\.map\.gz$/.test(entry)
-  )
-  for (const mapEntry of packagedMaps) {
-    const javascriptEntry = mapEntry.slice(0, -'.map.gz'.length)
-    if (!archiveEntryByNormalizedPath.has(javascriptEntry)) {
-      throw new Error(
-        `Packaged renderer source map ${mapEntry} has no adjacent JavaScript asset ${javascriptEntry}`
-      )
-    }
-    const sourceMap = parsePackagedSourceMap(
+  for (const outputName of OUTPUT_NAMES) {
+    verifyOutputSourceMaps({
+      outputName,
+      outputDir: outputDirectories[outputName],
       asar,
       asarPath,
-      mapEntry,
-      archiveEntryByNormalizedPath.get(mapEntry)
-    )
-    if (!sourceMap || typeof sourceMap !== 'object' || Array.isArray(sourceMap)) {
-      throw new Error(`Packaged renderer source map ${mapEntry} is not a JSON object`)
-    }
-    if (Object.prototype.hasOwnProperty.call(sourceMap, 'sourcesContent')) {
-      throw new Error(`Packaged renderer source map ${mapEntry} contains sourcesContent`)
-    }
-    if (sourceMap.file !== basename(javascriptEntry)) {
-      throw new Error(
-        `Packaged renderer source map ${mapEntry} identifies ${String(sourceMap.file)} instead of ${basename(javascriptEntry)}`
-      )
-    }
+      archiveEntryByNormalizedPath
+    })
   }
 }
 
 module.exports = {
-  listRendererSourceMaps,
+  containsSourcesContent,
+  listOutputFiles,
   normalizeAsarEntry,
   verifyPackagedRendererSourceMaps
 }

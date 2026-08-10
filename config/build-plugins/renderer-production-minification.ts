@@ -22,6 +22,16 @@ export const rendererProductionOutput = {
   minify: rendererProductionMinifyOptions
 } as const
 
+function removeSourcesContent(value: unknown): void {
+  if (Array.isArray(value)) {
+    value.forEach(removeSourcesContent)
+  } else if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>
+    delete record.sourcesContent
+    Object.values(record).forEach(removeSourcesContent)
+  }
+}
+
 function compactSourceMaps(directory: string): void {
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
     const filePath = join(directory, entry.name)
@@ -30,7 +40,7 @@ function compactSourceMaps(directory: string): void {
     } else if (entry.name.endsWith('.js.map')) {
       const sourceMap = JSON.parse(readFileSync(filePath, 'utf8')) as Record<string, unknown>
       // Why: mappings plus the asset hash keep symbolization without 100 MB of source copies.
-      delete sourceMap.sourcesContent
+      removeSourcesContent(sourceMap)
       writeFileSync(`${filePath}.gz`, gzipSync(JSON.stringify(sourceMap), { level: 9 }))
       unlinkSync(filePath)
     }

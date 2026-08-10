@@ -297,7 +297,8 @@ export const electronViteConfig: UserConfig = {
     },
     plugins: [react(), tailwindcss(), createRendererSourceMapCompactionPlugin()],
     worker: {
-      format: 'es'
+      format: 'es',
+      rollupOptions: { output: rendererProductionOutput }
     },
     build: {
       ...rendererProductionBuild,

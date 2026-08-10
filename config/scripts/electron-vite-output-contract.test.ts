@@ -13,6 +13,7 @@ import {
 } from '../build-plugins/bootstrap-fatal-exit-banner'
 import { electronViteConfig } from '../../electron.vite.config'
 import { BOOTSTRAP_FATAL_EXIT_GUARD_KEY } from '../../src/main/startup/bootstrap-fatal-exit-guard'
+import webViteConfig from '../../vite.web.config'
 
 const targetConfig = readFileSync('config/electron-vite-target.config.ts', 'utf8')
 const devRunner = readFileSync('config/scripts/run-electron-vite-dev.mjs', 'utf8')
@@ -198,14 +199,32 @@ describe('Electron Vite output contract', () => {
   it('minifies production renderers while retaining names and hidden source maps', () => {
     const rendererBuild = electronViteConfig.renderer?.build
     const output = rendererBuild?.rollupOptions?.output
+    const workerOutput = electronViteConfig.renderer?.worker?.rollupOptions?.output
     if (!output || Array.isArray(output)) {
       throw new Error('Expected one renderer output')
+    }
+    if (!workerOutput || Array.isArray(workerOutput)) {
+      throw new Error('Expected one renderer worker output')
     }
 
     expect(rendererBuild?.minify).toBe('oxc')
     expect(rendererBuild?.sourcemap).toBe('hidden')
     expect(output.keepNames).toBe(true)
+    expect(workerOutput.keepNames).toBe(true)
+    expect(workerOutput.minify).toBe(output.minify)
     expect(output.minify).toMatchObject({
+      compress: { keepNames: { function: true, class: true } },
+      mangle: { keepNames: { function: true, class: true } }
+    })
+  })
+
+  it('retains names while bundling direct web workers', () => {
+    const workerOutput = webViteConfig.worker?.rollupOptions?.output
+    if (!workerOutput || Array.isArray(workerOutput)) {
+      throw new Error('Expected one direct web worker output')
+    }
+    expect(workerOutput.keepNames).toBe(true)
+    expect(workerOutput.minify).toMatchObject({
       compress: { keepNames: { function: true, class: true } },
       mangle: { keepNames: { function: true, class: true } }
     })
