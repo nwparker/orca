@@ -747,20 +747,37 @@ export class RelayDispatcher {
     if (activeTargets.length === 0) {
       return Promise.resolve()
     }
-    let frame: PreparedRelayFrame
-    try {
-      frame = this.prepareFrame({
-        jsonrpc: '2.0',
-        method,
-        ...(params !== undefined ? { params } : {})
-      })
-    } catch (error) {
-      return Promise.reject(error)
+    const msg: JsonRpcNotification = {
+      jsonrpc: '2.0',
+      method,
+      ...(params !== undefined ? { params: { ...params } } : {})
+    }
+    let prepared:
+      | { ok: true; frame: PreparedRelayFrame }
+      | { ok: false; error: unknown }
+      | undefined
+    const prepareOnce = (): PreparedRelayFrame => {
+      if (!prepared) {
+        try {
+          prepared = { ok: true, frame: this.prepareFrame(msg) }
+        } catch (error) {
+          prepared = { ok: false, error }
+        }
+      }
+      if (!prepared.ok) {
+        throw prepared.error
+      }
+      return prepared.frame
     }
     const lane = method === 'fs.streamChunk' ? 'fixed-bulk' : 'bulk'
     const waits: Promise<void>[] = []
     for (const client of activeTargets) {
-      const step = client.bulkChain.then(() => this.publishBulkWhenAvailable(client, frame, lane))
+      const step = client.bulkChain.then(() => {
+        if (this.disposed || client.closed) {
+          return
+        }
+        return this.publishBulkWhenAvailable(client, prepareOnce(), lane)
+      })
       client.bulkChain = step.catch(() => {})
       waits.push(step)
     }

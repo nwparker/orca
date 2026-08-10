@@ -269,4 +269,60 @@ describe('RelayDispatcher prepared JSON payloads', () => {
       dispatcher.dispose()
     }
   })
+
+  it('prepares queued 256 KiB bulk payloads only when their chain step becomes active', async () => {
+    const sink = new DrainSink()
+    const dispatcher = new RelayDispatcher(sink.write, sink.options)
+    try {
+      dispatcher.notify('test.blocker', { data: 'x'.repeat(16 * 1024) })
+      protocolCalls.preparations = 0
+      protocolCalls.encodes = 0
+      const originalData = Buffer.alloc(256 * 1024, 0x61).toString('base64')
+      const pending = Array.from({ length: 16 }, (_, index) => {
+        const params = { streamId: index + 1, seq: 1, data: originalData }
+        const publication = dispatcher.notifyBulk('fs.streamChunk', params)
+        params.data = 'mutated'
+        return publication
+      })
+
+      expect(protocolCalls).toEqual({ preparations: 0, encodes: 0 })
+      await Promise.resolve()
+      expect(protocolCalls).toEqual({ preparations: 1, encodes: 0 })
+
+      sink.drain()
+      await Promise.all(pending)
+
+      const chunks = sink.frames
+        .map(decodeFrame)
+        .filter((frame) => frame.message.method === 'fs.streamChunk')
+      expect(chunks).toHaveLength(16)
+      expect(chunks.every((frame) => frame.message.params?.data === originalData)).toBe(true)
+      expect(protocolCalls).toEqual({ preparations: 16, encodes: 16 })
+    } finally {
+      dispatcher.dispose()
+    }
+  })
+
+  it('lazily shares one bulk payload across broadcast clients', async () => {
+    const primary = new DrainSink()
+    const secondary = new DrainSink()
+    primary.drain()
+    secondary.drain()
+    const dispatcher = new RelayDispatcher(primary.write, primary.options)
+    dispatcher.attachClient(secondary.write, secondary.options)
+    try {
+      const params = { streamId: 4, seq: 8, data: 'before' }
+      const pending = dispatcher.notifyBulk('git.responseChunk', params)
+      params.data = 'after'
+
+      expect(protocolCalls).toEqual({ preparations: 0, encodes: 0 })
+      await pending
+
+      expect(decodeFrame(primary.frames[0]).message.params?.data).toBe('before')
+      expect(decodeFrame(secondary.frames[0]).message.params?.data).toBe('before')
+      expect(protocolCalls).toEqual({ preparations: 1, encodes: 2 })
+    } finally {
+      dispatcher.dispose()
+    }
+  })
 })
