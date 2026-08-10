@@ -13,12 +13,14 @@ const temporaryRoots = []
 const mappedAssets = ['index-entry.js', 'shared.js', 'dynamic.js']
 
 function sourceMap(file, overrides = {}) {
+  const sources = overrides.sources ?? [`src/${file}.ts`]
   return gzipSync(
     JSON.stringify({
       version: 3,
       file,
       names: [],
-      sources: [`src/${file}.ts`],
+      sources,
+      sourcesContent: sources.map((source) => `source text for ${source}`),
       mappings: '',
       ...overrides
     })
@@ -100,7 +102,7 @@ afterEach(() => {
 })
 
 describe('packaged renderer source maps', () => {
-  it('accepts exact Windows-style renderer and web maps plus source-less facades', () => {
+  it('accepts exact Windows-style maps with embedded sources plus source-less facades', () => {
     const { asar, outputDirectories } = createFixture()
 
     expect(() =>
@@ -228,18 +230,112 @@ describe('packaged renderer source maps', () => {
       )
     })
 
-    it('rejects recursively nested sourcesContent', () => {
+    it('rejects a map without embedded sourcesContent', () => {
       const { asar, outputDirectories } = createFixture((fixture) => {
         fixture.writeMapPair(
           outputName,
           'shared.js',
-          sourceMap('shared.js', { sections: [{ map: { sourcesContent: ['source'] } }] })
+          sourceMap('shared.js', { sourcesContent: undefined })
         )
       })
 
       expect(() => verifyPackagedRendererSourceMaps('resources', asar, outputDirectories)).toThrow(
-        `Local ${outputName} source map assets/shared.js.map.gz contains sourcesContent`
+        `Local ${outputName} source map assets/shared.js.map.gz does not embed sourcesContent`
       )
     })
+
+    it('rejects sourcesContent that is not aligned with sources', () => {
+      const { asar, outputDirectories } = createFixture((fixture) => {
+        fixture.writeMapPair(
+          outputName,
+          'shared.js',
+          sourceMap('shared.js', { sourcesContent: [] })
+        )
+      })
+
+      expect(() => verifyPackagedRendererSourceMaps('resources', asar, outputDirectories)).toThrow(
+        `Local ${outputName} source map assets/shared.js.map.gz has 0 sourcesContent entries for 1 sources`
+      )
+    })
+
+    it('rejects absent text for a source file', () => {
+      const { asar, outputDirectories } = createFixture((fixture) => {
+        fixture.writeMapPair(
+          outputName,
+          'shared.js',
+          sourceMap('shared.js', { sourcesContent: [null] })
+        )
+      })
+
+      expect(() => verifyPackagedRendererSourceMaps('resources', asar, outputDirectories)).toThrow(
+        `Local ${outputName} source map assets/shared.js.map.gz does not embed source text for src/shared.js.ts`
+      )
+    })
+
+    it('recursively enforces embedded sources in indexed maps', () => {
+      const indexedMap = sourceMap('shared.js', {
+        sources: undefined,
+        sourcesContent: undefined,
+        mappings: undefined,
+        sections: [
+          {
+            offset: { line: 0, column: 0 },
+            map: {
+              version: 3,
+              names: [],
+              sources: ['src/section.ts'],
+              mappings: ''
+            }
+          }
+        ]
+      })
+      const { asar, outputDirectories } = createFixture((fixture) => {
+        fixture.writeMapPair(outputName, 'shared.js', indexedMap)
+      })
+
+      expect(() => verifyPackagedRendererSourceMaps('resources', asar, outputDirectories)).toThrow(
+        `Local ${outputName} source map assets/shared.js.map.gz section 0 does not embed sourcesContent`
+      )
+    })
+  })
+
+  it('accepts aligned indexed maps, source-less maps, and generated null content', () => {
+    const { asar, outputDirectories } = createFixture((fixture) => {
+      fixture.writeMapPair(
+        'renderer',
+        'shared.js',
+        sourceMap('shared.js', {
+          sources: undefined,
+          sourcesContent: undefined,
+          mappings: undefined,
+          sections: [
+            {
+              offset: { line: 0, column: 0 },
+              map: {
+                version: 3,
+                names: [],
+                sources: ['src/section.ts'],
+                sourcesContent: ['const section = true'],
+                mappings: ''
+              }
+            }
+          ]
+        })
+      )
+      fixture.writeMapPair(
+        'renderer',
+        'dynamic.js',
+        sourceMap('dynamic.js', { sources: [], sourcesContent: undefined })
+      )
+      fixture.writeMapPair(
+        'web',
+        'dynamic.js',
+        sourceMap('dynamic.js', { sources: ['\0generated'], sourcesContent: [null] })
+      )
+    })
+
+    expect(() =>
+      verifyPackagedRendererSourceMaps('resources', asar, outputDirectories)
+    ).not.toThrow()
   })
 })

@@ -1,8 +1,8 @@
 import { spawnSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { isAbsolute, join, resolve } from 'node:path'
 import { gunzipSync } from 'node:zlib'
-import { originalPositionFor, TraceMap } from '@jridgewell/trace-mapping'
+import { originalPositionFor, sourceContentFor, TraceMap } from '@jridgewell/trace-mapping'
 import { afterEach, describe, expect, it } from 'vitest'
 import { build } from 'vite'
 import {
@@ -129,7 +129,12 @@ describe('renderer production minification', () => {
     expect(frame).not.toBeNull()
     expect(() => readFileSync(`${outputPath}.map`)).toThrow()
     const mapContents = gunzipSync(readFileSync(`${outputPath}.map.gz`)).toString('utf8')
-    expect(JSON.parse(mapContents)).not.toHaveProperty('sourcesContent')
+    const sourceMap = JSON.parse(mapContents) as {
+      sources: string[]
+      sourcesContent: (string | null)[]
+    }
+    expect(sourceMap.sources.every((source) => !isAbsolute(source))).toBe(true)
+    expect(sourceMap.sourcesContent).toHaveLength(sourceMap.sources.length)
     const map = new TraceMap(mapContents)
     const original = originalPositionFor(map, {
       line: Number(frame![1]),
@@ -137,6 +142,9 @@ describe('renderer production minification', () => {
     })
     expect(original.source).toMatch(/src\/probe\.ts$/)
     expect(original.line).toBe(7)
+    expect(sourceContentFor(map, original.source!)).toContain(
+      'throw new TypeError(`renderer-minification-probe:'
+    )
   })
 
   it('keeps collided function and class names inside a real worker bundle', async () => {
@@ -177,5 +185,15 @@ describe('renderer production minification', () => {
     )
     expect(execution.status, execution.stderr).toBe(0)
     expect(execution.stdout).toContain('worker-collision:same,same,Same,Same')
+
+    const workerMap = JSON.parse(
+      gunzipSync(readFileSync(join(assetsDir, `${workerFile}.map.gz`))).toString('utf8')
+    ) as { sources: string[]; sourcesContent: (string | null)[] }
+    const workerSourceIndex = workerMap.sources.findIndex((source) =>
+      source.endsWith('src/worker-collision.ts')
+    )
+    expect(workerSourceIndex).toBeGreaterThanOrEqual(0)
+    expect(workerMap.sourcesContent).toHaveLength(workerMap.sources.length)
+    expect(workerMap.sourcesContent[workerSourceIndex]).toContain('worker-collision:')
   })
 })

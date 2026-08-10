@@ -44,16 +44,58 @@ function parseSourceMap(mapBytes, mapLabel) {
   }
 }
 
-function containsSourcesContent(value) {
-  if (!value || typeof value !== 'object') {
-    return false
+function isSourceMapObject(value) {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value))
+}
+
+function isGeneratedSourceWithoutContent(source) {
+  return source.startsWith('\0') || source.startsWith('virtual:') || /^<[^>]+>$/.test(source)
+}
+
+function verifyEmbeddedSources(sourceMap, mapLabel) {
+  if (sourceMap.version !== 3) {
+    throw new Error(`${mapLabel} has source-map version ${String(sourceMap.version)} instead of 3`)
   }
-  if (Array.isArray(value)) {
-    return value.some(containsSourcesContent)
+  if (sourceMap.sections !== undefined) {
+    if (!Array.isArray(sourceMap.sections)) {
+      throw new Error(`${mapLabel} has non-array indexed-map sections`)
+    }
+    sourceMap.sections.forEach((section, index) => {
+      if (!isSourceMapObject(section) || !isSourceMapObject(section.map)) {
+        throw new Error(`${mapLabel} has invalid indexed-map section ${index}`)
+      }
+      verifyEmbeddedSources(section.map, `${mapLabel} section ${index}`)
+    })
+    return
   }
-  return Object.entries(value).some(
-    ([key, nestedValue]) => key === 'sourcesContent' || containsSourcesContent(nestedValue)
-  )
+  if (
+    !Array.isArray(sourceMap.sources) ||
+    !sourceMap.sources.every((source) => typeof source === 'string')
+  ) {
+    throw new Error(`${mapLabel} does not list string sources`)
+  }
+  if (sourceMap.sources.length === 0 && sourceMap.sourcesContent === undefined) {
+    return
+  }
+  if (!Array.isArray(sourceMap.sourcesContent)) {
+    throw new Error(`${mapLabel} does not embed sourcesContent`)
+  }
+  if (sourceMap.sourcesContent.length !== sourceMap.sources.length) {
+    throw new Error(
+      `${mapLabel} has ${sourceMap.sourcesContent.length} sourcesContent entries for ${sourceMap.sources.length} sources`
+    )
+  }
+  sourceMap.sources.forEach((source, index) => {
+    const content = sourceMap.sourcesContent[index]
+    if (typeof content === 'string') {
+      return
+    }
+    // Rolldown can omit text only for a synthetic source with no source file.
+    if (content === null && isGeneratedSourceWithoutContent(source)) {
+      return
+    }
+    throw new Error(`${mapLabel} does not embed source text for ${source}`)
+  })
 }
 
 function verifySourceMap(mapBytes, mapEntry, javascriptEntries, scope) {
@@ -63,20 +105,15 @@ function verifySourceMap(mapBytes, mapEntry, javascriptEntries, scope) {
     throw new Error(`${mapLabel} has no adjacent JavaScript asset ${javascriptEntry}`)
   }
   const sourceMap = parseSourceMap(mapBytes, mapLabel)
-  if (!sourceMap || typeof sourceMap !== 'object' || Array.isArray(sourceMap)) {
+  if (!isSourceMapObject(sourceMap)) {
     throw new Error(`${mapLabel} is not a JSON object`)
-  }
-  if (sourceMap.version !== 3) {
-    throw new Error(`${mapLabel} has source-map version ${String(sourceMap.version)} instead of 3`)
   }
   if (sourceMap.file !== basename(javascriptEntry)) {
     throw new Error(
       `${mapLabel} identifies ${String(sourceMap.file)} instead of ${basename(javascriptEntry)}`
     )
   }
-  if (containsSourcesContent(sourceMap)) {
-    throw new Error(`${mapLabel} contains sourcesContent`)
-  }
+  verifyEmbeddedSources(sourceMap, mapLabel)
 }
 
 function verifyOutputSourceMaps({
@@ -169,8 +206,8 @@ function verifyPackagedRendererSourceMaps(
 }
 
 module.exports = {
-  containsSourcesContent,
   listOutputFiles,
   normalizeAsarEntry,
+  verifyEmbeddedSources,
   verifyPackagedRendererSourceMaps
 }
