@@ -8,7 +8,7 @@ import { createPlainNodeEntryGuardPlugin } from './config/build-plugins/plain-no
 import {
   createRendererSourceMapCompactionPlugin,
   rendererProductionBuild,
-  rendererProductionMinifyOptions
+  rendererProductionOutput
 } from './config/build-plugins/renderer-production-minification'
 import packageJson from './package.json' with { type: 'json' }
 
@@ -318,7 +318,7 @@ export const electronViteConfig: UserConfig = {
           popout: resolve('src/renderer/popout.html'),
           web: resolve('src/renderer/web-index.html')
         },
-        output: { minify: rendererProductionMinifyOptions }
+        output: rendererProductionOutput
       }
     }
   }

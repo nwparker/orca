@@ -204,6 +204,7 @@ describe('Electron Vite output contract', () => {
 
     expect(rendererBuild?.minify).toBe('oxc')
     expect(rendererBuild?.sourcemap).toBe('hidden')
+    expect(output.keepNames).toBe(true)
     expect(output.minify).toMatchObject({
       compress: { keepNames: { function: true, class: true } },
       mangle: { keepNames: { function: true, class: true } }

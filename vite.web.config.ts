@@ -5,7 +5,7 @@ import tailwindcss from '@tailwindcss/vite'
 import {
   createRendererSourceMapCompactionPlugin,
   rendererProductionBuild,
-  rendererProductionMinifyOptions
+  rendererProductionOutput
 } from './config/build-plugins/renderer-production-minification'
 
 export default defineConfig({
@@ -29,7 +29,7 @@ export default defineConfig({
     emptyOutDir: true,
     rollupOptions: {
       input: resolve('src/renderer/web-index.html'),
-      output: { minify: rendererProductionMinifyOptions }
+      output: rendererProductionOutput
     }
   },
   worker: {

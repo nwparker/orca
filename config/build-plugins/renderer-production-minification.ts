@@ -17,6 +17,11 @@ export const rendererProductionMinifyOptions = {
   }
 } as const
 
+export const rendererProductionOutput = {
+  keepNames: true,
+  minify: rendererProductionMinifyOptions
+} as const
+
 function compactSourceMaps(directory: string): void {
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
     const filePath = join(directory, entry.name)

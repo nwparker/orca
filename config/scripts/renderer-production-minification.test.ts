@@ -8,7 +8,7 @@ import { build } from 'vite'
 import {
   createRendererSourceMapCompactionPlugin,
   rendererProductionBuild,
-  rendererProductionMinifyOptions
+  rendererProductionOutput
 } from '../build-plugins/renderer-production-minification'
 
 const temporaryRoots: string[] = []
@@ -27,15 +27,25 @@ function createFixture(): string {
   writeFileSync(
     join(root, 'src', 'probe.ts'),
     [
+      "import { Same as AlphaClass, same as alphaFunction } from './probe-alpha'",
+      "import { Same as BetaClass, same as betaFunction } from './probe-beta'",
       'const rendererMinificationDiagnosticPadding = "padding-padding-padding-padding"',
       'function deliberateRendererCrash(): never {',
       '  const descriptiveRendererState = rendererMinificationDiagnosticPadding.length',
-      '  throw new TypeError(`renderer-minification-probe:${descriptiveRendererState}`)',
+      '  const collisionNames = [alphaFunction.name, betaFunction.name, AlphaClass.name, BetaClass.name].join(",")',
+      '  throw new TypeError(`renderer-minification-probe:${descriptiveRendererState}:${collisionNames}`)',
       '}',
       'deliberateRendererCrash()'
     ].join('\n'),
     'utf8'
   )
+  for (const moduleName of ['probe-alpha', 'probe-beta']) {
+    writeFileSync(
+      join(root, 'src', `${moduleName}.ts`),
+      'export function same(): void {}\nexport class Same {}\n',
+      'utf8'
+    )
+  }
   return root
 }
 
@@ -59,7 +69,7 @@ describe('renderer production minification', () => {
         outDir,
         emptyOutDir: true,
         modulePreload: false,
-        rollupOptions: { output: { minify: rendererProductionMinifyOptions } }
+        rollupOptions: { output: rendererProductionOutput }
       }
     })
 
@@ -74,7 +84,9 @@ describe('renderer production minification', () => {
 
     const execution = spawnSync(process.execPath, [outputPath], { encoding: 'utf8' })
     expect(execution.status).not.toBe(0)
-    expect(execution.stderr).toContain('TypeError: renderer-minification-probe:31')
+    expect(execution.stderr).toContain(
+      'TypeError: renderer-minification-probe:31:same,same,Same,Same'
+    )
     expect(execution.stderr).toContain('deliberateRendererCrash')
 
     const escapedOutputFile = outputFile!.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -89,6 +101,6 @@ describe('renderer production minification', () => {
       column: Number(frame![2]) - 1
     })
     expect(original.source).toMatch(/src\/probe\.ts$/)
-    expect(original.line).toBe(4)
+    expect(original.line).toBe(7)
   })
 })
