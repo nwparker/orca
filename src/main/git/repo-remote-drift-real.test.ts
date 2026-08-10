@@ -28,6 +28,7 @@ describe('remote drift real Git contract', () => {
     writeFileSync(join(repoPath, 'fixture.txt'), 'base\n')
     git('add', 'fixture.txt')
     git('commit', '-m', 'base')
+    git('branch', '-M', 'fixture-base')
     git('branch', 'feature')
 
     writeFileSync(join(repoPath, 'fixture.txt'), 'remote one\n')
