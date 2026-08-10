@@ -106,6 +106,10 @@ export function useWorkspaceEmojiShortcodeInput({
       if (!open) {
         return false
       }
+      if (isImeCompositionKeyDown(event)) {
+        event.stopPropagation()
+        return true
+      }
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
         event.preventDefault()
         event.stopPropagation()
@@ -124,7 +128,7 @@ export function useWorkspaceEmojiShortcodeInput({
           !event.altKey &&
           !event.shiftKey) ||
         (event.key === 'Tab' && !event.shiftKey)
-      if (acceptsSuggestion && selectedSuggestion && !isImeCompositionKeyDown(event)) {
+      if (acceptsSuggestion && selectedSuggestion) {
         event.preventDefault()
         event.stopPropagation()
         selectSuggestion(selectedSuggestion)

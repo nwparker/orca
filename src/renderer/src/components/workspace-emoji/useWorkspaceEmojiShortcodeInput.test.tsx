@@ -2,10 +2,16 @@
 
 import { useRef, useState } from 'react'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { useWorkspaceEmojiShortcodeInput } from './useWorkspaceEmojiShortcodeInput'
 
-function EmojiInputHarness({ initialValue }: { initialValue: string }): React.JSX.Element {
+function EmojiInputHarness({
+  initialValue,
+  onUnhandledKeyDown
+}: {
+  initialValue: string
+  onUnhandledKeyDown?: (event: React.KeyboardEvent<HTMLInputElement>) => void
+}): React.JSX.Element {
   const [value, setValue] = useState(initialValue)
   const inputRef = useRef<HTMLInputElement>(null)
   const emojiInput = useWorkspaceEmojiShortcodeInput({
@@ -27,7 +33,11 @@ function EmojiInputHarness({ initialValue }: { initialValue: string }): React.JS
           )
         }
         onSelect={(event) => emojiInput.syncCursor(event.currentTarget)}
-        onKeyDown={(event) => emojiInput.handleKeyDown(event)}
+        onKeyDown={(event) => {
+          if (!emojiInput.handleKeyDown(event)) {
+            onUnhandledKeyDown?.(event)
+          }
+        }}
       />
       {emojiInput.suggestions.map((suggestion) => (
         <button
@@ -77,5 +87,36 @@ describe('useWorkspaceEmojiShortcodeInput', () => {
 
     expect((input as HTMLInputElement).value).toBe('Launch :wink')
     expect(input.parentElement?.dataset.emojiMenuOpen).toBe('false')
+  })
+
+  it('leaves composing arrow navigation to the IME', () => {
+    const onUnhandledKeyDown = vi.fn()
+    render(
+      <EmojiInputHarness initialValue="Launch :wink" onUnhandledKeyDown={onUnhandledKeyDown} />
+    )
+    const input = screen.getByRole('textbox', { name: 'Workspace name' })
+
+    ;(input as HTMLInputElement).setSelectionRange(12, 12)
+    fireEvent.select(input)
+    const handled = fireEvent.keyDown(input, { key: 'ArrowDown', isComposing: true })
+
+    expect(handled).toBe(true)
+    expect(onUnhandledKeyDown).not.toHaveBeenCalled()
+  })
+
+  it('does not accept or submit on a composing Enter', () => {
+    const onUnhandledKeyDown = vi.fn()
+    render(
+      <EmojiInputHarness initialValue="Launch :wink" onUnhandledKeyDown={onUnhandledKeyDown} />
+    )
+    const input = screen.getByRole('textbox', { name: 'Workspace name' })
+
+    ;(input as HTMLInputElement).setSelectionRange(12, 12)
+    fireEvent.select(input)
+    const handled = fireEvent.keyDown(input, { key: 'Enter', isComposing: true })
+
+    expect(handled).toBe(true)
+    expect(onUnhandledKeyDown).not.toHaveBeenCalled()
+    expect((input as HTMLInputElement).value).toBe('Launch :wink')
   })
 })

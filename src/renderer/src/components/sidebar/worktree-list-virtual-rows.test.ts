@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { VirtualItem } from '@tanstack/react-virtual'
+import type { ExecutionHostId } from '../../../../shared/execution-host'
 import {
   HOST_STICKY_PINNED_HEIGHT,
   buildLineageRowRekeyMap,
@@ -11,11 +12,11 @@ import {
   type RenderRow
 } from './worktree-list-virtual-rows'
 
-function hostRow(hostId: string): RenderRow {
+function hostRow(hostId: ExecutionHostId): RenderRow {
   return {
     type: 'host-header',
     key: `host:${hostId}`,
-    hostId: hostId as never,
+    hostId,
     kind: 'ssh',
     label: hostId,
     detail: 'SSH',
@@ -25,14 +26,14 @@ function hostRow(hostId: string): RenderRow {
   }
 }
 
-function groupRow(key: string, hostId?: string): RenderRow {
+function groupRow(key: string, hostId?: ExecutionHostId): RenderRow {
   return {
     type: 'header',
     key,
     label: key,
     count: 1,
     tone: 'text-foreground',
-    ...(hostId ? { hostId: hostId as never } : {})
+    ...(hostId ? { hostId } : {})
   }
 }
 
@@ -46,11 +47,11 @@ function virtualItem(index: number, start: number): VirtualItem {
 
 // rows: [host-a, group-a1, item, item, host-b, group-b1, item]
 const rows: RenderRow[] = [
-  hostRow('a'),
+  hostRow('ssh:a'),
   groupRow('a1'),
   itemStub('wt-1'),
   itemStub('wt-2'),
-  hostRow('b'),
+  hostRow('ssh:b'),
   groupRow('b1'),
   itemStub('wt-3')
 ]
@@ -173,7 +174,7 @@ describe('getActiveStickyIndexesForScroll', () => {
 
   it('keeps the previous mounted Project sticky when the next group is unmounted', () => {
     const multiGroupRows: RenderRow[] = [
-      hostRow('a'),
+      hostRow('ssh:a'),
       groupRow('a1'),
       itemStub('wt-1'),
       groupRow('a2'),
@@ -287,7 +288,8 @@ describe('buildLineageRowRekeyMap', () => {
 
   it('contributes nothing for non-lineage row types', () => {
     expect(
-      buildLineageRowRekeyMap([hostRow('a'), groupRow('a1'), hostRow('b'), groupRow('b1')]).size
+      buildLineageRowRekeyMap([hostRow('ssh:a'), groupRow('a1'), hostRow('ssh:b'), groupRow('b1')])
+        .size
     ).toBe(0)
   })
 

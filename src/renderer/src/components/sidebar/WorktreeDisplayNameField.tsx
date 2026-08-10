@@ -1,5 +1,6 @@
-import type { RefObject } from 'react'
+import { useId, type RefObject } from 'react'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { WorkspaceEmojiSuggestionPopover } from '@/components/workspace-emoji/WorkspaceEmojiSuggestionPopover'
 import { useWorkspaceEmojiShortcodeInput } from '@/components/workspace-emoji/useWorkspaceEmojiShortcodeInput'
 import { translate } from '@/i18n/i18n'
@@ -21,6 +22,7 @@ export function WorktreeDisplayNameField({
   portalContainer,
   value
 }: WorktreeDisplayNameFieldProps): React.JSX.Element {
+  const inputId = useId()
   const emojiInput = useWorkspaceEmojiShortcodeInput({
     disabled,
     inputRef,
@@ -30,10 +32,11 @@ export function WorktreeDisplayNameField({
 
   return (
     <div className="space-y-1">
-      <label className="text-[11px] font-medium text-muted-foreground">
+      <Label htmlFor={inputId} className="text-[11px] font-medium text-muted-foreground">
         {translate('auto.components.sidebar.WorktreeMetaDialog.ad5e4e514f', 'Display Name')}
-      </label>
+      </Label>
       <Input
+        id={inputId}
         ref={inputRef}
         value={value}
         onChange={(event) =>

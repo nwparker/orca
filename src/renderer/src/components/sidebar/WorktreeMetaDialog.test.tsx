@@ -227,7 +227,7 @@ describe('WorktreeMetaDialog issue link row', () => {
 
   it('replaces a completed emoji shortcode in the display name', () => {
     openDialog()
-    const displayNameInput = screen.getByPlaceholderText('Custom display name...')
+    const displayNameInput = screen.getByRole('textbox', { name: 'Display Name' })
 
     fireEvent.change(displayNameInput, {
       target: { value: 'Feature :wink:', selectionStart: 14 }
