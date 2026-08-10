@@ -34,7 +34,7 @@ function writeFixtureFile(root, relativePath, contents) {
   writeFileSync(filePath, contents)
 }
 
-function createFixture(sourceMap = basicMap()) {
+function createFixture(sourceMap = basicMap(), sourceMapMode = 'mapped') {
   const root = mkdtempSync(join(tmpdir(), 'orca-source-map-contract-'))
   temporaryRoots.push(root)
   writeFixtureFile(root, 'assets/app.js', 'throw new Error("contract")')
@@ -45,8 +45,8 @@ function createFixture(sourceMap = basicMap()) {
     `${JSON.stringify({
       version: 1,
       chunks: [
-        { file: 'assets/app.js', sourceMap: true },
-        { file: 'assets/source-less-facade.js', sourceMap: false }
+        { file: 'assets/app.js', sourceMap: sourceMapMode },
+        { file: 'assets/source-less-facade.js', sourceMap: 'source-less-facade' }
       ]
     })}\n`
   )
@@ -54,8 +54,8 @@ function createFixture(sourceMap = basicMap()) {
   return root
 }
 
-function verifyFixture(sourceMap) {
-  const root = createFixture(sourceMap)
+function verifyFixture(sourceMap, sourceMapMode = 'mapped') {
+  const root = createFixture(sourceMap, sourceMapMode)
   return () => verifyLocalRendererSourceMaps('renderer', root)
 }
 
@@ -76,6 +76,29 @@ describe('renderer source-map contract', () => {
     ).not.toThrow()
   })
 
+  it('keeps duplicate generated columns emitted by the toolchain valid', () => {
+    expect(verifyFixture(basicMap({ mappings: 'AAAA,AAAA' }))).not.toThrow()
+  })
+
+  it('accepts a provenance-backed mappingless JSON data map', () => {
+    expect(
+      verifyFixture(
+        basicMap({
+          sources: ['src/data.json'],
+          sourcesContent: ['{"message":"data"}'],
+          mappings: ''
+        }),
+        'mappingless-json'
+      )
+    ).not.toThrow()
+  })
+
+  it('does not let mappingless provenance bless ordinary executable source', () => {
+    expect(verifyFixture(basicMap({ mappings: '' }), 'mappingless-json')).toThrow(
+      'is not a JSON-only mappingless map'
+    )
+  })
+
   it('rejects a missing mappings field', () => {
     expect(verifyFixture(basicMap({ mappings: undefined }))).toThrow(
       'does not contain string mappings'
@@ -91,11 +114,33 @@ describe('renderer source-map contract', () => {
   })
 
   it('rejects mappings that decode to invalid source positions', () => {
-    expect(verifyFixture(basicMap({ mappings: '!bad' }))).toThrow('has invalid source position')
+    expect(verifyFixture(basicMap({ mappings: '!bad' }))).toThrow('has an invalid VLQ character')
   })
 
   it('rejects a negative decoded generated column', () => {
     expect(verifyFixture(basicMap({ mappings: 'DAAA' }))).toThrow('has invalid generated column')
+  })
+
+  it.each([
+    ['AA', 'two-field', 'has invalid decoded segment'],
+    ['AAA', 'three-field', 'has invalid decoded segment'],
+    ['AAAAAA', 'six-field', 'has invalid decoded segment'],
+    ['g', 'truncated', 'has a truncated VLQ value'],
+    ['ADAA', 'negative source index', 'has invalid source position'],
+    ['ACAA', 'out-of-range source index', 'has invalid source position'],
+    ['AADA', 'negative original line', 'has invalid source position'],
+    ['AACA', 'out-of-range original line', 'has out-of-range original position'],
+    ['AAAD', 'negative original column', 'has invalid source position'],
+    ['AAAAD', 'negative name index', 'has invalid name index'],
+    ['AAAAC', 'out-of-range name index', 'has invalid name index']
+  ])('rejects a %s VLQ segment (%s)', (mappings, _case, error) => {
+    expect(verifyFixture(basicMap({ mappings }))).toThrow(error)
+  })
+
+  it('rejects an original column beyond the embedded source line', () => {
+    expect(verifyFixture(basicMap({ sourcesContent: ['x'], mappings: 'AAAE' }))).toThrow(
+      'has out-of-range original position'
+    )
   })
 
   it('rejects an absolute sourceRoot', () => {
@@ -103,6 +148,31 @@ describe('renderer source-map contract', () => {
       'contains non-relative source /checkout'
     )
   })
+
+  it.each(['file:///checkout/app.ts', 'https://example.test/app.ts', 'custom+source:app.ts'])(
+    'rejects a URI source: %s',
+    (source) => {
+      expect(verifyFixture(basicMap({ sources: [source] }))).toThrow(
+        `contains non-relative source ${source}`
+      )
+    }
+  )
+
+  it.each(['file:///checkout', 'https://example.test/src', 'custom+root:src'])(
+    'rejects a URI sourceRoot: %s',
+    (sourceRoot) => {
+      expect(verifyFixture(basicMap({ sourceRoot }))).toThrow(
+        `contains non-relative source ${sourceRoot}`
+      )
+    }
+  )
+
+  it.each(['AAAA,', ',AAAA', 'AAAA,,AAAA'])(
+    'rejects an empty lexical VLQ segment: %s',
+    (mappings) => {
+      expect(verifyFixture(basicMap({ mappings }))).toThrow('has an empty VLQ segment')
+    }
+  )
 
   it('rejects a section without an offset', () => {
     expect(verifyFixture(indexedMap([{ map: sectionMap() }]))).toThrow(
@@ -161,11 +231,11 @@ describe('renderer source-map contract', () => {
     )
   })
 
-  it('rejects null source text even when the source name looks synthetic', () => {
+  it('rejects null source text for a relative source', () => {
     expect(
       verifyFixture(
-        basicMap({ sources: ['virtual:spoofed'], sourcesContent: [null], mappings: 'AAAA' })
+        basicMap({ sources: ['src/spoofed.ts'], sourcesContent: [null], mappings: 'AAAA' })
       )
-    ).toThrow('does not embed source text for virtual:spoofed')
+    ).toThrow('does not embed source text for src/spoofed.ts')
   })
 })

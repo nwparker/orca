@@ -18,6 +18,13 @@ const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
 const selectedFiles = new Set(['web-index.html'])
 const visitedEntries = new Set()
 const projectedProvenancePath = 'source-map-provenance/projected-web.json'
+const sourceMapModes = new Set([
+  'mapped',
+  'mappingless-json',
+  'source-less-asset',
+  'source-less-facade',
+  'source-less-generated'
+])
 
 function assertEntryIsolation() {
   const entryKeys = new Set(
@@ -139,7 +146,7 @@ function createProjectedSourceMapProvenance() {
       throw new Error(`Invalid renderer source-map provenance: ${outputPath}`)
     }
     for (const chunk of provenance.chunks) {
-      if (typeof chunk?.file !== 'string' || typeof chunk.sourceMap !== 'boolean') {
+      if (typeof chunk?.file !== 'string' || !sourceMapModes.has(chunk.sourceMap)) {
         throw new Error(`Invalid renderer source-map provenance chunk: ${outputPath}`)
       }
       const previous = chunksByFile.get(chunk.file)

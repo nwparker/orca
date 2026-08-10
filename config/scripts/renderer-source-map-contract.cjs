@@ -2,8 +2,16 @@ const { readFileSync, readdirSync } = require('node:fs')
 const { basename, join, relative, sep } = require('node:path')
 const { gunzipSync } = require('node:zlib')
 const { AnyMap, decodedMappings } = require('@jridgewell/trace-mapping')
+const { verifyBasicMappingsStrict } = require('./renderer-source-map-vlq.cjs')
 
 const PROVENANCE_PREFIX = 'source-map-provenance/'
+const SOURCE_MAP_MODES = new Set([
+  'mapped',
+  'mappingless-json',
+  'source-less-asset',
+  'source-less-facade',
+  'source-less-generated'
+])
 const BASIC_MAP_FIELDS = [
   'mappings',
   'names',
@@ -55,7 +63,13 @@ function parseSourceMap(mapBytes, mapLabel) {
 }
 
 function assertRelativeSource(source, mapLabel) {
-  if (source.startsWith('/') || /^[A-Za-z]:[\\/]/.test(source) || source.includes('\\')) {
+  if (
+    source.startsWith('/') ||
+    /^[A-Za-z][A-Za-z0-9+.-]*:/.test(source) ||
+    source.includes('\\') ||
+    source.includes('\0') ||
+    /^<[^>]+>$/.test(source)
+  ) {
     throw new Error(`${mapLabel} contains non-relative source ${source}`)
   }
 }
@@ -104,7 +118,7 @@ function verifyDecodedMappings(traceMap, decoded, mapLabel, requireMappedSegment
   }
 }
 
-function verifyBasicMap(sourceMap, mapLabel) {
+function verifyBasicMap(sourceMap, mapLabel, sourceMapMode) {
   if (typeof sourceMap.mappings !== 'string') {
     throw new Error(`${mapLabel} does not contain string mappings`)
   }
@@ -149,8 +163,31 @@ function verifyBasicMap(sourceMap, mapLabel) {
       }
     })
   }
+  if (sourceMapMode === 'mappingless-json') {
+    if (
+      sourceMap.mappings !== '' ||
+      sourceMap.sources.length === 0 ||
+      sourceMap.names.length !== 0 ||
+      !sourceMap.sources.every((source) => source.endsWith('.json'))
+    ) {
+      throw new Error(`${mapLabel} is not a JSON-only mappingless map`)
+    }
+    sourceMap.sourcesContent.forEach((content, index) => {
+      try {
+        JSON.parse(content)
+      } catch {
+        throw new Error(`${mapLabel} has non-JSON mappingless source ${sourceMap.sources[index]}`)
+      }
+    })
+  }
   const { traceMap, decoded } = constructSourceMap(sourceMap, mapLabel)
-  verifyDecodedMappings(traceMap, decoded, mapLabel, sourceMap.sources.length > 0)
+  verifyBasicMappingsStrict(sourceMap, decoded, mapLabel)
+  verifyDecodedMappings(
+    traceMap,
+    decoded,
+    mapLabel,
+    sourceMap.sources.length > 0 && sourceMapMode !== 'mappingless-json'
+  )
 }
 
 function verifyIndexedMap(sourceMap, mapLabel) {
@@ -184,13 +221,13 @@ function verifyIndexedMap(sourceMap, mapLabel) {
       throw new Error(`${mapLabel} has unordered indexed-map offset at section ${index}`)
     }
     previousOffset = { line, column }
-    verifySourceMapObject(section.map, `${mapLabel} section ${index}`)
+    verifySourceMapObject(section.map, `${mapLabel} section ${index}`, 'mapped')
   })
   const { traceMap, decoded } = constructSourceMap(sourceMap, mapLabel)
   verifyDecodedMappings(traceMap, decoded, mapLabel, traceMap.sources.length > 0)
 }
 
-function verifySourceMapObject(sourceMap, mapLabel) {
+function verifySourceMapObject(sourceMap, mapLabel, sourceMapMode = 'mapped') {
   if (!isObject(sourceMap)) {
     throw new Error(`${mapLabel} is not a JSON object`)
   }
@@ -198,13 +235,22 @@ function verifySourceMapObject(sourceMap, mapLabel) {
     throw new Error(`${mapLabel} has source-map version ${String(sourceMap.version)} instead of 3`)
   }
   if (Object.hasOwn(sourceMap, 'sections')) {
+    if (sourceMapMode === 'mappingless-json') {
+      throw new Error(`${mapLabel} uses indexed sections for a mappingless map`)
+    }
     verifyIndexedMap(sourceMap, mapLabel)
   } else {
-    verifyBasicMap(sourceMap, mapLabel)
+    verifyBasicMap(sourceMap, mapLabel, sourceMapMode)
   }
 }
 
-function verifySourceMapBytes(mapBytes, mapEntry, javascriptEntries, scope) {
+function verifySourceMapBytes(
+  mapBytes,
+  mapEntry,
+  javascriptEntries,
+  scope,
+  sourceMapMode = 'mapped'
+) {
   const javascriptEntry = mapEntry.slice(0, -'.map.gz'.length)
   const mapLabel = `${scope} source map ${mapEntry}`
   if (!javascriptEntries.has(javascriptEntry)) {
@@ -219,7 +265,7 @@ function verifySourceMapBytes(mapBytes, mapEntry, javascriptEntries, scope) {
       `${mapLabel} identifies ${String(sourceMap.file)} instead of ${basename(javascriptEntry)}`
     )
   }
-  verifySourceMapObject(sourceMap, mapLabel)
+  verifySourceMapObject(sourceMap, mapLabel, sourceMapMode)
 }
 
 function readSourceMapProvenance(outputDir, files, label) {
@@ -246,7 +292,7 @@ function readSourceMapProvenance(outputDir, files, label) {
         chunk.file.startsWith('/') ||
         chunk.file.includes('\\') ||
         chunk.file.split('/').includes('..') ||
-        typeof chunk.sourceMap !== 'boolean'
+        !SOURCE_MAP_MODES.has(chunk.sourceMap)
       ) {
         throw new Error(`${label} ${entry} has invalid source-map provenance chunk ${index}`)
       }
@@ -281,7 +327,9 @@ function verifyOutputCoverage(files, provenance, label) {
     )
   }
   const expectedMaps = new Set(
-    [...provenance.chunks].filter(([, sourceMap]) => sourceMap).map(([entry]) => `${entry}.map.gz`)
+    [...provenance.chunks]
+      .filter(([, sourceMap]) => !sourceMap.startsWith('source-less-'))
+      .map(([entry]) => `${entry}.map.gz`)
   )
   const maps = new Set(files.filter((entry) => /\.m?js\.map\.gz$/.test(entry)))
   const mapDifference = describeSetDifference(expectedMaps, maps)
@@ -301,11 +349,13 @@ function verifyLocalRendererSourceMaps(outputName, outputDir) {
   const provenance = readSourceMapProvenance(outputDir, files, label)
   const coverage = verifyOutputCoverage(files, provenance, label)
   for (const mapEntry of coverage.maps) {
+    const javascriptEntry = mapEntry.slice(0, -'.map.gz'.length)
     verifySourceMapBytes(
       readFileSync(join(outputDir, ...mapEntry.split('/'))),
       mapEntry,
       coverage.javascript,
-      label
+      label,
+      provenance.chunks.get(javascriptEntry)
     )
   }
   return { files, provenance, ...coverage }

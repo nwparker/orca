@@ -64,9 +64,9 @@ function createRendererFixture() {
       chunks: [
         ...['web-entry.js', 'web-shared.js', 'lazy.js', 'editor.worker-fixture.js'].map((file) => ({
           file: `assets/${file}`,
-          sourceMap: true
+          sourceMap: 'mapped'
         })),
-        { file: 'assets/desktop-entry.js', sourceMap: false }
+        { file: 'assets/desktop-entry.js', sourceMap: 'source-less-facade' }
       ]
     })
   )
@@ -112,7 +112,7 @@ describe('renderer web client projection', () => {
     expect(provenance.chunks).toHaveLength(4)
     expect(provenance.chunks).not.toContainEqual({
       file: 'assets/desktop-entry.js',
-      sourceMap: false
+      sourceMap: 'source-less-facade'
     })
   })
 

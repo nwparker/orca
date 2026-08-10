@@ -1,8 +1,23 @@
 import { createHash } from 'node:crypto'
-import { readFileSync, readdirSync, unlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from 'node:fs'
 import { isAbsolute, join, resolve } from 'node:path'
 import { gzipSync } from 'node:zlib'
-import type { BuildOptions, Plugin } from 'vite'
+import type { BuildOptions, Plugin, Rollup } from 'vite'
+
+export type RendererSourceMapMode =
+  | 'mapped'
+  | 'mappingless-json'
+  | 'source-less-asset'
+  | 'source-less-facade'
+  | 'source-less-generated'
+
+const sourceMapModePriority: Record<RendererSourceMapMode, number> = {
+  'source-less-asset': 0,
+  'source-less-facade': 1,
+  'source-less-generated': 2,
+  'mappingless-json': 3,
+  mapped: 4
+}
 
 export const rendererProductionBuild: Pick<BuildOptions, 'minify' | 'sourcemap'> = {
   minify: 'oxc',
@@ -23,6 +38,35 @@ export const rendererProductionOutput = {
   minify: rendererProductionMinifyOptions
 } as const
 
+function isJsonModule(moduleId: string): boolean {
+  return moduleId.split('?', 1)[0].endsWith('.json')
+}
+
+function classifySourceMap(output: Rollup.OutputAsset | Rollup.OutputChunk): RendererSourceMapMode {
+  if (output.type === 'asset') {
+    return 'source-less-asset'
+  }
+  const moduleIds = Object.keys(output.modules)
+  if (
+    output.code.length === 0 ||
+    moduleIds.length === 0 ||
+    Object.values(output.modules).every((module) => module.renderedLength === 0)
+  ) {
+    return 'source-less-facade'
+  }
+  if (moduleIds.every((moduleId) => moduleId.startsWith('\0') || moduleId === 'rolldown:runtime')) {
+    return 'source-less-generated'
+  }
+  if (
+    moduleIds.every(isJsonModule) &&
+    output.map?.mappings === '' &&
+    output.map.sources.length > 0
+  ) {
+    return 'mappingless-json'
+  }
+  return 'mapped'
+}
+
 export function createRendererSourceMapProvenancePlugin(): Plugin {
   return {
     name: 'orca-renderer-source-map-provenance',
@@ -34,7 +78,7 @@ export function createRendererSourceMapProvenancePlugin(): Plugin {
             ? [
                 {
                   file: output.fileName.replaceAll('\\', '/'),
-                  sourceMap: output.type === 'chunk' && Boolean(output.map)
+                  sourceMap: classifySourceMap(output)
                 }
               ]
             : []
@@ -68,13 +112,16 @@ function finalizeSourceMapProvenance(directory: string): void {
   const provenanceFiles = readdirSync(provenanceDirectory).filter((entry) =>
     entry.endsWith('.json')
   )
-  const sourceMapByFile = new Map<string, boolean>()
+  const sourceMapByFile = new Map<string, RendererSourceMapMode>()
   for (const provenanceFile of provenanceFiles) {
     const provenance = JSON.parse(
       readFileSync(join(provenanceDirectory, provenanceFile), 'utf8')
-    ) as { chunks: { file: string; sourceMap: boolean }[] }
+    ) as { chunks: { file: string; sourceMap: RendererSourceMapMode }[] }
     for (const chunk of provenance.chunks) {
-      sourceMapByFile.set(chunk.file, Boolean(sourceMapByFile.get(chunk.file)) || chunk.sourceMap)
+      const previous = sourceMapByFile.get(chunk.file)
+      if (!previous || sourceMapModePriority[chunk.sourceMap] > sourceMapModePriority[previous]) {
+        sourceMapByFile.set(chunk.file, chunk.sourceMap)
+      }
     }
   }
   const chunks = listOutputFiles(directory)
@@ -90,6 +137,12 @@ function finalizeSourceMapProvenance(directory: string): void {
   for (const provenanceFile of provenanceFiles) {
     unlinkSync(join(provenanceDirectory, provenanceFile))
   }
+  for (const chunk of chunks) {
+    const mapPath = join(directory, `${chunk.file}.map.gz`)
+    if (chunk.sourceMap.startsWith('source-less-') && existsSync(mapPath)) {
+      unlinkSync(mapPath)
+    }
+  }
   writeFileSync(
     join(provenanceDirectory, 'complete.json'),
     `${JSON.stringify({ version: 1, chunks })}\n`
@@ -103,15 +156,7 @@ function compactSourceMaps(directory: string): void {
       compactSourceMaps(filePath)
     } else if (entry.name.endsWith('.js.map')) {
       const source = readFileSync(filePath)
-      const sourceMap = JSON.parse(source.toString('utf8')) as {
-        mappings?: unknown
-        sources?: unknown[]
-      }
-      const compactedSource =
-        sourceMap.mappings === '' && sourceMap.sources?.length
-          ? Buffer.from(JSON.stringify({ ...sourceMap, mappings: 'AAAA' }))
-          : source
-      writeFileSync(`${filePath}.gz`, gzipSync(compactedSource, { level: 9 }))
+      writeFileSync(`${filePath}.gz`, gzipSync(source, { level: 9 }))
       unlinkSync(filePath)
     }
   }

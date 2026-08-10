@@ -56,8 +56,8 @@ function createFixture(mutate = () => {}) {
       `${JSON.stringify({
         version: 1,
         chunks: [
-          ...mappedAssets.map((file) => ({ file: `assets/${file}`, sourceMap: true })),
-          { file: 'assets/source-less-facade.js', sourceMap: false }
+          ...mappedAssets.map((file) => ({ file: `assets/${file}`, sourceMap: 'mapped' })),
+          { file: 'assets/source-less-facade.js', sourceMap: 'source-less-facade' }
         ]
       })}\n`
     )
@@ -86,6 +86,15 @@ function createFixture(mutate = () => {}) {
     writeMapPair(outputName, asset, contents) {
       writeOutputFile(outputDirectories[outputName], `assets/${asset}.map.gz`, contents)
       archiveFiles.set(`out/${outputName}/assets/${asset}.map.gz`, contents)
+    },
+    setSourceMapMode(outputName, asset, sourceMapMode) {
+      const relativePath = 'source-map-provenance/bundle-fixture.json'
+      const provenance = JSON.parse(this.readLocal(outputName, relativePath))
+      const chunk = provenance.chunks.find((entry) => entry.file === `assets/${asset}`)
+      chunk.sourceMap = sourceMapMode
+      const contents = Buffer.from(`${JSON.stringify(provenance)}\n`)
+      this.writeLocal(outputName, relativePath, contents)
+      this.writePackaged(outputName, relativePath, contents)
     }
   }
   mutate(fixture)
@@ -137,6 +146,20 @@ describe('packaged renderer source maps', () => {
 
       expect(() => verifyPackagedRendererSourceMaps('resources', asar, outputDirectories)).toThrow(
         `Packaged ${outputName} source map assets/shared.js.map.gz differs`
+      )
+    })
+
+    it('rejects changed packaged JavaScript with unchanged map and provenance', () => {
+      const { asar, outputDirectories } = createFixture((fixture) => {
+        fixture.writePackaged(
+          outputName,
+          'assets/dynamic.js',
+          Buffer.from('changed packaged JavaScript')
+        )
+      })
+
+      expect(() => verifyPackagedRendererSourceMaps('resources', asar, outputDirectories)).toThrow(
+        `Packaged ${outputName} JavaScript assets/dynamic.js differs from the local build output`
       )
     })
 
@@ -320,6 +343,17 @@ describe('packaged renderer source maps', () => {
         `Local ${outputName} source map assets/shared.js.map.gz section 0 does not embed sourcesContent`
       )
     })
+
+    it('does not let mappingless provenance bless ordinary executable source', () => {
+      const { asar, outputDirectories } = createFixture((fixture) => {
+        fixture.setSourceMapMode(outputName, 'dynamic.js', 'mappingless-json')
+        fixture.writeMapPair(outputName, 'dynamic.js', sourceMap('dynamic.js', { mappings: '' }))
+      })
+
+      expect(() => verifyPackagedRendererSourceMaps('resources', asar, outputDirectories)).toThrow(
+        `Local ${outputName} source map assets/dynamic.js.map.gz is not a JSON-only mappingless map`
+      )
+    })
   })
 
   it('accepts aligned indexed maps, source-less maps, and generated source text', () => {
@@ -355,10 +389,12 @@ describe('packaged renderer source maps', () => {
         'web',
         'dynamic.js',
         sourceMap('dynamic.js', {
-          sources: ['\0generated'],
-          sourcesContent: ['const generated = true']
+          sources: ['src/generated-data.json'],
+          sourcesContent: ['{"generated":true}'],
+          mappings: ''
         })
       )
+      fixture.setSourceMapMode('web', 'dynamic.js', 'mappingless-json')
     })
 
     expect(() =>

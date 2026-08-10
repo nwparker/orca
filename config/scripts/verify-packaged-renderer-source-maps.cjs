@@ -73,9 +73,23 @@ function verifyOutputSourceMaps({
     local.provenance,
     `Packaged ${outputName}`
   )
+  for (const javascriptEntry of local.provenance.chunks.keys()) {
+    const localBytes = readFileSync(join(outputDir, ...javascriptEntry.split('/')))
+    const packagedBytes = extractArchiveFile(
+      asar,
+      asarPath,
+      archiveEntryByNormalizedPath.get(`${archivePrefix}${javascriptEntry}`)
+    )
+    if (!localBytes.equals(packagedBytes)) {
+      throw new Error(
+        `Packaged ${outputName} JavaScript ${javascriptEntry} differs from the local build output`
+      )
+    }
+  }
   verifyPackagedSet(`Packaged ${outputName} source-map set`, local.maps, packagedCoverage.maps)
   for (const mapEntry of local.maps) {
     const archiveMapEntry = `${archivePrefix}${mapEntry}`
+    const javascriptEntry = mapEntry.slice(0, -'.map.gz'.length)
     const localMapBytes = readFileSync(join(outputDir, ...mapEntry.split('/')))
     const packagedMapBytes = extractArchiveFile(
       asar,
@@ -91,7 +105,8 @@ function verifyOutputSourceMaps({
       packagedMapBytes,
       mapEntry,
       packagedCoverage.javascript,
-      `Packaged ${outputName}`
+      `Packaged ${outputName}`,
+      local.provenance.chunks.get(javascriptEntry)
     )
   }
 }

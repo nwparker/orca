@@ -4,13 +4,15 @@ import { isAbsolute, join, resolve } from 'node:path'
 import { gunzipSync } from 'node:zlib'
 import { originalPositionFor, sourceContentFor, TraceMap } from '@jridgewell/trace-mapping'
 import { afterEach, describe, expect, it } from 'vitest'
-import { build } from 'vite'
+import { build, type Plugin } from 'vite'
 import {
   createRendererSourceMapCompactionPlugin,
   createRendererSourceMapProvenancePlugin,
   rendererProductionBuild,
-  rendererProductionOutput
+  rendererProductionOutput,
+  type RendererSourceMapMode
 } from '../build-plugins/renderer-production-minification'
+import { verifyLocalRendererSourceMaps } from './renderer-source-map-contract.cjs'
 
 const temporaryRoots: string[] = []
 
@@ -101,13 +103,33 @@ function createGeneratedDataFixture(): string {
   return root
 }
 
-function readProvenanceChunks(outputDir: string): { file: string; sourceMap: boolean }[] {
+function readProvenanceChunks(
+  outputDir: string
+): { file: string; sourceMap: RendererSourceMapMode }[] {
   return readdirSync(join(outputDir, 'source-map-provenance')).flatMap((fileName) => {
     const provenance = JSON.parse(
       readFileSync(join(outputDir, 'source-map-provenance', fileName), 'utf8')
-    ) as { chunks: { file: string; sourceMap: boolean }[] }
+    ) as {
+      chunks: { file: string; sourceMap: RendererSourceMapMode }[]
+    }
     return provenance.chunks
   })
+}
+
+function stripOrdinaryChunkMap(): Plugin {
+  return {
+    name: 'strip-ordinary-chunk-map',
+    generateBundle: (_options, bundle) => {
+      for (const output of Object.values(bundle)) {
+        if (
+          output.type === 'chunk' &&
+          Object.keys(output.modules).some((id) => id.endsWith('probe.ts'))
+        ) {
+          output.map = null
+        }
+      }
+    }
+  }
 }
 
 afterEach(() => {
@@ -166,7 +188,7 @@ describe('renderer production minification', () => {
     expect(sourceMap.sourcesContent).toHaveLength(sourceMap.sources.length)
     expect(readProvenanceChunks(join(root, outDir))).toContainEqual({
       file: `assets/${outputFile}`,
-      sourceMap: true
+      sourceMap: 'mapped'
     })
     const map = new TraceMap(mapContents)
     const original = originalPositionFor(map, {
@@ -234,11 +256,11 @@ describe('renderer production minification', () => {
     expect(workerMap.sourcesContent[workerSourceIndex]).toContain('worker-collision:')
     expect(readProvenanceChunks(join(root, outDir))).toContainEqual({
       file: `assets/${workerFile}`,
-      sourceMap: true
+      sourceMap: 'mapped'
     })
   })
 
-  it('emits a usable mapping for a generated data chunk', async () => {
+  it('preserves an honest mappingless map for a generated JSON data chunk', async () => {
     const root = createGeneratedDataFixture()
     const outDir = 'out'
     await build({
@@ -272,6 +294,44 @@ describe('renderer production minification', () => {
     const sourceMap = JSON.parse(
       gunzipSync(readFileSync(join(assetsDir, mapFile!))).toString('utf8')
     ) as { mappings: string }
-    expect(sourceMap.mappings).toBe('AAAA')
+    expect(sourceMap.mappings).toBe('')
+    expect(readProvenanceChunks(join(root, outDir))).toContainEqual({
+      file: `assets/${mapFile!.slice(0, -'.map.gz'.length)}`,
+      sourceMap: 'mappingless-json'
+    })
+    expect(() => verifyLocalRendererSourceMaps('renderer', join(root, outDir))).not.toThrow()
+  })
+
+  it('requires a map when another plugin strips one from an ordinary chunk', async () => {
+    const root = createFixture()
+    const outDir = 'out'
+    await build({
+      root,
+      configFile: false,
+      logLevel: 'silent',
+      plugins: [
+        stripOrdinaryChunkMap(),
+        createRendererSourceMapProvenancePlugin(),
+        createRendererSourceMapCompactionPlugin()
+      ],
+      build: {
+        ...rendererProductionBuild,
+        outDir,
+        emptyOutDir: true,
+        modulePreload: false,
+        rollupOptions: { output: rendererProductionOutput }
+      }
+    })
+
+    expect(readProvenanceChunks(join(root, outDir))).toContainEqual(
+      expect.objectContaining({ sourceMap: 'mapped' })
+    )
+    const assetsDir = join(root, outDir, 'assets')
+    const mapFile = readdirSync(assetsDir).find((fileName) => fileName.endsWith('.js.map.gz'))
+    expect(mapFile).toBeDefined()
+    rmSync(join(assetsDir, mapFile!))
+    expect(() => verifyLocalRendererSourceMaps('renderer', join(root, outDir))).toThrow(
+      'source-map coverage differs from provenance (missing:'
+    )
   })
 })
