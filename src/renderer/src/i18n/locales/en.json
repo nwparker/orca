@@ -2414,10 +2414,20 @@
           }
         },
         "CommentReactions": {
-          "addThumbsUp": "Add thumbs up reaction",
-          "removeThumbsUp": "Remove thumbs up reaction",
-          "addThumbsDown": "Add thumbs down reaction",
-          "removeThumbsDown": "Remove thumbs down reaction"
+          "addReaction": "Add reaction",
+          "reactions": "Reactions",
+          "addNamedReaction": "Add {{value0}} reaction",
+          "removeNamedReaction": "Remove {{value0}} reaction",
+          "addNamedReactionWithCount": "Add {{value0}} reaction, {{value1}} total",
+          "removeNamedReactionWithCount": "Remove {{value0}} reaction, {{value1}} total",
+          "thumbsUp": "thumbs up",
+          "thumbsDown": "thumbs down",
+          "laugh": "laugh",
+          "confused": "confused",
+          "heart": "heart",
+          "hooray": "hooray",
+          "rocket": "rocket",
+          "eyes": "eyes"
         }
       },
       "linear": {

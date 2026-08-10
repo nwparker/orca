@@ -1,4 +1,4 @@
-import type { Locator } from '@stablyai/playwright-test'
+import type { Locator, Page } from '@stablyai/playwright-test'
 import { test, expect } from './helpers/orca-app'
 import { openChecks } from './helpers/source-control-ai-generation'
 import { seedPRCommentsSidebarFixture } from './helpers/pr-comments-sidebar-fixture'
@@ -40,6 +40,33 @@ async function expectOpenTextNotShiftedLeft(
   // Why: the open rail is a real border, but focused row actions must not scroll content left.
   expect(delta).toBeGreaterThanOrEqual(0)
   expect(delta).toBeLessThanOrEqual(3)
+}
+
+async function openReactionCard(
+  page: Page,
+  worktreeId: string
+): Promise<{ card: Locator; addReaction: Locator }> {
+  const card = page.getByTestId('pr-comment-group').filter({
+    hasText: 'Please update this handler before merge.'
+  })
+  const addReaction = card.getByRole('button', { name: 'Add reaction' })
+  await expect
+    .poll(
+      async () => {
+        if (await addReaction.isVisible()) {
+          return true
+        }
+        await openChecks(page, worktreeId).catch(() => undefined)
+        const checksButton = page.getByRole('button', { name: /^Checks(?: |$)/ }).first()
+        if (await checksButton.isVisible()) {
+          await checksButton.click()
+        }
+        return addReaction.isVisible()
+      },
+      { timeout: 15_000 }
+    )
+    .toBe(true)
+  return { card, addReaction }
 }
 
 test.describe('PR comments sidebar cards view', () => {
@@ -94,43 +121,70 @@ test.describe('PR comments sidebar cards view', () => {
     await expect(orcaPage.getByRole('button', { name: /^Add$/ })).toHaveCount(0)
   })
 
-  test('adds and removes thumbs reactions on GitHub comments', async ({ orcaPage }, testInfo) => {
+  test('adds and removes any GitHub reaction', async ({ orcaPage }, testInfo) => {
     const { worktreeId } = await seedPRCommentsSidebarFixture(orcaPage)
-
-    const codeRabbitCard = orcaPage.getByTestId('pr-comment-group').filter({
-      hasText: 'Please update this handler before merge.'
-    })
-    const thumbsUp = codeRabbitCard.getByRole('button', { name: 'Add thumbs up reaction' })
-    const thumbsDown = codeRabbitCard.getByRole('button', { name: 'Add thumbs down reaction' })
-    await expect
-      .poll(
-        async () => {
-          if ((await thumbsUp.isVisible()) && (await thumbsDown.isVisible())) {
-            return true
-          }
-          await openChecks(orcaPage, worktreeId)
-          const checksButton = orcaPage.getByRole('button', { name: /^Checks(?: |$)/ }).first()
-          if (await checksButton.isVisible()) {
-            await checksButton.click()
-          }
-          return (await thumbsUp.isVisible()) && (await thumbsDown.isVisible())
-        },
-        { timeout: 15_000 }
-      )
-      .toBe(true)
+    const { card: codeRabbitCard, addReaction } = await openReactionCard(orcaPage, worktreeId)
 
     await orcaPage.screenshot({ path: testInfo.outputPath('reaction-before.png') })
-    await thumbsUp.click()
-    const selectedThumbsUp = codeRabbitCard.getByRole('button', {
-      name: 'Remove thumbs up reaction'
+    await addReaction.click()
+    await expect(orcaPage.getByRole('group', { name: 'Reactions' })).toBeFocused()
+    for (const name of [
+      'thumbs up',
+      'thumbs down',
+      'laugh',
+      'confused',
+      'heart',
+      'hooray',
+      'rocket',
+      'eyes'
+    ]) {
+      await expect(orcaPage.getByRole('button', { name: `Add ${name} reaction` })).toBeVisible()
+    }
+    await orcaPage.waitForTimeout(300)
+    await orcaPage.screenshot({ path: testInfo.outputPath('reaction-picker.png') })
+
+    await orcaPage.getByRole('button', { name: 'Add rocket reaction' }).click()
+    await expect(orcaPage.getByRole('group', { name: 'Reactions' })).toBeHidden()
+    const selectedRocket = codeRabbitCard.getByRole('button', {
+      name: 'Remove rocket reaction, 1 total'
     })
-    await expect(selectedThumbsUp).toHaveAttribute('aria-pressed', 'true')
-    await expect(selectedThumbsUp).toContainText('1')
+    await expect(selectedRocket).toHaveAttribute('aria-pressed', 'true')
+    await expect(selectedRocket).toContainText('1')
+    await orcaPage.waitForTimeout(300)
+    await orcaPage.mouse.click(800, 500)
+    await orcaPage.waitForTimeout(100)
     await orcaPage.screenshot({ path: testInfo.outputPath('reaction-after.png') })
 
-    await selectedThumbsUp.click()
-    await expect(thumbsUp).toHaveAttribute('aria-pressed', 'false')
-    await expect(thumbsUp).not.toContainText('1')
+    await selectedRocket.click()
+    await expect(selectedRocket).toHaveCount(0)
+    await expect(addReaction).toBeVisible()
+  })
+
+  test('keeps reaction picker focus when a remote mutation fails', async ({ orcaPage }) => {
+    const { worktreeId } = await seedPRCommentsSidebarFixture(orcaPage)
+    const { addReaction } = await openReactionCard(orcaPage, worktreeId)
+    await orcaPage.evaluate(() => {
+      window.__store?.setState({
+        setPRCommentReaction: async () => {
+          await new Promise((resolve) => window.setTimeout(resolve, 300))
+          return false
+        }
+      })
+    })
+
+    await addReaction.focus()
+    await addReaction.press('Enter')
+    await expect(orcaPage.getByRole('group', { name: 'Reactions' })).toBeFocused()
+    const rocket = orcaPage.getByRole('button', { name: 'Add rocket reaction' })
+    await rocket.focus()
+    await rocket.press('Enter')
+    await expect(rocket).toBeFocused()
+    await expect(rocket).toHaveAttribute('aria-disabled', 'true')
+    await rocket.press('Enter')
+    await expect(rocket).toBeFocused()
+    await expect(orcaPage.getByRole('group', { name: 'Reactions' })).toBeVisible()
+    await expect(rocket).toHaveAttribute('aria-disabled', 'false')
+    await expect(rocket).toBeFocused()
   })
 
   test('can switch from grouped to chronological timeline order', async ({ orcaPage }) => {

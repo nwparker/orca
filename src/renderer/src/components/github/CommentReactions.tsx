@@ -1,10 +1,22 @@
-import React, { useEffect, useState } from 'react'
-import { Loader2 } from 'lucide-react'
+import React, { useEffect, useRef, useState } from 'react'
+import { Loader2, SmilePlus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { translate } from '@/i18n/i18n'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import type { GitHubReaction, GitHubReactionContent } from '../../../../shared/types'
+
+const REACTION_CONTENTS: GitHubReactionContent[] = [
+  '+1',
+  '-1',
+  'laugh',
+  'confused',
+  'heart',
+  'hooray',
+  'rocket',
+  'eyes'
+]
 
 const REACTION_EMOJI: Record<GitHubReaction['content'], string> = {
   '+1': '👍',
@@ -17,21 +29,50 @@ const REACTION_EMOJI: Record<GitHubReaction['content'], string> = {
   eyes: '👀'
 }
 
-function getReactionToggleLabel(content: '+1' | '-1', add: boolean): string {
-  if (content === '+1') {
-    return add
-      ? translate('auto.components.github.CommentReactions.addThumbsUp', 'Add thumbs up reaction')
-      : translate(
-          'auto.components.github.CommentReactions.removeThumbsUp',
-          'Remove thumbs up reaction'
-        )
+function getReactionName(content: GitHubReactionContent): string {
+  switch (content) {
+    case '+1':
+      return translate('auto.components.github.CommentReactions.thumbsUp', 'thumbs up')
+    case '-1':
+      return translate('auto.components.github.CommentReactions.thumbsDown', 'thumbs down')
+    case 'laugh':
+      return translate('auto.components.github.CommentReactions.laugh', 'laugh')
+    case 'confused':
+      return translate('auto.components.github.CommentReactions.confused', 'confused')
+    case 'heart':
+      return translate('auto.components.github.CommentReactions.heart', 'heart')
+    case 'hooray':
+      return translate('auto.components.github.CommentReactions.hooray', 'hooray')
+    case 'rocket':
+      return translate('auto.components.github.CommentReactions.rocket', 'rocket')
+    case 'eyes':
+      return translate('auto.components.github.CommentReactions.eyes', 'eyes')
   }
-  return add
-    ? translate('auto.components.github.CommentReactions.addThumbsDown', 'Add thumbs down reaction')
-    : translate(
-        'auto.components.github.CommentReactions.removeThumbsDown',
-        'Remove thumbs down reaction'
-      )
+}
+
+function getReactionToggleLabel(
+  content: GitHubReactionContent,
+  add: boolean,
+  count?: number
+): string {
+  if (count !== undefined) {
+    return translate(
+      add
+        ? 'auto.components.github.CommentReactions.addNamedReactionWithCount'
+        : 'auto.components.github.CommentReactions.removeNamedReactionWithCount',
+      add
+        ? 'Add {{value0}} reaction, {{value1}} total'
+        : 'Remove {{value0}} reaction, {{value1}} total',
+      { value0: getReactionName(content), value1: count }
+    )
+  }
+  return translate(
+    add
+      ? 'auto.components.github.CommentReactions.addNamedReaction'
+      : 'auto.components.github.CommentReactions.removeNamedReaction',
+    add ? 'Add {{value0}} reaction' : 'Remove {{value0}} reaction',
+    { value0: getReactionName(content) }
+  )
 }
 
 export function CommentReactions({
@@ -44,7 +85,10 @@ export function CommentReactions({
   onToggle?: (content: GitHubReactionContent, add: boolean) => Promise<boolean>
 }): React.JSX.Element | null {
   const visibleReactions = (reactions ?? []).filter((reaction) => reaction.count > 0)
+  const pickerGroupRef = useRef<HTMLDivElement>(null)
+  const mutationPendingRef = useRef(false)
   const [pendingContent, setPendingContent] = useState<GitHubReactionContent | null>(null)
+  const [pickerOpen, setPickerOpen] = useState(false)
   const [showPending, setShowPending] = useState(false)
 
   useEffect(() => {
@@ -60,20 +104,35 @@ export function CommentReactions({
     return null
   }
 
-  const contents = Array.from(
-    new Set<GitHubReactionContent>([
-      ...(onToggle ? (['+1', '-1'] as const) : []),
-      ...visibleReactions.map((reaction) => reaction.content)
-    ])
-  )
+  const toggleReaction = (
+    content: GitHubReactionContent,
+    add: boolean,
+    closePicker: boolean
+  ): void => {
+    if (!onToggle || mutationPendingRef.current) {
+      return
+    }
+    mutationPendingRef.current = true
+    setPendingContent(content)
+    void onToggle(content, add)
+      .then((changed) => {
+        if (changed && closePicker) {
+          setPickerOpen(false)
+        }
+      })
+      .catch(() => false)
+      .finally(() => {
+        mutationPendingRef.current = false
+        setPendingContent(null)
+      })
+  }
 
   return (
     <div className={cn('mt-2 flex flex-wrap gap-1.5', className)}>
-      {contents.map((content) => {
-        const reaction = visibleReactions.find((entry) => entry.content === content)
-        const interactive = onToggle && (content === '+1' || content === '-1')
+      {visibleReactions.map((reaction) => {
+        const content = reaction.content
         const add = !reaction?.viewerHasReacted
-        if (!interactive) {
+        if (!onToggle) {
           return (
             <span
               key={content}
@@ -82,19 +141,19 @@ export function CommentReactions({
                 'auto.components.GitHubItemDialog.a18f669c7a',
                 '{{value0}} {{value1}} reaction{{value2}}',
                 {
-                  value0: reaction?.count ?? 0,
+                  value0: reaction.count,
                   value1: content,
-                  value2: reaction?.count === 1 ? '' : 's'
+                  value2: reaction.count === 1 ? '' : 's'
                 }
               )}
             >
               <span aria-hidden="true">{REACTION_EMOJI[content]}</span>
-              <span className="tabular-nums">{reaction?.count}</span>
+              <span className="tabular-nums">{reaction.count}</span>
             </span>
           )
         }
         const label = getReactionToggleLabel(content, add)
-        const toggleReaction = onToggle
+        const accessibleLabel = getReactionToggleLabel(content, add, reaction.count)
         return (
           <Tooltip key={content}>
             <TooltipTrigger asChild>
@@ -103,18 +162,15 @@ export function CommentReactions({
                 variant="outline"
                 size="xs"
                 className={cn(
-                  'min-w-8 rounded-full border-border/60 bg-muted/35 leading-none shadow-none disabled:cursor-wait disabled:opacity-60',
+                  'min-w-8 rounded-full border-border/60 bg-muted/35 leading-none shadow-none aria-disabled:cursor-wait aria-disabled:opacity-60',
                   reaction?.viewerHasReacted && 'border-ring/50 bg-accent text-accent-foreground'
                 )}
-                aria-label={label}
-                aria-pressed={reaction?.viewerHasReacted ?? false}
-                disabled={pendingContent !== null}
+                aria-label={accessibleLabel}
+                aria-pressed={reaction.viewerHasReacted ?? false}
+                aria-disabled={pendingContent !== null}
                 onClick={(event) => {
                   event.stopPropagation()
-                  setPendingContent(content)
-                  void toggleReaction(content, add)
-                    .catch(() => false)
-                    .finally(() => setPendingContent(null))
+                  toggleReaction(content, add, false)
                 }}
               >
                 {pendingContent === content && showPending ? (
@@ -122,15 +178,104 @@ export function CommentReactions({
                 ) : (
                   <span aria-hidden="true">{REACTION_EMOJI[content]}</span>
                 )}
-                {(reaction?.count ?? 0) > 0 ? (
-                  <span className="tabular-nums">{reaction?.count}</span>
-                ) : null}
+                <span className="tabular-nums">{reaction.count}</span>
               </Button>
             </TooltipTrigger>
             <TooltipContent>{label}</TooltipContent>
           </Tooltip>
         )
       })}
+      {onToggle ? (
+        <Popover
+          open={pickerOpen}
+          onOpenChange={(open) => {
+            if (!open || !mutationPendingRef.current) {
+              setPickerOpen(open)
+            }
+          }}
+        >
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <PopoverTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon-xs"
+                  className="rounded-full border-border/60 bg-muted/35 text-muted-foreground shadow-none aria-disabled:cursor-wait aria-disabled:opacity-60"
+                  aria-label={translate(
+                    'auto.components.github.CommentReactions.addReaction',
+                    'Add reaction'
+                  )}
+                  aria-disabled={pendingContent !== null}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    if (mutationPendingRef.current) {
+                      event.preventDefault()
+                    }
+                  }}
+                >
+                  <SmilePlus />
+                </Button>
+              </PopoverTrigger>
+            </TooltipTrigger>
+            <TooltipContent>
+              {translate('auto.components.github.CommentReactions.addReaction', 'Add reaction')}
+            </TooltipContent>
+          </Tooltip>
+          <PopoverContent
+            side="top"
+            align="start"
+            className="w-auto p-1.5"
+            onOpenAutoFocus={(event) => {
+              event.preventDefault()
+              pickerGroupRef.current?.focus()
+            }}
+          >
+            <div
+              ref={pickerGroupRef}
+              role="group"
+              tabIndex={-1}
+              aria-label={translate(
+                'auto.components.github.CommentReactions.reactions',
+                'Reactions'
+              )}
+              className="grid grid-cols-4 gap-1"
+            >
+              {REACTION_CONTENTS.map((content) => {
+                const reaction = visibleReactions.find((entry) => entry.content === content)
+                const add = !reaction?.viewerHasReacted
+                const label = getReactionToggleLabel(content, add)
+                return (
+                  <Tooltip key={content}>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        className={cn(
+                          'text-lg aria-disabled:cursor-wait aria-disabled:opacity-60',
+                          reaction?.viewerHasReacted && 'bg-accent text-accent-foreground'
+                        )}
+                        aria-label={label}
+                        aria-pressed={reaction?.viewerHasReacted ?? false}
+                        aria-disabled={pendingContent !== null}
+                        onClick={() => toggleReaction(content, add, true)}
+                      >
+                        {pendingContent === content && showPending ? (
+                          <Loader2 className="size-4 animate-spin" />
+                        ) : (
+                          <span aria-hidden="true">{REACTION_EMOJI[content]}</span>
+                        )}
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>{label}</TooltipContent>
+                  </Tooltip>
+                )
+              })}
+            </div>
+          </PopoverContent>
+        </Popover>
+      ) : null}
     </div>
   )
 }
