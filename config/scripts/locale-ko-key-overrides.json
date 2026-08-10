@@ -1556,18 +1556,6 @@
   "auto.components.onboarding.OnboardingFlow.windowsTerminalSubtitle": {
     "ko": "새 창에서 사용할 기본 셸과 terminal에서 오른쪽 클릭이 동작하는 방식을 선택하세요."
   },
-  "auto.components.onboarding.RepoStep.466108ab89": {
-    "ko": "선택한 호스트에 존재하는 경로를 입력하세요."
-  },
-  "auto.components.onboarding.RepoStep.6558d50c69": {
-    "ko": "한 번에 여러 repos를 가져오고 싶으신가요? 상위 폴더를 선택하세요."
-  },
-  "auto.components.onboarding.RepoStep.c33b190ca3": {
-    "ko": "호스트 경로만"
-  },
-  "auto.components.onboarding.RepoStep.cf23006ba7": {
-    "ko": "선택한 호스트"
-  },
   "auto.components.onboarding.ThemeStep.7ee9234e54": {
     "ko": "Ghostty 설정을 찾았습니다."
   },
