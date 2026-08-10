@@ -7,6 +7,11 @@ import {
 describe('packaged renderer source maps', () => {
   it('accepts Windows-style asar paths with maps adjacent to every renderer chunk', () => {
     const html = (entry) => `<script type="module" src="./assets/${entry}.js"></script>`
+    const htmlByArchiveEntry = new Map([
+      ['out\\renderer\\index.html', html('index-abc')],
+      ['out\\renderer\\web-index.html', html('web-def')],
+      ['out\\renderer\\popout.html', html('popout-ghi')]
+    ])
     const asar = {
       listPackage: () => [
         '\\out\\renderer\\index.html',
@@ -16,14 +21,13 @@ describe('packaged renderer source maps', () => {
         '\\out\\renderer\\assets\\web-def.js.map.gz',
         '\\out\\renderer\\assets\\popout-ghi.js.map.gz'
       ],
-      extractFile: (_asarPath, entry) =>
-        Buffer.from(
-          entry.endsWith('web-index.html')
-            ? html('web-def')
-            : entry.endsWith('popout.html')
-              ? html('popout-ghi')
-              : html('index-abc')
-        )
+      extractFile: (_asarPath, entry) => {
+        const contents = htmlByArchiveEntry.get(entry)
+        if (!contents) {
+          throw new Error(`Unexpected archive entry: ${entry}`)
+        }
+        return Buffer.from(contents)
+      }
     }
 
     expect(() => verifyPackagedRendererSourceMaps('resources', asar)).not.toThrow()
