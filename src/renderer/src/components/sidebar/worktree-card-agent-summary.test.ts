@@ -1,6 +1,8 @@
-import { describe, expect, it } from 'vitest'
+import { createElement } from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
+import { describe, expect, it, vi } from 'vitest'
 import type { DashboardAgentRow as DashboardAgentRowData } from '@/components/dashboard/useDashboardData'
-import { getCompactAgentSecondary } from './worktree-card-compact-agent-row'
+import { CompactAgentRow, getCompactAgentSecondary } from './worktree-card-compact-agent-row'
 import { getAgentDotState, summarizeAgents } from './worktree-card-agent-summary'
 
 function monitoringAgent(): DashboardAgentRowData {
@@ -38,5 +40,19 @@ describe('worktree card agent summary', () => {
     expect(getAgentDotState(agent)).toBe('monitoring')
     expect(getCompactAgentSecondary(agent)).toBe('Monitoring background tasks')
     expect(summarizeAgents([agent], 'Agent')).toBe('Agent monitoring')
+  })
+
+  it('keeps monitoring visible before a compact row prompt', () => {
+    const agent = monitoringAgent()
+    agent.entry.prompt = 'Run background checks'
+
+    const markup = renderToStaticMarkup(
+      createElement(CompactAgentRow, { agent, now: 2000, onActivate: vi.fn() })
+    )
+
+    expect(markup).toContain('title="Monitoring background tasks - Run background checks"')
+    expect(markup).toMatch(
+      /Monitoring background tasks<\/span><span[^>]*> - Run background checks<\/span>/
+    )
   })
 })
