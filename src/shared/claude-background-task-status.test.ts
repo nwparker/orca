@@ -104,7 +104,7 @@ describe('Claude background task status', () => {
     }
   })
 
-  it('stays working through Claude 2.1.220 Stop and SubagentStop until the shell finishes', () => {
+  it('drains the Claude 2.1.229 background-task completion sequence', () => {
     const state = createHookListenerState()
 
     expect(
@@ -130,15 +130,18 @@ describe('Claude background task status', () => {
     expect(
       claudeEvent(state, SOURCE_PANE, {
         hook_event_name: 'UserPromptSubmit',
-        prompt: '<task-notification><status>completed</status></task-notification>'
+        prompt:
+          '<task-notification><task-id>b8rs2wmxg</task-id><status>completed</status></task-notification>'
       })
     ).toMatchObject({ state: 'working', workingMode: undefined })
     expect(
       claudeEvent(state, SOURCE_PANE, {
         hook_event_name: 'Stop',
-        background_tasks: []
+        background_tasks: [],
+        session_crons: []
       })?.state
     ).toBe('done')
+    expect(state.claudeRunningNonAgentTaskPaneKeys.has(SOURCE_PANE)).toBe(false)
   })
 
   it('keeps foreground child work active before falling back to monitoring', () => {
@@ -555,7 +558,11 @@ describe('Claude background task status', () => {
       background_tasks: [RUNNING_SHELL]
     })
 
-    expect(claudeEvent(state, SOURCE_PANE, { hook_event_name: 'Stop' })?.state).toBe('working')
+    expect(claudeEvent(state, SOURCE_PANE, { hook_event_name: 'Stop' })).toMatchObject({
+      state: 'working',
+      workingMode: 'monitoring'
+    })
+    expect(state.claudeRunningNonAgentTaskPaneKeys.has(SOURCE_PANE)).toBe(true)
     clearPaneCacheState(state, SOURCE_PANE)
     expect(state.claudeRunningNonAgentTaskPaneKeys.size).toBe(0)
 
