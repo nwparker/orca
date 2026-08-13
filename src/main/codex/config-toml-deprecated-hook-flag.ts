@@ -1,18 +1,23 @@
-export function normalizeDeprecatedCodexHookFeatureFlag(config: string): string {
-  if (!config.includes('codex_hooks')) {
-    return config
-  }
+import {
+  createTomlLineScanState,
+  getTomlTableHeader,
+  isTomlStructuralLine,
+  updateTomlLineScanState
+} from './config-toml-line-scan'
+import { parseTomlKeyPath, parseTomlTableHeaderPath } from './config-toml-key-path'
 
+export function normalizeDeprecatedCodexHookFeatureFlag(config: string): string {
   const lines = config.split('\n')
   const featureSections: { start: number; end: number }[] = []
   let featureStart: number | null = null
+  let state = createTomlLineScanState()
 
   for (let index = 0; index <= lines.length; index += 1) {
     const line = lines[index]
-    // Why: CRLF configs keep a trailing \r after the split, so header anchors
-    // must tolerate it or Windows-shaped configs skip normalization entirely.
-    const isHeader = line === undefined || /^[ \t]*\[[^\]]+\][ \t]*(?:#.*)?\r?$/.test(line)
-    if (!isHeader) {
+    const header =
+      line !== undefined && isTomlStructuralLine(state) ? getTomlTableHeader(line) : null
+    if (line !== undefined && !header) {
+      state = updateTomlLineScanState(state, line)
       continue
     }
 
@@ -20,8 +25,17 @@ export function normalizeDeprecatedCodexHookFeatureFlag(config: string): string 
       featureSections.push({ start: featureStart, end: index })
       featureStart = null
     }
-    if (line !== undefined && /^[ \t]*\[features\][ \t]*(?:#.*)?\r?$/.test(line)) {
+    const table = header ? parseTomlTableHeaderPath(header) : null
+    if (
+      table &&
+      !table.isArray &&
+      table.segments.length === 1 &&
+      table.segments[0] === 'features'
+    ) {
       featureStart = index
+    }
+    if (line !== undefined) {
+      state = updateTomlLineScanState(state, line)
     }
   }
 
@@ -34,14 +48,22 @@ export function normalizeDeprecatedCodexHookFeatureFlag(config: string): string 
 function normalizeFeatureSectionLines(lines: string[], start: number, end: number): void {
   const deprecatedIndexes: number[] = []
   let hasHooksKey = false
+  let state = createTomlLineScanState()
   for (let index = start; index < end; index += 1) {
     const line = lines[index] ?? ''
-    if (/^[ \t]*hooks[ \t]*=/.test(line)) {
-      hasHooksKey = true
+    if (isTomlStructuralLine(state)) {
+      const parsed = parseTomlKeyPath(line)
+      const key = parsed?.segments.length === 1 ? parsed.segments[0] : null
+      if (parsed && line[parsed.end] === '=') {
+        if (key === 'hooks') {
+          hasHooksKey = true
+        }
+        if (key === 'codex_hooks') {
+          deprecatedIndexes.push(index)
+        }
+      }
     }
-    if (/^[ \t]*codex_hooks[ \t]*=/.test(line)) {
-      deprecatedIndexes.push(index)
-    }
+    state = updateTomlLineScanState(state, line)
   }
   if (deprecatedIndexes.length === 0) {
     return
@@ -52,14 +74,24 @@ function normalizeFeatureSectionLines(lines: string[], start: number, end: numbe
     if (firstDeprecatedIndex !== undefined) {
       // Why: Codex 0.133 warns on the old key. Mirror into Orca's runtime
       // config using the new key without rewriting the user's real config.
-      lines[firstDeprecatedIndex] = lines[firstDeprecatedIndex]!.replace(
-        /^([ \t]*)codex_hooks([ \t]*=)/,
-        '$1hooks$2'
-      )
+      lines[firstDeprecatedIndex] = renameDeprecatedHookKey(lines[firstDeprecatedIndex] ?? '')
     }
   }
 
   for (const index of deprecatedIndexes.toReversed()) {
     lines.splice(index, 1)
   }
+}
+
+function renameDeprecatedHookKey(line: string): string {
+  const parsed = parseTomlKeyPath(line)
+  if (!parsed || parsed.segments.length !== 1 || parsed.segments[0] !== 'codex_hooks') {
+    return line
+  }
+  const keyStart = /^[ \t]*/.exec(line)?.[0].length ?? 0
+  let keyEnd = parsed.end
+  while (line[keyEnd - 1] === ' ' || line[keyEnd - 1] === '\t') {
+    keyEnd -= 1
+  }
+  return `${line.slice(0, keyStart)}hooks${line.slice(keyEnd)}`
 }
