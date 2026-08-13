@@ -1,6 +1,7 @@
-import { existsSync, writeFileSync } from 'node:fs'
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { readAgentStateFileSync, readAgentStateJsonFileSync } from '../agent-state-file-reader'
+import { writeFileAtomically } from '../codex-accounts/fs-utils'
 
 const SETTINGS_BASELINE_FILE = '.orca-config-settings-baseline.json'
 
@@ -68,7 +69,7 @@ export function writeCodexSettingsBaseline(
   if (existsSync(baselinePath) && readAgentStateFileSync(baselinePath) === serialized) {
     return
   }
-  writeFileSync(baselinePath, serialized, { encoding: 'utf-8', mode: 0o600 })
+  writeFileAtomically(baselinePath, serialized, { mode: 0o600 })
 }
 
 function getCodexSettingsBaselinePath(runtimeHomePath: string): string {
