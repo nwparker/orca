@@ -80,6 +80,16 @@ import {
 
 import { _resetOriginGitHubApiRepositoryCache } from './github-api-repository'
 
+function githubIssuePayload(number: number): Record<string, unknown> {
+  return {
+    number,
+    title: `Issue ${number}`,
+    state: 'open',
+    html_url: `https://github.com/stablyai/orca/issues/${number}`,
+    labels: []
+  }
+}
+
 // The origin-repository cache is module-level state; reset it so slugs
 // resolved by one test cannot leak into the next.
 beforeEach(() => {
@@ -238,10 +248,130 @@ describe('issue source operations', () => {
         'api',
         '--cache',
         '120s',
-        'repos/stablyai/orca/issues?per_page=5&state=open&sort=updated&direction=desc'
+        'repos/stablyai/orca/issues?per_page=100&page=1&state=open&sort=updated&direction=desc'
       ],
       { cwd: '/repo-root', host: 'github.com' }
     )
+  })
+
+  it('continues past a full page of pull requests to collect issues', async () => {
+    getIssueOwnerRepoMock.mockResolvedValueOnce({ owner: 'stablyai', repo: 'orca' })
+    const pullRequests = Array.from({ length: 100 }, (_, index) => ({
+      ...githubIssuePayload(index + 1),
+      pull_request: {}
+    }))
+    ghExecFileAsyncMock
+      .mockResolvedValueOnce({ stdout: JSON.stringify(pullRequests) })
+      .mockResolvedValueOnce({
+        stdout: JSON.stringify([githubIssuePayload(101), githubIssuePayload(102)])
+      })
+
+    const result = await listIssues('/repo-root', 2)
+
+    expect(result.items.map((issue) => issue.number)).toEqual([101, 102])
+    expect(ghExecFileAsyncMock).toHaveBeenNthCalledWith(
+      2,
+      [
+        'api',
+        '--cache',
+        '120s',
+        'repos/stablyai/orca/issues?per_page=100&page=2&state=open&sort=updated&direction=desc'
+      ],
+      { cwd: '/repo-root', host: 'github.com' }
+    )
+  })
+
+  it('fills the requested issue count across mixed GitHub pages', async () => {
+    getIssueOwnerRepoMock.mockResolvedValueOnce({ owner: 'stablyai', repo: 'orca' })
+    const firstPage = [
+      githubIssuePayload(1),
+      ...Array.from({ length: 99 }, (_, index) => ({
+        ...githubIssuePayload(index + 100),
+        pull_request: {}
+      }))
+    ]
+    ghExecFileAsyncMock
+      .mockResolvedValueOnce({ stdout: JSON.stringify(firstPage) })
+      .mockResolvedValueOnce({
+        stdout: JSON.stringify([
+          githubIssuePayload(2),
+          githubIssuePayload(3),
+          githubIssuePayload(4)
+        ])
+      })
+
+    const result = await listIssues('/repo-root', 3)
+
+    expect(result.items.map((issue) => issue.number)).toEqual([1, 2, 3])
+    expect(ghExecFileAsyncMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('deduplicates issues that move across page boundaries', async () => {
+    getIssueOwnerRepoMock.mockResolvedValueOnce({ owner: 'stablyai', repo: 'orca' })
+    const firstPage = [
+      githubIssuePayload(1),
+      ...Array.from({ length: 99 }, (_, index) => ({
+        ...githubIssuePayload(index + 100),
+        pull_request: {}
+      }))
+    ]
+    ghExecFileAsyncMock
+      .mockResolvedValueOnce({ stdout: JSON.stringify(firstPage) })
+      .mockResolvedValueOnce({
+        stdout: JSON.stringify([githubIssuePayload(1), githubIssuePayload(2)])
+      })
+
+    const result = await listIssues('/repo-root', 2)
+
+    expect(result.items.map((issue) => issue.number)).toEqual([1, 2])
+    expect(ghExecFileAsyncMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('stops issue pagination after a short GitHub page', async () => {
+    getIssueOwnerRepoMock.mockResolvedValueOnce({ owner: 'stablyai', repo: 'orca' })
+    ghExecFileAsyncMock.mockResolvedValueOnce({
+      stdout: JSON.stringify([
+        { ...githubIssuePayload(1), pull_request: {} },
+        githubIssuePayload(2)
+      ])
+    })
+
+    const result = await listIssues('/repo-root', 3)
+
+    expect(result.items.map((issue) => issue.number)).toEqual([2])
+    expect(ghExecFileAsyncMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('threads Enterprise host and WSL options through every issue page', async () => {
+    const localGitOptions = { wslDistro: 'Ubuntu' }
+    resolveIssueSourceMock.mockResolvedValueOnce({
+      source: { owner: 'team', repo: 'orca', host: 'github.acme-corp.com' },
+      fellBack: false
+    })
+    const pullRequests = Array.from({ length: 100 }, (_, index) => ({
+      ...githubIssuePayload(index + 1),
+      pull_request: {}
+    }))
+    ghExecFileAsyncMock
+      .mockResolvedValueOnce({ stdout: JSON.stringify(pullRequests) })
+      .mockResolvedValueOnce({ stdout: JSON.stringify([githubIssuePayload(101)]) })
+
+    await listIssues('/repo-root', 1, undefined, null, localGitOptions)
+
+    expect(ghExecFileAsyncMock).toHaveBeenCalledTimes(2)
+    expect(
+      ghExecFileAsyncMock.mock.calls.every(
+        (call) => call[1]?.host === 'github.acme-corp.com' && call[1]?.wslDistro === 'Ubuntu'
+      )
+    ).toBe(true)
+  })
+
+  it('returns no GitHub issues without requesting a page for a nonpositive limit', async () => {
+    getIssueOwnerRepoMock.mockResolvedValueOnce({ owner: 'stablyai', repo: 'orca' })
+
+    await expect(listIssues('/repo-root', 0)).resolves.toEqual({ items: [] })
+
+    expect(ghExecFileAsyncMock).not.toHaveBeenCalled()
   })
 
   it('surfaces a classified permission_denied error instead of collapsing to empty', async () => {
@@ -250,7 +380,9 @@ describe('issue source operations', () => {
     // render as a banner with retry, not a silent empty list.
     getIssueOwnerRepoMock.mockResolvedValueOnce({ owner: 'stablyai', repo: 'orca' })
     ghExecFileAsyncMock.mockRejectedValueOnce(
-      new Error('HTTP 403: Resource not accessible by integration')
+      Object.assign(new Error('gh exited with 1.'), {
+        stderr: 'HTTP 403: Resource not accessible by integration'
+      })
     )
 
     const result = await listIssues('/repo-root', 5)
@@ -496,6 +628,43 @@ describe('issue source operations', () => {
       ['api', '-X', 'PATCH', 'repos/stablyai/orca/issues/924', '--raw-field', 'body=Updated body'],
       { cwd: '/repo-root', host: 'github.com' }
     )
+  })
+
+  it('classifies structured gh permission diagnostics for issue mutations', async () => {
+    getIssueOwnerRepoMock.mockResolvedValue({ owner: 'stablyai', repo: 'orca' })
+    ghExecFileAsyncMock.mockRejectedValue(
+      Object.assign(new Error('gh exited with 1.'), {
+        stderr: 'HTTP 403: Resource not accessible by integration'
+      })
+    )
+
+    const updateResult = await updateIssue('/repo-root', 924, { body: 'Updated body' })
+    const commentResult = await addIssueComment('/repo-root', 924, 'Comment')
+
+    expect(updateResult).toEqual({
+      ok: false,
+      error: "You don't have permission to edit this issue. Check your GitHub token scopes."
+    })
+    expect(commentResult).toEqual({
+      ok: false,
+      error: "You don't have permission to edit this issue. Check your GitHub token scopes."
+    })
+  })
+
+  it('treats structured already-closed and already-open diagnostics as success', async () => {
+    getIssueOwnerRepoMock.mockResolvedValue({ owner: 'stablyai', repo: 'orca' })
+    ghExecFileAsyncMock
+      .mockRejectedValueOnce(
+        Object.assign(new Error('gh exited with 1.'), { stderr: 'issue is already closed' })
+      )
+      .mockRejectedValueOnce(
+        Object.assign(new Error('gh exited with 1.'), { stderr: 'issue is already open' })
+      )
+
+    await expect(updateIssue('/repo-root', 924, { state: 'closed' })).resolves.toEqual({
+      ok: true
+    })
+    await expect(updateIssue('/repo-root', 924, { state: 'open' })).resolves.toEqual({ ok: true })
   })
 
   it('closes issues with completed, not planned, and duplicate reasons', async () => {

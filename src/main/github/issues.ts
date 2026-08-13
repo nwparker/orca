@@ -145,25 +145,37 @@ export async function listIssues(
   await acquire()
   try {
     if (ownerRepo) {
-      const { stdout } = await ghExecFileAsync(
-        [
-          'api',
-          '--cache',
-          '120s',
-          `repos/${ownerRepo.owner}/${ownerRepo.repo}/issues?per_page=${limit}&state=open&sort=updated&direction=desc`
-        ],
-        ghOptions
-      )
-      const data = JSON.parse(stdout) as Record<string, unknown>[]
-      // Why: the GitHub REST `/repos/{owner}/{repo}/issues` endpoint returns
-      // pull requests alongside issues (PRs carry a `pull_request` key).
-      // Strip them here so `listIssues` only returns true issues, matching the
-      // filter applied in `listRecentWorkItems` (src/main/github/client.ts).
-      return {
-        items: data
-          .filter((d) => !('pull_request' in d))
-          .map((d) => mapIssueInfo(d as Parameters<typeof mapIssueInfo>[0]))
+      const requestedLimit = Number.isFinite(limit) ? Math.max(0, Math.floor(limit)) : 0
+      const items: IssueInfo[] = []
+      const seenIssueNumbers = new Set<number>()
+      const pageSize = 100
+      let page = 1
+      while (items.length < requestedLimit) {
+        const { stdout } = await ghExecFileAsync(
+          [
+            'api',
+            '--cache',
+            '120s',
+            `repos/${ownerRepo.owner}/${ownerRepo.repo}/issues?per_page=${pageSize}&page=${page}&state=open&sort=updated&direction=desc`
+          ],
+          ghOptions
+        )
+        const data = JSON.parse(stdout) as Record<string, unknown>[]
+        // GitHub mixes pull requests into this endpoint, so fill from later pages.
+        for (const issue of data
+          .filter((entry) => !('pull_request' in entry))
+          .map((entry) => mapIssueInfo(entry as Parameters<typeof mapIssueInfo>[0]))) {
+          if (!seenIssueNumbers.has(issue.number)) {
+            seenIssueNumbers.add(issue.number)
+            items.push(issue)
+          }
+        }
+        if (data.length < pageSize) {
+          break
+        }
+        page += 1
       }
+      return { items: items.slice(0, requestedLimit) }
     }
     // Fallback for non-GitHub remotes
     const { stdout } = await ghExecFileAsync(
@@ -175,10 +187,9 @@ export async function listIssues(
       items: data.map((d) => mapIssueInfo(d as Parameters<typeof mapIssueInfo>[0]))
     }
   } catch (err) {
-    const stderr = err instanceof Error ? err.message : String(err)
     return {
       items: [],
-      error: classifyListIssuesError(stderr)
+      error: classifyListIssuesError(githubIssueErrorMessage(err))
     }
   } finally {
     release()
@@ -353,10 +364,10 @@ export async function updateIssue(
         await ghExecFileAsync(['issue', 'reopen', String(issueNumber), '--repo', repo], ghOptions)
       }
     } catch (err) {
-      const stderr = err instanceof Error ? err.message : String(err)
+      const message = githubIssueErrorMessage(err)
       // Treat "already closed/open" as a no-op
-      if (!stderr.toLowerCase().includes('already')) {
-        errors.push(classifyGhError(stderr).message)
+      if (!message.toLowerCase().includes('already')) {
+        errors.push(classifyGhError(message).message)
       }
     } finally {
       release()
@@ -378,8 +389,7 @@ export async function updateIssue(
         ghOptions
       )
     } catch (err) {
-      const stderr = err instanceof Error ? err.message : String(err)
-      errors.push(classifyGhError(stderr).message)
+      errors.push(classifyGhError(githubIssueErrorMessage(err)).message)
     } finally {
       release()
     }
@@ -415,8 +425,7 @@ export async function updateIssue(
     try {
       await ghExecFileAsync(editArgs, ghOptions)
     } catch (err) {
-      const stderr = err instanceof Error ? err.message : String(err)
-      errors.push(classifyGhError(stderr).message)
+      errors.push(classifyGhError(githubIssueErrorMessage(err)).message)
     } finally {
       release()
     }
@@ -494,8 +503,7 @@ export async function addIssueComment(
     }
     return { ok: true, comment }
   } catch (err) {
-    const stderr = err instanceof Error ? err.message : String(err)
-    return { ok: false, error: classifyGhError(stderr).message }
+    return { ok: false, error: classifyGhError(githubIssueErrorMessage(err)).message }
   } finally {
     release()
   }
