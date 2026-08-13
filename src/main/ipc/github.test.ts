@@ -467,6 +467,44 @@ describe('registerGitHubHandlers', () => {
     expect(candidate).not.toHaveProperty('localGitOptions')
   })
 
+  it('cleans active refresh state when its sender is destroyed before reporting visibility', async () => {
+    registerGitHubHandlers(store as never, stats as never)
+    let onDestroyed: (() => void) | undefined
+    const sender = {
+      id: 901,
+      once: vi.fn((event: string, listener: () => void) => {
+        if (event === 'destroyed') {
+          onDestroyed = listener
+        }
+      })
+    }
+
+    await handlers['gh:enqueuePRRefresh'](
+      { sender },
+      {
+        candidate: {
+          cacheKey: '/workspace/repo::feature/test',
+          repoPath: '/workspace/repo',
+          repoId: 'repo-1',
+          branch: 'feature/test',
+          repoKind: 'git'
+        },
+        reason: 'active',
+        priority: 80
+      }
+    )
+
+    expect(sender.once).toHaveBeenCalledWith('destroyed', expect.any(Function))
+    expect(enqueuePRRefreshMock).toHaveBeenCalledWith(
+      expect.objectContaining({ repoPath: '/workspace/repo' }),
+      'active',
+      80,
+      901
+    )
+    onDestroyed?.()
+    expect(clearVisiblePRRefreshWindowMock).toHaveBeenCalledWith(901)
+  })
+
   it('keeps manual PR refresh validation strict', async () => {
     registerGitHubHandlers(store as never, stats as never)
 

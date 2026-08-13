@@ -2,7 +2,7 @@
 the repo-path validation, preference-threading, and stats wiring patterns are
 reviewable as one surface. Splitting by feature area would risk drifting
 validation/gate conventions across handler files. */
-import { ipcMain } from 'electron'
+import { ipcMain, type WebContents } from 'electron'
 import { resolve } from 'node:path'
 import type {
   Repo,
@@ -113,7 +113,19 @@ import { track } from '../telemetry/client'
 import { getCohortAtEmit } from '../telemetry/cohort-classifier'
 import { sendToTrustedUIRenderer } from './ui'
 
-const prRefreshVisibilityCleanupRegistered = new Set<number>()
+const prRefreshWindowCleanupRegistered = new Set<number>()
+
+function registerPRRefreshWindowCleanup(sender: WebContents): void {
+  const senderId = sender.id
+  if (prRefreshWindowCleanupRegistered.has(senderId)) {
+    return
+  }
+  prRefreshWindowCleanupRegistered.add(senderId)
+  sender.once('destroyed', () => {
+    prRefreshWindowCleanupRegistered.delete(senderId)
+    clearVisiblePRRefreshWindow(senderId)
+  })
+}
 
 // Why: the app renderer owns the SWR cache; browser guests cannot consume this
 // event. Skip the origin because it already updated its cache optimistically.
@@ -342,7 +354,11 @@ export function registerGitHubHandlers(store: Store, stats: StatsCollector): voi
       if (validation.kind === 'skipped') {
         return validation.result
       }
-      const senderWindowId = event?.sender?.id
+      const sender = event?.sender
+      const senderWindowId = sender?.id
+      if (sender) {
+        registerPRRefreshWindowCleanup(sender)
+      }
       enqueuePRRefresh(validation.candidate, args.reason, args.priority ?? 0, senderWindowId)
       return { kind: 'queued' }
     }
@@ -352,13 +368,7 @@ export function registerGitHubHandlers(store: Store, stats: StatsCollector): voi
     'gh:reportVisiblePRRefreshCandidates',
     (event, args: { candidates: GitHubPRRefreshCandidate[]; generation: number }) => {
       const senderId = event.sender.id
-      if (!prRefreshVisibilityCleanupRegistered.has(senderId)) {
-        prRefreshVisibilityCleanupRegistered.add(senderId)
-        event.sender.once('destroyed', () => {
-          prRefreshVisibilityCleanupRegistered.delete(senderId)
-          clearVisiblePRRefreshWindow(senderId)
-        })
-      }
+      registerPRRefreshWindowCleanup(event.sender)
       const candidates: GitHubPRRefreshCandidate[] = []
       const repos = store.getRepos()
       for (const candidate of args.candidates) {

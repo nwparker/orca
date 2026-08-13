@@ -249,6 +249,7 @@ function isVisibleKey(key: string): boolean {
   for (const windowId of Array.from(visibleByWindow.keys())) {
     if (!liveWindowIds.has(windowId)) {
       visibleByWindow.delete(windowId)
+      clearActiveBurstWindow(windowId)
     }
   }
   for (const visible of visibleByWindow.values()) {
@@ -904,6 +905,10 @@ export function reportVisiblePRRefreshCandidates(
 
 export function _getVisiblePRRefreshWindowCountForTests(): number {
   return visibleByWindow.size
+}
+
+export function _getPRRefreshActiveBurstScopeCountForTests(): number {
+  return activeStartsByScope.size
 }
 
 export function _getPRRefreshErrorBackoffCountForTests(): number {

@@ -1115,6 +1115,34 @@ describe('pr-refresh-coordinator', () => {
     expect(getPRForBranchOutcomeMock).toHaveBeenCalledTimes(1)
   })
 
+  it('drops active-burst state when stale visibility discovers a destroyed window', async () => {
+    const {
+      _getPRRefreshActiveBurstScopeCountForTests,
+      enqueuePRRefresh,
+      refreshPRNow,
+      reportVisiblePRRefreshCandidates
+    } = await import('./pr-refresh-coordinator')
+    const candidate = makeCandidate({ cachedFetchedAt: Date.now() })
+    getPRForBranchOutcomeMock
+      .mockResolvedValueOnce({ kind: 'no-pr', fetchedAt: Date.now() })
+      .mockResolvedValueOnce({
+        kind: 'upstream-error',
+        errorType: 'network',
+        message: 'network down',
+        fetchedAt: Date.now()
+      })
+
+    reportVisiblePRRefreshCandidates([candidate], 1, 1)
+    enqueuePRRefresh(candidate, 'active', 80, 1)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(_getPRRefreshActiveBurstScopeCountForTests()).toBe(1)
+
+    getAllWebContentsMock.mockReturnValue([])
+    await refreshPRNow(candidate)
+
+    expect(_getPRRefreshActiveBurstScopeCountForTests()).toBe(0)
+  })
+
   it('clears visible retry backoff when a non-visible manual refresh steals the retry', async () => {
     const {
       _getPRRefreshErrorBackoffCountForTests,
