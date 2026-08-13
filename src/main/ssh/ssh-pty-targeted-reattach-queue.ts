@@ -1,4 +1,8 @@
-type TargetedReattach = Readonly<{ start: () => void }>
+export const SSH_PTY_REATTACH_CANCELLED = Symbol('ssh-pty-reattach-cancelled')
+
+export type SshPtyTargetedReattachResult = boolean | typeof SSH_PTY_REATTACH_CANCELLED
+
+type TargetedReattach = Readonly<{ start: () => void; cancel: () => void }>
 
 // Why bounded: every rejected frame asks for its own attach round trip, so a relay that starts
 // rejecting across many PTYs at once fans out one concurrent reattach per PTY. The bulk reconnect
@@ -14,8 +18,8 @@ export class SshPtyTargetedReattachQueue {
     return this.running.has(key)
   }
 
-  run(key: string, task: () => Promise<boolean>): Promise<boolean> {
-    return new Promise<boolean>((resolve, reject) => {
+  run(key: string, task: () => Promise<boolean>): Promise<SshPtyTargetedReattachResult> {
+    return new Promise<SshPtyTargetedReattachResult>((resolve, reject) => {
       const entry: TargetedReattach = {
         start: () => {
           this.active++
@@ -29,7 +33,8 @@ export class SshPtyTargetedReattachQueue {
               reject(error instanceof Error ? error : new Error(String(error)))
             }
           )
-        }
+        },
+        cancel: () => resolve(SSH_PTY_REATTACH_CANCELLED)
       }
       this.running.set(key, entry)
       if (this.active < this.maxConcurrency) {
@@ -43,7 +48,9 @@ export class SshPtyTargetedReattachQueue {
   // Why queued entries are dropped rather than started: each one is keyed to the provider generation
   // the teardown just ended, so running it would attach onto a mux that is already gone.
   clear(): void {
-    this.waiting.length = 0
+    for (const entry of this.waiting.splice(0)) {
+      entry.cancel()
+    }
     this.running.clear()
   }
 

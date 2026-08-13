@@ -127,7 +127,10 @@ import {
   rememberSshPtyConsumerRecovery
 } from './ssh-pty-consumer-recovery'
 import { classifySshPtyFrameRejection, SshPtyFrameRejectionLog } from './ssh-pty-frame-rejection'
-import { SshPtyTargetedReattachQueue } from './ssh-pty-targeted-reattach-queue'
+import {
+  SSH_PTY_REATTACH_CANCELLED,
+  SshPtyTargetedReattachQueue
+} from './ssh-pty-targeted-reattach-queue'
 
 export type RelaySessionState = 'idle' | 'deploying' | 'ready' | 'reconnecting' | 'disposed'
 
@@ -1915,6 +1918,9 @@ export class SshRelaySession {
       )
       .then(
         (recovered) => {
+          if (recovered === SSH_PTY_REATTACH_CANCELLED) {
+            return
+          }
           if (recovered) {
             // Why only a completed reattach clears this: an accepted frame proves nothing about the
             // delivery that was rejected, and resetting on one lets a flapping PTY reattach forever.
