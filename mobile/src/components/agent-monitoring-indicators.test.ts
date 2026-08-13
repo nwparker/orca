@@ -1,10 +1,17 @@
 import { createElement } from 'react'
-import { act, create, type ReactTestRenderer } from 'react-test-renderer'
+import { act, create } from 'react-test-renderer'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AgentSpinner } from './AgentSpinner'
 import { AgentStateDot } from './AgentStateDot'
 
 const DESKTOP_WORKING_COLOR = '#eab308'
+
+type MonitoringTestRenderer = {
+  readonly root: {
+    findByType(type: string): { props: Record<string, unknown> }
+  }
+  unmount(): void
+}
 
 const { animationLoop, animationTiming, setValue } = vi.hoisted(() => ({
   animationLoop: vi.fn(() => ({ start: vi.fn(), stop: vi.fn() })),
@@ -28,7 +35,7 @@ vi.mock('react-native', () => ({
 }))
 
 describe('mobile monitoring indicators', () => {
-  let renderer: ReactTestRenderer | null = null
+  let renderer: MonitoringTestRenderer | null = null
 
   beforeEach(() => {
     animationLoop.mockClear()
@@ -46,7 +53,7 @@ describe('mobile monitoring indicators', () => {
       renderer = create(createElement(AgentStateDot, { state: 'monitoring' }))
     })
 
-    expect(renderer.root.findByType('Radio').props).toMatchObject({
+    expect(renderer?.root.findByType('Radio').props).toMatchObject({
       color: DESKTOP_WORKING_COLOR,
       size: 10
     })
@@ -61,7 +68,7 @@ describe('mobile monitoring indicators', () => {
       )
     })
 
-    expect(renderer.root.findByType('Radio').props).toMatchObject({
+    expect(renderer?.root.findByType('Radio').props).toMatchObject({
       color: DESKTOP_WORKING_COLOR,
       size: 12
     })
