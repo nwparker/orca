@@ -16,6 +16,7 @@ import {
   type ReadClipboardTextOptions
 } from '../../shared/clipboard-text'
 import {
+  cleanupExpiredLocalClipboardImages,
   saveClipboardImageBufferAsTempFile,
   type SaveClipboardImageAsTempFileArgs
 } from './clipboard-image-temp-file'
@@ -85,6 +86,7 @@ export function registerClipboardHandlers(store: Store): void {
   ipcMain.removeHandler('clipboard:writeFile')
   ipcMain.removeHandler('clipboard:saveImageAsTempFile')
 
+  void cleanupExpiredLocalClipboardImages()
   void cleanupExpiredRemoteClipboardFiles()
   scheduleLegacyRemoteClipboardFileCleanup()
 

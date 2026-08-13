@@ -567,7 +567,7 @@ describe('registerClipboardHandlers', () => {
     await expect(
       handlers.get('clipboard:saveImageAsTempFile')?.(makeClipboardEvent(), undefined)
     ).resolves.toBe(expectedPath)
-    expect(fsWriteFileMock).toHaveBeenCalledWith(expectedPath, png)
+    expect(fsWriteFileMock).toHaveBeenCalledWith(expectedPath, png, expect.any(Object))
     expect(clipboardReadBufferMock).not.toHaveBeenCalled()
     expect(fsOpenMock).not.toHaveBeenCalled()
     expect(getSshFilesystemProviderMock).not.toHaveBeenCalled()
