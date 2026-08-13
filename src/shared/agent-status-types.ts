@@ -15,6 +15,7 @@ export { AGENT_STATUS_MAX_FIELD_LENGTH } from './agent-status-field-normalizatio
 
 export const AGENT_STATUS_STATES = ['working', 'blocked', 'waiting', 'done'] as const
 export type AgentStatusState = (typeof AGENT_STATUS_STATES)[number]
+export type AgentWorkingMode = 'monitoring'
 // Why: agent types aren't a fixed set (custom agents exist); any non-empty string is
 // accepted — these well-known names are just a convenience union for pattern-matching.
 export type WellKnownAgentType =
@@ -91,6 +92,8 @@ export type AgentSubagentSnapshot = {
 
 export type AgentStatusEntry = {
   state: AgentStatusState
+  /** Ongoing work that does not require foreground agent execution. Only valid while working. */
+  workingMode?: AgentWorkingMode
   /** The user's most recent prompt. Cached across the turn — later tool-use events
    *  omit it, so the last value persists until a new prompt or pane reset. Empty when unknown. */
   prompt: string
@@ -169,6 +172,8 @@ export type MigrationUnsupportedPtyEntry = {
 
 export type AgentStatusPayload = {
   state: AgentStatusState
+  /** Ongoing work that does not require foreground agent execution. Only valid while working. */
+  workingMode?: AgentWorkingMode
   prompt?: string
   agentType?: AgentType
   model?: string
@@ -206,6 +211,7 @@ export function pickParsedAgentStatusPayload(
 ): ParsedAgentStatusPayload {
   return {
     state: row.state,
+    ...(row.workingMode !== undefined ? { workingMode: row.workingMode } : {}),
     prompt: row.prompt,
     ...(row.agentType !== undefined ? { agentType: row.agentType } : {}),
     ...(row.model !== undefined ? { model: row.model } : {}),
@@ -400,6 +406,7 @@ function normalizeAgentStatusObject(parsed: unknown): ParsedAgentStatusPayload |
   }
   return {
     state: state as AgentStatusState,
+    workingMode: state === 'working' && obj.workingMode === 'monitoring' ? 'monitoring' : undefined,
     prompt: normalizePromptField(obj.prompt),
     // Why: normalize like the other single-line fields so embedded newlines (e.g. `agentType: "claude\nrogue"`) can't break single-line UI and equality checks.
     agentType: normalizeOptionalField(obj.agentType, AGENT_TYPE_MAX_LENGTH),

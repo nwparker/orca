@@ -63,6 +63,7 @@ import {
   type ParsedAgentStatusPayload,
   normalizeAgentStatusPayload
 } from '../../shared/agent-status-types'
+import { terminalStatusPayloadMatchesHook } from '../../shared/agent-terminal-status-equivalence'
 import {
   resolveAgentStatusIdentity,
   shouldSuppressInheritedTerminalStatus
@@ -411,26 +412,6 @@ function toAgentStatusIpcPayload(entry: EnrichedAgentHookEventPayload): AgentSta
     ...(entry.restoredUnconfirmed ? { restoredUnconfirmed: true } : {}),
     ...entry.payload
   }
-}
-
-// Why: OSC never carries model/children; omit both so an equivalent OSC ping preserves the hook-cached identity graph.
-function equivalentParsedAgentStatusPayload(
-  a: ParsedAgentStatusPayload,
-  b: ParsedAgentStatusPayload
-): boolean {
-  return (
-    a.state === b.state &&
-    a.prompt === b.prompt &&
-    a.agentType === b.agentType &&
-    a.toolName === b.toolName &&
-    a.toolInput === b.toolInput &&
-    a.interactivePrompt === b.interactivePrompt &&
-    a.lastAssistantMessage === b.lastAssistantMessage &&
-    a.interrupted === b.interrupted &&
-    // Why: a session-boundary done must never be deduped against a cached real done —
-    // the flag has to reach receivers deterministically (STA-3386).
-    a.sessionBoundary === b.sessionBoundary
-  )
 }
 
 function trackEmptyPaneKeyHook(body: unknown): void {
@@ -914,6 +895,7 @@ export class AgentHookServer {
       providerSession: existing.providerSession,
       payload: {
         state: restored.state,
+        ...(restored.workingMode ? { workingMode: restored.workingMode } : {}),
         prompt: payload.prompt,
         agentType: payload.agentType,
         ...(restored.state === 'done' && restored.interrupted ? { interrupted: true } : {}),
@@ -1826,7 +1808,7 @@ export class AgentHookServer {
       previous?.connectionId === connectionId &&
       previous.tabId === tabId &&
       previous.worktreeId === worktreeId &&
-      equivalentParsedAgentStatusPayload(previous.payload, event.payload)
+      terminalStatusPayloadMatchesHook(previous.payload, event.payload)
     ) {
       return
     }
@@ -2528,7 +2510,12 @@ export class AgentHookServer {
         ...(state !== 'done' && restoredUnconfirmed ? { restoredUnconfirmed: true } : {}),
         receivedAt: reconciledAt,
         stateStartedAt: stateChanged ? reconciledAt : enriched.stateStartedAt,
-        payload: { ...enriched.payload, state, subagents }
+        payload: {
+          ...enriched.payload,
+          state,
+          workingMode: state === 'working' ? enriched.payload.workingMode : undefined,
+          subagents
+        }
       }
       this.state.lastStatusByPaneKey.set(paneKey, reconciled)
     }

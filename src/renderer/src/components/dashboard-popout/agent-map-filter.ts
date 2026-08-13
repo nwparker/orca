@@ -13,6 +13,9 @@ export function agentMapState(card: DashboardCard): AgentMapState {
   if (state === 'blocked' || state === 'waiting') {
     return 'attention'
   }
+  if (state === 'monitoring') {
+    return 'working'
+  }
   return state
 }
 

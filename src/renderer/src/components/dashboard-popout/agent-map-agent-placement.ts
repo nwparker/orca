@@ -1,4 +1,7 @@
-import type { DashboardCard } from '../../../../shared/dashboard-snapshot'
+import type {
+  DashboardCard,
+  DashboardCardDisplayState
+} from '../../../../shared/dashboard-snapshot'
 import { agentMapDurationMinutes, agentMapNodeStatus } from './agent-map-node-metadata'
 
 const GOLDEN_ANGLE = 2.399963229728653
@@ -30,7 +33,7 @@ export function placeAgentMapAgents({
   y: number
   radius: number
   durationMinutes: number
-  status: DashboardCard['dotState']
+  status: DashboardCardDisplayState
 }[] {
   const availableRadius = Math.max(0, radius - agentRadius - 6)
   const sorted = [...cards].sort((a, b) =>

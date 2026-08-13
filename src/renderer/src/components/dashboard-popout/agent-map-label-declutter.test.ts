@@ -8,7 +8,15 @@ import type {
 } from './agent-map-layout'
 
 function statusCounts(overrides: Partial<AgentMapStatusCounts> = {}): AgentMapStatusCounts {
-  return { working: 0, blocked: 0, waiting: 0, done: 0, idle: 0, ...overrides }
+  return {
+    working: 0,
+    monitoring: 0,
+    blocked: 0,
+    waiting: 0,
+    done: 0,
+    idle: 0,
+    ...overrides
+  }
 }
 
 function worktree(overrides: Partial<AgentMapWorktreeRing> = {}): AgentMapWorktreeRing {

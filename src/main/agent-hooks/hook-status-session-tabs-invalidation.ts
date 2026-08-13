@@ -24,6 +24,7 @@ export function createHookStatusSessionTabsInvalidator(): {
     return (
       !previous ||
       previous.state !== next.state ||
+      previous.workingMode !== next.workingMode ||
       previous.prompt !== next.prompt ||
       (previous.agentType ?? null) !== (next.agentType ?? null) ||
       (previous.toolName ?? null) !== (next.toolName ?? null) ||

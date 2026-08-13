@@ -3,7 +3,15 @@ import type { AgentMapStatusCounts } from './agent-map-layout'
 import { agentMapWorktreeActiveStatus } from './agent-map-worktree-active-status'
 
 function counts(overrides: Partial<AgentMapStatusCounts> = {}): AgentMapStatusCounts {
-  return { blocked: 0, waiting: 0, working: 0, done: 0, idle: 0, ...overrides }
+  return {
+    blocked: 0,
+    waiting: 0,
+    working: 0,
+    monitoring: 0,
+    done: 0,
+    idle: 0,
+    ...overrides
+  }
 }
 
 describe('agentMapWorktreeActiveStatus', () => {
@@ -17,5 +25,10 @@ describe('agentMapWorktreeActiveStatus', () => {
   it('uses working only when no agent needs attention', () => {
     expect(agentMapWorktreeActiveStatus(counts({ working: 1, done: 2 }))).toBe('working')
     expect(agentMapWorktreeActiveStatus(counts({ done: 2, idle: 1 }))).toBeNull()
+  })
+
+  it('keeps passive monitoring out of the active-worktree glow', () => {
+    expect(agentMapWorktreeActiveStatus(counts({ monitoring: 1 }))).toBeNull()
+    expect(agentMapWorktreeActiveStatus(counts({ working: 1, monitoring: 1 }))).toBe('working')
   })
 })

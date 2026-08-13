@@ -36,11 +36,14 @@ function getCompactAgentPrimary(
   return prompt || agentStateLabel(getAgentDotState(agent))
 }
 
-function getCompactAgentSecondary(agent: DashboardAgentRowData): string {
+export function getCompactAgentSecondary(agent: DashboardAgentRowData): string {
   if (agent.entry.interrupted === true) {
     return 'Interrupted by user'
   }
-  if (agent.state === 'working') {
+  if (agent.state === 'working' && agent.entry.workingMode === 'monitoring') {
+    return agentStateLabel('monitoring')
+  }
+  if (agent.state === 'working' && agent.entry.workingMode !== 'monitoring') {
     const toolName = agent.entry.toolName?.trim() ?? ''
     const toolInput = agent.entry.toolInput?.trim() ?? ''
     if (toolName && toolInput) {

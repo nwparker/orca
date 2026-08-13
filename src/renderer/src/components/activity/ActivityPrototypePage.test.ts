@@ -313,6 +313,31 @@ describe('buildActivityEvents', () => {
     })
   })
 
+  it('projects monitoring into thread rows and status groups', () => {
+    const result = makeActivityResult({
+      entries: {
+        [PANE_KEY]: {
+          ...makeWorkingEntryWithoutHistory(),
+          workingMode: 'monitoring'
+        }
+      }
+    })
+    const threads = makeThreads(result)
+    const groups = groupActivityThreadsByStatus(threads)
+
+    expect(result.liveAgentByPaneKey[PANE_KEY].state).toBe('monitoring')
+    expect(threads[0].currentAgentState).toBe('monitoring')
+    expect(getActivityThreadGroup(threads[0], 'status')).toEqual({
+      key: 'monitoring',
+      label: 'Monitoring background tasks'
+    })
+    expect(groups[0]).toMatchObject({
+      id: 'monitoring',
+      label: 'Monitoring background tasks',
+      state: 'monitoring'
+    })
+  })
+
   it('uses orchestration display metadata for live thread titles', () => {
     const result = makeActivityResult({
       entries: {

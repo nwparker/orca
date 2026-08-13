@@ -15,7 +15,7 @@ import {
 import { layoutAgentMapWorktreeLineage } from './agent-map-worktree-lineage-layout'
 
 type DashboardCard = DashboardSnapshotTypes.DashboardCard
-type DashboardCardDotState = DashboardSnapshotTypes.DashboardCardDotState
+type DashboardCardDisplayState = DashboardSnapshotTypes.DashboardCardDisplayState
 type DashboardWorkspace = DashboardSnapshotTypes.DashboardWorkspace
 
 export { AGENT_MAP_WORKTREE_GAP } from './agent-map-worktree-packing'
@@ -39,7 +39,7 @@ const PROJECT_PADDING = 12
 const WORLD_MARGIN = 32
 const RING_CONTENT_OFFSET = AGENT_MAP_RING_HEADER_HEIGHT / 2
 
-export type AgentMapStatusCounts = Record<DashboardCardDotState, number>
+export type AgentMapStatusCounts = Record<DashboardCardDisplayState, number>
 
 export type AgentMapAgentNode = {
   card: DashboardCard
@@ -47,7 +47,7 @@ export type AgentMapAgentNode = {
   y: number
   radius: number
   durationMinutes: number
-  status: DashboardCardDotState
+  status: DashboardCardDisplayState
   motionState?: AgentMapMotionState
 }
 
@@ -131,7 +131,7 @@ export function shouldAggregateAgentMapWorktree(
 }
 
 function emptyStatusCounts(): AgentMapStatusCounts {
-  return { working: 0, blocked: 0, waiting: 0, done: 0, idle: 0 }
+  return { working: 0, monitoring: 0, blocked: 0, waiting: 0, done: 0, idle: 0 }
 }
 
 function worktreeRadius(agentCount: number): number {

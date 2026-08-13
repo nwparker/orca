@@ -1,5 +1,5 @@
 import React from 'react'
-import { MessageCircleQuestion } from 'lucide-react'
+import { MessageCircleQuestion, Radio } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { AgentWorkingSpinner } from '@/components/AgentWorkingSpinner'
 import { getWorktreeStatusLabel, type WorktreeStatus } from '@/lib/worktree-status'
@@ -36,6 +36,18 @@ const StatusIndicator = React.memo(function StatusIndicator({
         {...rest}
       >
         <AgentWorkingSpinner className="size-2" />
+      </span>
+    )
+  }
+
+  if (status === 'monitoring') {
+    return (
+      <span
+        className={cn('inline-flex h-3 w-3 shrink-0 items-center justify-center', className)}
+        title={resolvedTitle}
+        {...rest}
+      >
+        <Radio className="size-3 text-yellow-500" aria-hidden="true" />
       </span>
     )
   }

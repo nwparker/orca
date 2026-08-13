@@ -1,7 +1,7 @@
 import {
   dashboardCardDisplayState,
   type DashboardCard,
-  type DashboardCardDotState
+  type DashboardCardDisplayState
 } from '../../../../shared/dashboard-snapshot'
 
 export function agentMapDurationMinutes(card: DashboardCard, now: number): number {
@@ -12,6 +12,6 @@ export function agentMapDurationMinutes(card: DashboardCard, now: number): numbe
   return Math.max(0, (end - card.startedAt) / 60_000)
 }
 
-export function agentMapNodeStatus(card: DashboardCard): DashboardCardDotState {
+export function agentMapNodeStatus(card: DashboardCard): DashboardCardDisplayState {
   return dashboardCardDisplayState(card)
 }

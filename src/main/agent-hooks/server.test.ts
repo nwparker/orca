@@ -521,6 +521,7 @@ describe('AgentHookServer listener replay', () => {
       const baseline = server.getStatusSnapshot()[0]
 
       expect(baseline).not.toHaveProperty('claudeRunningNonAgentTask')
+      expect(baseline).toMatchObject({ state: 'working', workingMode: 'monitoring' })
       expect(
         server.inferInterrupt({
           paneKey: PANE,
@@ -6755,7 +6756,11 @@ describe('Last-status persistence', () => {
         worktreeId: 'wt-1',
         receivedAt: expect.any(Number),
         stateStartedAt: expect.any(Number),
-        payload: expect.objectContaining({ state: 'working', prompt: 'persist me' })
+        payload: expect.objectContaining({
+          state: 'working',
+          workingMode: 'monitoring',
+          prompt: 'persist me'
+        })
       })
       expect(file.entries[PANE].launchToken).toBeUndefined()
       expect(file.entries[PANE].launchTokenHash).toBe(
@@ -8555,6 +8560,52 @@ describe('AgentHookServer ingestRemote', () => {
 })
 
 describe('AgentHookServer ingestTerminalStatus', () => {
+  it('keeps hook monitoring mode across an equivalent OSC ping until a hook clears it', () => {
+    const server = new AgentHookServer()
+
+    server.ingestRemote(
+      {
+        paneKey: PANE,
+        source: 'claude',
+        hookEventName: 'Stop',
+        payload: {
+          state: 'working',
+          workingMode: 'monitoring',
+          prompt: 'watch the build',
+          agentType: 'claude'
+        }
+      },
+      'conn-1'
+    )
+    server.ingestTerminalStatus({
+      paneKey: PANE,
+      connectionId: 'conn-1',
+      payload: { state: 'working', prompt: 'watch the build', agentType: 'claude' }
+    })
+
+    expect(server.getStatusSnapshot()[0]).toMatchObject({
+      state: 'working',
+      workingMode: 'monitoring'
+    })
+
+    server.ingestRemote(
+      {
+        paneKey: PANE,
+        source: 'claude',
+        hookEventName: 'PreToolUse',
+        payload: {
+          state: 'working',
+          prompt: 'watch the build',
+          agentType: 'claude',
+          toolName: 'Read'
+        }
+      },
+      'conn-1'
+    )
+
+    expect(server.getStatusSnapshot()[0]?.workingMode).toBeUndefined()
+  })
+
   // Why: the OSC 9999 payload cannot carry a provider session, so letting it overwrite the row
   // erased the session id from persisted rows and from headless `orca serve` — which serves these
   // rows straight to mobile — leaving Chat UI with no transcript to subscribe to (#10630).

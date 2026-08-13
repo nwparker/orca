@@ -111,34 +111,55 @@ describe('Claude background task status', () => {
       claudeEvent(state, SOURCE_PANE, {
         hook_event_name: 'UserPromptSubmit',
         prompt: 'run a background sleep'
-      })?.state
-    ).toBe('working')
+      })
+    ).toMatchObject({ state: 'working', workingMode: undefined })
     expect(
       claudeEvent(state, SOURCE_PANE, {
         hook_event_name: 'Stop',
         background_tasks: [RUNNING_SHELL]
-      })?.state
-    ).toBe('working')
+      })
+    ).toMatchObject({ state: 'working', workingMode: 'monitoring' })
     expect(
       claudeEvent(state, SOURCE_PANE, {
         hook_event_name: 'SubagentStop',
         agent_id: 'a70fdf2986e38302b',
         background_tasks: [RUNNING_SHELL]
-      })?.state
-    ).toBe('working')
+      })
+    ).toMatchObject({ state: 'working', workingMode: 'monitoring' })
 
     expect(
       claudeEvent(state, SOURCE_PANE, {
         hook_event_name: 'UserPromptSubmit',
         prompt: '<task-notification><status>completed</status></task-notification>'
-      })?.state
-    ).toBe('working')
+      })
+    ).toMatchObject({ state: 'working', workingMode: undefined })
     expect(
       claudeEvent(state, SOURCE_PANE, {
         hook_event_name: 'Stop',
         background_tasks: []
       })?.state
     ).toBe('done')
+  })
+
+  it('keeps foreground child work active before falling back to monitoring', () => {
+    const state = createHookListenerState()
+    claudeEvent(state, SOURCE_PANE, {
+      hook_event_name: 'SubagentStart',
+      agent_id: 'child-1'
+    })
+
+    expect(
+      claudeEvent(state, SOURCE_PANE, {
+        hook_event_name: 'Stop',
+        background_tasks: [{ id: 'child-1', type: 'subagent', status: 'running' }, RUNNING_SHELL]
+      })
+    ).toMatchObject({ state: 'working', workingMode: undefined })
+    expect(
+      claudeEvent(state, SOURCE_PANE, {
+        hook_event_name: 'SubagentStop',
+        agent_id: 'child-1'
+      })
+    ).toMatchObject({ state: 'working', workingMode: 'monitoring' })
   })
 
   it('keeps pending task state when pane authority moves', () => {
@@ -208,15 +229,15 @@ describe('Claude background task status', () => {
       claudeEvent(state, SOURCE_PANE, {
         hook_event_name: 'Stop',
         session_crons: [{ id: 'cron-1' }]
-      })?.state
-    ).toBe('working')
+      })
+    ).toMatchObject({ state: 'working', workingMode: 'monitoring' })
     expect(state.claudeActiveSessionCronPaneKeys.has(SOURCE_PANE)).toBe(true)
     expect(
       claudeEvent(state, SOURCE_PANE, {
         hook_event_name: 'SubagentStop',
         agent_id: 'child-1'
-      })?.state
-    ).toBe('working')
+      })
+    ).toMatchObject({ state: 'working', workingMode: 'monitoring' })
     expect(
       claudeEvent(state, SOURCE_PANE, {
         hook_event_name: 'Stop',

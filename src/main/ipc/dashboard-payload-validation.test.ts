@@ -97,6 +97,19 @@ function imageIconSrc(bodyBytes: number, withWhitespace = false): string {
 describe('dashboard payload validation', () => {
   it('accepts a complete dashboard snapshot', () => {
     expect(isDashboardSnapshot(SNAPSHOT)).toBe(true)
+    expect(
+      isDashboardSnapshot({
+        ...SNAPSHOT,
+        cards: [
+          {
+            ...SNAPSHOT.cards[0],
+            bucket: 'working',
+            dotState: 'working',
+            workingMode: 'monitoring'
+          }
+        ]
+      })
+    ).toBe(true)
   })
 
   it('rejects malformed or unbounded snapshot fields', () => {
@@ -105,6 +118,18 @@ describe('dashboard payload validation', () => {
       isDashboardSnapshot({
         ...SNAPSHOT,
         cards: [{ ...SNAPSHOT.cards[0], bucket: 'unexpected' }]
+      })
+    ).toBe(false)
+    expect(
+      isDashboardSnapshot({
+        ...SNAPSHOT,
+        cards: [{ ...SNAPSHOT.cards[0], dotState: 'monitoring' }]
+      })
+    ).toBe(false)
+    expect(
+      isDashboardSnapshot({
+        ...SNAPSHOT,
+        cards: [{ ...SNAPSHOT.cards[0], dotState: 'done', workingMode: 'monitoring' }]
       })
     ).toBe(false)
     expect(

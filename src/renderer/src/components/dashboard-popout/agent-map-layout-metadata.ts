@@ -3,7 +3,7 @@ import type { AgentMapLayout, AgentMapStatusCounts } from './agent-map-layout'
 import { agentMapDurationMinutes, agentMapNodeStatus } from './agent-map-node-metadata'
 
 function emptyStatusCounts(): AgentMapStatusCounts {
-  return { working: 0, blocked: 0, waiting: 0, done: 0, idle: 0 }
+  return { working: 0, monitoring: 0, blocked: 0, waiting: 0, done: 0, idle: 0 }
 }
 
 export function refreshAgentMapMetadata(

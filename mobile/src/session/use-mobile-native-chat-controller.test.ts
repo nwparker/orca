@@ -696,7 +696,9 @@ describe('useMobileNativeChatController streaming scope', () => {
     launchAgent: 'claude',
     agentStatus: {
       state: 'working',
+      workingMode: undefined as 'monitoring' | undefined,
       agentType: 'claude',
+      lastAssistantMessage: 'Partial reply',
       providerSession: { id: 'session-1' }
     },
     isActive: true
@@ -722,6 +724,7 @@ describe('useMobileNativeChatController streaming scope', () => {
 
   beforeEach(() => {
     viewMode.isTabChatView = () => true
+    workingTab.agentStatus.workingMode = undefined
     act(() => {
       renderer = create(createElement(Harness))
     })
@@ -736,6 +739,7 @@ describe('useMobileNativeChatController streaming scope', () => {
 
   it('holds the stream scope and liveness while the user peeks at the terminal', () => {
     expect(controller?.showNativeChat).toBe(true)
+    expect(controller?.nativeChatAgentWorking).toBe(true)
     const scopeKey = controller?.nativeChatStreamScopeKey
     expect(scopeKey).toContain('session-1')
     expect(controller?.nativeChatStreamLive).toBe(true)
@@ -747,6 +751,16 @@ describe('useMobileNativeChatController streaming scope', () => {
     expect(controller?.nativeChatAgentWorking).toBe(false)
     expect(controller?.nativeChatStreamScopeKey).toBe(scopeKey)
     expect(controller?.nativeChatStreamLive).toBe(true)
+  })
+
+  it('treats passive monitoring as outside the foreground turn', () => {
+    workingTab.agentStatus.workingMode = 'monitoring'
+    act(() => renderer?.update(createElement(Harness)))
+
+    expect(controller?.nativeChatAgentWorking).toBe(false)
+    expect(controller?.nativeChatStreamLive).toBe(false)
+    expect(controller?.nativeChatStreamingText).toBeUndefined()
+    expect(controller?.nativeChatSessionOptions?.isWorking).toBe(false)
   })
 
   it('keeps the delayed-send route guard view-gated, unlike the stream scope', () => {

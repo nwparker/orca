@@ -81,7 +81,10 @@ function WorktreeDetails({
   onDone: () => void
 }): React.JSX.Element {
   const activeCount =
-    worktree.statusCounts.working + worktree.statusCounts.blocked + worktree.statusCounts.waiting
+    worktree.statusCounts.working +
+    worktree.statusCounts.monitoring +
+    worktree.statusCounts.blocked +
+    worktree.statusCounts.waiting
   return (
     <PopoverContent align="center" sideOffset={10} className="w-80 p-0">
       <header className="border-b border-border px-3 py-2.5">
