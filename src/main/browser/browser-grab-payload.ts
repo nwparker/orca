@@ -6,6 +6,14 @@ import {
 } from '../../shared/browser-grab-types'
 
 const SAFE_GRAB_URL_PROTOCOLS = new Set(['http:', 'https:', 'file:'])
+const GRAB_HTML_URL_ATTRIBUTE =
+  /(\b(?:href|src|action)\s*=\s*)(?:"([^"]*)"|'([^']*)'|([^\s"'`=<>]+))/giu
+const GRAB_HTML_ATTRIBUTE_ESCAPE: Record<string, string> = {
+  '&': '&amp;',
+  '"': '&quot;',
+  '<': '&lt;',
+  '>': '&gt;'
+}
 
 /**
  * Re-validate and clamp all string, array, and budget fields in a grab payload
@@ -59,8 +67,7 @@ export function clampGrabPayload(raw: unknown): BrowserGrabPayload | null {
     return GRAB_SECRET_PATTERNS.some((p) => lower.includes(p))
   }
 
-  // Why: mirror the guest-side URL sanitization. Strip query strings and
-  // fragments to prevent token leakage even if the guest is compromised.
+  // Why: mirror guest sanitization so compromised guests cannot forward URL secrets.
   const sanitizeUrl = (rawUrl: unknown): string => {
     const str = typeof rawUrl === 'string' ? rawUrl : ''
     if (!str) {
@@ -74,6 +81,8 @@ export function clampGrabPayload(raw: unknown): BrowserGrabPayload | null {
       if (!SAFE_GRAB_URL_PROTOCOLS.has(url.protocol)) {
         return ''
       }
+      url.username = ''
+      url.password = ''
       url.search = ''
       url.hash = ''
       return url.toString()
@@ -111,6 +120,24 @@ export function clampGrabPayload(raw: unknown): BrowserGrabPayload | null {
       }
     }
     return filtered
+  }
+
+  const sanitizeHtmlSnippet = (value: unknown): string => {
+    const snippet = clampStr(value, GRAB_BUDGET.htmlSnippetMaxLength)
+    if (!snippet || containsSecret(snippet)) {
+      return snippet ? '[redacted]' : ''
+    }
+    return snippet.replace(
+      GRAB_HTML_URL_ATTRIBUTE,
+      (_match, prefix: string, doubleQuoted?: string, singleQuoted?: string, unquoted?: string) => {
+        const sanitized = sanitizeUrl(doubleQuoted ?? singleQuoted ?? unquoted ?? '')
+        const escaped = sanitized.replace(
+          /[&"<>]/g,
+          (character) => GRAB_HTML_ATTRIBUTE_ESCAPE[character] ?? ''
+        )
+        return `${prefix}"${escaped}"`
+      }
+    )
   }
 
   const safeMetadataStr = (value: unknown, max: number): string => {
@@ -181,7 +208,7 @@ export function clampGrabPayload(raw: unknown): BrowserGrabPayload | null {
       ),
       sourceFile: safeNullableMetadataStr(target.sourceFile, GRAB_BUDGET.sourceFileMaxLength),
       textSnippet: clampStr(target.textSnippet, GRAB_BUDGET.textSnippetMaxLength),
-      htmlSnippet: clampStr(target.htmlSnippet, GRAB_BUDGET.htmlSnippetMaxLength),
+      htmlSnippet: sanitizeHtmlSnippet(target.htmlSnippet),
       attributes: safeAttributes(target.attributes),
       accessibility: {
         role: safeNullableMetadataStr(accessibility?.role, 500),

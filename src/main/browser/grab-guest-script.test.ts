@@ -56,6 +56,8 @@ describe('buildGuestOverlayScript', () => {
   it('arm script strips script tags from HTML snippets', () => {
     const script = buildGuestOverlayScript('arm')
     expect(script).toContain("querySelectorAll('script')")
+    expect(script).toContain("clone.querySelectorAll('*')")
+    expect(script).toContain('sanitizeCloneElement(descendants[j])')
   })
 
   it('arm script only allows safe attributes', () => {
@@ -111,9 +113,11 @@ describe('buildGuestOverlayScript', () => {
     expect(script).toContain('100vh')
   })
 
-  it('arm script sanitizes URLs by stripping query strings', () => {
+  it('arm script sanitizes URL credentials, query strings, and fragments', () => {
     const script = buildGuestOverlayScript('arm')
     expect(script).toContain('sanitizeUrl')
+    expect(script).toContain("u.username = ''")
+    expect(script).toContain("u.password = ''")
     expect(script).toContain("u.search = ''")
     expect(script).toContain("u.hash = ''")
   })

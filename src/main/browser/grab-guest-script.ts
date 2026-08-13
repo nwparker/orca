@@ -109,6 +109,8 @@ const ARM_SCRIPT = `(function() {
       if (!SAFE_URL_PROTOCOLS.has(u.protocol)) {
         return '';
       }
+      u.username = '';
+      u.password = '';
       u.search = '';
       u.hash = '';
       return u.toString();
@@ -116,6 +118,31 @@ const ARM_SCRIPT = `(function() {
       // Why: returning the raw URL on parse failure could preserve javascript:
       // URIs or other non-http schemes. Return empty string instead.
       return '';
+    }
+  }
+
+  function isSafeAttributeName(name) {
+    return SAFE_ATTRS.has(name) || name.indexOf('aria-') === 0;
+  }
+
+  function sanitizeAttributeValue(name, value) {
+    if (containsSecret(value)) return '[redacted]';
+    if ((name === 'href' || name === 'src' || name === 'action') && value) {
+      return sanitizeUrl(value);
+    }
+    if (name === 'class') return clampStr(value, 200);
+    return value;
+  }
+
+  function sanitizeCloneElement(el) {
+    for (var i = el.attributes.length - 1; i >= 0; i--) {
+      var attr = el.attributes[i];
+      var name = attr.name.toLowerCase();
+      if (!isSafeAttributeName(name)) {
+        el.removeAttribute(attr.name);
+      } else {
+        el.setAttribute(name, sanitizeAttributeValue(name, attr.value));
+      }
     }
   }
 
@@ -246,6 +273,11 @@ const ARM_SCRIPT = `(function() {
     for (var i = 0; i < scripts.length; i++) {
       scripts[i].remove();
     }
+    sanitizeCloneElement(clone);
+    var descendants = clone.querySelectorAll('*');
+    for (var j = 0; j < descendants.length; j++) {
+      sanitizeCloneElement(descendants[j]);
+    }
     var html = clone.outerHTML || '';
     return clampStr(html, BUDGET.htmlSnippetMaxLength);
   }
@@ -255,21 +287,8 @@ const ARM_SCRIPT = `(function() {
     for (var i = 0; i < el.attributes.length; i++) {
       var attr = el.attributes[i];
       var name = attr.name.toLowerCase();
-      var isAria = name.indexOf('aria-') === 0;
-      if (!SAFE_ATTRS.has(name) && !isAria) continue;
-      var value = attr.value;
-      // Redact secret-looking values
-      if (containsSecret(value)) {
-        attrs[name] = '[redacted]';
-      } else if ((name === 'href' || name === 'src' || name === 'action') && value) {
-        // Strip query strings and fragments from URL-bearing attributes
-        attrs[name] = sanitizeUrl(value);
-      } else if (name === 'class') {
-        // Cap class list length
-        attrs[name] = clampStr(value, 200);
-      } else {
-        attrs[name] = value;
-      }
+      if (!isSafeAttributeName(name)) continue;
+      attrs[name] = sanitizeAttributeValue(name, attr.value);
     }
     return attrs;
   }

@@ -148,4 +148,31 @@ describe('clampGrabPayload', () => {
     expect(payload?.target.attributes.action).toBe('')
     expect(payload?.target.attributes.title).toBe('Safe label')
   })
+
+  it('strips credentials from page and attribute URLs', () => {
+    const payload = clampGrabPayload(
+      makeRawPayload({
+        page: {
+          ...(makeRawPayload().page as Record<string, unknown>),
+          sanitizedUrl: 'https://alice:s3cr3t@example.com/page?token=x#fragment'
+        },
+        target: {
+          ...(makeRawPayload().target as Record<string, unknown>),
+          htmlSnippet:
+            '<a href="https://bob:hunter2@example.net/path?q=1#fragment">Private link</a>',
+          attributes: {
+            href: 'https://bob:hunter2@example.net/path?q=1#fragment',
+            src: 'https://carol:p4ss@example.org/image.png?size=2',
+            action: 'https://dave:letmein@example.edu/submit#done'
+          }
+        }
+      })
+    )
+
+    expect(payload?.page.sanitizedUrl).toBe('https://example.com/page')
+    expect(payload?.target.attributes.href).toBe('https://example.net/path')
+    expect(payload?.target.attributes.src).toBe('https://example.org/image.png')
+    expect(payload?.target.attributes.action).toBe('https://example.edu/submit')
+    expect(payload?.target.htmlSnippet).toBe('<a href="https://example.net/path">Private link</a>')
+  })
 })
