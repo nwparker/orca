@@ -78,30 +78,28 @@ function fileHandle(
 }
 
 describe('readWindowsClipboardImageFileAsPng', () => {
-  it.each([
-    'C:\\Users\\alice\\图片\\shot.PNG',
-    '\\\\server\\share\\shot.jpeg',
-    '\\\\?\\C:\\Users\\alice\\shot.jpg',
-    '\\\\?\\UNC\\server\\share\\shot.png'
-  ])('decodes and converts a bounded FileNameW path: %s', async (filePath) => {
-    const source = filePath.toLowerCase().endsWith('.png') ? pngHeader() : jpegHeader()
-    const png = Buffer.from([9, 8, 7])
-    const handle = fileHandle(source, { chunkSize: 3 })
-    const openFile = vi.fn().mockResolvedValue(handle)
-    const createImageFromBuffer = vi.fn(() => image(png) as never)
+  it.each(['C:\\Users\\alice\\图片\\shot.PNG', '\\\\?\\C:\\Users\\alice\\shot.jpg'])(
+    'decodes and converts a bounded FileNameW path: %s',
+    async (filePath) => {
+      const source = filePath.toLowerCase().endsWith('.png') ? pngHeader() : jpegHeader()
+      const png = Buffer.from([9, 8, 7])
+      const handle = fileHandle(source, { chunkSize: 3 })
+      const openFile = vi.fn().mockResolvedValue(handle)
+      const createImageFromBuffer = vi.fn(() => image(png) as never)
 
-    await expect(
-      readWindowsClipboardImageFileAsPng(clipboardFormats(filePath), {
-        createImageFromBuffer,
-        openFile
-      })
-    ).resolves.toEqual(png)
+      await expect(
+        readWindowsClipboardImageFileAsPng(clipboardFormats(filePath), {
+          createImageFromBuffer,
+          openFile
+        })
+      ).resolves.toEqual(png)
 
-    expect(openFile).toHaveBeenCalledWith(filePath)
-    expect(handle.read.mock.calls.length).toBeGreaterThan(1)
-    expect(handle.close).toHaveBeenCalledOnce()
-    expect(createImageFromBuffer).toHaveBeenCalledWith(source)
-  })
+      expect(openFile).toHaveBeenCalledWith(filePath)
+      expect(handle.read.mock.calls.length).toBeGreaterThan(1)
+      expect(handle.close).toHaveBeenCalledOnce()
+      expect(createImageFromBuffer).toHaveBeenCalledWith(source)
+    }
+  )
 
   it.each([
     ['empty', Buffer.alloc(0)],
@@ -111,6 +109,8 @@ describe('readWindowsClipboardImageFileAsPng', () => {
     ['drive-relative path', fileNameW('C:shot.png')],
     ['rooted drive-relative path', fileNameW('\\shot.png')],
     ['device namespace', fileNameW('\\\\.\\pipe\\shot.png')],
+    ['UNC share', fileNameW('\\\\server\\share\\shot.png')],
+    ['extended UNC share', fileNameW('\\\\?\\UNC\\server\\share\\shot.png')],
     ['UNC named-pipe namespace', fileNameW('\\\\server\\pipe\\shot.png')],
     ['extended UNC named-pipe namespace', fileNameW('\\\\?\\UNC\\server\\pipe\\shot.png')],
     ['multiple paths', Buffer.from('C:\\one.png\0C:\\two.png\0', 'utf16le')],

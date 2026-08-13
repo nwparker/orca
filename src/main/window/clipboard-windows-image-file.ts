@@ -28,23 +28,11 @@ const JPEG_START_OF_FRAME_MARKERS = new Set([
   0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf
 ])
 
-function isOrdinaryUncShare(share: string | undefined): boolean {
-  return typeof share === 'string' && share.toLowerCase() !== 'pipe'
-}
-
-function isFullyQualifiedWindowsPath(filePath: string): boolean {
+function isLocalDriveWindowsPath(filePath: string): boolean {
   if (/^[A-Za-z]:[\\/]/.test(filePath)) {
     return true
   }
-  if (/^\\\\\?\\[A-Za-z]:\\/.test(filePath)) {
-    return true
-  }
-  const extendedUnc = /^\\\\\?\\UNC\\[^\\/]+\\([^\\/]+)(?:\\|$)/i.exec(filePath)
-  if (extendedUnc) {
-    return isOrdinaryUncShare(extendedUnc[1])
-  }
-  const unc = /^[/\\]{2}(?![?.][/\\])[^/\\]+[/\\]([^/\\]+)(?:[/\\]|$)/.exec(filePath)
-  return isOrdinaryUncShare(unc?.[1])
+  return /^\\\\\?\\[A-Za-z]:\\/.test(filePath)
 }
 
 function decodeFileNameW(value: Buffer): string | null {
@@ -62,7 +50,7 @@ function decodeFileNameW(value: Buffer): string | null {
     end -= 2
   }
   const filePath = value.subarray(0, end).toString('utf16le')
-  if (!filePath || filePath.includes('\0') || !isFullyQualifiedWindowsPath(filePath)) {
+  if (!filePath || filePath.includes('\0') || !isLocalDriveWindowsPath(filePath)) {
     return null
   }
   return IMAGE_FILE_EXTENSION_SET.has(win32.extname(filePath).toLowerCase()) ? filePath : null
