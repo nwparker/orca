@@ -41,9 +41,9 @@ function diffCell(count) {
     return '0'
   }
   if (count > 0) {
-    return `+${count} \`${COLOR_ADDED}\``
+    return `$\\color{${COLOR_ADDED}}{\\textsf{+${count}}}$`
   }
-  return `−${Math.abs(count)} \`${COLOR_DELETED}\``
+  return `$\\color{${COLOR_DELETED}}{\\textsf{−${Math.abs(count)}}}$`
 }
 
 function locTableRow(label, bucket) {
