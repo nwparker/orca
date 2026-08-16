@@ -108,10 +108,10 @@ describe('PR test LoC summary', () => {
     })
 
     expect(block).toContain(
-      '| Test | 1 | $\\color{#1a7f37}{\\textsf{+2}}$ | $\\color{#cf222e}{\\textsf{−5}}$ | $\\color{#cf222e}{\\textsf{−3}}$ |'
+      '| Test | 1 | $\\color{#1a7f37}{\\textbf{+2}}$ | $\\color{#cf222e}{\\textbf{−5}}$ | $\\color{#cf222e}{\\textbf{−3}}$ |'
     )
     expect(block).toContain(
-      '| Prod | 1 | 0 | $\\color{#cf222e}{\\textsf{−4}}$ | $\\color{#cf222e}{\\textsf{−4}}$ |'
+      '| Prod | 1 | $\\color{white}{\\textbf{0}}$ | $\\color{#cf222e}{\\textbf{−4}}$ | $\\color{#cf222e}{\\textbf{−4}}$ |'
     )
   })
 
@@ -124,10 +124,10 @@ describe('PR test LoC summary', () => {
 
     expect(block).toContain(LOC_HANDS_OFF_COMMENT)
     expect(block).toContain(
-      '| Test | 1 | $\\color{#1a7f37}{\\textsf{+2}}$ | $\\color{#cf222e}{\\textsf{−1}}$ | $\\color{#1a7f37}{\\textsf{+1}}$ |'
+      '| Test | 1 | $\\color{#1a7f37}{\\textbf{+2}}$ | $\\color{#cf222e}{\\textbf{−1}}$ | $\\color{#1a7f37}{\\textbf{+1}}$ |'
     )
     expect(block).toContain(
-      '| Prod | 1 | $\\color{#1a7f37}{\\textsf{+4}}$ | 0 | $\\color{#1a7f37}{\\textsf{+4}}$ |'
+      '| Prod | 1 | $\\color{#1a7f37}{\\textbf{+4}}$ | $\\color{white}{\\textbf{0}}$ | $\\color{#1a7f37}{\\textbf{+4}}$ |'
     )
     expect(block).not.toContain('| Total |')
     expect(mergeLocBlock('## ELI5\n\nHello\n', totals)).toBe(`${block}\n\n## ELI5\n\nHello\n`)
@@ -160,10 +160,10 @@ describe('PR test LoC summary', () => {
     expect(result.stdout.startsWith('<!-- orca-pr-loc -->')).toBe(true)
     expect(result.stdout).toContain(LOC_HANDS_OFF_COMMENT)
     expect(result.stdout).toContain(
-      '| Test | 1 | $\\color{#1a7f37}{\\textsf{+6}}$ | $\\color{#cf222e}{\\textsf{−1}}$ | $\\color{#1a7f37}{\\textsf{+5}}$ |'
+      '| Test | 1 | $\\color{#1a7f37}{\\textbf{+6}}$ | $\\color{#cf222e}{\\textbf{−1}}$ | $\\color{#1a7f37}{\\textbf{+5}}$ |'
     )
     expect(result.stdout).toContain(
-      '| Prod | 1 | $\\color{#1a7f37}{\\textsf{+2}}$ | 0 | $\\color{#1a7f37}{\\textsf{+2}}$ |'
+      '| Prod | 1 | $\\color{#1a7f37}{\\textbf{+2}}$ | $\\color{white}{\\textbf{0}}$ | $\\color{#1a7f37}{\\textbf{+2}}$ |'
     )
     expect(result.stdout).not.toContain('| Total |')
     expect(result.stdout).toContain('## ELI5\n\nHello\n')

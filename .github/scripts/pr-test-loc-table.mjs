@@ -38,12 +38,12 @@ const COLOR_DELETED = '#cf222e'
 
 function diffCell(count) {
   if (count === 0) {
-    return '0'
+    return `$\\color{white}{\\textbf{0}}$`
   }
   if (count > 0) {
-    return `$\\color{${COLOR_ADDED}}{\\textsf{+${count}}}$`
+    return `$\\color{${COLOR_ADDED}}{\\textbf{+${count}}}$`
   }
-  return `$\\color{${COLOR_DELETED}}{\\textsf{−${Math.abs(count)}}}$`
+  return `$\\color{${COLOR_DELETED}}{\\textbf{−${Math.abs(count)}}}$`
 }
 
 function locTableRow(label, bucket) {
