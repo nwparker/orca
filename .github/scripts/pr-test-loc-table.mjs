@@ -37,7 +37,7 @@ const COLOR_ADDED = '#1a7f37'
 const COLOR_DELETED = '#cf222e'
 
 function diffMath(color, text) {
-  return `$\\color{${color}}{\\large{\\textbf{\\textsf{${text}}}}}$`
+  return `$\\color{${color}}{\\large{\\mathbf{${text}}}}$`
 }
 
 function diffCell(count) {

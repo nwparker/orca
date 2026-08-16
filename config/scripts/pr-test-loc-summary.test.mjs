@@ -108,10 +108,10 @@ describe('PR test LoC summary', () => {
     })
 
     expect(block).toContain(
-      '| Test | 1 | $\\color{#1a7f37}{\\large{\\textbf{\\textsf{+2}}}}$ | $\\color{#cf222e}{\\large{\\textbf{\\textsf{−5}}}}$ | $\\color{#cf222e}{\\large{\\textbf{\\textsf{−3}}}}$ |'
+      '| Test | 1 | $\\color{#1a7f37}{\\large{\\mathbf{+2}}}$ | $\\color{#cf222e}{\\large{\\mathbf{−5}}}$ | $\\color{#cf222e}{\\large{\\mathbf{−3}}}$ |'
     )
     expect(block).toContain(
-      '| Prod | 1 | $\\color{white}{\\large{\\textbf{\\textsf{0}}}}$ | $\\color{#cf222e}{\\large{\\textbf{\\textsf{−4}}}}$ | $\\color{#cf222e}{\\large{\\textbf{\\textsf{−4}}}}$ |'
+      '| Prod | 1 | $\\color{white}{\\large{\\mathbf{0}}}$ | $\\color{#cf222e}{\\large{\\mathbf{−4}}}$ | $\\color{#cf222e}{\\large{\\mathbf{−4}}}$ |'
     )
   })
 
@@ -124,10 +124,10 @@ describe('PR test LoC summary', () => {
 
     expect(block).toContain(LOC_HANDS_OFF_COMMENT)
     expect(block).toContain(
-      '| Test | 1 | $\\color{#1a7f37}{\\large{\\textbf{\\textsf{+2}}}}$ | $\\color{#cf222e}{\\large{\\textbf{\\textsf{−1}}}}$ | $\\color{#1a7f37}{\\large{\\textbf{\\textsf{+1}}}}$ |'
+      '| Test | 1 | $\\color{#1a7f37}{\\large{\\mathbf{+2}}}$ | $\\color{#cf222e}{\\large{\\mathbf{−1}}}$ | $\\color{#1a7f37}{\\large{\\mathbf{+1}}}$ |'
     )
     expect(block).toContain(
-      '| Prod | 1 | $\\color{#1a7f37}{\\large{\\textbf{\\textsf{+4}}}}$ | $\\color{white}{\\large{\\textbf{\\textsf{0}}}}$ | $\\color{#1a7f37}{\\large{\\textbf{\\textsf{+4}}}}$ |'
+      '| Prod | 1 | $\\color{#1a7f37}{\\large{\\mathbf{+4}}}$ | $\\color{white}{\\large{\\mathbf{0}}}$ | $\\color{#1a7f37}{\\large{\\mathbf{+4}}}$ |'
     )
     expect(block).not.toContain('| Total |')
     expect(mergeLocBlock('## ELI5\n\nHello\n', totals)).toBe(`${block}\n\n## ELI5\n\nHello\n`)
@@ -160,10 +160,10 @@ describe('PR test LoC summary', () => {
     expect(result.stdout.startsWith('<!-- orca-pr-loc -->')).toBe(true)
     expect(result.stdout).toContain(LOC_HANDS_OFF_COMMENT)
     expect(result.stdout).toContain(
-      '| Test | 1 | $\\color{#1a7f37}{\\large{\\textbf{\\textsf{+6}}}}$ | $\\color{#cf222e}{\\large{\\textbf{\\textsf{−1}}}}$ | $\\color{#1a7f37}{\\large{\\textbf{\\textsf{+5}}}}$ |'
+      '| Test | 1 | $\\color{#1a7f37}{\\large{\\mathbf{+6}}}$ | $\\color{#cf222e}{\\large{\\mathbf{−1}}}$ | $\\color{#1a7f37}{\\large{\\mathbf{+5}}}$ |'
     )
     expect(result.stdout).toContain(
-      '| Prod | 1 | $\\color{#1a7f37}{\\large{\\textbf{\\textsf{+2}}}}$ | $\\color{white}{\\large{\\textbf{\\textsf{0}}}}$ | $\\color{#1a7f37}{\\large{\\textbf{\\textsf{+2}}}}$ |'
+      '| Prod | 1 | $\\color{#1a7f37}{\\large{\\mathbf{+2}}}$ | $\\color{white}{\\large{\\mathbf{0}}}$ | $\\color{#1a7f37}{\\large{\\mathbf{+2}}}$ |'
     )
     expect(result.stdout).not.toContain('| Total |')
     expect(result.stdout).toContain('## ELI5\n\nHello\n')
