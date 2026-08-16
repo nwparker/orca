@@ -101,6 +101,20 @@ describe('PR test LoC summary', () => {
     })
   })
 
+  it('colors added cells green and deleted or negative-net cells red', () => {
+    const block = renderLocBlock({
+      test: { files: 1, added: 2, deleted: 5 },
+      nonTest: { files: 1, added: 0, deleted: 4 }
+    })
+
+    expect(block).toContain(
+      '| Test | 1 | <span style="color:#1a7f37">+2</span> | <span style="color:#cf222e">−5</span> | <span style="color:#cf222e">−3</span> |'
+    )
+    expect(block).toContain(
+      '| Prod | 1 | 0 | <span style="color:#cf222e">−4</span> | <span style="color:#cf222e">−4</span> |'
+    )
+  })
+
   it('replaces an existing header and prepends when missing', () => {
     const totals = {
       test: { files: 1, added: 2, deleted: 1 },
@@ -109,8 +123,12 @@ describe('PR test LoC summary', () => {
     const block = renderLocBlock(totals)
 
     expect(block).toContain(LOC_HANDS_OFF_COMMENT)
-    expect(block).toContain('| Test | 1 | +2 | −1 | +1 |')
-    expect(block).toContain('| Prod | 1 | +4 | 0 | +4 |')
+    expect(block).toContain(
+      '| Test | 1 | <span style="color:#1a7f37">+2</span> | <span style="color:#cf222e">−1</span> | <span style="color:#1a7f37">+1</span> |'
+    )
+    expect(block).toContain(
+      '| Prod | 1 | <span style="color:#1a7f37">+4</span> | 0 | <span style="color:#1a7f37">+4</span> |'
+    )
     expect(block).not.toContain('| Total |')
     expect(mergeLocBlock('## ELI5\n\nHello\n', totals)).toBe(`${block}\n\n## ELI5\n\nHello\n`)
     expect(mergeLocBlock(`${block}\n\n## ELI5\n`, totals)).toBe(`${block}\n\n## ELI5\n`)
@@ -141,8 +159,12 @@ describe('PR test LoC summary', () => {
     expect(result.status).toBe(0)
     expect(result.stdout.startsWith('<!-- orca-pr-loc -->')).toBe(true)
     expect(result.stdout).toContain(LOC_HANDS_OFF_COMMENT)
-    expect(result.stdout).toContain('| Test | 1 | +6 | −1 | +5 |')
-    expect(result.stdout).toContain('| Prod | 1 | +2 | 0 | +2 |')
+    expect(result.stdout).toContain(
+      '| Test | 1 | <span style="color:#1a7f37">+6</span> | <span style="color:#cf222e">−1</span> | <span style="color:#1a7f37">+5</span> |'
+    )
+    expect(result.stdout).toContain(
+      '| Prod | 1 | <span style="color:#1a7f37">+2</span> | 0 | <span style="color:#1a7f37">+2</span> |'
+    )
     expect(result.stdout).not.toContain('| Total |')
     expect(result.stdout).toContain('## ELI5\n\nHello\n')
     expect(result.stdout.match(/<!-- orca-pr-loc -->/g)).toHaveLength(1)
