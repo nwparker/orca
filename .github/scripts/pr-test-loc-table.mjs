@@ -36,14 +36,18 @@ export function sumChangedFiles(files) {
 const COLOR_ADDED = '#1a7f37'
 const COLOR_DELETED = '#cf222e'
 
+function diffMath(color, text) {
+  return `$\\color{${color}}{\\large{\\textbf{\\textsf{${text}}}}}$`
+}
+
 function diffCell(count) {
   if (count === 0) {
-    return `$\\color{white}{\\textbf{0}}$`
+    return diffMath('white', '0')
   }
   if (count > 0) {
-    return `$\\color{${COLOR_ADDED}}{\\textbf{+${count}}}$`
+    return diffMath(COLOR_ADDED, `+${count}`)
   }
-  return `$\\color{${COLOR_DELETED}}{\\textbf{−${Math.abs(count)}}}$`
+  return diffMath(COLOR_DELETED, `−${Math.abs(count)}`)
 }
 
 function locTableRow(label, bucket) {
