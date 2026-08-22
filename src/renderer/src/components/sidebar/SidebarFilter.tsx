@@ -216,7 +216,7 @@ const SidebarFilter = React.memo(function SidebarFilter({
         side={contentSide}
         align="start"
         sideOffset={8}
-        className="w-72"
+        className="w-64"
         data-workspace-board-preserve-open={preserveWorkspaceBoardOpen ? '' : undefined}
       >
         <FilterToggleRow

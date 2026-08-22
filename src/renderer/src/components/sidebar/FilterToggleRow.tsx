@@ -37,7 +37,7 @@ export function FilterToggleRow({
       className={cn(
         // Why pl-* and not px-2 + pl-6: Tailwind v4 emits px as padding-inline,
         // which outranks a physical pl-6 override and flattens the indent.
-        'flex w-full items-center justify-between gap-2 rounded-[5px] py-1.5 pr-2 text-[12px] font-medium hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+        'flex w-full items-center justify-between gap-2 rounded-[5px] py-1 pr-2 text-[12px] font-medium hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
         indented ? 'pl-7' : 'pl-2'
       )}
     >

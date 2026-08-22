@@ -168,7 +168,7 @@ const SidebarWorkspaceOptionsMenu = React.memo(function SidebarWorkspaceOptionsM
         side="right"
         align="start"
         sideOffset={8}
-        className="w-72 pb-2"
+        className="w-64 pb-2"
         data-workspace-board-preserve-open={preserveWorkspaceBoardOpen ? '' : undefined}
       >
         {/* Why: host + project filters share one section and the same single-row
