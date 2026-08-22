@@ -659,7 +659,7 @@ export default function NewWorkspaceComposerCard({
         containerClassName
       )}
     >
-      <div className="min-w-0 space-y-4 pt-3">
+      <div className="min-w-0 space-y-3 pt-2">
         <div className="space-y-1" data-contextual-tour-target="workspace-creation-project">
           <div className="flex items-center justify-between gap-2">
             <label className="text-xs font-medium text-muted-foreground">
@@ -700,7 +700,7 @@ export default function NewWorkspaceComposerCard({
               translate('auto.components.NewWorkspaceComposerCard.dccd26d4e4', 'Choose project')
             }
             // Why: programmatic .focus() doesn't reliably trigger :focus-visible in Chromium, so mirror the Input ring onto :focus.
-            triggerClassName="h-9 w-full border-input text-sm focus:border-ring focus:ring-[3px] focus:ring-ring/50"
+            triggerClassName="h-8 w-full border-input text-sm focus:border-ring focus:ring-[3px] focus:ring-ring/50"
             invalid={Boolean(projectError)}
             describedBy={projectDescriptionId}
           />
@@ -721,7 +721,7 @@ export default function NewWorkspaceComposerCard({
             // Why: Run on is nested in the Project block (so they share the
             // error/empty states), which put it on the block's 4px rhythm. It's
             // its own field, so give it the 16px other fields get.
-            <div className="space-y-1 pt-3">
+            <div className="space-y-1 pt-1">
               <label className="block min-w-0 truncate text-xs font-medium text-muted-foreground">
                 {translate('auto.components.NewWorkspaceComposerCard.runOn', 'Run on')}
               </label>
@@ -933,7 +933,7 @@ export default function NewWorkspaceComposerCard({
             onSetDefault={handleSetDefaultAgent}
             // Why: match Project/Run-on — full-width form row, no 260px min that can overflow the dialog column.
             allowNarrowTrigger
-            triggerClassName="h-9 w-full min-w-0 border-input text-sm focus:border-ring focus:ring-[3px] focus:ring-ring/50"
+            triggerClassName="h-8 w-full min-w-0 border-input text-sm focus:border-ring focus:ring-[3px] focus:ring-ring/50"
             onTriggerEnter={createDisabled ? undefined : onCreate}
           />
         </div>
