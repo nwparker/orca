@@ -1264,10 +1264,7 @@ function Settings(): React.JSX.Element {
 
                 <SettingsSection
                   id="accounts"
-                  title={translate(
-                    'auto.components.settings.Settings.ad6c529693',
-                    'AI Provider Accounts'
-                  )}
+                  title={translate('auto.components.settings.Settings.ad6c529693', 'AI Providers')}
                   description={translate(
                     'auto.components.settings.Settings.21f09426ea',
                     'Optional. Orca works with your existing provider logins; add accounts only if you want Orca to help switch between them.'

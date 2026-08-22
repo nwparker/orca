@@ -102,7 +102,7 @@ function renderSidebar(
             sections: [
               {
                 id: 'accounts',
-                title: 'AI Provider Accounts',
+                title: 'AI Providers',
                 icon: Bot,
                 badge: 'Optional'
               }

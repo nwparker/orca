@@ -181,10 +181,7 @@ export function buildSettingsNavigationMetadata({
     },
     {
       id: 'accounts',
-      title: translate(
-        'auto.hooks.useSettingsNavigationMetadata.f70ac54d38',
-        'AI Provider Accounts'
-      ),
+      title: translate('auto.hooks.useSettingsNavigationMetadata.f70ac54d38', 'AI Providers'),
       description: translate(
         'auto.hooks.useSettingsNavigationMetadata.b1c2f8b0ac',
         'Optional account switching and usage setup for Claude, Codex, Gemini, OpenCode Go, MiniMax, and Grok.'
