@@ -63,10 +63,10 @@ export function SettingsSection({
   }
 
   return (
-    <section id={id} data-settings-section={id} className={cn('scroll-mt-8 space-y-6', className)}>
-      <div className="flex flex-wrap items-start justify-between gap-4 border-b border-border/60 pb-5">
-        <div className="min-w-0 space-y-2">
-          <h2 className="flex flex-wrap items-center gap-2 text-2xl font-semibold leading-tight text-foreground">
+    <section id={id} data-settings-section={id} className={cn('scroll-mt-8 space-y-4', className)}>
+      <div className="flex flex-wrap items-start justify-between gap-4 border-b border-border/60 pb-4">
+        <div className="min-w-0 space-y-1.5">
+          <h2 className="flex flex-wrap items-center gap-2 text-xl font-semibold leading-tight text-foreground">
             {title}
             {badge ? (
               <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.05em] text-muted-foreground">
@@ -75,7 +75,7 @@ export function SettingsSection({
             ) : null}
             {badgeAccessory}
           </h2>
-          <p className="max-w-3xl text-sm leading-6 text-muted-foreground">{description}</p>
+          <p className="max-w-3xl text-[13px] leading-5 text-muted-foreground">{description}</p>
         </div>
         {headerAction ? <div className="shrink-0">{headerAction}</div> : null}
       </div>
@@ -84,7 +84,7 @@ export function SettingsSection({
           contained inside the section, not as a continuation of the sidebar. */}
       <div
         className={cn(
-          'rounded-xl border border-border/50 bg-card/50 px-7 py-6 shadow-xs',
+          'rounded-xl border border-border/50 bg-card/50 px-5 py-4 shadow-xs',
           bodyClassName
         )}
       >
