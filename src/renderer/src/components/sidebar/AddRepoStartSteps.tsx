@@ -167,7 +167,7 @@ export function AddRepoLocalStartStep({
       </DialogHeader>
 
       <div
-        className="space-y-3 pt-2"
+        className="space-y-2.5 pt-1"
         ref={actionsRef}
         onBlur={handleActionsBlur}
         onKeyDown={handleArrowNavigation}
@@ -186,8 +186,8 @@ export function AddRepoLocalStartStep({
 
         {/* Keep secondary entry methods always visible so they stay discoverable without an extra click. */}
         {/* Label clarifies the lighter-weight rows are alternate entry methods, not lesser features. */}
-        <div className="space-y-1.5">
-          <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+        <div className="space-y-1">
+          <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
             {translate('auto.components.sidebar.AddRepoStartSteps.87596c1446', 'Other ways to add')}
           </p>
           {/* Outline uses the `input` token (white-ish in dark mode) to match Browse's visible outline variant;
@@ -268,7 +268,7 @@ const AddRepoPrimaryStartAction = ({
     disabled={disabled}
     data-add-repo-action
     className={cn(
-      'h-auto min-h-[3.75rem] w-full justify-start gap-3 whitespace-normal px-3 py-2.5 text-left',
+      'h-auto min-h-[3.25rem] w-full justify-start gap-3 whitespace-normal px-3 py-2 text-left',
       selected
         ? 'border border-ring bg-foreground/10 text-foreground focus-visible:border-ring focus-visible:ring-0 dark:bg-accent dark:text-accent-foreground'
         : 'border border-border bg-background shadow-none dark:bg-background'
@@ -310,7 +310,7 @@ function AddRepoSecondaryStartAction({
       onClick={onClick}
       onFocus={onFocus}
       className={cn(
-        'flex min-h-[3.25rem] w-full items-center gap-3 border border-transparent px-3 py-2.5 text-left transition-colors focus-visible:outline-none disabled:pointer-events-none disabled:cursor-default disabled:opacity-40',
+        'flex min-h-[2.75rem] w-full items-center gap-3 border border-transparent px-3 py-2 text-left transition-colors focus-visible:outline-none disabled:pointer-events-none disabled:cursor-default disabled:opacity-40',
         className,
         // Selected mirrors the primary card's neutral wash so the highlight moves between rows.
         selected
@@ -320,7 +320,7 @@ function AddRepoSecondaryStartAction({
     >
       <span
         className={cn(
-          'grid size-7 shrink-0 place-items-center rounded-md',
+          'grid size-6 shrink-0 place-items-center rounded-md',
           selected ? 'bg-background/70 text-accent-foreground' : 'text-muted-foreground'
         )}
       >
