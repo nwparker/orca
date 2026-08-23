@@ -179,6 +179,27 @@ describe('daemon pty foreground scan cadence', () => {
     expect(resolveAgentForegroundProcessMock).toHaveBeenCalledTimes(4)
   })
 
+  it('coalesces foreground reads while one identity refresh is unresolved', async () => {
+    let resolveScan: (value: string) => void = () => {}
+    resolveAgentForegroundProcessMock.mockImplementationOnce(
+      () =>
+        new Promise<string>((resolve) => {
+          resolveScan = resolve
+        })
+    )
+    const { handle } = await spawnShellSubprocess('zsh', 'darwin')
+
+    expect(handle.getForegroundProcess()).toBe('zsh')
+    expect(handle.getForegroundProcess()).toBe('zsh')
+    expect(handle.getForegroundProcess()).toBe('zsh')
+    expect(resolveAgentForegroundProcessMock).toHaveBeenCalledOnce()
+
+    resolveScan('codex')
+    await flushAsyncTicks()
+    expect(handle.getForegroundProcess()).toBe('codex')
+    expect(resolveAgentForegroundProcessMock).toHaveBeenCalledOnce()
+  })
+
   it('keeps the 5s retry for an idle POSIX shell with no output', async () => {
     resolveAgentForegroundProcessMock.mockResolvedValue('zsh')
     const { handle } = await spawnShellSubprocess('zsh', 'darwin')

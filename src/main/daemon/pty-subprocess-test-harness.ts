@@ -49,14 +49,16 @@ export type MockPtyProcess = {
   kill: Mock<(signal?: string) => void>
   process: string
   onData: Mock<(cb: (data: string) => void) => { dispose: Mock<() => void> }>
-  onExit: Mock<(cb: (e: { exitCode: number }) => void) => { dispose: Mock<() => void> }>
+  onExit: Mock<
+    (cb: (e: { exitCode: number; signal?: number }) => void) => { dispose: Mock<() => void> }
+  >
   _simulateData: (data: string) => void
-  _simulateExit: (code: number) => void
+  _simulateExit: (code: number, signal?: number) => void
 }
 
 export function mockPtyProcess(pid = 12345): MockPtyProcess {
   const onDataListeners: ((data: string) => void)[] = []
-  const onExitListeners: ((e: { exitCode: number }) => void)[] = []
+  const onExitListeners: ((e: { exitCode: number; signal?: number }) => void)[] = []
   return {
     pid,
     write: vi.fn(),
@@ -67,12 +69,13 @@ export function mockPtyProcess(pid = 12345): MockPtyProcess {
       onDataListeners.push(cb)
       return { dispose: vi.fn() }
     }),
-    onExit: vi.fn((cb: (e: { exitCode: number }) => void) => {
+    onExit: vi.fn((cb: (e: { exitCode: number; signal?: number }) => void) => {
       onExitListeners.push(cb)
       return { dispose: vi.fn() }
     }),
     _simulateData: (data: string) => onDataListeners.forEach((cb) => cb(data)),
-    _simulateExit: (code: number) => onExitListeners.forEach((cb) => cb({ exitCode: code }))
+    _simulateExit: (code: number, signal?: number) =>
+      onExitListeners.forEach((cb) => cb({ exitCode: code, ...(signal ? { signal } : {}) }))
   }
 }
 

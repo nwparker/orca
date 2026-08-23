@@ -316,4 +316,41 @@ describe('daemon-init: runRestartDaemon (7-step sequence)', () => {
     )
     expect(tokenUnlinks.length).toBeGreaterThan(0)
   })
+
+  it('disconnects without shutting down the daemon process', async () => {
+    const mod = await importFresh()
+    await mod.initDaemonPtyProvider()
+
+    await mod.disconnectDaemon()
+
+    expect(adapterInstances[0].disconnectOnly).toHaveBeenCalledOnce()
+    expect(adapterInstances[0].dispose).not.toHaveBeenCalled()
+    expect(spawnerInstances[0].shutdown).not.toHaveBeenCalled()
+    expect(mod.getDaemonProvider()).toBeNull()
+  })
+
+  it('disposes the provider before shutting down the daemon process', async () => {
+    const mod = await importFresh()
+    await mod.initDaemonPtyProvider()
+    const order: string[] = []
+    adapterInstances[0].dispose.mockImplementation(() => order.push('dispose'))
+    spawnerInstances[0].shutdown.mockImplementation(async () => {
+      order.push('shutdown')
+    })
+
+    await mod.shutdownDaemon()
+
+    expect(order).toEqual(['dispose', 'shutdown'])
+    expect(mod.getDaemonProvider()).toBeNull()
+  })
+
+  it('returns an unverifiable inventory when daemon listing fails', async () => {
+    const mod = await importFresh()
+    listProcessesControl.current = async () => {
+      throw new Error('transport unavailable')
+    }
+    await mod.initDaemonPtyProvider()
+
+    await expect(mod.listLiveDaemonPtyIds()).resolves.toBeNull()
+  })
 })

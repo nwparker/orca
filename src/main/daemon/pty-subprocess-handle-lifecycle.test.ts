@@ -242,6 +242,18 @@ describe('createPtySubprocess', () => {
     expect(codes).toEqual([42])
   })
 
+  it('preserves host signal evidence in the exit cause', async () => {
+    const proc = mockPtyProcess()
+    spawnMock.mockReturnValue(proc)
+
+    const handle = await createPtySubprocess({ sessionId: 'test', cols: 80, rows: 24 })
+    const causes: unknown[] = []
+    handle.onExit((_code, cause) => causes.push(cause))
+
+    proc._simulateExit(0, 9)
+    expect(causes).toEqual([{ kind: 'signaled', signal: 9 }])
+  })
+
   it('replays pre-listener data before a pre-listener exit', async () => {
     const proc = mockPtyProcess()
     spawnMock.mockReturnValue(proc)

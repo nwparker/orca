@@ -146,6 +146,53 @@ describe('createPtySubprocess', () => {
     )
   })
 
+  it('adopts the winning cmd fallback launch identity and command delivery', async () => {
+    const proc = mockPtyProcess()
+    spawnMock
+      .mockImplementationOnce(() => {
+        throw new Error('pwsh denied')
+      })
+      .mockImplementationOnce(() => {
+        throw new Error('powershell denied')
+      })
+      .mockReturnValueOnce(proc)
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform')
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const onMacosTccSpawnStrategy = vi.fn()
+    Object.defineProperty(process, 'platform', { value: 'win32' })
+
+    try {
+      const handle = await createPtySubprocess({
+        sessionId: 'test',
+        cols: 80,
+        rows: 24,
+        shellOverride: 'pwsh.exe',
+        terminalWindowsPowerShellImplementation: 'pwsh.exe',
+        command: 'echo fallback-ready',
+        onMacosTccSpawnStrategy
+      })
+
+      expect(handle.shellPath).toBe(CMD_ABS)
+      expect(handle.startupCommandDeliveredInShellArgs).toBe(true)
+      expect(spawnMock.mock.calls.map(([file]) => file)).toEqual([
+        PWSH7_ABS,
+        WINDOWS_POWERSHELL_ABS,
+        CMD_ABS
+      ])
+      expect(spawnMock.mock.calls[2]?.[1]).toEqual([
+        '/K',
+        expect.stringContaining('echo fallback-ready')
+      ])
+      expect(onMacosTccSpawnStrategy).toHaveBeenCalledTimes(1)
+      expect(onMacosTccSpawnStrategy).toHaveBeenCalledWith('direct')
+    } finally {
+      warn.mockRestore()
+      if (platform) {
+        Object.defineProperty(process, 'platform', platform)
+      }
+    }
+  })
+
   it('keeps PowerShell 7 selected when the pwsh availability probe is cold-false on Windows', async () => {
     const proc = mockPtyProcess()
     spawnMock.mockReturnValue(proc)
