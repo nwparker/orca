@@ -31,7 +31,6 @@ inline src/main/git/status.ts
 inline src/main/git/worktree.ts
 inline src/main/github/pr-refresh-coordinator.ts
 inline src/main/github/project-view.ts
-inline src/main/github/project-view/mutations.ts
 inline src/main/github/work-item-details.ts
 inline src/main/gitlab/client.ts
 inline src/main/index.ts
@@ -105,9 +104,6 @@ inline src/renderer/src/components/feature-wall/BrowserAnimatedVisual.tsx
 inline src/renderer/src/components/feature-wall/EditorAnimatedVisual.tsx
 inline src/renderer/src/components/feature-wall/WorkbenchAnimatedVisual.tsx
 inline src/renderer/src/components/floating-terminal/FloatingTerminalPanel.tsx
-inline src/renderer/src/components/github-project/ProjectCell.tsx
-inline src/renderer/src/components/github-project/ProjectPicker.tsx
-inline src/renderer/src/components/github-project/ProjectViewWrapper.tsx
 inline src/renderer/src/components/linear-project-view-surfaces.tsx
 inline src/renderer/src/components/new-workspace/SmartWorkspaceNameField.tsx
 inline src/renderer/src/components/onboarding/use-onboarding-flow.ts
