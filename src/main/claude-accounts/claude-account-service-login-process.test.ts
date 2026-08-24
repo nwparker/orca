@@ -572,4 +572,51 @@ describe('ClaudeAccountService credential capture', () => {
       vi.doUnmock('node:child_process')
     }
   })
+
+  it('redacts secrets from Claude command failures', async () => {
+    setPlatform('linux')
+    vi.resetModules()
+    const child = new EventEmitter() as EventEmitter & {
+      stdin: PassThrough
+      stdout: PassThrough
+      stderr: PassThrough
+      kill: ReturnType<typeof vi.fn>
+    }
+    child.stdin = new PassThrough()
+    child.stdout = new PassThrough()
+    child.stderr = new PassThrough()
+    child.kill = vi.fn()
+    const spawnMock = vi.fn(() => child)
+    vi.doMock('node:child_process', () => ({ spawn: spawnMock }))
+    try {
+      const { ClaudeAccountService } = await import('./service')
+      const service = new ClaudeAccountService(
+        createService() as never,
+        createService() as never,
+        createService() as never
+      )
+      const command = (
+        service as unknown as {
+          runClaudeCommand(
+            args: string[],
+            config: { windowsPath: string; linuxPath: null; wslDistro: null },
+            timeoutMs: number
+          ): Promise<string>
+        }
+      ).runClaudeCommand(
+        ['auth', 'status'],
+        { windowsPath: '/tmp/claude-auth', linuxPath: null, wslDistro: null },
+        1000
+      )
+      child.stderr.write('Authorization: Bearer never-print-this')
+      child.emit('close', 1)
+
+      const error = await command.catch((reason: unknown) => reason)
+      expect(error).toBeInstanceOf(Error)
+      expect((error as Error).message).toContain('[redacted')
+      expect((error as Error).message).not.toContain('never-print-this')
+    } finally {
+      vi.doUnmock('node:child_process')
+    }
+  })
 })

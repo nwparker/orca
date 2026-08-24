@@ -6,6 +6,8 @@ import {
 } from 'node:child_process'
 import { buildWindowsCmdShimCommandLine, isCmdInterpretedProgram } from './windows-command-line'
 
+export type ChildProcessHandle = ChildProcess
+
 /**
  * The single place Orca starts a child process.
  *
@@ -39,6 +41,12 @@ export type ProcessSpec = {
   maxOutputBytes?: number
   /** Kills the process when aborted; the result still reports the exit. */
   signal?: AbortSignal
+  /** Keep the child in its own POSIX process group for tree termination. */
+  detached?: boolean
+  /** Preserve a caller-owned Windows command line such as a cmd.exe invocation. */
+  windowsVerbatimArguments?: boolean
+  /** Streaming callers may suppress child output for auxiliary processes. */
+  stdio?: NodeSpawnOptions['stdio']
 }
 
 export type ProcessResult = {
@@ -81,12 +89,14 @@ export function resolveSpawn(spec: ProcessSpec, platform: NodeJS.Platform): Reso
   const base: NodeSpawnOptions = {
     cwd: spec.cwd,
     env: spec.env,
-    stdio: ['pipe', 'pipe', 'pipe'],
+    stdio: spec.stdio ?? ['pipe', 'pipe', 'pipe'],
     // Why unconditional: Orca's main process is GUI-subsystem and owns no
     // console, so every console-subsystem child it starts gets a fresh visible
     // conhost that takes foreground — keystrokes typed into an Orca terminal at
     // that moment land in the black box instead.
     windowsHide: true,
+    detached: spec.detached,
+    windowsVerbatimArguments: spec.windowsVerbatimArguments,
     // Why never `shell: true`: it concatenates arguments without escaping (Node
     // itself warns DEP0190) and it silently makes windowsHide a no-op.
     shell: false
