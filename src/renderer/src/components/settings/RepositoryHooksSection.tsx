@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type {
   HookCommandSourcePolicy,
@@ -111,6 +111,7 @@ export function RepositoryHooksSection({
     archiveScript: hookSettingsDraft.scripts.archive,
     hasSharedScript
   })
+  const [isAdvancedOpen, setIsAdvancedOpen] = useState(false)
 
   return (
     <section ref={flushScriptDraftOnUnmount} className="space-y-6">
@@ -261,6 +262,8 @@ export function RepositoryHooksSection({
             updateHookSettingsPolicyDraft({ commandSourcePolicy })
           }
           onCopyTemplate={onCopyTemplate}
+          isAdvancedOpen={isAdvancedOpen}
+          onAdvancedOpenChange={setIsAdvancedOpen}
         />
       </SearchableSetting>
     </section>

@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import { ChevronRight } from 'lucide-react'
 import type {
   HookCommandSourcePolicy,
@@ -189,18 +188,21 @@ export function RepositoryHookCommandSourceSetting({
   yamlState,
   yamlHooks,
   copiedTemplate,
+  isAdvancedOpen,
   onSelectPolicy,
-  onCopyTemplate
+  onCopyTemplate,
+  onAdvancedOpenChange
 }: {
   searchQuery: string
   selectedPolicy: HookCommandSourcePolicy
   yamlState: string
   yamlHooks: OrcaHooks | null
   copiedTemplate: boolean
+  isAdvancedOpen: boolean
   onSelectPolicy: (policy: HookCommandSourcePolicy) => void
   onCopyTemplate: () => void
+  onAdvancedOpenChange: (open: boolean) => void
 }): React.JSX.Element {
-  const [isAdvancedOpen, setIsAdvancedOpen] = useState(false)
   const advancedMatchesSearch =
     searchQuery.trim() !== '' &&
     matchesSettingsSearch(searchQuery, {
@@ -228,7 +230,7 @@ export function RepositoryHookCommandSourceSetting({
         if (advancedMatchesSearch) {
           event.currentTarget.open = true
         } else {
-          setIsAdvancedOpen(event.currentTarget.open)
+          onAdvancedOpenChange(event.currentTarget.open)
         }
       }}
     >

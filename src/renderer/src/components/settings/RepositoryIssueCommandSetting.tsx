@@ -67,17 +67,12 @@ export function RepositoryIssueCommandSetting({
         <code className="rounded bg-muted px-1 py-0.5">
           {translate('auto.components.settings.RepositoryHooksSection.39da2ae12f', 'orca.yaml')}
         </code>
-        {hasSharedIssueCommand ? (
-          '.'
-        ) : (
-          <>
-            {' '}
-            {translate(
+        {hasSharedIssueCommand
+          ? '.'
+          : translate(
               'auto.components.settings.RepositoryHooksSection.9b12f15b1e',
               'when one exists.'
             )}
-          </>
-        )}
       </p>
       {issueCommandSaveError ? (
         <p className="text-xs text-destructive">{issueCommandSaveError}</p>

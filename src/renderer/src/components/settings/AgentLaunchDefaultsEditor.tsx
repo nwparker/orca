@@ -37,9 +37,6 @@ export function AgentCommandOverrideInput({
           onChange={(event) => setCmdDraft(event.target.value)}
           onBlur={commitCmd}
           onKeyDown={(event) => {
-            if (event.nativeEvent.isComposing) {
-              return
-            }
             if (event.key === 'Enter') {
               commitCmd()
               event.currentTarget.blur()
@@ -95,9 +92,6 @@ export function AgentDefaultArgsInput({
           onChange={(event) => setArgsDraft(event.target.value)}
           onBlur={commitArgs}
           onKeyDown={(event) => {
-            if (event.nativeEvent.isComposing) {
-              return
-            }
             if (event.key === 'Enter') {
               commitArgs()
               event.currentTarget.blur()
@@ -171,9 +165,6 @@ export function AgentDefaultEnvInput({
           }}
           onBlur={commitEnv}
           onKeyDown={(event) => {
-            if (event.nativeEvent.isComposing) {
-              return
-            }
             if (event.key === 'Enter') {
               commitEnv()
               event.currentTarget.blur()
