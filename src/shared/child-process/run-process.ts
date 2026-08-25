@@ -9,6 +9,8 @@ import { forceTerminateProcessTree, signalProcessTree } from './process-tree-ter
 
 export type ChildProcessHandle = ChildProcess
 
+export type SpawnedProcess = ChildProcess
+
 /**
  * The single place Orca starts a child process.
  *
