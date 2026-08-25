@@ -7,6 +7,7 @@ import {
   isPreHandlerPtyStateDiscarded
 } from './pty-pre-handler-buffer'
 import { projectIpcPtyConnectResult } from './ipc-pty-connect-result'
+import { waitAtTerminalPtyPreSpawnE2EBarrier } from './terminal-pty-pre-spawn-e2e-barrier'
 import type { IpcPtySessionHandlers } from './ipc-pty-session-handlers'
 import { spawnIpcPty } from './ipc-pty-spawn-request'
 import type { IpcPtyTransportOptions, PtyConnectResult, PtyTransport } from './pty-transport-types'
@@ -38,9 +39,6 @@ export async function connectIpcPty(
   if (context.isDestroyed()) {
     return
   }
-  if (options.shouldContinue && !options.shouldContinue()) {
-    return
-  }
   if (options.sessionId && hasPreHandlerPtyExit(options.sessionId)) {
     if (options.admitPtyId && !options.admitPtyId(options.sessionId)) {
       return { id: options.sessionId }
@@ -60,6 +58,16 @@ export async function connectIpcPty(
   }
 
   try {
+    const preSpawnBarrier = waitAtTerminalPtyPreSpawnE2EBarrier()
+    if (preSpawnBarrier) {
+      await preSpawnBarrier
+      if (context.isDestroyed()) {
+        return
+      }
+    }
+    if (options.shouldContinue && !options.shouldContinue()) {
+      return
+    }
     const spawnResult = await spawnIpcPty(transportOptions, options, admittedSessionId)
     const retireFreshSpawn = async (): Promise<void> => {
       if (!spawnResult.isReattach && !spawnResult.coldRestore) {
