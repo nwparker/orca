@@ -41,9 +41,10 @@ const PUBLIC_RUNTIME_GIT_CLIENT_FUNCTIONS = [
 
 describe('runtime Git client API contract', () => {
   it('keeps the stable renderer facade exact and callable', () => {
-    expect(Object.keys(runtimeGitClient).sort()).toEqual([...PUBLIC_RUNTIME_GIT_CLIENT_FUNCTIONS])
+    const exported: Record<string, unknown> = { ...runtimeGitClient }
+    expect(Object.keys(exported).sort()).toEqual([...PUBLIC_RUNTIME_GIT_CLIENT_FUNCTIONS])
     for (const functionName of PUBLIC_RUNTIME_GIT_CLIENT_FUNCTIONS) {
-      expect(runtimeGitClient[functionName]).toBeTypeOf('function')
+      expect(exported[functionName]).toBeTypeOf('function')
     }
   })
 })
