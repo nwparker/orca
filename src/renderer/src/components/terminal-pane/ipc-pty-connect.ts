@@ -38,6 +38,9 @@ export async function connectIpcPty(
   if (context.isDestroyed()) {
     return
   }
+  if (options.shouldContinue && !options.shouldContinue()) {
+    return
+  }
   if (options.sessionId && hasPreHandlerPtyExit(options.sessionId)) {
     if (options.admitPtyId && !options.admitPtyId(options.sessionId)) {
       return { id: options.sessionId }

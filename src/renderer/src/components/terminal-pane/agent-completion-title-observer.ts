@@ -79,6 +79,7 @@ export function createAgentCompletionTitleObserver({
 
     if (status === 'working') {
       if (recordTitleWorking()) {
+        setLastStatus(status)
         return
       }
     } else if (getLastStatus() === 'working') {
