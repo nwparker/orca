@@ -1,5 +1,6 @@
 import type { GitForkSyncExpectedUpstream, GitForkSyncResult } from '../../../shared/git-fork-sync'
 import type { GitUpstreamStatus } from '../../../shared/git-status-types'
+import { REBASE_FROM_BASE_RPC_TIMEOUT_MS } from '../../../shared/git-rebase-source'
 import type { GitPushTarget } from '../../../shared/worktree/types'
 import { resolveLocalWorktreePath, type RuntimeGitContext } from './runtime-git-client-context'
 import { callRuntimeRpc, getActiveRuntimeTarget } from './runtime-rpc-client'
@@ -171,7 +172,7 @@ export async function rebaseRuntimeGitFromBase(
     target,
     'git.rebaseFromBase',
     { worktree: toRuntimeWorktreeSelector(context.worktreeId), baseRef },
-    { timeoutMs: 30_000 }
+    { timeoutMs: REBASE_FROM_BASE_RPC_TIMEOUT_MS }
   )
 }
 
