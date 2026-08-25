@@ -109,7 +109,7 @@ afterEach(() => {
 })
 
 describe('Linear issue workspace detail state', () => {
-  it('preserves every edited field while accepting fresh hydration data', () => {
+  it('preserves the edited fields while accepting fresh hydration data', () => {
     const current = {
       ...issue('1', 'Edited'),
       project: { id: 'project-edited', name: 'Edited project' },
@@ -125,8 +125,10 @@ describe('Linear issue workspace detail state', () => {
       project: { id: 'project-server', name: 'Server project' },
       dueDate: '2026-09-01'
     }
+    // Why: list issues never carry `project`, so hydration owns it.
     expect(mergeLinearIssueHydration(fetched, current, true)).toEqual({
       ...current,
+      project: fetched.project,
       dueDate: '2026-09-01',
       updatedAt: fetched.updatedAt
     })

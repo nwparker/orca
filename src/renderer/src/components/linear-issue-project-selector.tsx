@@ -30,7 +30,6 @@ export function LinearIssueProjectSelector({
   const [loading, setLoading] = useState(false)
   const [savingProjectId, setSavingProjectId] = useState<string | null>(null)
   const searchRequestIdRef = useRef(0)
-  const saveRequestIdRef = useRef(0)
   const mountedRef = useMountedRef()
   const requestQuery = getLinearProjectSearchRequestQuery(query)
   const displayedProjects = requestQuery === null ? [] : projects
@@ -77,7 +76,6 @@ export function LinearIssueProjectSelector({
 
   const handleSelectProject = useCallback(
     async (project: LinearProjectSummary) => {
-      const requestId = ++saveRequestIdRef.current
       setSavingProjectId(project.id)
       try {
         const result = await linearUpdateIssue(
@@ -86,9 +84,6 @@ export function LinearIssueProjectSelector({
           { projectId: project.id },
           issue.workspaceId
         )
-        if (!mountedRef.current || requestId !== saveRequestIdRef.current) {
-          return
-        }
         if (result.ok) {
           onProjectChanged(project)
           patchLinearIssue(issue.id, { project }, { sourceContext })
@@ -100,26 +95,21 @@ export function LinearIssueProjectSelector({
           toast.error(result.error)
         }
       } catch (error) {
-        if (mountedRef.current && requestId === saveRequestIdRef.current) {
-          toast.error(
-            error instanceof Error
-              ? error.message
-              : translate(
-                  'auto.components.LinearIssueWorkspace.8b5b593053',
-                  'Failed to update project'
-                )
-          )
-        }
+        toast.error(
+          error instanceof Error
+            ? error.message
+            : translate(
+                'auto.components.LinearIssueWorkspace.8b5b593053',
+                'Failed to update project'
+              )
+        )
       } finally {
-        if (mountedRef.current && requestId === saveRequestIdRef.current) {
-          setSavingProjectId(null)
-        }
+        setSavingProjectId(null)
       }
     },
     [
       issue.id,
       issue.workspaceId,
-      mountedRef,
       onProjectChanged,
       patchLinearIssue,
       providerSettings,

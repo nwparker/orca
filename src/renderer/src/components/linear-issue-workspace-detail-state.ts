@@ -20,8 +20,7 @@ const EDITED_LINEAR_ISSUE_FIELDS = [
   'assignee',
   'estimate',
   'labelIds',
-  'labels',
-  'project'
+  'labels'
 ] as const
 
 export function mergeLinearIssueHydration(
@@ -100,8 +99,7 @@ export function useLinearIssueWorkspaceDetail({
   )
 
   const handleProjectChanged = useCallback((project: LinearProjectSummary) => {
-    hasEditedRef.current = true
-    setFullIssue((current) => ({ ...current, project }))
+    setFullIssue((prev) => (prev ? { ...prev, project } : prev))
   }, [])
 
   const handleCommentAdded = useCallback((comment: LinearLocalComment) => {

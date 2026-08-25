@@ -191,9 +191,6 @@ export function LinearIssueSubIssues({
               value={title}
               onChange={(event) => setTitle(event.target.value)}
               onKeyDown={(event) => {
-                if (event.nativeEvent.isComposing) {
-                  return
-                }
                 if (event.key === 'Enter') {
                   event.preventDefault()
                   void handleCreate()
