@@ -3,12 +3,13 @@ import type { AppState } from '../types'
 import {
   WORKSPACE_CLEANUP_CLASSIFIER_VERSION,
   applyWorkspaceCleanupPolicy,
-  canSelectWorkspaceCleanupCandidate,
+  canQueueWorkspaceCleanupCandidate,
   type WorkspaceCleanupCandidate,
   type WorkspaceCleanupDismissal,
   type WorkspaceCleanupScanArgs,
   type WorkspaceCleanupScanProgress,
-  type WorkspaceCleanupScanResult
+  type WorkspaceCleanupScanResult,
+  type WorkspaceCleanupUnverifiedRemovalConsent
 } from '../../../../shared/workspace-cleanup'
 import {
   getWorkspaceCleanupCandidateHostId,
@@ -34,8 +35,10 @@ export { enrichWorkspaceCleanupCandidates, WORKSPACE_CLEANUP_ENRICHMENT_CONCURRE
 type WorkspaceCleanupViewedCandidate = {
   viewedAt: number
   fingerprint: string
-  wasSuggested: boolean
+  wasSuggested?: boolean
 }
+
+const unverifiedRemovalConsentByStore = new WeakMap<() => AppState, Map<string, string>>()
 
 export type WorkspaceCleanupSlice = {
   workspaceCleanupScan: WorkspaceCleanupScanResult | null
@@ -51,6 +54,7 @@ export type WorkspaceCleanupSlice = {
     candidates: readonly WorkspaceCleanupCandidate[]
   ) => Promise<void>
   resetWorkspaceCleanupDismissals: () => Promise<void>
+  beginUnverifiedRemovalConsent: (identity: string) => string | null
   removeWorkspaceCleanupCandidates: (
     worktreeIds: readonly string[],
     options?: WorkspaceCleanupRemoveOptions
@@ -88,7 +92,7 @@ export const createWorkspaceCleanupSlice: StateCreator<AppState, [], [], Workspa
         [candidate.worktreeId]: {
           viewedAt: now,
           fingerprint: candidate.fingerprint,
-          wasSuggested: candidate.tier === 'ready' && canSelectWorkspaceCleanupCandidate(candidate)
+          wasSuggested: candidate.tier === 'ready' && canQueueWorkspaceCleanupCandidate(candidate)
         }
       }
     }))
@@ -143,6 +147,29 @@ export const createWorkspaceCleanupSlice: StateCreator<AppState, [], [], Workspa
     }))
     await window.api.workspaceCleanup.clearDismissals()
   },
+  beginUnverifiedRemovalConsent: (identity) => {
+    const existing = unverifiedRemovalConsentByStore.get(get) ?? new Map<string, string>()
+    unverifiedRemovalConsentByStore.set(get, existing)
+    if (existing.has(identity)) {
+      return null
+    }
+    const attemptId = crypto.randomUUID()
+    existing.set(identity, attemptId)
+    return attemptId
+  },
   removeWorkspaceCleanupCandidates: (worktreeIds, options) =>
-    removeWorkspaceCleanupCandidates(get, set, worktreeIds, options)
+    removeWorkspaceCleanupCandidates(get, set, worktreeIds, {
+      ...options,
+      getConsentAttemptId: (identity) => unverifiedRemovalConsentByStore.get(get)?.get(identity)
+    }).finally(() => {
+      const consent = options?.unverifiedRemovalConsent as
+        | WorkspaceCleanupUnverifiedRemovalConsent
+        | undefined
+      if (
+        consent &&
+        unverifiedRemovalConsentByStore.get(get)?.get(consent.identity) === consent.attemptId
+      ) {
+        unverifiedRemovalConsentByStore.get(get)?.delete(consent.identity)
+      }
+    })
 })

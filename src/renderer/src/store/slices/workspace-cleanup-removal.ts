@@ -2,7 +2,8 @@ import type { AppState } from '../types'
 import type { ExecutionHostId } from '../../../../shared/execution-host'
 import type {
   WorkspaceCleanupCandidate,
-  WorkspaceCleanupDismissal
+  WorkspaceCleanupDismissal,
+  WorkspaceCleanupUnverifiedRemovalConsent
 } from '../../../../shared/workspace-cleanup'
 import { shouldForceWorkspaceCleanupRemoval } from '../../../../shared/workspace-cleanup'
 import {
@@ -23,6 +24,7 @@ export type WorkspaceCleanupFailure = {
   executionHostId?: ExecutionHostId
   displayName: string
   message: string
+  canDeleteAnyway?: boolean
 }
 export type WorkspaceCleanupRemoveResult = {
   removedIds: string[]
@@ -33,6 +35,8 @@ export type WorkspaceCleanupRemoveResult = {
 export type WorkspaceCleanupRemoveOptions = {
   approvedCandidates?: readonly WorkspaceCleanupCandidate[]
   snapshotPruneBatchId?: string
+  unverifiedRemovalConsent?: WorkspaceCleanupUnverifiedRemovalConsent
+  getConsentAttemptId?: (identity: string) => string | undefined
 }
 
 export async function removeWorkspaceCleanupCandidates(
@@ -70,7 +74,11 @@ export async function removeWorkspaceCleanupCandidates(
     removableTargets,
     get,
     (candidates, state) =>
-      enrichWorkspaceCleanupCandidates(candidates, state, { applyDismissals: false })
+      enrichWorkspaceCleanupCandidates(candidates, state, { applyDismissals: false }),
+    {
+      unverifiedRemovalConsent: options?.unverifiedRemovalConsent,
+      getConsentAttemptId: options?.getConsentAttemptId
+    }
   )
   const targetsToRemove: {
     target: WorkspaceCleanupRemovalTarget
