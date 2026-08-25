@@ -103,6 +103,7 @@ function ProjectViewBody({
         )}
         onUse={(item) => {
           rowActions.setDialogRepoItem(null)
+          // Why: issue #4756 keeps project-view actions on the direct "start work now" path, not the TaskPage background-create flow.
           void launchWorkItemDirect({
             item,
             repoId: dialogItem.workItem.repoId,
