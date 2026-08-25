@@ -4,7 +4,7 @@ import { useMountedRef } from '@/hooks/useMountedRef'
 import { translate } from '@/i18n/i18n'
 import { callRuntimeRpc, getActiveRuntimeTarget } from '@/runtime/runtime-rpc-client'
 import { useAppStore } from '@/store'
-import { projectViewCacheKey } from '@/store/slices/github'
+import { projectViewCacheKey } from '@/store/github/cache-identity'
 import type {
   GitHubProjectSettings,
   GitHubProjectTable,

@@ -303,7 +303,10 @@
             "9d6e531da6": "Workspace no longer exists.",
             "changedSinceConfirmation": "Workspace changed after confirmation. Refresh to review it before removing.",
             "hostCollision": "Error: this workspace exists on multiple hosts at the same path",
-            "hostUnresolved": "Orca cannot tell which host owns this workspace. Refresh projects and review it again."
+            "hostUnresolved": "Orca cannot tell which host owns this workspace. Refresh projects and review it again.",
+            "gitStatusUnavailable": "Orca couldn't check this workspace's git status. Try again, or delete it from its host-specific sidebar or project list.",
+            "gitStatusUnavailableOlderPeer": "Orca couldn't match this git-status failure to a host. Update the older connected peer, or delete the workspace from its host-specific sidebar or project list.",
+            "forceNeedsApproval": "Review and confirm this workspace before force deleting it."
           }
         },
         "worktrees": {
@@ -15008,6 +15011,10 @@
           "0e1de0358b": "Month",
           "77e96bded6": "Weekday"
         },
+        "AutomationPromptDisclosure": {
+          "showLess": "Show less",
+          "showMore": "Show more"
+        },
         "AutomationDetail": {
           "007c8ad874": "Prompt",
           "a1d52c2189": "Usage coverage",
@@ -16226,7 +16233,62 @@
           "measuringSizesProgress": "Scanning {{value0}}/{{value1}}",
           "measuringSizes": "Scanning sizes",
           "measureSizesFailed": "Could not scan workspace sizes",
-          "selectedCount": "{{value0}} selected"
+          "selectedCount": "{{value0}} selected",
+          "gitStatusCheckFailed": "Git status check failed",
+          "gitStatusUnverified": "Git status could not be verified",
+          "deleteAnyway": "Delete anyway",
+          "forceDeleteProjectionOne": "{{count}} workspace currently shows risk and may need a force delete",
+          "forceDeleteProjectionMany": "{{count}} workspaces currently show risk and may need a force delete",
+          "selectionWithheldOne": "1 selected workspace is hidden by the current filters and was deselected.",
+          "selectionWithheld": "{{value0}} selected workspaces are hidden by the current filters and were deselected.",
+          "selectAllCountOne": "Select 1 safety-checked workspace",
+          "selectAllCount": "Select all {{value0}} safety-checked workspaces",
+          "appliedFilters": "Applied filters",
+          "removeFilter": "Remove filter {{value0}}",
+          "chip": {
+            "idleDays": "Idle {{value0}}d+",
+            "neverVisited": "Never visited",
+            "minSize": "At least {{value0}} MB",
+            "maxSize": "At most {{value0}} MB",
+            "excludesUnsized": "Measured only",
+            "excludesStatusless": "Has a status",
+            "list": "{{value0}}: {{value1}}",
+            "triState": "{{value0}}: {{value1}}",
+            "only": "Only",
+            "exclude": "Excluded",
+            "minAhead": "Ahead {{value0}}+",
+            "minBehind": "Behind {{value0}}+",
+            "branchQuery": "Branch: {{value0}}",
+            "pathPrefix": "Path: {{value0}}",
+            "presence": "{{value0}}: {{value1}}",
+            "has": "Has",
+            "none": "None",
+            "completelyEmpty": "Nothing to lose",
+            "selectableOnly": "Deletable only",
+            "kind": {
+              "status": "Status",
+              "agent": "Agent",
+              "git": "Git",
+              "review": "Review",
+              "reviewState": "Review state",
+              "reviewProvider": "Provider",
+              "ticket": "Ticket",
+              "ticketSource": "Ticket source",
+              "context": "Context",
+              "host": "Host",
+              "repo": "Repo",
+              "blocker": "Blocker",
+              "tier": "Safety",
+              "dismissed": "Ignored",
+              "archived": "Archived",
+              "pinned": "Pinned",
+              "unread": "Unread",
+              "comment": "Comment",
+              "prunable": "Prunable",
+              "locked": "Locked",
+              "retainedAgents": "Finished agents"
+            }
+          }
         },
         "scan": {
           "progress": "Scanning workspaces ({{value0}}/{{value1}})",
@@ -16239,7 +16301,9 @@
           "readyManyOne": "{{value0}} workspaces found, with 1 cleanup suggestion.",
           "readyManyMany": "{{value0}} workspaces found, with {{value1}} cleanup suggestions.",
           "fallbackRepository": "a repository",
-          "gitListFailed": "Git could not list worktrees"
+          "gitListFailed": "Git could not list worktrees",
+          "readyOne": "1 workspace found.",
+          "readyMany": "{{value0}} workspaces found."
         },
         "relativeTime": {
           "never": "Never",
