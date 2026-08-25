@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { Keyboard } from 'react-native'
 import { getComposerRepoWorktreeBranches } from '../../../src/shared/composer-branch-selection'
 import { getProjectIdentityKey } from '../../../src/shared/project-host-setup-projection'
@@ -30,27 +30,26 @@ import { useNewWorkspaceSetupScript } from './use-new-workspace-setup-script'
 import { useNewWorktreeDrawerNavigation } from './use-new-worktree-drawer-navigation'
 
 export function NewWorktreeModal(props: NewWorktreeModalProps) {
-  const [boundary, setBoundary] = useState(() => ({
-    client: props.client,
-    visible: props.visible,
-    epoch: 0
-  }))
+  const openEpochRef = useRef(0)
+  const wasVisibleRef = useRef(false)
+  const clientEpochRef = useRef({ client: props.client, epoch: 0 })
 
-  useLayoutEffect(() => {
-    setBoundary((current) => {
-      if (current.client === props.client && current.visible === props.visible) {
-        return current
-      }
-      const shouldReset = current.client !== props.client || (props.visible && !current.visible)
-      return {
-        client: props.client,
-        visible: props.visible,
-        epoch: current.epoch + (shouldReset ? 1 : 0)
-      }
-    })
-  }, [props.client, props.visible])
+  // Why: each drawer opening is a fresh form session; remounting resets local
+  // form state before paint instead of clearing it in a visible-prop Effect.
+  if (props.visible && !wasVisibleRef.current) {
+    openEpochRef.current += 1
+  }
+  wasVisibleRef.current = props.visible
+  if (clientEpochRef.current.client !== props.client) {
+    clientEpochRef.current = { client: props.client, epoch: clientEpochRef.current.epoch + 1 }
+  }
 
-  return <NewWorktreeModalContent key={boundary.epoch} {...props} />
+  return (
+    <NewWorktreeModalContent
+      key={`${openEpochRef.current}:${clientEpochRef.current.epoch}`}
+      {...props}
+    />
+  )
 }
 
 function NewWorktreeModalContent(props: NewWorktreeModalProps) {

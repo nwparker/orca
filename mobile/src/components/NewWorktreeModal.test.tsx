@@ -355,6 +355,28 @@ describe('NewWorktreeModal project targets', () => {
     expect(pickerItems(renderer, 'Project')).toEqual([expect.objectContaining({ label: 'fresh' })])
   })
 
+  it('remounts before the reopened session renders, so no stale instance sees visible', async () => {
+    const sendRequest = vi.fn().mockImplementation(() => new Promise(() => {}))
+    const client = { sendRequest } as unknown as RpcClient
+    const modalProps = {
+      client,
+      hostId: 'host-1',
+      onCreated: () => {},
+      onClose: () => {}
+    }
+
+    await act(async () => {
+      renderer = create(createElement(NewWorktreeModal, { ...modalProps, visible: true }))
+    })
+    act(() => renderer.update(createElement(NewWorktreeModal, { ...modalProps, visible: false })))
+    act(() => renderer.update(createElement(NewWorktreeModal, { ...modalProps, visible: true })))
+
+    // One repo.list per opening. A third means the previous session's instance
+    // re-ran its visible-gated effects before the remount key caught up.
+    const repoListCalls = sendRequest.mock.calls.filter(([method]) => method === 'repo.list')
+    expect(repoListCalls).toHaveLength(2)
+  })
+
   it('starts with fresh form state after closing and reopening', async () => {
     const client = {
       sendRequest: vi.fn().mockImplementation(() => new Promise(() => {}))
