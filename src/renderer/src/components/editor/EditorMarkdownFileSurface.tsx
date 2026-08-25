@@ -1,17 +1,12 @@
-import { lazyWithRetry as lazy } from '@/lib/lazy-with-retry'
 import { translate } from '@/i18n/i18n'
 import type { MarkdownViewMode, OpenFile } from '@/store/slices/editor'
+import { MarkdownPreview, RichMarkdownEditor } from './editor-lazy-views'
 import { exceedsMarkdownRichModeSizeLimit } from './markdown-rich-size-limit'
 import { extractFrontMatter, prependFrontMatter } from './markdown-frontmatter'
 import { getMarkdownRenderMode } from './markdown-render-mode'
 import { getMarkdownRichModeUnsupportedMessage } from './markdown-rich-mode'
 import { RichMarkdownErrorBoundary } from './RichMarkdownErrorBoundary'
 import type { useMarkdownDocuments } from './useMarkdownDocuments'
-
-const RichMarkdownEditor = lazy(() => import('./RichMarkdownEditor'), {
-  reloadKey: 'rich-markdown-editor'
-})
-const MarkdownPreview = lazy(() => import('./MarkdownPreview'))
 
 type MarkdownDocumentsController = ReturnType<typeof useMarkdownDocuments>
 

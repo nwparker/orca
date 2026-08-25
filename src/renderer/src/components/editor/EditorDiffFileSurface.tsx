@@ -1,14 +1,10 @@
-import { lazyWithRetry as lazy } from '@/lib/lazy-with-retry'
 import { translate } from '@/i18n/i18n'
 import type { OpenFile } from '@/store/slices/editor'
 import type { GitDiffResult } from '../../../../shared/git-diff-compare-types'
 import { getDiffContentSignature } from './diff-content-signature'
+import { DiffViewer, ImageDiffViewer, MarkdownPreview } from './editor-lazy-views'
 import { ExternalFileChangeBanner } from './ExternalFileChangeBanner'
 import type { useMarkdownDocuments } from './useMarkdownDocuments'
-
-const DiffViewer = lazy(() => import('./DiffViewer'))
-const ImageDiffViewer = lazy(() => import('./ImageDiffViewer'))
-const MarkdownPreview = lazy(() => import('./MarkdownPreview'))
 
 type MarkdownDocumentsController = ReturnType<typeof useMarkdownDocuments>
 

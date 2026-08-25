@@ -2,7 +2,7 @@ import DOMPurify from 'dompurify'
 import { cn } from '@/lib/utils'
 import { translate } from '@/i18n/i18n'
 import { IpynbMarkdownCell } from './IpynbCellEditor'
-import type { IpynbCell, IpynbOutput, IpynbOutputItem } from './ipynb-parse'
+import type { IpynbCell, IpynbOutputItem } from './ipynb-parse'
 
 function valueToText(value: unknown): string {
   if (Array.isArray(value)) {
@@ -26,29 +26,6 @@ function dataUriForImage(item: IpynbOutputItem): string | null {
     return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(valueToText(item.value))}`
   }
   return `data:${item.mime};base64,${value}`
-}
-
-function getOutputIdentity(output: IpynbOutput): string {
-  if (output.kind === 'stream') {
-    return `stream:${output.name}:${output.text}`
-  }
-  if (output.kind === 'error') {
-    return `error:${output.name}:${output.message}:${output.traceback}`
-  }
-  const items = output.items
-    .map((item) => `${item.mime}:${JSON.stringify(item.value) ?? ''}`)
-    .join('|')
-  return `display:${output.outputType}:${output.executionCount ?? ''}:${items}`
-}
-
-function getKeyedOutputs(outputs: IpynbOutput[]): { key: string; output: IpynbOutput }[] {
-  const occurrences = new Map<string, number>()
-  return outputs.map((output) => {
-    const identity = getOutputIdentity(output)
-    const occurrence = occurrences.get(identity) ?? 0
-    occurrences.set(identity, occurrence + 1)
-    return { key: `${identity}:${occurrence}`, output }
-  })
 }
 
 function PreformattedOutput({
@@ -116,13 +93,13 @@ export function IpynbCellOutputs({ cell }: { cell: IpynbCell }): React.JSX.Eleme
   }
   return (
     <div className="border-t border-border/50 bg-background">
-      {getKeyedOutputs(cell.outputs).map(({ key, output }) => {
+      {cell.outputs.map((output, index) => {
         if (output.kind === 'stream') {
-          return <PreformattedOutput key={key} text={output.text} />
+          return <PreformattedOutput key={index} text={output.text} />
         }
         if (output.kind === 'error') {
           return (
-            <div key={key} className="border-l-2 border-destructive">
+            <div key={index} className="border-l-2 border-destructive">
               <PreformattedOutput
                 error
                 text={[output.name, output.message, output.traceback].filter(Boolean).join('\n')}
@@ -131,10 +108,10 @@ export function IpynbCellOutputs({ cell }: { cell: IpynbCell }): React.JSX.Eleme
           )
         }
         const renderedItems = output.items
-          .map((item) => <OutputItem key={item.mime} item={item} />)
+          .map((item, itemIndex) => <OutputItem key={`${item.mime}-${itemIndex}`} item={item} />)
           .filter(Boolean)
         return renderedItems.length > 0 ? (
-          <div key={key} className="border-b border-border/40 last:border-b-0">
+          <div key={index} className="border-b border-border/40 last:border-b-0">
             {renderedItems}
           </div>
         ) : null

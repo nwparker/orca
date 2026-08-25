@@ -1,22 +1,22 @@
-import { lazyWithRetry as lazy } from '@/lib/lazy-with-retry'
 import { translate } from '@/i18n/i18n'
 import type { MarkdownViewMode, OpenFile, PendingEditorReveal } from '@/store/slices/editor'
 import type { GitDiffResult } from '../../../../shared/git-diff-compare-types'
 import type { GitStatusEntry } from '../../../../shared/git-status-types'
 import { ChangesModeView } from './ChangesModeView'
 import { ConflictBanner, ConflictPlaceholderView } from './ConflictComponents'
+import {
+  CsvViewer,
+  ImageViewer,
+  IpynbViewer,
+  MermaidViewer,
+  MonacoEditor
+} from './editor-lazy-views'
 import type { EditorConflictNavigation } from './useEditorConflictNavigation'
 import { EditorFileLoadErrorView } from './EditorFileLoadErrorView'
 import type { FileContent } from './editor-panel-content-types'
 import { ExternalFileChangeBanner } from './ExternalFileChangeBanner'
 import type { useMarkdownDocuments } from './useMarkdownDocuments'
 import { EditorMarkdownFileSurface } from './EditorMarkdownFileSurface'
-
-const MonacoEditor = lazy(() => import('./MonacoEditor'))
-const ImageViewer = lazy(() => import('./ImageViewer'))
-const MermaidViewer = lazy(() => import('./MermaidViewer'))
-const CsvViewer = lazy(() => import('./CsvViewer'))
-const IpynbViewer = lazy(() => import('./IpynbViewer'))
 
 const noopEditorContentChange = (_content: string): void => {}
 const noopEditorSave = async (_content: string): Promise<boolean> => false

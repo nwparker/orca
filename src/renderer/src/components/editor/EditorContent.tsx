@@ -1,9 +1,9 @@
-import { lazyWithRetry as lazy } from '@/lib/lazy-with-retry'
 import { useAppStore } from '@/store'
 import type { MarkdownViewMode, OpenFile, PendingEditorReveal } from '@/store/slices/editor'
 import type { GitDiffResult } from '../../../../shared/git-diff-compare-types'
 import type { GitStatusEntry } from '../../../../shared/git-status-types'
 import { CheckRunDetailsPanel } from './CheckRunDetailsPanel'
+import { CombinedDiffViewer, MarkdownPreview } from './editor-lazy-views'
 import { EditorConflictReviewSurface } from './EditorConflictReviewSurface'
 import { EditorDiffFileSurface } from './EditorDiffFileSurface'
 import { EditorEditFileSurface } from './EditorEditFileSurface'
@@ -12,9 +12,6 @@ import type { FileContent } from './editor-panel-content-types'
 import { translate } from '@/i18n/i18n'
 import { useEditorConflictNavigation } from './useEditorConflictNavigation'
 import { useMarkdownDocuments } from './useMarkdownDocuments'
-
-const CombinedDiffViewer = lazy(() => import('./CombinedDiffViewer'))
-const MarkdownPreview = lazy(() => import('./MarkdownPreview'))
 
 const noopCloseMarkdownTableOfContents = (): void => {}
 

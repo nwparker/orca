@@ -1,18 +1,15 @@
 import React from 'react'
-import { lazyWithRetry as lazy } from '@/lib/lazy-with-retry'
 import { detectLanguage } from '@/lib/language-detect'
 import { joinPath } from '@/lib/path'
 import { useAppStore } from '@/store'
 import type { OpenFile, PendingEditorReveal } from '@/store/slices/editor'
 import type { GitStatusEntry } from '../../../../shared/git-status-types'
 import { ConflictBanner, ConflictPlaceholderView, ConflictReviewPanel } from './ConflictComponents'
+import { ImageViewer, MonacoEditor } from './editor-lazy-views'
 import { EditorFileLoadErrorView } from './EditorFileLoadErrorView'
 import type { FileContent } from './editor-panel-content-types'
 import { translate } from '@/i18n/i18n'
 import type { EditorConflictNavigation } from './useEditorConflictNavigation'
-
-const MonacoEditor = lazy(() => import('./MonacoEditor'))
-const ImageViewer = lazy(() => import('./ImageViewer'))
 
 export function EditorConflictReviewSurface({
   activeFile,
