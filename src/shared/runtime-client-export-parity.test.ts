@@ -87,6 +87,8 @@ type RuntimeTypeInventory = [
   Runtime.ComputerWindowListWindow,
   Runtime.DeviceScope,
   Runtime.RuntimeBrowserDriverState,
+  Runtime.RuntimeBrowserUnavailableReason,
+  Runtime.RuntimeDegradation,
   Runtime.RuntimeDesktopWindowStatus,
   Runtime.RuntimeFileListEntry,
   Runtime.RuntimeFileListResult,
@@ -218,8 +220,10 @@ describe('runtime client public export parity', () => {
 
   it('keeps the runtime and transport value exports exact', () => {
     expect(Object.keys(Runtime).sort()).toEqual([
+      'BROWSER_UNAVAILABLE_ERROR_CODE',
       'COMPUTER_ERROR_CODES',
-      'HEADLESS_RUNTIME_WINDOW_ID'
+      'HEADLESS_RUNTIME_WINDOW_ID',
+      'browserUnavailableMessage'
     ])
     expect(Object.keys(RemoteClient).sort()).toEqual([
       'RemoteRuntimeClientError',

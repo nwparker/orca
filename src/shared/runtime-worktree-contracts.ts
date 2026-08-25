@@ -1,4 +1,4 @@
-import type { AgentStatusState, AgentType } from './agent-status-types'
+import type { AgentStatusState, AgentType, AgentWorkingMode } from './agent-status-types'
 import type { BaseRefSearchResult, Repo } from './repo-types'
 import type { CreateWorktreeResult, RemoveWorktreeResult } from './worktree/create-types'
 import type {
@@ -12,6 +12,7 @@ export type RuntimeWorktreeAgentRow = {
   paneKey: string
   parentPaneKey: string | null
   state: AgentStatusState
+  workingMode?: AgentWorkingMode
   agentType: AgentType | null
   prompt: string
   taskTitle: string | null
@@ -63,6 +64,8 @@ export type RuntimeWorktreePsSummary = {
   lastOutputAt: number | null
   preview: string
   status: RuntimeWorktreeStatus
+  /** Optional discriminator for a working workspace; older clients fall back to ordinary working. */
+  workingMode?: AgentWorkingMode
   agents: RuntimeWorktreeAgentRow[]
 }
 

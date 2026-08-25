@@ -91,12 +91,18 @@ export type {
   RuntimeTerminalPathOpenTarget,
   RuntimeTerminalPathResolution
 } from './runtime-file-contracts'
-export { HEADLESS_RUNTIME_WINDOW_ID } from './runtime-session-contracts'
+export {
+  BROWSER_UNAVAILABLE_ERROR_CODE,
+  browserUnavailableMessage,
+  HEADLESS_RUNTIME_WINDOW_ID
+} from './runtime-session-contracts'
 export type {
   CliRuntimeState,
   CliStatusResult,
   DeviceScope,
   RuntimeBrowserDriverState,
+  RuntimeBrowserUnavailableReason,
+  RuntimeDegradation,
   RuntimeDesktopWindowStatus,
   RuntimeGraphStatus,
   RuntimeMobileSessionBrowserTab,

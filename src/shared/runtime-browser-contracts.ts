@@ -5,6 +5,7 @@ import type {
   BrowserSessionProfile,
   BrowserSessionProfileSource
 } from './browser-workspace-types'
+import type { BROWSER_UNAVAILABLE_ERROR_CODE } from './runtime-session-contracts'
 
 export type BrowserSnapshotRef = { ref: string; role: string; name: string }
 
@@ -177,6 +178,11 @@ export type BrowserCaptureStopResult = { stopped: boolean }
 export type BrowserTabCreateResult = { browserPageId: string }
 
 export type BrowserErrorCode =
+  | typeof BROWSER_UNAVAILABLE_ERROR_CODE
+  | 'browser_command_unavailable'
+  | 'browser_profile_unavailable'
+  | 'browser_screencast_unavailable'
+  | 'browser_certificate_trust_unavailable'
   | 'browser_no_tab'
   | 'browser_tab_not_found'
   | 'browser_tab_closed'
