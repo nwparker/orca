@@ -33,7 +33,7 @@ export type ProcessSpec = {
   cwd?: string
   env?: NodeJS.ProcessEnv
   /** Kill the process (and, on Windows, its console) after this long. */
-  timeoutMs?: number
+  timeoutMs?: number | null
   /** Written to stdin then closed. Omit to leave stdin empty and closed. */
   input?: string
   /** Cap on captured stdout/stderr; output past it is discarded. */
@@ -343,11 +343,14 @@ export function runProcess(spec: ProcessSpec): Promise<ProcessResult> {
       graceTimer.unref?.()
     }
 
-    const timer = setTimeout(() => {
-      timedOut = true
-      stopAndSettle()
-    }, spec.timeoutMs ?? DEFAULT_PROCESS_TIMEOUT_MS)
-    timer.unref?.()
+    const timer =
+      spec.timeoutMs === null
+        ? undefined
+        : setTimeout(() => {
+            timedOut = true
+            stopAndSettle()
+          }, spec.timeoutMs ?? DEFAULT_PROCESS_TIMEOUT_MS)
+    timer?.unref?.()
 
     // Why the same escalation: an aborted caller has stopped waiting, so an
     // unkillable child must not keep the promise alive on their behalf either.
@@ -418,7 +421,7 @@ export function runProcessSync(spec: ProcessSpec): ProcessResult {
   const result = nodeSpawnSync(resolved.file, [...resolved.args], {
     ...resolved.options,
     input: spec.input,
-    timeout: spec.timeoutMs ?? DEFAULT_PROCESS_TIMEOUT_MS,
+    timeout: spec.timeoutMs === null ? undefined : (spec.timeoutMs ?? DEFAULT_PROCESS_TIMEOUT_MS),
     maxBuffer: spec.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES,
     encoding: 'buffer'
   })
