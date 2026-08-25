@@ -31,8 +31,10 @@ import { hasCtrlEnterCsiUAuthorityForPane } from './terminal-ctrl-enter'
 import { resolveTerminalInputHostPlatform } from './terminal-input-host-platform'
 import { isLocalWindowsConptyPaneForCtrlArrow } from './terminal-ctrl-arrow-conpty'
 import { keyboardEventBelongsToScope } from './terminal-keyboard-scope'
-import { resolveTerminalKeyboardShortcutAction } from './terminal-keyboard-shortcut-matching'
-import { isEditableTarget } from './terminal-keyboard-shortcut-matching'
+import {
+  isEditableTarget,
+  resolveTerminalKeyboardShortcutAction
+} from './terminal-keyboard-shortcut-matching'
 import { createTerminalNativeOnlyShortcutTracker } from './terminal-native-only-shortcut'
 
 type RuntimeOptions = {
