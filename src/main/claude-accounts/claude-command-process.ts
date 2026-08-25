@@ -1,5 +1,4 @@
 import { spawnProcess, type ChildProcessHandle } from '../../shared/child-process/run-process'
-import { redactString } from '../observability/redactor'
 import { resolveClaudeCommand } from '../codex-cli/command'
 import { buildWindowsCommandInvocation } from './windows-command-invocation'
 
@@ -111,7 +110,7 @@ export function runClaudeCommandProcess(
     }
     const onError = (error: Error): void => {
       if (!terminationPending) {
-        settle(() => rejectPromise(new Error(redactString(error.message))))
+        settle(() => rejectPromise(error))
       }
     }
     const onDone = (code: number | null): void => {
@@ -123,7 +122,7 @@ export function runClaudeCommandProcess(
           resolvePromise(output)
           return
         }
-        const trimmedOutput = redactString(output.trim())
+        const trimmedOutput = output.trim()
         rejectPromise(
           new Error(
             trimmedOutput

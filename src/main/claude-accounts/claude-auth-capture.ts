@@ -1,7 +1,6 @@
 import { createHash } from 'node:crypto'
 import { existsSync, readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
-import { redactString } from '../observability/redactor'
 import { readActiveClaudeKeychainCredentialsStrict } from './keychain'
 
 export type ClaudeIdentity = {
@@ -50,8 +49,7 @@ export async function captureClaudeAuthFromExistingConfigDir(
       { allowFailure: true }
     )
   } catch (error) {
-    const message = error instanceof Error ? redactString(error.message) : 'Unknown error'
-    console.warn('[claude-accounts] Could not read `claude auth status`:', message)
+    console.warn('[claude-accounts] Could not read `claude auth status`:', error)
   }
   const currentLegacyKeychain = await readActiveClaudeKeychainCredentialsStrict()
   return captureClaudeAuthFromConfigDir(
