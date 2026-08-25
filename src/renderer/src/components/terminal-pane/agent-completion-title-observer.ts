@@ -78,8 +78,8 @@ export function createAgentCompletionTitleObserver({
     }
 
     if (status === 'working') {
-      if (recordTitleWorking()) {
-        setLastStatus(status)
+      // Why: a rejected working title is a post-hook-completion replay; leave lastStatus untouched so it can't open a completion branch.
+      if (!recordTitleWorking()) {
         return
       }
     } else if (getLastStatus() === 'working') {

@@ -41,6 +41,7 @@ export type AgentCompletionIdentityScope = {
   hasUnconsumedStampedTail: () => boolean
   hasConsumedIdentity: (identity: string) => boolean
   clearOriginStampedTail: () => void
+  clearStampedTail: () => void
   dispose: (isLive: boolean) => void
 }
 
@@ -175,6 +176,9 @@ export function createAgentCompletionIdentityScope(
           lastCompletionByPane.delete(paneKey)
         }
       }
+    },
+    clearStampedTail: () => {
+      pendingStampedTailByPane.delete(paneKey)
     },
     dispose: (isLive) => {
       const remaining = (coordinatorCountByPane.get(paneKey) ?? 1) - 1

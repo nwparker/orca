@@ -189,7 +189,7 @@ export function createAgentCompletionNotificationController({
           optionsOverride.completionIdentity.lastTurnCompletedAtNotified
         )
       } else {
-        identityScope.clearOriginStampedTail()
+        identityScope.clearStampedTail()
       }
     }
     if (
