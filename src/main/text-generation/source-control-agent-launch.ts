@@ -1,4 +1,5 @@
 import { spawnProcess } from '../../shared/child-process/run-process'
+import { withCliRuntimeOnPath } from '../../shared/node-cli-command-resolution'
 import { resolveCliCommand } from '../codex-cli/command'
 import { wslAwareSpawn } from '../git/runner'
 import { getSpawnArgsForWindows } from '../win32-utils'
@@ -44,16 +45,16 @@ export const spawnSourceControlAgent: SpawnSourceControlAgent = (input) => {
       useWslLoginShell: true
     })
   }
-  const binary =
+  const resolvedBinary =
     process.platform === 'win32'
       ? resolveCliCommand(input.binary, { pathEnv: spawnEnv.PATH ?? spawnEnv.Path ?? null })
       : input.binary
-  const { spawnCmd, spawnArgs } = getSpawnArgsForWindows(binary, input.args)
+  const { spawnCmd, spawnArgs } = getSpawnArgsForWindows(resolvedBinary, input.args)
   const child = spawnProcess({
     program: spawnCmd,
     args: spawnArgs,
-    ...(input.useCwdForNative ? { cwd: input.cwd } : {}),
-    env: spawnEnv
+    env: withCliRuntimeOnPath(resolvedBinary, spawnEnv),
+    ...(input.useCwdForNative ? { cwd: input.cwd } : {})
   })
   if (input.stdinMode === 'ignore') {
     child.stdin?.on?.('error', () => {})

@@ -1,6 +1,7 @@
 import {
   cleanGeneratedCommitMessage,
-  excerptAgentFailureOutput
+  excerptAgentFailureOutput,
+  sanitizeAgentFailureDetail
 } from '../../shared/commit-message-prompt'
 import { withMacTailscaleDnsHint } from '../network/macos-tailscale-dns-diagnostic'
 import {
@@ -8,30 +9,6 @@ import {
   type AgentGenerationFailureOutput
 } from './agent-failure-output'
 import type { InternalTextGenerationResult } from './source-control-text-generation-types'
-
-export function sanitizeAgentFailureDetail(detail: string | null): string | null {
-  const trimmed = detail
-    ?.replace(/[\p{Cc}\p{Cf}]+/gu, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-  if (!trimmed) {
-    return null
-  }
-  const redacted = trimmed
-    .replace(
-      /\\\\[^\s"'`<>\\]+\\(?:[^\s"'`<>\\]+(?:\s+[^\s"'`<>\\]+)*(?=\\)\\)*[^\s"'`<>\\]+/g,
-      '[path]'
-    )
-    .replace(
-      /[A-Za-z]:(?:\\+|\/)(?:[^\s"'`<>\\/|:*?]+(?:\s+[^\s"'`<>\\/|:*?]+)*(?=[\\/])(?:\\+|\/))*[^\s"'`<>\\/|:*?]+/g,
-      '[path]'
-    )
-    .replace(
-      /(^|[\s"'`(=:,])\/(?:[^\s"'`<>/]+(?:\s+[^\s"'`<>/]+)*(?=\/)\/)+[^\s"'`<>/]+/g,
-      '$1[path]'
-    )
-  return redacted.length > 240 ? `${redacted.slice(0, 240).trimEnd()}...` : redacted
-}
 
 export function formatAgentCliFailureMessage(
   label: string,
