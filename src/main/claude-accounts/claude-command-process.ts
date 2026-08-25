@@ -1,4 +1,5 @@
 import { spawnProcess, type ChildProcessHandle } from '../../shared/child-process/run-process'
+import { withCliRuntimeOnPath } from '../../shared/node-cli-command-resolution'
 import {
   buildWindowsHostInteractiveLoginSpawn,
   type WindowsHostInteractiveLoginSpawn
@@ -40,12 +41,16 @@ export function runClaudeCommandProcess(
       configDir.wslDistro === null &&
       args[0] === 'auth' &&
       args[1] === 'login'
+    // Why lazy: the WSL branch runs `claude` inside the distro, so resolving a
+    // host binary there would be wasted filesystem probing for a path never used.
+    let cachedHostClaudeCommand: string | null = null
+    const hostClaudeCommand = (): string => (cachedHostClaudeCommand ??= resolveClaudeCommand())
     // The native login needs its own visible console, so it runs behind a
     // start /wait wrapper that relays the real login PID back for termination.
     const interactiveLogin = isWindowsHostInteractiveLogin
-      ? buildWindowsHostInteractiveLoginSpawn(resolveClaudeCommand(), args)
+      ? buildWindowsHostInteractiveLoginSpawn(hostClaudeCommand(), args)
       : null
-    const spawnConfig = resolveClaudeInvocation(args, configDir, interactiveLogin)
+    const spawnConfig = resolveClaudeInvocation(args, configDir, interactiveLogin, hostClaudeCommand)
     const child = spawnProcess({
       program: spawnConfig.command,
       args: spawnConfig.args,
@@ -181,16 +186,17 @@ type ClaudeSpawnConfig = {
 function resolveClaudeInvocation(
   args: string[],
   configDir: ClaudeCommandConfig,
-  interactiveLogin: WindowsHostInteractiveLoginSpawn | null
+  interactiveLogin: WindowsHostInteractiveLoginSpawn | null,
+  hostClaudeCommand: () => string
 ): ClaudeSpawnConfig {
   const spawnConfig = interactiveLogin
     ? {
         command: interactiveLogin.command,
         args: interactiveLogin.args,
-        env: {
+        env: withCliRuntimeOnPath(hostClaudeCommand(), {
           ...process.env,
           CLAUDE_CONFIG_DIR: configDir.windowsPath
-        },
+        }),
         windowsVerbatimArguments: false
       }
     : configDir.linuxPath && configDir.wslDistro
@@ -209,19 +215,19 @@ function resolveClaudeInvocation(
         }
       : process.platform === 'win32'
         ? {
-            ...buildWindowsCommandInvocation(resolveClaudeCommand(), args),
-            env: {
+            ...buildWindowsCommandInvocation(hostClaudeCommand(), args),
+            env: withCliRuntimeOnPath(hostClaudeCommand(), {
               ...process.env,
               CLAUDE_CONFIG_DIR: configDir.windowsPath
-            }
+            })
           }
         : {
-            command: resolveClaudeCommand(),
+            command: hostClaudeCommand(),
             args,
-            env: {
+            env: withCliRuntimeOnPath(hostClaudeCommand(), {
               ...process.env,
               CLAUDE_CONFIG_DIR: configDir.windowsPath
-            },
+            }),
             windowsVerbatimArguments: false
           }
   return spawnConfig
