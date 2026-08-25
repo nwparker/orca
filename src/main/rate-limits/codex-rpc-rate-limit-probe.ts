@@ -1,5 +1,11 @@
 import type { ProviderRateLimits } from '../../shared/rate-limit-types'
+import { extractCodexAuthError } from '../../shared/codex-auth-errors'
+import {
+  excerptAgentFailureOutput,
+  sanitizeAgentFailureDetail
+} from '../../shared/commit-message-agent-output'
 import { withMacTailscaleDnsHint } from '../network/macos-tailscale-dns-diagnostic'
+import { redactString } from '../observability/redactor'
 import {
   classifyCodexRateLimitWindows,
   CODEX_SESSION_WINDOW_MINUTES,
@@ -38,15 +44,17 @@ type RpcInputStream = {
   off(event: 'error', listener: (error: Error) => void): unknown
 }
 
+type CodexRpcCloseListener = (code: number | null, signal: NodeJS.Signals | null) => void
+
 export type CodexRpcRateLimitChild = {
   stdin: RpcInputStream
   stdout: RpcDataStream
   stderr: RpcDataStream
   on(event: 'error', listener: (error: Error) => void): unknown
-  on(event: 'close', listener: () => void): unknown
-  once(event: 'close', listener: () => void): unknown
+  on(event: 'close', listener: CodexRpcCloseListener): unknown
+  once(event: 'close', listener: CodexRpcCloseListener): unknown
   off(event: 'error', listener: (error: Error) => void): unknown
-  off(event: 'close', listener: () => void): unknown
+  off(event: 'close', listener: CodexRpcCloseListener): unknown
 }
 
 type CodexRpcRateLimitProbeOptions = {
@@ -178,13 +186,13 @@ export function readCodexRateLimitsViaRpc(
       child.stdin.off('error', onStdinError)
     }
 
-    function onClose(): void {
+    function onClose(code: number | null, signal: NodeJS.Signals | null): void {
       settle({
         provider: 'codex',
         session: null,
         weekly: null,
         updatedAt: Date.now(),
-        error: withMacTailscaleDnsHint('RPC process exited unexpectedly', stderr),
+        error: describeCodexRpcExit(code, signal, stderr),
         status: 'error'
       })
     }
@@ -267,4 +275,27 @@ export function readCodexRateLimitsViaRpc(
       onError(error instanceof Error ? error : new Error(String(error)))
     }
   })
+}
+
+// Why: surfaced text drives re-auth classification, so diagnosis and classification must use the same sanitized value.
+function describeCodexRpcExit(
+  code: number | null,
+  signal: NodeJS.Signals | null,
+  stderr: string
+): string {
+  if (extractCodexAuthError(stderr)) {
+    // Fixed copy cannot leak paths/tokens and is exactly what the renderer classifies.
+    return 'Your ChatGPT session could not be refreshed. Please sign in again.'
+  }
+  const reason =
+    code !== null ? `exit code ${code}` : signal ? `signal ${signal}` : 'no exit status'
+  const detail = sanitizeAgentFailureDetail(
+    redactString(excerptAgentFailureOutput('', stderr) ?? '')
+  )
+  return withMacTailscaleDnsHint(
+    detail
+      ? `Codex RPC process exited (${reason}): ${detail}`
+      : `Codex RPC process exited (${reason})`,
+    stderr
+  )
 }

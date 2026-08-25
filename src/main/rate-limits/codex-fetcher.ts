@@ -5,6 +5,9 @@ import { buildWslExecArgs, buildWslLoginShellCommand } from '../../shared/wsl-lo
 import { parseWslUncPath } from '../../shared/wsl-paths'
 import { CODEX_READ_ONLY_APP_SERVER_ARGS } from '../codex-cli/codex-read-only-app-server-args'
 import { resolveCodexCommand } from '../codex-cli/command'
+// Why: import from the shared module, not the codex-cli re-export, so a test that
+// mocks '../codex-cli/command' does not have to restate this pure helper.
+import { withCliRuntimeOnPath } from '../../shared/node-cli-command-resolution'
 import {
   resolveCodexHomeProcessLockKey,
   withCodexHomeProcessLock
@@ -108,10 +111,10 @@ async function fetchViaRpc(options?: CodexRateLimitFetchOptions): Promise<Provid
     stdio: ['pipe', 'pipe', 'pipe'] as ['pipe', 'pipe', 'pipe'],
     cwd: resolveHiddenRateLimitPtyCwd(),
     windowsHide: true,
-    env: {
+    env: withCliRuntimeOnPath(codexCommand, {
       ...(wslCodex ? processEnvWithoutCodexHome() : process.env),
       ...(options?.codexHomePath && !wslCodex ? { CODEX_HOME: options.codexHomePath } : {})
-    }
+    })
   }
   const child = spawn(spawnCmd, spawnArgs, spawnOptions)
   return readCodexRateLimitsViaRpc({
@@ -134,11 +137,11 @@ function resolvePtyCommand(options?: CodexRateLimitFetchOptions) {
     command: wslCodex ? wslCodex.command : isWin32 ? getCmdExePath() : codexCommand,
     args: wslCodex ? wslCodex.args : isWin32 ? ['/d', '/c', codexCommand] : [],
     cwd: resolveHiddenRateLimitPtyCwd(),
-    env: {
+    env: withCliRuntimeOnPath(codexCommand, {
       ...(wslCodex ? processEnvWithoutCodexHome() : process.env),
       TERM: 'xterm-256color',
       ...(options?.codexHomePath && !wslCodex ? { CODEX_HOME: options.codexHomePath } : {})
-    }
+    })
   }
 }
 
