@@ -3,7 +3,6 @@ import type { AppState } from '../types'
 import {
   WORKSPACE_CLEANUP_CLASSIFIER_VERSION,
   applyWorkspaceCleanupPolicy,
-  canQueueWorkspaceCleanupCandidate,
   type WorkspaceCleanupCandidate,
   type WorkspaceCleanupDismissal,
   type WorkspaceCleanupScanArgs,
@@ -35,7 +34,6 @@ export { enrichWorkspaceCleanupCandidates, WORKSPACE_CLEANUP_ENRICHMENT_CONCURRE
 type WorkspaceCleanupViewedCandidate = {
   viewedAt: number
   fingerprint: string
-  wasSuggested?: boolean
 }
 
 const unverifiedRemovalConsentByStore = new WeakMap<() => AppState, Map<string, string>>()
@@ -91,8 +89,7 @@ export const createWorkspaceCleanupSlice: StateCreator<AppState, [], [], Workspa
         ),
         [candidate.worktreeId]: {
           viewedAt: now,
-          fingerprint: candidate.fingerprint,
-          wasSuggested: candidate.tier === 'ready' && canQueueWorkspaceCleanupCandidate(candidate)
+          fingerprint: candidate.fingerprint
         }
       }
     }))

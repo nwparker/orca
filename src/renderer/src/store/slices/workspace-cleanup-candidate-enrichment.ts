@@ -7,8 +7,12 @@ import {
   type WorkspaceCleanupCandidate,
   type WorkspaceCleanupDismissal
 } from '../../../../shared/workspace-cleanup'
-import { getWorkspaceCleanupCandidateIdentity } from '../../../../shared/workspace-cleanup-host-identity'
+import {
+  getWorkspaceCleanupCandidateHostId,
+  getWorkspaceCleanupCandidateIdentity
+} from '../../../../shared/workspace-cleanup-host-identity'
 import { mapWithConcurrency } from '../../../../shared/map-with-concurrency'
+import { getWorktreeVisitTimestamp } from '@/lib/worktree-visit-recency'
 import {
   buildWorkspaceCleanupAgentStatusIndex,
   hasFreshIndexedLiveAgent,
@@ -192,7 +196,11 @@ function getWorkspaceCleanupLocalStateSignature(
     browserTabCount: (state.browserTabsByWorktree[worktreeId] ?? []).length,
     retainedDoneAgentPaneKeys,
     agentStatuses,
-    lastVisitedAt: state.lastVisitedAtByWorktreeId[worktreeId] ?? 0,
+    lastVisitedAt:
+      getWorktreeVisitTimestamp(state.lastVisitedAtByWorktreeId, {
+        id: worktreeId,
+        hostId: getWorkspaceCleanupCandidateHostId(candidate)
+      }) ?? 0,
     viewed: state.workspaceCleanupViewedCandidates[worktreeId] ?? null,
     dismissal
   })
@@ -237,7 +245,11 @@ async function enrichWorkspaceCleanupCandidate(
     blockers.push('terminal-liveness-unknown')
   }
 
-  const lastVisitedAt = state.lastVisitedAtByWorktreeId[candidate.worktreeId] ?? 0
+  const lastVisitedAt =
+    getWorktreeVisitTimestamp(state.lastVisitedAtByWorktreeId, {
+      id: candidate.worktreeId,
+      hostId: getWorkspaceCleanupCandidateHostId(candidate)
+    }) ?? 0
   const hasVisibleContext = cleanEditorTabCount > 0 || browserTabCount > 0
   if (
     hasVisibleContext &&

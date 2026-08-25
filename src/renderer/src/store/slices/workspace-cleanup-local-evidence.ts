@@ -5,6 +5,7 @@ import {
 } from '../../../../shared/agent-status-types'
 import { classifyTitleActivity, isExplicitAgentStatusFresh } from '@/lib/pane-agent-evidence'
 import type { WorkspaceCleanupCandidate } from '../../../../shared/workspace-cleanup'
+import { getWorktreeVisitTimestamp } from '@/lib/worktree-visit-recency'
 
 const RECENT_VISIBLE_CONTEXT_MS = 24 * 60 * 60 * 1000
 const VIEWED_FROM_CLEANUP_MS = 2 * 60 * 60 * 1000
@@ -38,7 +39,7 @@ export function shouldPreserveCleanupInspection(
   state: AppState
 ): boolean {
   const viewed = state.workspaceCleanupViewedCandidates[candidate.worktreeId]
-  if (!viewed?.wasSuggested || viewed.fingerprint !== candidate.fingerprint) {
+  if (!viewed || viewed.fingerprint !== candidate.fingerprint) {
     return false
   }
   return Date.now() - viewed.viewedAt <= VIEWED_FROM_CLEANUP_MS
@@ -78,7 +79,12 @@ export function getInitialWorkspaceCleanupGitDeferrals(state: AppState): string[
     const hasVisibleContext =
       openEditorWorktreeIds.has(worktreeId) ||
       (state.browserTabsByWorktree[worktreeId]?.length ?? 0) > 0
-    const lastVisitedAt = state.lastVisitedAtByWorktreeId[worktreeId] ?? 0
+    // Why: enrichment state may be a plain snapshot without slice methods.
+    const lastVisitedAt =
+      getWorktreeVisitTimestamp(state.lastVisitedAtByWorktreeId, {
+        id: worktreeId,
+        hostId: state.getKnownWorktreeById?.(worktreeId)?.hostId
+      }) ?? 0
     if (
       hasVisibleContext &&
       lastVisitedAt > 0 &&
