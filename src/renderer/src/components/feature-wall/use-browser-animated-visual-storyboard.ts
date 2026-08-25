@@ -59,6 +59,7 @@ function targetElement(
 
 export function useBrowserAnimatedVisualStoryboard(
   refs: BrowserVisualTargetRefs,
+  reducedMotion: boolean,
   onCycleComplete?: () => void
 ): BrowserVisualState {
   const [phase, setPhase] = useState<BrowserVisualPhase>('idle')
@@ -73,6 +74,9 @@ export function useBrowserAnimatedVisualStoryboard(
   const completeCycle = useEffectEvent(() => onCycleComplete?.())
 
   useEffect(() => {
+    if (reducedMotion) {
+      return
+    }
     let cancelled = false
     const timeouts: number[] = []
     const wait = (ms: number): Promise<void> =>
@@ -149,7 +153,7 @@ export function useBrowserAnimatedVisualStoryboard(
       cancelled = true
       timeouts.forEach((id) => window.clearTimeout(id))
     }
-  }, [refs])
+  }, [refs, reducedMotion])
 
   return {
     phase,

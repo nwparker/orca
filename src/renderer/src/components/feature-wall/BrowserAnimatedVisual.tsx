@@ -21,32 +21,19 @@ export function BrowserAnimatedVisual(props: {
   const targets = useBrowserVisualTargetRefs()
   const newBrowserShortcutLabel = useShortcutLabel('tab.newBrowser')
 
-  return props.reducedMotion ? (
-    <BrowserVisualFrame
-      state={BROWSER_REDUCED_MOTION_STATE}
-      targets={targets}
-      newBrowserShortcutLabel={newBrowserShortcutLabel}
-    />
-  ) : (
-    <AnimatedBrowserVisualFrame
-      targets={targets}
-      newBrowserShortcutLabel={newBrowserShortcutLabel}
-      onCycleComplete={props.onCycleComplete}
-    />
+  // Why: branch on the state source, not the element type, so a reducedMotion
+  // toggle re-renders the storyboard in place instead of remounting it.
+  const animatedState = useBrowserAnimatedVisualStoryboard(
+    targets,
+    props.reducedMotion,
+    props.onCycleComplete
   )
-}
 
-function AnimatedBrowserVisualFrame(props: {
-  targets: BrowserVisualTargetRefs
-  newBrowserShortcutLabel: string
-  onCycleComplete?: () => void
-}): JSX.Element {
-  const state = useBrowserAnimatedVisualStoryboard(props.targets, props.onCycleComplete)
   return (
     <BrowserVisualFrame
-      state={state}
-      targets={props.targets}
-      newBrowserShortcutLabel={props.newBrowserShortcutLabel}
+      state={props.reducedMotion ? BROWSER_REDUCED_MOTION_STATE : animatedState}
+      targets={targets}
+      newBrowserShortcutLabel={newBrowserShortcutLabel}
     />
   )
 }

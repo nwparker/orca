@@ -42,42 +42,17 @@ export function WorkbenchAnimatedVisual(props: {
   const variant = props.variant ?? 'tour'
   const splitRightShortcutLabel = useShortcutLabel('terminal.splitRight')
   const splitDownShortcutLabel = useShortcutLabel('terminal.splitDown')
-
-  if (props.reducedMotion) {
-    return (
-      <WorkbenchTerminalVisualFrame
-        reducedMotion
-        variant={variant}
-        splitRightShortcutLabel={splitRightShortcutLabel}
-        splitDownShortcutLabel={splitDownShortcutLabel}
-        state={getReducedMotionState(variant)}
-      />
-    )
-  }
+  // Why: branch on the state source, not the element type, so a reducedMotion
+  // toggle re-renders the storyboard in place instead of remounting it.
+  const animatedState = useWorkbenchTerminalStoryboard(variant, props.reducedMotion)
 
   return (
-    <AnimatedWorkbenchTerminalVisual
-      key={variant}
+    <WorkbenchTerminalVisualFrame
+      reducedMotion={props.reducedMotion}
       variant={variant}
       splitRightShortcutLabel={splitRightShortcutLabel}
       splitDownShortcutLabel={splitDownShortcutLabel}
-    />
-  )
-}
-
-function AnimatedWorkbenchTerminalVisual(props: {
-  variant: WorkbenchAnimatedVisualVariant
-  splitRightShortcutLabel: string
-  splitDownShortcutLabel: string
-}): JSX.Element {
-  const state = useWorkbenchTerminalStoryboard(props.variant)
-  return (
-    <WorkbenchTerminalVisualFrame
-      reducedMotion={false}
-      variant={props.variant}
-      splitRightShortcutLabel={props.splitRightShortcutLabel}
-      splitDownShortcutLabel={props.splitDownShortcutLabel}
-      state={state}
+      state={props.reducedMotion ? getReducedMotionState(variant) : animatedState}
     />
   )
 }
@@ -219,7 +194,7 @@ function WorkbenchTerminalPointerIcon(): JSX.Element {
   )
 }
 
-function getReducedMotionState(
+function buildReducedMotionState(
   variant: WorkbenchAnimatedVisualVariant
 ): WorkbenchTerminalVisualState {
   const isTwoAgentsChecklist = variant === 'two-agents-checklist'
@@ -234,4 +209,16 @@ function getReducedMotionState(
     showCaret: !isTwoAgentsChecklist,
     rippleKey: 0
   }
+}
+
+// Why: stable identities — a fresh cursorTarget per render would re-fire the cursor layout effect.
+const WORKBENCH_TOUR_REDUCED_MOTION_STATE = buildReducedMotionState('tour')
+const WORKBENCH_TWO_AGENTS_REDUCED_MOTION_STATE = buildReducedMotionState('two-agents-checklist')
+
+function getReducedMotionState(
+  variant: WorkbenchAnimatedVisualVariant
+): WorkbenchTerminalVisualState {
+  return variant === 'two-agents-checklist'
+    ? WORKBENCH_TWO_AGENTS_REDUCED_MOTION_STATE
+    : WORKBENCH_TOUR_REDUCED_MOTION_STATE
 }

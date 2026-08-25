@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   WORKBENCH_RUN_QUEUE,
   WORKBENCH_RUN_TICK_MS,
@@ -9,7 +9,10 @@ import {
 } from './workbench-terminal-storyboard-state'
 import { runWorkbenchTerminalStoryboardSequence } from './workbench-terminal-storyboard-sequence'
 
-export function useWorkbenchTerminalStoryboard(variant: WorkbenchAnimatedVisualVariant): {
+export function useWorkbenchTerminalStoryboard(
+  variant: WorkbenchAnimatedVisualVariant,
+  reducedMotion: boolean
+): {
   phase: WorkbenchAnimationPhase
   running: (typeof WORKBENCH_RUN_QUEUE)[number]
   cursorTarget: WorkbenchCursorTarget
@@ -20,9 +23,7 @@ export function useWorkbenchTerminalStoryboard(variant: WorkbenchAnimatedVisualV
   showCaret: boolean
   rippleKey: number
 } {
-  // The keyed animated stage remounts when the variant changes.
-  const storyboardVariant = useRef(variant).current
-  const isTwoAgentsChecklist = storyboardVariant === 'two-agents-checklist'
+  const isTwoAgentsChecklist = variant === 'two-agents-checklist'
   const [phase, setPhase] = useState<WorkbenchAnimationPhase>({ kind: 'idle' })
   const [runIdx, setRunIdx] = useState(0)
   const [cursorTarget, setCursorTarget] = useState<WorkbenchCursorTarget>({ kind: 'hidden' })
@@ -34,16 +35,19 @@ export function useWorkbenchTerminalStoryboard(variant: WorkbenchAnimatedVisualV
   const [rippleKey, setRippleKey] = useState(0)
 
   useEffect(() => {
-    if (isTwoAgentsChecklist) {
+    if (reducedMotion || isTwoAgentsChecklist) {
       return
     }
     const id = window.setInterval(() => {
       setRunIdx((index) => (index + 1) % WORKBENCH_RUN_QUEUE.length)
     }, WORKBENCH_RUN_TICK_MS)
     return () => window.clearInterval(id)
-  }, [isTwoAgentsChecklist])
+  }, [isTwoAgentsChecklist, reducedMotion])
 
   useEffect(() => {
+    if (reducedMotion) {
+      return
+    }
     let cancelled = false
     const timeouts: number[] = []
     const wait = (ms: number): Promise<void> =>
@@ -52,7 +56,7 @@ export function useWorkbenchTerminalStoryboard(variant: WorkbenchAnimatedVisualV
         timeouts.push(id)
       })
 
-    void runWorkbenchTerminalStoryboardSequence(storyboardVariant, {
+    void runWorkbenchTerminalStoryboardSequence(variant, {
       isCancelled: () => cancelled,
       wait,
       setPhase,
@@ -69,7 +73,7 @@ export function useWorkbenchTerminalStoryboard(variant: WorkbenchAnimatedVisualV
       cancelled = true
       timeouts.forEach((id) => window.clearTimeout(id))
     }
-  }, [storyboardVariant])
+  }, [variant, reducedMotion])
 
   return {
     phase,
