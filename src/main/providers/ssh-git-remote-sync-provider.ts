@@ -1,5 +1,6 @@
 import type { GitForkSyncExpectedUpstream, GitForkSyncResult } from '../../shared/git-fork-sync'
 import type { GitPushTarget } from '../../shared/worktree/types'
+import { REBASE_FROM_BASE_RPC_TIMEOUT_MS } from '../../shared/git-rebase-source'
 import { SshGitWorkingTreeProvider } from './ssh-git-working-tree-provider'
 
 export class SshGitRemoteSyncProvider extends SshGitWorkingTreeProvider {
@@ -36,7 +37,11 @@ export class SshGitRemoteSyncProvider extends SshGitWorkingTreeProvider {
 
   async rebaseFromBase(worktreePath: string, baseRef: string): Promise<void> {
     await this.runWithGitReadInvalidation(async () => {
-      await this.mux.request('git.rebaseFromBase', { worktreePath, baseRef })
+      await this.mux.request(
+        'git.rebaseFromBase',
+        { worktreePath, baseRef },
+        { timeoutMs: REBASE_FROM_BASE_RPC_TIMEOUT_MS }
+      )
     })
   }
 

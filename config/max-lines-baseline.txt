@@ -3,7 +3,6 @@
 # split the oversized file instead (AGENTS.md → "Do Not Disable Max Lines").
 # Regenerate/prune: pnpm check:max-lines-ratchet --prune   (removes stale entries only)
 inline src/cli/handlers/automations.ts
-inline src/cli/handlers/orchestration.ts
 inline src/cli/help.ts
 inline src/main/agent-hooks/server.ts
 inline src/main/automations/external-manager.ts
@@ -32,20 +31,16 @@ inline src/main/github/pr-refresh-coordinator.ts
 inline src/main/github/project-view.ts
 inline src/main/github/project-view/mutations.ts
 inline src/main/github/work-item-details.ts
-inline src/main/gitlab/client.ts
 inline src/main/index.ts
 inline src/main/ipc/filesystem-watcher.ts
 inline src/main/ipc/filesystem.ts
 inline src/main/ipc/github.ts
-inline src/main/ipc/pty.ts
 inline src/main/ipc/repos.ts
 inline src/main/ipc/ssh.ts
 inline src/main/ipc/worktree-remote.ts
 inline src/main/ipc/worktrees.ts
-inline src/main/jira/issues.ts
 inline src/main/keybindings/keybinding-file.ts
 inline src/main/linear/issues.ts
-inline src/main/linear/projects.ts
 inline src/main/memory/collector.ts
 inline src/main/opencode/hook-service.ts
 inline src/main/persistence/loading-store/store.ts
@@ -63,7 +58,6 @@ inline src/main/runtime/orca-runtime-git.ts
 inline src/main/runtime/orca-runtime.test.ts
 inline src/main/runtime/orca-runtime.ts
 inline src/main/runtime/rpc/methods/orchestration.ts
-inline src/main/runtime/rpc/methods/terminal.ts
 inline src/main/runtime/runtime-rpc.ts
 inline src/main/source-control/hosted-review-creation.ts
 inline src/main/speech/model-manager.ts
@@ -79,10 +73,8 @@ inline src/main/window/createMainWindow.ts
 inline src/main/workspace-space-analysis.ts
 inline src/preload/index.ts
 inline src/relay/dispatcher.ts
-inline src/relay/external-automations-handler.ts
 inline src/relay/git-handler.ts
 inline src/relay/pty-handler.ts
-inline src/relay/relay.ts
 inline src/relay/workspace-space-scan.ts
 inline src/renderer/src/components/GitLabItemDialog.tsx
 inline src/renderer/src/components/JiraIssueWorkspace.tsx
@@ -146,7 +138,6 @@ inline src/renderer/src/runtime/web-session-tabs-sync.ts
 inline src/renderer/src/store/slices/agent-status.ts
 inline src/renderer/src/store/slices/browser.ts
 inline src/renderer/src/store/slices/diffComments.ts
-inline src/renderer/src/store/slices/github.ts
 inline src/renderer/src/store/slices/hosted-review.ts
 inline src/renderer/src/store/slices/jira.ts
 inline src/renderer/src/store/slices/linear.ts
