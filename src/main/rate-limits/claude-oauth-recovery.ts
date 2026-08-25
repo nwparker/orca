@@ -104,9 +104,10 @@ export function makeClaudeUsageClassificationError(input: {
   oauthCredentials: ClaudeOAuthCredentialReadResult
   authPreparation?: ClaudeRuntimeAuthPreparation
 }): ProviderRateLimits {
-  const message = input.error instanceof Error ? input.error.message : String(input.error || '')
+  const message =
+    input.error instanceof Error ? input.error.message : String(input.error || 'Unknown error')
   const retryAfterMs = input.error instanceof OAuthUsageError ? input.error.retryAfterMs : null
-  return makeClaudeUsageResult('error', withMacTailscaleDnsHint(message || 'Unknown error'), {
+  return makeClaudeUsageResult('error', withMacTailscaleDnsHint(message), {
     ...metadataForClaudeUsageAttempt({
       attemptedSources: input.attempts.attemptedSources,
       oauthCredentials: input.oauthCredentials,
