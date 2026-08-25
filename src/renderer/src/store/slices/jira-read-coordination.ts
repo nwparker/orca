@@ -1,5 +1,5 @@
 import type { AppState } from '../types'
-import type { CacheEntry } from './github'
+import type { CacheEntry } from '../github/cache-model'
 import type { JiraSlice, JiraSliceSet } from './jira-slice-contract'
 import type {
   JiraConnectionStatus,

@@ -50,6 +50,7 @@ import { applyManualRepoOrder, getManualRepoOrder } from '../../../../shared/man
 import { getProjectGroupSubtreeIds } from '../../../../shared/project-groups'
 import { isPathInsideOrEqual } from '../../../../shared/cross-platform-path'
 import { getRepoIdFromWorktreeId } from '../../../../shared/worktree/id'
+import { getWorktreeIdFromVisitKey, getWorktreeVisitKey } from '@/lib/worktree-visit-recency'
 import { structuralValuesEqual } from '../../../../shared/structural-value-equality'
 import { selectProjectGroupRemovalTargets } from './project-group-removal-targets'
 import {
@@ -112,6 +113,7 @@ import { getEnvironmentSshStateGeneration } from './runtime-environment-ssh'
 import { getRuntimeEnvironmentConnectionGeneration } from './runtime-status'
 import {
   findFolderWorkspaceOwner,
+  getExecutionHostIdForFolderWorkspace,
   getRuntimeEnvironmentIdForFolderWorkspace
 } from '@/lib/folder-workspace-runtime-owner'
 import {
@@ -1908,7 +1910,10 @@ export type RepoSlice = {
     updates: FolderWorkspaceUpdates,
     options?: { executionHostId?: ExecutionHostId }
   ) => Promise<boolean>
-  deleteFolderWorkspace: (folderWorkspaceId: string) => Promise<boolean>
+  deleteFolderWorkspace: (
+    folderWorkspaceId: string,
+    options?: { executionHostId?: ExecutionHostId }
+  ) => Promise<boolean>
   // options.hostId targets a specific host's row + RPC target when the id exists on multiple hosts; else the group's own host owns the call.
   updateProjectGroup: (
     groupId: string,
@@ -2980,12 +2985,22 @@ export const createRepoSlice: StateCreator<AppState, [], [], RepoSlice> = (set, 
     }
   },
 
-  deleteFolderWorkspace: async (folderWorkspaceId) => {
+  deleteFolderWorkspace: async (folderWorkspaceId, options) => {
     const state = get()
-    if (!findFolderWorkspaceOwner(state, folderWorkspaceId)) {
+    const executionHostId = options?.executionHostId
+    if (!findFolderWorkspaceOwner(state, folderWorkspaceId, executionHostId)) {
       return false
     }
-    const runtimeEnvironmentId = getRuntimeEnvironmentIdForFolderWorkspace(state, folderWorkspaceId)
+    const ownerHostId = getExecutionHostIdForFolderWorkspace(
+      state,
+      folderWorkspaceId,
+      executionHostId
+    )
+    const runtimeEnvironmentId = getRuntimeEnvironmentIdForFolderWorkspace(
+      state,
+      folderWorkspaceId,
+      executionHostId
+    )
     try {
       // Why: deletion targets the folder's owner; focus may be on a different host.
       const target = getActiveRuntimeTarget({ activeRuntimeEnvironmentId: runtimeEnvironmentId })
@@ -3006,11 +3021,15 @@ export const createRepoSlice: StateCreator<AppState, [], [], RepoSlice> = (set, 
       const workspaceKey = folderWorkspaceKey(folderWorkspaceId)
       set((s) => ({
         folderWorkspaces: s.folderWorkspaces.filter(
-          (workspace) => workspace.id !== folderWorkspaceId
+          (workspace) =>
+            workspace.id !== folderWorkspaceId ||
+            getFolderWorkspaceHostId(workspace, s.projectGroups) !== ownerHostId
         ),
         folderWorkspacePathStatuses: {}
       }))
-      get().purgeWorktreeTerminalState([workspaceKey])
+      if (!get().folderWorkspaces.some((workspace) => workspace.id === folderWorkspaceId)) {
+        get().purgeWorktreeTerminalState([workspaceKey])
+      }
       return true
     } catch (err) {
       console.error('Failed to delete folder workspace:', err)
@@ -3682,6 +3701,20 @@ export const createRepoSlice: StateCreator<AppState, [], [], RepoSlice> = (set, 
 
       // Kill PTYs for all worktrees belonging to this repo
       const worktreeIds = getKnownRepoWorktreeIds(get(), projectId, ownerHostId)
+      // A raw id can be published by two hosts. Keep the purge host-scoped for
+      // those twins so the sibling's qualified visit recency survives.
+      const knownRepoWorktrees = [
+        ...(get().worktreesByRepo[projectId] ?? []),
+        ...(get().detectedWorktreesByRepo[projectId]?.worktrees ?? [])
+      ]
+      const exactSiblingIds = new Set(
+        knownRepoWorktrees
+          .filter((worktree) => !worktreeBelongsToHost(worktree, ownerHostId))
+          .map((worktree) => worktree.id)
+      )
+      const purgeTargets = worktreeIds.map((id) =>
+        exactSiblingIds.has(id) ? { id, hostId: ownerHostId } : id
+      )
       const localAgentContextProjectIds =
         ownerHostId === LOCAL_EXECUTION_HOST_ID
           ? [
@@ -3717,7 +3750,7 @@ export const createRepoSlice: StateCreator<AppState, [], [], RepoSlice> = (set, 
       }
 
       // Why: use the canonical per-worktree purge to evict all worktree-scoped maps (hand-deletion leaked most); runs before the set() below so it still sees tabsByWorktree.
-      get().purgeWorktreeTerminalState(worktreeIds)
+      get().purgeWorktreeTerminalState(purgeTargets)
       get().clearLocalDetectedAgentContextsForProjects(localAgentContextProjectIds)
 
       set((s) => {
@@ -3756,6 +3789,9 @@ export const createRepoSlice: StateCreator<AppState, [], [], RepoSlice> = (set, 
         }
         // Why: editor state is worktree-scoped; clear the repo's open files + active-file tracking so orphans don't linger in the session save.
         const worktreeIdSet = new Set(worktreeIds)
+        const removedVisitKeys = new Set(
+          worktreeIds.map((worktreeId) => getWorktreeVisitKey(worktreeId, ownerHostId))
+        )
         const nextOpenFiles = s.openFiles.filter((f) => !worktreeIdSet.has(f.worktreeId))
         const nextActiveFileIdByWorktree = { ...s.activeFileIdByWorktree }
         const nextActiveTabTypeByWorktree = { ...s.activeTabTypeByWorktree }
@@ -3771,9 +3807,11 @@ export const createRepoSlice: StateCreator<AppState, [], [], RepoSlice> = (set, 
         const repoIdFullyRemoved = !nextRepos.some((r) => r.id === projectId)
         let nextLastVisitedAtByWorktreeId = s.lastVisitedAtByWorktreeId
         for (const id of Object.keys(s.lastVisitedAtByWorktreeId)) {
+          const rawId = getWorktreeIdFromVisitKey(id)
           if (
-            worktreeIdSet.has(id) ||
-            (repoIdFullyRemoved && getRepoIdFromWorktreeId(id) === projectId)
+            (ownerHostId && removedVisitKeys.has(id)) ||
+            (!ownerHostId && worktreeIdSet.has(rawId)) ||
+            (repoIdFullyRemoved && getRepoIdFromWorktreeId(rawId) === projectId)
           ) {
             if (nextLastVisitedAtByWorktreeId === s.lastVisitedAtByWorktreeId) {
               nextLastVisitedAtByWorktreeId = { ...s.lastVisitedAtByWorktreeId }
