@@ -36,6 +36,23 @@ describe('host-qualified worktree metadata', () => {
     expect(Object.keys(persisted.worktreeMetaByIdentity ?? {})).toHaveLength(2)
     expect(store.getWorktreeMeta(worktreeId)?.displayName).toBe('Local feature')
   })
+  it('projects canonical-only metadata for exactly one host', () => {
+    const store = createStore()
+    store.setWorktreeMetaForHost(worktreeId, 'local', { displayName: 'Local feature' })
+    store.setWorktreeMetaForHost(worktreeId, 'ssh:build-box', {
+      displayName: 'Remote feature'
+    })
+
+    expect(store.getAllWorktreeMetaForHost('local')).toEqual({
+      [worktreeId]: expect.objectContaining({ displayName: 'Local feature', hostId: 'local' })
+    })
+    expect(store.getAllWorktreeMetaForHost('ssh:build-box')).toEqual({
+      [worktreeId]: expect.objectContaining({
+        displayName: 'Remote feature',
+        hostId: 'ssh:build-box'
+      })
+    })
+  })
   it('reloads host-specific metadata without collapsing it to the legacy locator', () => {
     const store = createStore()
     store.setWorktreeMetaForHost(worktreeId, 'local', { displayName: 'Local feature' })
@@ -242,5 +259,95 @@ describe('host-qualified worktree metadata', () => {
     const persisted = readDataFile() as PersistedState
     expect(persisted.worktreeMetaByIdentity ?? {}).toEqual({})
     expect(persisted.worktreeIdentityAliases ?? {}).toEqual({})
+  })
+
+  it('repairs a missing canonical instance id while re-adopting an SSH target', () => {
+    const oldHostId = 'ssh:old-target' as const
+    const newHostId = 'ssh:new-target' as const
+    const seed = createStore()
+    seed.setWorktreeMetaForHost(worktreeId, oldHostId, { displayName: 'Remote feature' })
+    seed.flush()
+    const persisted = readDataFile() as PersistedState
+    const oldAlias = composeWorktreeIdentityAlias(oldHostId, worktreeId)
+    const oldKey = persisted.worktreeIdentityAliases?.[oldAlias]?.[0]
+    expect(oldKey).toBeTruthy()
+    delete persisted.worktreeMetaByIdentity?.[oldKey!]?.instanceId
+    writeDataFile(persisted)
+
+    const store = createStore()
+    store.reassignSshTargetId('old-target', 'new-target')
+    store.flush()
+
+    const repaired = readDataFile() as PersistedState
+    const newAlias = composeWorktreeIdentityAlias(newHostId, worktreeId)
+    const newKey = repaired.worktreeIdentityAliases?.[newAlias]?.[0]
+    expect(repaired.worktreeIdentityAliases?.[oldAlias]).toBeUndefined()
+    expect(newKey).toBeTruthy()
+    expect(repaired.worktreeMetaByIdentity?.[newKey!]).toMatchObject({
+      displayName: 'Remote feature',
+      hostId: newHostId,
+      instanceId: expect.any(String)
+    })
+    expect(repaired.worktreeMetaByIdentity?.[oldKey!]).toBeUndefined()
+  })
+
+  it('preserves source metadata when the re-adoption destination is divergent', () => {
+    const oldHostId = 'ssh:old-target' as const
+    const newHostId = 'ssh:new-target' as const
+    const store = createStore()
+    store.setWorktreeMetaForHost(worktreeId, oldHostId, { displayName: 'Source feature' })
+    store.setWorktreeMetaForHost(worktreeId, newHostId, {
+      displayName: 'Destination feature'
+    })
+
+    store.reassignSshTargetId('old-target', 'new-target')
+
+    expect(store.getWorktreeMetaForHost(worktreeId, oldHostId)?.displayName).toBe('Source feature')
+    expect(store.getWorktreeMetaForHost(worktreeId, newHostId)?.displayName).toBe(
+      'Destination feature'
+    )
+    expect(store.getWorktreeMeta(worktreeId)?.hostId).toBe(oldHostId)
+    store.flush()
+    const persisted = readDataFile() as PersistedState
+    expect(
+      persisted.worktreeIdentityAliases?.[composeWorktreeIdentityAlias(oldHostId, worktreeId)]
+    ).toHaveLength(1)
+    expect(
+      persisted.worktreeIdentityAliases?.[composeWorktreeIdentityAlias(newHostId, worktreeId)]
+    ).toHaveLength(1)
+  })
+
+  it('deduplicates an equivalent destination during SSH target re-adoption', () => {
+    const oldHostId = 'ssh:old-target' as const
+    const newHostId = 'ssh:new-target' as const
+    const seed = createStore()
+    seed.setWorktreeMetaForHost(worktreeId, oldHostId, { displayName: 'Remote feature' })
+    seed.flush()
+    const persisted = readDataFile() as PersistedState
+    const oldAlias = composeWorktreeIdentityAlias(oldHostId, worktreeId)
+    const oldKey = persisted.worktreeIdentityAliases?.[oldAlias]?.[0]
+    const source = oldKey ? persisted.worktreeMetaByIdentity?.[oldKey] : undefined
+    expect(source?.instanceId).toBeTruthy()
+    const newAlias = composeWorktreeIdentityAlias(newHostId, worktreeId)
+    const newKey = canonicalWorktreeIdentity({
+      worktreeId,
+      executionHostId: newHostId,
+      instanceId: source!.instanceId!
+    })
+    persisted.worktreeMetaByIdentity ??= {}
+    persisted.worktreeIdentityAliases ??= {}
+    persisted.worktreeMetaByIdentity[newKey] = { ...source!, hostId: newHostId }
+    persisted.worktreeIdentityAliases[newAlias] = [newKey]
+    writeDataFile(persisted)
+
+    const store = createStore()
+    store.reassignSshTargetId('old-target', 'new-target')
+    store.flush()
+
+    const deduped = readDataFile() as PersistedState
+    expect(deduped.worktreeIdentityAliases?.[oldAlias]).toBeUndefined()
+    expect(deduped.worktreeIdentityAliases?.[newAlias]).toEqual([newKey])
+    expect(deduped.worktreeMetaByIdentity?.[oldKey!]).toBeUndefined()
+    expect(deduped.worktreeMetaByIdentity?.[newKey]).toEqual({ ...source!, hostId: newHostId })
   })
 })

@@ -36,10 +36,10 @@ export function resolveWorktreeMetaWithDiscoveryBackfill(
   store: Store,
   repo: Repo,
   worktreeId: string,
-  allMetaOverride?: Record<string, WorktreeMeta>
+  allMetaOverride?: Record<string, WorktreeMeta>,
+  repoOwnerCount = store.getRepos().filter((candidate) => candidate.id === repo.id).length
 ): WorktreeMeta {
   const executionHostId = getRepoExecutionHostId(repo)
-  const repoOwnerCount = store.getRepos().filter((candidate) => candidate.id === repo.id).length
   const legacyMeta = store.getWorktreeMeta?.(worktreeId)
   const allMeta = allMetaOverride ?? store.getAllWorktreeMeta?.()
   const existing =

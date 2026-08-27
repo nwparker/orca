@@ -8,16 +8,36 @@ import type { WorktreeMeta } from '../../shared/worktree/meta-types'
  */
 export type HostQualifiedWorktreeMetaStore = {
   getWorktreeMeta?: (worktreeId: string) => WorktreeMeta | undefined
+  getAllWorktreeMeta?: () => Record<string, WorktreeMeta>
   getWorktreeMetaForHost?: (
     worktreeId: string,
     executionHostId: ExecutionHostId
   ) => WorktreeMeta | undefined
+  getAllWorktreeMetaForHost?: (executionHostId: ExecutionHostId) => Record<string, WorktreeMeta>
   setWorktreeMeta?: (worktreeId: string, meta: Partial<WorktreeMeta>) => WorktreeMeta
   setWorktreeMetaForHost?: (
     worktreeId: string,
     executionHostId: ExecutionHostId,
     meta: Partial<WorktreeMeta>
   ) => WorktreeMeta
+}
+
+/** Canonical host snapshot, with a filtered legacy fallback for partial test/compatibility stores. */
+export function readAllWorktreeMetaForHost(
+  store: Pick<HostQualifiedWorktreeMetaStore, 'getAllWorktreeMeta' | 'getAllWorktreeMetaForHost'>,
+  executionHostId: ExecutionHostId
+): Record<string, WorktreeMeta> {
+  const qualified = store.getAllWorktreeMetaForHost?.(executionHostId)
+  if (qualified) {
+    return qualified
+  }
+  const projected: Record<string, WorktreeMeta> = {}
+  for (const [worktreeId, meta] of Object.entries(store.getAllWorktreeMeta?.() ?? {})) {
+    if (!meta.hostId || meta.hostId === executionHostId) {
+      projected[worktreeId] = meta
+    }
+  }
+  return projected
 }
 
 /**

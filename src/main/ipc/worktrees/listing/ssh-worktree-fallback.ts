@@ -152,9 +152,9 @@ export function buildDetectedGitWorktrees(
     resolveConfiguredWorktreeBasePaths(repo)
   )
   const allMeta = allMetaOverride ?? store.getAllWorktreeMeta?.()
+  const repoOwnerCount = store.getRepos().filter((candidate) => candidate.id === repo.id).length
   const detected = liveWorktrees.map((gitWorktree) => {
     const worktreeId = `${repo.id}::${gitWorktree.path}`
-    const repoOwnerCount = store.getRepos().filter((candidate) => candidate.id === repo.id).length
     const legacyMeta = store.getWorktreeMeta?.(worktreeId)
     const metaById = allMeta ?? (legacyMeta ? { [worktreeId]: legacyMeta } : {})
     let meta =
@@ -174,7 +174,13 @@ export function buildDetectedGitWorktrees(
       return detected
     }
 
-    meta = resolveWorktreeMetaWithDiscoveryBackfill(store, repo, worktreeId, allMeta)
+    meta = resolveWorktreeMetaWithDiscoveryBackfill(
+      store,
+      repo,
+      worktreeId,
+      allMeta,
+      repoOwnerCount
+    )
     return toDetectedWorktree({
       repo,
       worktree: mergeWorktree(repo.id, gitWorktree, meta, repo.displayName),

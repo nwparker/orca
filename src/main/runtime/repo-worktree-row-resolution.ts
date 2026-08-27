@@ -5,6 +5,7 @@ import {
 } from '../../shared/worktree/id'
 import { getRepoExecutionHostId, type ExecutionHostId } from '../../shared/execution-host'
 import {
+  readAllWorktreeMetaForHost,
   readWorktreeMetaForHost,
   writeWorktreeMetaForHost
 } from '../persistence/host-qualified-worktree-meta'
@@ -66,7 +67,9 @@ export function listStoredWorktreeRowsForRepo(
 ): GitWorktreeInfo[] {
   const expectedHostId = getRepoExecutionHostId(repo)
   const byWorktreeId = new Map<string, GitWorktreeInfo>()
-  for (const [worktreeId, meta] of Object.entries(store.getAllWorktreeMeta())) {
+  for (const [worktreeId, meta] of Object.entries(
+    readAllWorktreeMetaForHost(store, expectedHostId)
+  )) {
     const parsed = splitWorktreeId(worktreeId)
     if (!parsed || parsed.repoId !== repo.id) {
       continue

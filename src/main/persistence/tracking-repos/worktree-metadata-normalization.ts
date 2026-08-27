@@ -15,7 +15,10 @@ import {
 } from '../../../shared/workspace-linked-item'
 import { isWorkspaceLinkedItemSourceContextMatch } from '../../../shared/workspace-linked-item-source-context'
 import type { PersistedState } from '../../../shared/persisted-state-types'
-import { removeWorktreeMetadataForHost } from '../loading-store/worktree-identity-metadata'
+import {
+  pruneUnreferencedWorktreeIdentityMeta,
+  removeWorktreeMetadataForHost
+} from '../loading-store/worktree-identity-metadata'
 import type { WorktreeMeta } from '../../../shared/worktree/meta-types'
 
 // Why: worktrees deleted outside Orca orphan their worktreeMeta, so the map grew monotonically (63% dead on a heavy install).
@@ -124,12 +127,9 @@ export function normalizeWorktreeLinkedItemMetadata(state: PersistedState): bool
       Object.keys(state.worktreeLineageById).length > 0 ||
       Object.keys(state.workspaceLineageByChildKey).length > 0
     state.worktreeMeta = {}
-    // Companions go with the discarded map; a stranded lineage row would otherwise re-attach to a
-    // worktree recreated at the same repoId::path.
+    // Legacy lineage belongs to the discarded locator projection; canonical host state does not.
     state.worktreeLineageById = {}
     state.workspaceLineageByChildKey = {}
-    state.worktreeMetaByIdentity = {}
-    state.worktreeIdentityAliases = {}
     changed ||= rawWorktreeMeta !== undefined || hadLineage
   }
   for (const [key, meta] of Object.entries(state.worktreeMeta)) {
@@ -137,11 +137,9 @@ export function normalizeWorktreeLinkedItemMetadata(state: PersistedState): bool
     // keeps timestamp-less keys forever and every downstream consumer trusts the Record<string, WorktreeMeta> type.
     if (typeof meta !== 'object' || meta === null || Array.isArray(meta)) {
       delete state.worktreeMeta[key]
-      // Companions go with it, matching gcStaleWorktreeMeta/removeWorktreeMeta; a stranded lineage row would
-      // otherwise re-attach to a worktree recreated at the same repoId::path.
+      // Legacy lineage belongs to this corrupt locator row; canonical host state is independent.
       delete state.worktreeLineageById[key]
       delete state.workspaceLineageByChildKey[worktreeWorkspaceKey(key)]
-      removeWorktreeMetadataForHost(state, key, undefined)
       changed = true
       continue
     }
@@ -167,10 +165,11 @@ export function normalizeWorktreeLinkedItemMetadata(state: PersistedState): bool
   }
 
   const rawAliases = state.worktreeIdentityAliases as unknown
-  if (
-    rawAliases !== undefined &&
-    (typeof rawAliases !== 'object' || rawAliases === null || Array.isArray(rawAliases))
-  ) {
+  const aliasesAreObject =
+    typeof rawAliases === 'object' && rawAliases !== null && !Array.isArray(rawAliases)
+  const aliasesAreMalformed = rawAliases !== undefined && !aliasesAreObject
+  const aliasesCanProveReachability = aliasesAreObject && Object.keys(rawAliases).length > 0
+  if (aliasesAreMalformed) {
     state.worktreeIdentityAliases = {}
     changed = true
   }
@@ -203,6 +202,9 @@ export function normalizeWorktreeLinkedItemMetadata(state: PersistedState): bool
       state.worktreeIdentityAliases[alias] = identityKeys
       changed = true
     }
+  }
+  if (aliasesCanProveReachability) {
+    changed = pruneUnreferencedWorktreeIdentityMeta(state) || changed
   }
   return changed
 }

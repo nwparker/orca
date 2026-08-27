@@ -73,6 +73,8 @@ export {
 
 /** Registers worktree IPC handlers against freshly reset shared mocks and returns the runtime stub. */
 export function setupWorktreeHandlers(): WorktreeRuntimeStub {
+  delete (store as typeof store & { getAllWorktreeMetaForHost?: (...args: unknown[]) => unknown })
+    .getAllWorktreeMetaForHost
   setPlatform(ORIGINAL_PLATFORM)
   clearConfiguredWorktreeSharedDirectoriesCacheForTests()
   __resetSshWorktreeCreateFetchCacheForTests()

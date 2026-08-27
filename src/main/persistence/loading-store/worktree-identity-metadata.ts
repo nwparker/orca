@@ -205,6 +205,34 @@ export function getWorktreeMetaForHost(
   return !legacy?.hostId || legacy.hostId === executionHostId ? legacy : undefined
 }
 
+/** Read-only host projection used by listings that must include canonical-only rows. */
+export function getAllWorktreeMetaForHost(
+  runtime: MetadataRuntime,
+  executionHostId: ExecutionHostId
+): Record<string, WorktreeMeta> {
+  const state = runtime.state
+  const projected: Record<string, WorktreeMeta> = {}
+  for (const [worktreeId, meta] of Object.entries(state.worktreeMeta)) {
+    if (!meta.hostId || meta.hostId === executionHostId) {
+      projected[worktreeId] = meta
+    }
+  }
+  for (const alias of Object.keys(state.worktreeIdentityAliases ?? {})) {
+    if (getExecutionHostIdFromWorktreeHostIdentity(alias) !== executionHostId) {
+      continue
+    }
+    const worktreeId = getWorktreeIdFromHostIdentity(alias)
+    const identityKey = resolveAliasIdentityKey(state, alias).identityKey
+    const meta = identityKey ? state.worktreeMetaByIdentity?.[identityKey] : undefined
+    if (!worktreeId || !meta || (meta.hostId && meta.hostId !== executionHostId)) {
+      continue
+    }
+    projected[worktreeId] =
+      meta.hostId === executionHostId ? meta : { ...meta, hostId: executionHostId }
+  }
+  return projected
+}
+
 export function setWorktreeMetaForHost(
   runtime: MetadataRuntime,
   scheduling: WriteSchedulingOperations,
