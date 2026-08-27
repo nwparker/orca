@@ -5,6 +5,7 @@ import { groupWorkspaceKanbanWorktrees } from './workspace-kanban-worktree-group
 import { buildWorkspaceKanbanLaneViews } from './workspace-kanban-search'
 import { useWorkspaceKanbanSearch } from './use-workspace-kanban-search'
 import { registerWorkspaceKanbanSidebarDropGroups } from './workspace-kanban-sidebar-drop'
+import { buildUnambiguousWorktreeIdIndex } from './worktree-unambiguous-id-index'
 import {
   composeWorktreeHostIdentity,
   getWorktreeHostIdentity
@@ -37,19 +38,10 @@ export function useWorkspaceKanbanBoardProjection(args: {
       }),
     [args.allWorktrees, args.sortBy, args.workspaceStatuses, visibleWorktreeIds]
   )
-  const worktreeById = useMemo(() => {
-    const map = new Map<string, Worktree>()
-    const ambiguous = new Set<string>()
-    for (const worktree of args.allWorktrees) {
-      if (map.has(worktree.id)) {
-        map.delete(worktree.id)
-        ambiguous.add(worktree.id)
-      } else if (!ambiguous.has(worktree.id)) {
-        map.set(worktree.id, worktree)
-      }
-    }
-    return map
-  }, [args.allWorktrees])
+  const worktreeById = useMemo(
+    () => buildUnambiguousWorktreeIdIndex(args.allWorktrees),
+    [args.allWorktrees]
+  )
   const boardWorktrees = useMemo(
     () => args.workspaceStatuses.flatMap((status) => worktreesByStatus.get(status.id) ?? []),
     [args.workspaceStatuses, worktreesByStatus]
