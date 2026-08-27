@@ -1355,6 +1355,7 @@ type RuntimeStore = {
   getAllWorktreeMeta: Store['getAllWorktreeMeta']
   getWorktreeMeta: Store['getWorktreeMeta']
   setWorktreeMeta: Store['setWorktreeMeta']
+  setWorktreeMetaForHost?: Store['setWorktreeMetaForHost']
   removeWorktreeMeta: Store['removeWorktreeMeta']
   getWorktreeLineage?: Store['getWorktreeLineage']
   getAllWorktreeLineage?: Store['getAllWorktreeLineage']
@@ -27132,12 +27133,20 @@ export class OrcaRuntimeService {
         createdAt
       })
     }
-    this.store.setWorktreeMeta(worktree.id, stripOrcaProvenanceMetaUpdates(persistedMetaUpdates))
+    const metadataUpdates = stripOrcaProvenanceMetaUpdates(persistedMetaUpdates)
+    const executionHostId = worktree.identity?.executionHostId ?? worktree.hostId
+    if (executionHostId && this.store.setWorktreeMetaForHost) {
+      this.store.setWorktreeMetaForHost(worktree.id, executionHostId, metadataUpdates)
+    } else {
+      this.store.setWorktreeMeta(worktree.id, metadataUpdates)
+    }
     // Why: unlike renderer-initiated optimistic updates, CLI callers need an
     // explicit push so the editor refreshes metadata changed outside the UI.
     this.invalidateResolvedWorktreeCache()
     this.notifyWorktreesChanged(worktree.repoId)
-    return await this.showManagedWorktree(`id:${worktree.id}`)
+    return await this.showManagedWorktree(
+      worktree.identity?.key ? `identity:${worktree.identity.key}` : `id:${worktree.id}`
+    )
   }
 
   persistManagedWorktreeSortOrder(orderedIds: string[]): { updated: number } {

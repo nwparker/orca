@@ -253,7 +253,8 @@ export function createUpdateWorktreeMeta(
         settingsForWorktreeOwner(get(), worktreeId, executionHostId),
         worktreeId,
         enriched,
-        executionHostId ?? existingWorktree?.hostId
+        executionHostId ?? existingWorktree?.hostId,
+        worktreeForUpdate?.identity?.key
       )
       if (
         !options?.suppressHostedReviewRefresh &&

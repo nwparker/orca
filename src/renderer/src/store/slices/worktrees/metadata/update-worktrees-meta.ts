@@ -108,12 +108,19 @@ export function createUpdateWorktreesMeta(
             ? persistWorktreeMeta(settingsForWorktreeOwner(state, worktreeId), worktreeId, updates)
             : Promise.all(
                 ownerHostIds.map((hostId) =>
-                  persistWorktreeMeta(
-                    settingsForWorktreeOwner(state, worktreeId, hostId),
-                    worktreeId,
-                    updates,
-                    hostId
-                  )
+                  (() => {
+                    const worktree = getIndexedWorktreesById(
+                      state.worktreesByRepo,
+                      worktreeId
+                    ).find((candidate) => candidate.hostId === hostId)
+                    return persistWorktreeMeta(
+                      settingsForWorktreeOwner(state, worktreeId, hostId),
+                      worktreeId,
+                      updates,
+                      hostId,
+                      worktree?.identity?.key
+                    )
+                  })()
                 )
               ))
         } catch (err) {

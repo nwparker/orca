@@ -17,7 +17,8 @@ export async function persistWorktreeMeta(
   settings: AppState['settings'],
   worktreeId: string,
   updates: Partial<WorktreeMeta>,
-  executionHostId?: ExecutionHostId
+  executionHostId?: ExecutionHostId,
+  identityKey?: string
 ): Promise<void> {
   const target = getActiveRuntimeTarget(settings)
   if (target.kind === 'local') {
@@ -60,7 +61,7 @@ export async function persistWorktreeMeta(
     target,
     'worktree.set',
     {
-      worktree: toRuntimeWorktreeSelector(worktreeId),
+      worktree: identityKey ? `identity:${identityKey}` : toRuntimeWorktreeSelector(worktreeId),
       ...encodePushTargetClearForRuntimeRpc(updates)
     },
     { timeoutMs: 15_000 }
