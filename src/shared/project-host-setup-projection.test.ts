@@ -2,11 +2,11 @@ import { describe, expect, it } from 'vitest'
 import {
   projectHostSetupProjectionFromRepos,
   getProjectHostSetupsForProject,
-  getProjectHostSetupWorktreeMeta,
   isGitHubBackedRepo,
   getProjectIdForProviderIdentity,
   isProjectRemoteIdentityPending
 } from './project-host-setup-projection'
+import { getProjectHostSetupWorktreeMeta } from './project-host-setup-lookup'
 import type { Repo } from './repo-types'
 
 function repo(overrides: Partial<Repo> & Pick<Repo, 'id' | 'path' | 'displayName'>): Repo {

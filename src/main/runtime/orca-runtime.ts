@@ -538,11 +538,11 @@ import {
   splitWorktreeIdForFilesystem,
   worktreeIdComparisonKey
 } from '../../shared/worktree/id'
+import { getProjectIdForProviderIdentity } from '../../shared/project-host-setup-projection'
 import {
-  getProjectIdForProviderIdentity,
   getProjectHostSetupForRepo,
   getProjectHostSetupWorktreeMeta
-} from '../../shared/project-host-setup-projection'
+} from '../../shared/project-host-setup-lookup'
 import { parsePtySessionId } from '../../shared/pty-session-id-format'
 import { clampLinearIssueListLimit } from '../../shared/linear/issue-read-limits'
 import { isFolderRepo } from '../../shared/repo-kind'
