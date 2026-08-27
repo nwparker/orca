@@ -17,6 +17,14 @@ import {
   migrateAutomationsForSshReadoption
 } from '../../automations/automation-ssh-readoption-migration'
 import { automationIdsPinnedToSshTarget } from '../scheduling-automations/automation-owner-projection'
+import {
+  canonicalWorktreeIdentity,
+  composeWorktreeIdentityAlias
+} from '../../../shared/worktree/identity'
+import {
+  getWorktreeIdFromHostIdentity,
+  getExecutionHostIdFromWorktreeHostIdentity
+} from '../../../shared/worktree/host-qualified-identity'
 
 export type SshTargetReassignmentOperations = {
   state: PersistedState
@@ -87,6 +95,46 @@ export function reassignSshTargetId(
       meta.hostId = newHostId
       metaChanged = true
     }
+  }
+  // Re-key canonical identity rows as the host id changes; legacy locator rows
+  // above are not sufficient to recover identity-only metadata.
+  let identityChanged = false
+  const aliases = operations.state.worktreeIdentityAliases ?? {}
+  const identityMeta = operations.state.worktreeMetaByIdentity ?? {}
+  for (const [alias, keys] of Object.entries(aliases)) {
+    if (getExecutionHostIdFromWorktreeHostIdentity(alias) !== oldHostId) {
+      continue
+    }
+    const worktreeId = getWorktreeIdFromHostIdentity(alias)
+    if (!worktreeId) {
+      continue
+    }
+    const nextAlias = composeWorktreeIdentityAlias(newHostId, worktreeId)
+    const nextKeys = aliases[nextAlias] ?? []
+    for (const key of keys) {
+      const meta = identityMeta[key]
+      if (!meta) {
+        continue
+      }
+      if (!meta.instanceId) {
+        continue
+      }
+      const nextKey = canonicalWorktreeIdentity({
+        worktreeId,
+        executionHostId: newHostId,
+        instanceId: meta.instanceId
+      })
+      if (!identityMeta[nextKey]) {
+        identityMeta[nextKey] = { ...meta, hostId: newHostId }
+      }
+      if (!nextKeys.includes(nextKey)) {
+        nextKeys.push(nextKey)
+      }
+      delete identityMeta[key]
+    }
+    aliases[nextAlias] = nextKeys
+    delete aliases[alias]
+    identityChanged = true
   }
   // Why: any carrier still holding the old id later throws `SSH target not found` (STA-1468); migrate them all.
   let carrierChanged = migrateWorkspaceSessionSshTargetId(
@@ -175,7 +223,7 @@ export function reassignSshTargetId(
   if (repoIds.size > 0 || setupsChanged) {
     operations.syncProjectHostSetupCompatibilityState()
   }
-  if (repoIds.size > 0 || metaChanged || carrierChanged || setupsChanged) {
+  if (repoIds.size > 0 || metaChanged || carrierChanged || setupsChanged || identityChanged) {
     // The rewrites above patch rows in place; the list projection caches on array
     // identity, so a same-identity array would keep serving pre-readoption owners.
     operations.state.repos = [...operations.state.repos]
