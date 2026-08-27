@@ -129,6 +129,15 @@ export function useWorkspaceKanbanWorktreeActions(args: {
         const entry = updates.find((candidate) => candidate.worktreeId === worktreeId)
         if (entry) {
           entry.updates = { ...entry.updates, ...manualOrder }
+          continue
+        }
+        const current = args.worktreeById.get(worktreeId)
+        if (current) {
+          updates.push({
+            worktreeId,
+            updates: manualOrder,
+            executionHostId: current.hostId ?? 'local'
+          })
         }
       }
       const changed = updates.filter((entry) => Object.keys(entry.updates).length > 0)
