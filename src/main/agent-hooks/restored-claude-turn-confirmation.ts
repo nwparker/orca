@@ -90,12 +90,16 @@ export async function readClaudeTurnLifecycle(
   return lifecycle
 }
 
-/** A pane whose evidence held, with the PTY that evidence describes. */
-type ConfirmableTurn = { paneKey: string; ptyId: string }
+/** A pane whose evidence held, with the PTY and binding state that evidence describes. */
+type ConfirmableTurn = { paneKey: string; ptyId: string; allowUnbound: boolean }
 
-/** An unbound pane may still reattach to `inspected`; only another PTY voids the evidence. */
-function isReboundAway(current: string | undefined, inspected: string): boolean {
-  return current !== undefined && current !== inspected
+/** Cold restore may attach an initially unbound pane to `inspected`; later detachment is stale. */
+function isBindingEvidenceCurrent(
+  current: string | undefined,
+  inspected: string,
+  allowUnbound: boolean
+): boolean {
+  return current === inspected || (allowUnbound && current === undefined)
 }
 
 /** Confirm only when Claude owns the pane and its provider transcript has a recent open turn.
@@ -132,19 +136,22 @@ export async function confirmRestoredWorkingClaudeTurns(
       if (!deps.isLocalExecutionHost(worktreeId)) {
         return null
       }
-      const ptyId =
-        deps.getBoundPtyIdForPaneKey(paneKey) ?? deps.getPersistedPtyIdForPaneKey(paneKey)
+      const boundPtyId = deps.getBoundPtyIdForPaneKey(paneKey)
+      const ptyId = boundPtyId ?? deps.getPersistedPtyIdForPaneKey(paneKey)
       if (!ptyId) {
         return null
       }
+      let allowUnbound = boundPtyId === undefined
       const foreground = await readForeground(ptyId)
+      const currentPtyId = deps.getBoundPtyIdForPaneKey(paneKey)
       // Reattach to the inspected PTY is valid; another PTY is a different session.
       if (
-        isReboundAway(deps.getBoundPtyIdForPaneKey(paneKey), ptyId) ||
+        !isBindingEvidenceCurrent(currentPtyId, ptyId, allowUnbound) ||
         recognizeAgentProcess(foreground)?.agent !== row.agentType
       ) {
         return null
       }
+      allowUnbound = currentPtyId === undefined
       const readablePath = await deps.toReadableTranscriptPath(
         transcriptPath,
         signal,
@@ -159,7 +166,7 @@ export async function confirmRestoredWorkingClaudeTurns(
       const openedAt = lifecycle?.state === 'working' ? lifecycle.timestamp : null
       const age = openedAt === null ? null : now() - openedAt
       const open = age !== null && age >= 0 && age <= OPEN_BOUNDARY_MAX_AGE_MS
-      return open ? { paneKey, ptyId } : null
+      return open ? { paneKey, ptyId, allowUnbound } : null
     } catch {
       // Fail closed per pane without rejecting the pass.
       return null
@@ -186,7 +193,13 @@ export async function confirmRestoredWorkingClaudeTurns(
       continue
     }
     // A rebind while the transcript was read voids the gathered evidence.
-    if (isReboundAway(deps.getBoundPtyIdForPaneKey(verdict.paneKey), verdict.ptyId)) {
+    if (
+      !isBindingEvidenceCurrent(
+        deps.getBoundPtyIdForPaneKey(verdict.paneKey),
+        verdict.ptyId,
+        verdict.allowUnbound
+      )
+    ) {
       continue
     }
     // Why serialized: `confirm` re-reads and rewrites server state.

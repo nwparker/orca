@@ -172,6 +172,39 @@ describe('confirmRestoredWorkingClaudeTurns', () => {
     expect(deps.confirm).not.toHaveBeenCalled()
   })
 
+  it('refuses a pane detached after its evidence was gathered', async () => {
+    let bound: string | undefined = 'pty-1'
+    const deps = makeDeps({
+      getBoundPtyIdForPaneKey: () => bound,
+      toReadableTranscriptPath: async (path: string) => {
+        bound = undefined
+        return path
+      }
+    })
+
+    await expect(confirmRestoredWorkingClaudeTurns(deps)).resolves.toBe(0)
+    expect(deps.confirm).not.toHaveBeenCalled()
+  })
+
+  it('refuses an initially unbound pane that attaches and then detaches mid-pass', async () => {
+    let bound: string | undefined
+    const deps = makeDeps({
+      getBoundPtyIdForPaneKey: () => bound,
+      getPersistedPtyIdForPaneKey: () => 'pty-1',
+      readForegroundProcess: async () => {
+        bound = 'pty-1'
+        return 'claude'
+      },
+      toReadableTranscriptPath: async (path: string) => {
+        bound = undefined
+        return path
+      }
+    })
+
+    await expect(confirmRestoredWorkingClaudeTurns(deps)).resolves.toBe(0)
+    expect(deps.confirm).not.toHaveBeenCalled()
+  })
+
   it('never confirms a remote pane, whose agent and transcript live on the execution host', async () => {
     const readForegroundProcess = vi.fn()
     const deps = makeDeps({ isLocalExecutionHost: () => false, readForegroundProcess })
