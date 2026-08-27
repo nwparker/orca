@@ -49,7 +49,9 @@ export function registerWorktreeCatalogHandlers(context: WorktreeIpcContext): vo
 
   ipcMain.handle('worktrees:listAll', async () => {
     const repos = store.getRepos()
-    const allMeta = repos.some((repo) => repo.connectionId) ? store.getAllWorktreeMeta() : undefined
+    const allMeta = repos.some((repo) => !isFolderRepo(repo))
+      ? store.getAllWorktreeMeta()
+      : undefined
     const sshWorktreeMetaIndex = repos.some((repo) => repo.connectionId)
       ? createSshWorktreeMetaIndex(Object.entries(allMeta ?? {}))
       : new Map()
