@@ -81,7 +81,7 @@ export function parseExecutionHostId(value: string | null | undefined): ParsedEx
     if (!encoded) {
       return null
     }
-    // `|` must stay out of a host id: composeWorktreeIdentityAlias uses it as its delimiter and
+    // `|` must stay out of a host id: composeWorktreeHostIdentity uses it as its delimiter and
     // splits at the first one, so an unencoded pipe would rebind an alias to a different host.
     if (encoded.includes('|')) {
       return null

@@ -7,14 +7,13 @@ import type { WorktreeMeta } from '../../shared/worktree/meta-types'
  * ones. A real Store always has them.
  */
 export type HostQualifiedWorktreeMetaStore = {
-  getWorktreeMeta?: (worktreeId: string) => WorktreeMeta | undefined
-  getAllWorktreeMeta?: () => Record<string, WorktreeMeta>
+  getAllWorktreeMeta: () => Record<string, WorktreeMeta>
   getWorktreeMetaForHost?: (
     worktreeId: string,
     executionHostId: ExecutionHostId
   ) => WorktreeMeta | undefined
   getAllWorktreeMetaForHost?: (executionHostId: ExecutionHostId) => Record<string, WorktreeMeta>
-  setWorktreeMeta?: (worktreeId: string, meta: Partial<WorktreeMeta>) => WorktreeMeta
+  setWorktreeMeta: (worktreeId: string, meta: Partial<WorktreeMeta>) => WorktreeMeta
   setWorktreeMetaForHost?: (
     worktreeId: string,
     executionHostId: ExecutionHostId,
@@ -32,7 +31,7 @@ export function readAllWorktreeMetaForHost(
     return qualified
   }
   const projected: Record<string, WorktreeMeta> = {}
-  for (const [worktreeId, meta] of Object.entries(store.getAllWorktreeMeta?.() ?? {})) {
+  for (const [worktreeId, meta] of Object.entries(store.getAllWorktreeMeta())) {
     if (!meta.hostId || meta.hostId === executionHostId) {
       projected[worktreeId] = meta
     }
@@ -59,8 +58,8 @@ export function writeWorktreeMetaForHost(
   executionHostId: ExecutionHostId,
   meta: Partial<WorktreeMeta>
 ): WorktreeMeta {
-  const written =
+  return (
     store.setWorktreeMetaForHost?.(worktreeId, executionHostId, meta) ??
-    store.setWorktreeMeta?.(worktreeId, { ...meta, hostId: executionHostId })
-  return written ?? ({ ...meta, hostId: executionHostId } as WorktreeMeta)
+    store.setWorktreeMeta(worktreeId, { ...meta, hostId: executionHostId })
+  )
 }

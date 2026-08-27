@@ -274,11 +274,7 @@ export type WorktreeSlice = {
     options?: WorktreeMetaUpdateOptions
   ) => Promise<{ ok: true } | { ok: false; error: string }>
   ensureHostedReviewPushTarget: (worktreeId: string) => Promise<void>
-  updateWorktreesMeta: (
-    updatesByWorktreeId:
-      | readonly WorktreeMetaBatchUpdate[]
-      | ReadonlyMap<string, Partial<WorktreeMeta>>
-  ) => Promise<void>
+  updateWorktreesMeta: (updatesByWorktreeId: readonly WorktreeMetaBatchUpdate[]) => Promise<void>
   /**
    * Pin/unpin worktrees, then reveal the first changed one. The reveal keeps
    * the shortcut action visible even though pinned worktrees also remain in

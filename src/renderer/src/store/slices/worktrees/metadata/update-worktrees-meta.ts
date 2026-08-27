@@ -11,7 +11,6 @@ import { settingsForWorktreeOwner } from '../listing/worktree-owner-settings'
 import { parseWorkspaceKey } from '../../../../../../shared/workspace-scope'
 import { parseExecutionHostId, type ExecutionHostId } from '../../../../../../shared/execution-host'
 import { getIndexedWorktreesById } from '../../../worktree-repo-index'
-import type { WorktreeMeta } from '../../../../../../shared/worktree/meta-types'
 
 function getKnownOwnerHostIds(
   state: ReturnType<WorktreeSliceGet>,
@@ -26,20 +25,11 @@ function getKnownOwnerHostIds(
   }
   return [...hostIds]
 }
-function isBatchUpdateArray(
-  input: readonly WorktreeMetaBatchUpdate[] | ReadonlyMap<string, Partial<WorktreeMeta>>
-): input is readonly WorktreeMetaBatchUpdate[] {
-  return Array.isArray(input)
-}
-
 export function createUpdateWorktreesMeta(
   set: WorktreeSliceSet,
   get: WorktreeSliceGet
 ): WorktreeSlice['updateWorktreesMeta'] {
-  return async (input) => {
-    const updates: WorktreeMetaBatchUpdate[] = isBatchUpdateArray(input)
-      ? [...input]
-      : [...input].map(([worktreeId, updates]) => ({ worktreeId, updates }))
+  return async (updates) => {
     if (updates.length === 0) {
       return
     }
@@ -107,21 +97,18 @@ export function createUpdateWorktreesMeta(
           await (ownerHostIds.length === 0
             ? persistWorktreeMeta(settingsForWorktreeOwner(state, worktreeId), worktreeId, updates)
             : Promise.all(
-                ownerHostIds.map((hostId) =>
-                  (() => {
-                    const worktree = getIndexedWorktreesById(
-                      state.worktreesByRepo,
-                      worktreeId
-                    ).find((candidate) => candidate.hostId === hostId)
-                    return persistWorktreeMeta(
-                      settingsForWorktreeOwner(state, worktreeId, hostId),
-                      worktreeId,
-                      updates,
-                      hostId,
-                      worktree?.identity?.key
-                    )
-                  })()
-                )
+                ownerHostIds.map((hostId) => {
+                  const worktree = getIndexedWorktreesById(state.worktreesByRepo, worktreeId).find(
+                    (candidate) => candidate.hostId === hostId
+                  )
+                  return persistWorktreeMeta(
+                    settingsForWorktreeOwner(state, worktreeId, hostId),
+                    worktreeId,
+                    updates,
+                    hostId,
+                    worktree?.identity?.key
+                  )
+                })
               ))
         } catch (err) {
           if (isRuntimeSelectorNotFoundError(err)) {

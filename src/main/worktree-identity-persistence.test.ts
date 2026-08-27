@@ -3,10 +3,8 @@ import { rmSync, mkdtempSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import type { PersistedState } from '../shared/persisted-state-types'
-import {
-  canonicalWorktreeIdentity,
-  composeWorktreeIdentityAlias
-} from '../shared/worktree/identity'
+import { canonicalWorktreeIdentity } from '../shared/worktree/identity'
+import { composeWorktreeHostIdentity } from '../shared/worktree/host-qualified-identity'
 import { createStore, readDataFile, testState, writeDataFile } from './persistence-test-harness'
 
 describe('host-qualified worktree metadata', () => {
@@ -103,7 +101,7 @@ describe('host-qualified worktree metadata', () => {
     const first = seed.setWorktreeMetaForHost(worktreeId, 'local', { displayName: 'First' })
     seed.flush()
     const persisted = readDataFile() as PersistedState
-    const alias = composeWorktreeIdentityAlias('local', worktreeId)
+    const alias = composeWorktreeHostIdentity('local', worktreeId)
     const secondKey = canonicalWorktreeIdentity({
       worktreeId,
       executionHostId: 'local',
@@ -185,7 +183,7 @@ describe('host-qualified worktree metadata', () => {
     const persisted = readDataFile() as PersistedState
     expect(persisted.worktreeMetaByIdentity?.[identityKey]?.displayName).toBe('Feature')
     expect(
-      persisted.worktreeIdentityAliases?.[composeWorktreeIdentityAlias('local', renamedId)]
+      persisted.worktreeIdentityAliases?.[composeWorktreeHostIdentity('local', renamedId)]
     ).toEqual([identityKey])
   })
 
@@ -207,7 +205,7 @@ describe('host-qualified worktree metadata', () => {
     })
 
     expect(after).toBe(before)
-    expect(composeWorktreeIdentityAlias('local', worktreeId)).toBe(
+    expect(composeWorktreeHostIdentity('local', worktreeId)).toBe(
       'local|repo-1::/workspace/feature'
     )
   })
@@ -268,7 +266,7 @@ describe('host-qualified worktree metadata', () => {
     seed.setWorktreeMetaForHost(worktreeId, oldHostId, { displayName: 'Remote feature' })
     seed.flush()
     const persisted = readDataFile() as PersistedState
-    const oldAlias = composeWorktreeIdentityAlias(oldHostId, worktreeId)
+    const oldAlias = composeWorktreeHostIdentity(oldHostId, worktreeId)
     const oldKey = persisted.worktreeIdentityAliases?.[oldAlias]?.[0]
     expect(oldKey).toBeTruthy()
     delete persisted.worktreeMetaByIdentity?.[oldKey!]?.instanceId
@@ -279,7 +277,7 @@ describe('host-qualified worktree metadata', () => {
     store.flush()
 
     const repaired = readDataFile() as PersistedState
-    const newAlias = composeWorktreeIdentityAlias(newHostId, worktreeId)
+    const newAlias = composeWorktreeHostIdentity(newHostId, worktreeId)
     const newKey = repaired.worktreeIdentityAliases?.[newAlias]?.[0]
     expect(repaired.worktreeIdentityAliases?.[oldAlias]).toBeUndefined()
     expect(newKey).toBeTruthy()
@@ -310,10 +308,10 @@ describe('host-qualified worktree metadata', () => {
     store.flush()
     const persisted = readDataFile() as PersistedState
     expect(
-      persisted.worktreeIdentityAliases?.[composeWorktreeIdentityAlias(oldHostId, worktreeId)]
+      persisted.worktreeIdentityAliases?.[composeWorktreeHostIdentity(oldHostId, worktreeId)]
     ).toHaveLength(1)
     expect(
-      persisted.worktreeIdentityAliases?.[composeWorktreeIdentityAlias(newHostId, worktreeId)]
+      persisted.worktreeIdentityAliases?.[composeWorktreeHostIdentity(newHostId, worktreeId)]
     ).toHaveLength(1)
   })
 
@@ -324,11 +322,11 @@ describe('host-qualified worktree metadata', () => {
     seed.setWorktreeMetaForHost(worktreeId, oldHostId, { displayName: 'Remote feature' })
     seed.flush()
     const persisted = readDataFile() as PersistedState
-    const oldAlias = composeWorktreeIdentityAlias(oldHostId, worktreeId)
+    const oldAlias = composeWorktreeHostIdentity(oldHostId, worktreeId)
     const oldKey = persisted.worktreeIdentityAliases?.[oldAlias]?.[0]
     const source = oldKey ? persisted.worktreeMetaByIdentity?.[oldKey] : undefined
     expect(source?.instanceId).toBeTruthy()
-    const newAlias = composeWorktreeIdentityAlias(newHostId, worktreeId)
+    const newAlias = composeWorktreeHostIdentity(newHostId, worktreeId)
     const newKey = canonicalWorktreeIdentity({
       worktreeId,
       executionHostId: newHostId,

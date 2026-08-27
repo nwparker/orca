@@ -1,9 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  canonicalWorktreeIdentity,
-  composeWorktreeIdentityAlias,
-  type WorktreeIdentityRef
-} from './identity'
+import { canonicalWorktreeIdentity, type WorktreeIdentityRef } from './identity'
 
 describe('canonical worktree identity', () => {
   const local: WorktreeIdentityRef = {
@@ -28,11 +24,5 @@ describe('canonical worktree identity', () => {
 
   it('does not use the display name as identity input', () => {
     expect(canonicalWorktreeIdentity(local)).toBe(canonicalWorktreeIdentity({ ...local }))
-  })
-
-  it('produces an unambiguous host-qualified locator alias', () => {
-    expect(composeWorktreeIdentityAlias(local.executionHostId, local.worktreeId)).toBe(
-      'local|repo-1::/workspace/feature'
-    )
   })
 })

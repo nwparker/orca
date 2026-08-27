@@ -381,12 +381,10 @@ describe('worktree remote runtime mutations', () => {
     } as Partial<AppState>)
 
     const unsubscribe = store.subscribe(subscriber)
-    await store.getState().updateWorktreesMeta(
-      new Map([
-        [first.id, { workspaceStatus: 'in-review' }],
-        [second.id, { workspaceStatus: 'completed' }]
-      ])
-    )
+    await store.getState().updateWorktreesMeta([
+      { worktreeId: first.id, updates: { workspaceStatus: 'in-review' } },
+      { worktreeId: second.id, updates: { workspaceStatus: 'completed' } }
+    ])
     unsubscribe()
 
     expect(store.getState().worktreesByRepo.repo1.map((w) => w.workspaceStatus)).toEqual([
@@ -415,7 +413,7 @@ describe('worktree remote runtime mutations', () => {
     })
     store.setState({ worktreesByRepo: { repo1: [local, remote] } } as Partial<AppState>)
 
-    await store.getState().updateWorktreesMeta(new Map([[worktreeId, { manualOrder: 9000 }]]))
+    await store.getState().updateWorktreesMeta([{ worktreeId, updates: { manualOrder: 9000 } }])
 
     expect(store.getState().worktreesByRepo.repo1.map((row) => row.manualOrder)).toEqual([
       9000, 9000

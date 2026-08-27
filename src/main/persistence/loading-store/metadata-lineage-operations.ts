@@ -1,14 +1,9 @@
-import { randomUUID } from 'node:crypto'
 import type { WorkspaceKey } from '../../../shared/folder-workspace-types'
 import type { WorkspaceLineage, WorktreeLineage } from '../../../shared/worktree/lineage-types'
 import type { WorktreeMeta } from '../../../shared/worktree/meta-types'
-import { normalizeStoredTaskSourceContext } from '../../../shared/task-source-context'
-import { normalizeWorkspaceLinkedItem } from '../../../shared/workspace-linked-item'
-import { isWorkspaceLinkedItemSourceContextMatch } from '../../../shared/workspace-linked-item-source-context'
 import { LOCAL_EXECUTION_HOST_ID, type ExecutionHostId } from '../../../shared/execution-host'
 import { getRepoIdFromWorktreeId } from '../../../shared/worktree/id'
 import { hasWorktreeRemovalRepoOwnerOnOtherHost } from '../../worktree-removal-repo-owner'
-import { DEFAULT_WORKSPACE_STATUS_ID } from '../../../shared/workspace-statuses'
 import { folderWorkspaceKey, worktreeWorkspaceKey } from '../../../shared/workspace-scope'
 import {
   workspaceSessionOwnerPartitionForHost,
@@ -32,29 +27,7 @@ import {
   removeWorktreeMetadataForHost,
   setWorktreeMetaForHost as setWorktreeMetaForHostOperation
 } from './worktree-identity-metadata'
-function getDefaultWorktreeMeta(): WorktreeMeta {
-  return {
-    instanceId: randomUUID(),
-    displayName: '',
-    comment: '',
-    linkedIssue: null,
-    linkedPR: null,
-    linkedLinearIssue: null,
-    linkedGitLabMR: null,
-    linkedGitLabIssue: null,
-    linkedBitbucketPR: null,
-    linkedAzureDevOpsPR: null,
-    linkedGiteaPR: null,
-    linkedWorkItem: null,
-    linkedTaskSourceContext: null,
-    isArchived: false,
-    isUnread: false,
-    isPinned: false,
-    sortOrder: Date.now(),
-    lastActivityAt: 0,
-    workspaceStatus: DEFAULT_WORKSPACE_STATUS_ID
-  }
-}
+import { mergeWorktreeMetaForWrite } from './worktree-meta-write-normalization'
 
 type MetadataLineageOperationsRuntime = Pick<StoreRuntimeState, 'state'>
 
@@ -129,21 +102,7 @@ export class MetadataLineageOperations {
         meta
       )
     }
-    const existing = stored ?? getDefaultWorktreeMeta()
-    const updated = { ...existing, ...meta }
-    updated.linkedWorkItem = normalizeWorkspaceLinkedItem(updated.linkedWorkItem)
-    const linkedTaskSourceContext = normalizeStoredTaskSourceContext(
-      updated.linkedTaskSourceContext
-    )
-    updated.linkedTaskSourceContext = isWorkspaceLinkedItemSourceContextMatch(
-      updated.linkedWorkItem,
-      linkedTaskSourceContext
-    )
-      ? linkedTaskSourceContext
-      : null
-    if (!updated.instanceId) {
-      updated.instanceId = randomUUID()
-    }
+    const updated = mergeWorktreeMetaForWrite(stored, meta)
     state.worktreeMeta[worktreeId] = updated
     scheduleSave(this[metadataLineageOperationsContext].scheduling)
     return updated

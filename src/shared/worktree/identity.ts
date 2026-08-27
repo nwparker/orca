@@ -14,17 +14,6 @@ export type WorktreeIdentity = Omit<WorktreeIdentityRef, 'worktreeId'> & {
 }
 
 /**
- * Host-qualified legacy locator used while path IDs remain on the wire.
- * ExecutionHostId cannot contain `|`, so this delimiter is unambiguous.
- */
-export function composeWorktreeIdentityAlias(
-  executionHostId: ExecutionHostId,
-  worktreeId: string
-): string {
-  return `${executionHostId}|${worktreeId}`
-}
-
-/**
  * Canonical exact identity for one worktree occupant.
  * The locator is deliberately excluded so a folder rename preserves identity.
  */

@@ -3,11 +3,9 @@ import { isDeepStrictEqual } from 'node:util'
 import type { ExecutionHostId } from '../../../shared/execution-host'
 import type { PersistedState } from '../../../shared/persisted-state-types'
 import type { WorktreeMeta } from '../../../shared/worktree/meta-types'
+import { canonicalWorktreeIdentity } from '../../../shared/worktree/identity'
 import {
-  canonicalWorktreeIdentity,
-  composeWorktreeIdentityAlias
-} from '../../../shared/worktree/identity'
-import {
+  composeWorktreeHostIdentity,
   getExecutionHostIdFromWorktreeHostIdentity,
   getWorktreeIdFromHostIdentity
 } from '../../../shared/worktree/host-qualified-identity'
@@ -53,14 +51,11 @@ export function reassignCanonicalWorktreeMetadataHost(
         safe = false
         break
       }
-      const instanceId =
-        sourceMeta.instanceId ??
-        repairedInstanceIds.get(sourceKey) ??
-        (() => {
-          const generated = randomUUID()
-          repairedInstanceIds.set(sourceKey, generated)
-          return generated
-        })()
+      let instanceId = sourceMeta.instanceId ?? repairedInstanceIds.get(sourceKey)
+      if (instanceId === undefined) {
+        instanceId = randomUUID()
+        repairedInstanceIds.set(sourceKey, instanceId)
+      }
       const nextKey = canonicalWorktreeIdentity({
         worktreeId,
         executionHostId: newHostId,
@@ -80,7 +75,7 @@ export function reassignCanonicalWorktreeMetadataHost(
       continue
     }
 
-    const nextAlias = composeWorktreeIdentityAlias(newHostId, worktreeId)
+    const nextAlias = composeWorktreeHostIdentity(newHostId, worktreeId)
     const candidateKeys = new Set(identities.map((identity) => identity.nextKey))
     if ((aliases[nextAlias] ?? []).some((key) => !candidateKeys.has(key))) {
       continue
