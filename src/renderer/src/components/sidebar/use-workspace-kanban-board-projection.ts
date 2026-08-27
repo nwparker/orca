@@ -37,10 +37,19 @@ export function useWorkspaceKanbanBoardProjection(args: {
       }),
     [args.allWorktrees, args.sortBy, args.workspaceStatuses, visibleWorktreeIds]
   )
-  const worktreeById = useMemo(
-    () => new Map(args.allWorktrees.map((worktree) => [worktree.id, worktree])),
-    [args.allWorktrees]
-  )
+  const worktreeById = useMemo(() => {
+    const map = new Map<string, Worktree>()
+    const ambiguous = new Set<string>()
+    for (const worktree of args.allWorktrees) {
+      if (map.has(worktree.id)) {
+        map.delete(worktree.id)
+        ambiguous.add(worktree.id)
+      } else if (!ambiguous.has(worktree.id)) {
+        map.set(worktree.id, worktree)
+      }
+    }
+    return map
+  }, [args.allWorktrees])
   const boardWorktrees = useMemo(
     () => args.workspaceStatuses.flatMap((status) => worktreesByStatus.get(status.id) ?? []),
     [args.workspaceStatuses, worktreesByStatus]
