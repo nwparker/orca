@@ -91,6 +91,7 @@ describe('gcStaleWorktreeMeta', () => {
   it('reclaims the identity rows of a collected worktree', () => {
     const worktreeId = 'r1::/definitely/missing/orca/path'
     const identityKey = 'wt2:local:dead'
+    const remoteIdentityKey = 'wt2:ssh:live'
     const state = makeState({
       repos: [],
       projects: [],
@@ -102,14 +103,19 @@ describe('gcStaleWorktreeMeta', () => {
           lastActivityAt: Date.now() - WORKTREE_META_GC_GRACE_MS - 1
         } as unknown as WorktreeMeta
       },
-      worktreeMetaByIdentity: { [identityKey]: makeMeta() },
-      worktreeIdentityAliases: { [`local|${worktreeId}`]: [identityKey] }
+      worktreeMetaByIdentity: { [identityKey]: makeMeta(), [remoteIdentityKey]: makeMeta() },
+      worktreeIdentityAliases: {
+        [`local|${worktreeId}`]: [identityKey],
+        [`ssh:conn-1|${worktreeId}`]: [remoteIdentityKey]
+      }
     })
 
     expect(gcStaleWorktreeMeta(state)).toBe(1)
     // A surviving alias would re-attach this dead metadata to a worktree later
     // created at the same repoId::path, and nothing else ever reclaims it.
-    expect(state.worktreeMetaByIdentity).toEqual({})
-    expect(state.worktreeIdentityAliases).toEqual({})
+    expect(state.worktreeMetaByIdentity).toEqual({ [remoteIdentityKey]: expect.anything() })
+    expect(state.worktreeIdentityAliases).toEqual({
+      [`ssh:conn-1|${worktreeId}`]: [remoteIdentityKey]
+    })
   })
 })

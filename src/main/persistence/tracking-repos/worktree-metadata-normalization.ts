@@ -79,7 +79,7 @@ export function gcStaleWorktreeMeta(state: PersistedState): number {
     delete state.workspaceLineageByChildKey[worktreeWorkspaceKey(key)]
     // Identity rows are companions too: a surviving alias would re-attach this dead metadata to a
     // worktree later created at the same repoId::path, and nothing else ever reclaims them.
-    removeWorktreeMetadataForHost(state, key, undefined)
+    removeWorktreeMetadataForHost(state, key, LOCAL_EXECUTION_HOST_ID)
     removed++
   }
   return removed
