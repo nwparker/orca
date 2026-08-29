@@ -36,6 +36,7 @@ import type {
 } from './native-chat-composer-types'
 import { dispatchNativeChatStructuredComposerText } from './native-chat-structured-composer-dispatch'
 import { useNativeChatPtyComposerSend } from './use-native-chat-pty-composer-send'
+import { useImeEnterGestureOwnership } from '@/lib/ime-composition-keyboard-event'
 
 export type {
   NativeChatComposerHandle,
@@ -97,7 +98,7 @@ const NativeChatComposerPane = forwardRef<NativeChatComposerHandle, NativeChatCo
     const [notice, setNotice] = useState<string | null>(null)
     const [dictationPressed, setDictationPressed] = useState(false)
     const textareaRef = useRef<HTMLTextAreaElement>(null)
-    const isComposingRef = useRef(false)
+    const imeEnterGesture = useImeEnterGestureOwnership()
     const { cancelPendingSends, trackPendingSend } = useNativeChatSendLifecycle(
       terminalTabId,
       targetPtyId,
@@ -157,17 +158,20 @@ const NativeChatComposerPane = forwardRef<NativeChatComposerHandle, NativeChatCo
       setCaret(el.selectionStart ?? el.value.length)
     }, [])
 
+    const attachments = useNativeChatComposerAttachments({
+      attachmentScopeKey: paneKey,
+      allowWithoutTarget: Boolean(structuredTransport),
+      caret,
+      disabled,
+      isComposing: imeEnterGesture.isComposing,
+      resolveTarget,
+      textareaRef,
+      setCaret,
+      setDraft,
+      setNotice
+    })
     const { imageAttachments, attachResolvedPaths, clearImageAttachments, removeImageAttachment } =
-      useNativeChatComposerAttachments({
-        attachmentScopeKey: paneKey,
-        allowWithoutTarget: Boolean(structuredTransport),
-        caret,
-        resolveTarget,
-        textareaRef,
-        setCaret,
-        setDraft,
-        setNotice
-      })
+      attachments
     const sendButtonDisabled = isWorking
       ? !hasPty || !onStop
       : disabled || (draft.trim() === '' && imageAttachments.length === 0)
@@ -343,7 +347,7 @@ const NativeChatComposerPane = forwardRef<NativeChatComposerHandle, NativeChatCo
       activeSuggestion,
       draft,
       history,
-      isComposing: () => isComposingRef.current,
+      isComposing: imeEnterGesture.isComposing,
       completePickerItem: completeItem,
       dispatchPickerCommand,
       dismissPicker: dismiss,
@@ -383,6 +387,7 @@ const NativeChatComposerPane = forwardRef<NativeChatComposerHandle, NativeChatCo
         dictationDisabled={dictationDisabled}
         isDictating={isDictating}
         isDictationHoldMode={voiceSettings?.dictationMode === 'hold'}
+        imeEnterGesture={imeEnterGesture}
         onDraftChange={handleDraftChange}
         onTextareaSelect={(element) => {
           syncCaret(element)
@@ -390,16 +395,12 @@ const NativeChatComposerPane = forwardRef<NativeChatComposerHandle, NativeChatCo
           setActiveSuggestion(0)
         }}
         onKeyDown={handleKeyDown}
-        onCompositionStart={() => {
-          isComposingRef.current = true
-        }}
-        onCompositionEnd={(event) => {
-          isComposingRef.current = false
-          if (event.currentTarget.value !== draft) {
-            handleDraftChange(event.currentTarget.value, event.currentTarget)
+        onImeSettled={(element) => {
+          if (element.value !== draft) {
+            handleDraftChange(element.value, element)
           }
+          attachments.flushPendingAttachments()
         }}
-        onBlur={() => (isComposingRef.current = false)}
         onPaste={handlePaste}
         pickerListboxId={picker.listboxId}
         onChoosePickerItem={completeItem}

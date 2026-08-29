@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 
 import { createRef } from 'react'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('@/i18n/i18n', () => ({
@@ -21,12 +21,18 @@ import {
   NativeChatComposerField,
   type NativeChatComposerFieldProps
 } from './NativeChatComposerField'
+import { useImeEnterGestureOwnership } from '@/lib/ime-composition-keyboard-event'
 
 afterEach(() => cleanup())
 
-function fieldProps(
-  overrides: Partial<NativeChatComposerFieldProps> = {}
-): NativeChatComposerFieldProps {
+type TestFieldProps = Omit<NativeChatComposerFieldProps, 'imeEnterGesture'>
+
+function TestField(props: TestFieldProps): React.JSX.Element {
+  const imeEnterGesture = useImeEnterGestureOwnership()
+  return <NativeChatComposerField {...props} imeEnterGesture={imeEnterGesture} />
+}
+
+function fieldProps(overrides: Partial<TestFieldProps> = {}): TestFieldProps {
   return {
     textareaRef: createRef<HTMLTextAreaElement>(),
     draft: '',
@@ -46,9 +52,7 @@ function fieldProps(
     onDraftChange: vi.fn(),
     onTextareaSelect: vi.fn(),
     onKeyDown: vi.fn(),
-    onCompositionStart: vi.fn(),
-    onCompositionEnd: vi.fn(),
-    onBlur: vi.fn(),
+    onImeSettled: vi.fn(),
     onPaste: vi.fn(),
     pickerListboxId: 'picker',
     onChoosePickerItem: vi.fn(),
@@ -73,34 +77,35 @@ function textarea(): HTMLTextAreaElement {
 describe('native chat composer composition ownership', () => {
   it('preserves the focused browser preedit through 120 stale streaming rerenders', () => {
     const textareaRef = createRef<HTMLTextAreaElement>()
-    const onCompositionEnd = vi.fn()
-    const props = fieldProps({ textareaRef, onCompositionEnd })
-    const view = render(<NativeChatComposerField {...props} />)
+    const onImeSettled = vi.fn()
+    const props = fieldProps({ textareaRef, onImeSettled })
+    const view = render(<TestField {...props} />)
     const input = textarea()
     input.focus()
     fireEvent.compositionStart(input)
     input.value = '가'
 
     for (let index = 0; index < 120; index += 1) {
-      view.rerender(<NativeChatComposerField {...props} draft={`stale streaming draft ${index}`} />)
+      view.rerender(<TestField {...props} draft={`stale streaming draft ${index}`} />)
       expect(textarea()).toBe(input)
       expect(document.activeElement).toBe(input)
       expect(input.value).toBe('가')
     }
 
     fireEvent.compositionEnd(input, { data: '가' })
-    expect(onCompositionEnd).toHaveBeenCalledOnce()
+    expect(onImeSettled).toHaveBeenCalledOnce()
+    expect(onImeSettled).toHaveBeenCalledWith(input)
     expect(input.value).toBe('가')
   })
 
   it('synchronizes launch, programmatic, cleared, and pane-scoped drafts while idle', () => {
     const textareaRef = createRef<HTMLTextAreaElement>()
     const props = fieldProps({ textareaRef, draft: 'launch draft' })
-    const view = render(<NativeChatComposerField {...props} />)
+    const view = render(<TestField {...props} />)
     const input = textarea()
 
     for (const draft of ['programmatic insertion', '', 'next pane draft']) {
-      view.rerender(<NativeChatComposerField {...props} draft={draft} />)
+      view.rerender(<TestField {...props} draft={draft} />)
       expect(textarea()).toBe(input)
       expect(input.value).toBe(draft)
     }
@@ -110,12 +115,12 @@ describe('native chat composer composition ownership', () => {
     const onDraftChange = vi.fn()
     let settledValue: string | null = null
     render(
-      <NativeChatComposerField
+      <TestField
         {...fieldProps({
           draft: '한',
           onDraftChange,
-          onCompositionEnd: (event) => {
-            settledValue = event.currentTarget.value
+          onImeSettled: (element) => {
+            settledValue = element.value
           }
         })}
       />
@@ -132,7 +137,7 @@ describe('native chat composer composition ownership', () => {
 
   it('uses the shared Enter gesture owner without swallowing the next deliberate Enter', () => {
     const onKeyDown = vi.fn()
-    render(<NativeChatComposerField {...fieldProps({ draft: '가', onKeyDown })} />)
+    render(<TestField {...fieldProps({ draft: '가', onKeyDown })} />)
     const input = textarea()
     fireEvent.compositionStart(input)
 
@@ -153,64 +158,97 @@ describe('native chat composer composition ownership', () => {
   })
 
   it('releases composition ownership on blur even when compositionend is omitted', () => {
-    const onBlur = vi.fn()
+    const onImeSettled = vi.fn()
     const onKeyDown = vi.fn()
-    const props = fieldProps({ draft: '가', onBlur, onKeyDown })
-    const view = render(<NativeChatComposerField {...props} />)
+    const props = fieldProps({ draft: '가', onImeSettled, onKeyDown })
+    const view = render(<TestField {...props} />)
     const input = textarea()
     fireEvent.compositionStart(input)
     input.value = '각'
 
     fireEvent.blur(input)
-    view.rerender(<NativeChatComposerField {...props} draft="external draft" />)
+    view.rerender(<TestField {...props} draft="external draft" />)
     fireEvent.keyDown(input, { key: 'Enter', keyCode: 13, isComposing: false })
 
-    expect(onBlur).toHaveBeenCalledOnce()
+    expect(onImeSettled).toHaveBeenCalledOnce()
     expect(input.value).toBe('external draft')
     expect(onKeyDown).toHaveBeenCalledOnce()
   })
 
-  it('applies a draft deferred before blur when compositionend is omitted', () => {
-    const onBlur = vi.fn()
-    const props = fieldProps({ onBlur })
-    const view = render(<NativeChatComposerField {...props} />)
+  it('settles the browser value instead of an unrelated draft rerender on blur', () => {
+    const onImeSettled = vi.fn()
+    const props = fieldProps({ onImeSettled })
+    const view = render(<TestField {...props} />)
     const input = textarea()
     fireEvent.compositionStart(input)
     input.value = '각'
 
-    view.rerender(<NativeChatComposerField {...props} draft="next pane draft" />)
+    view.rerender(<TestField {...props} draft="programmatic draft" />)
     expect(input.value).toBe('각')
     fireEvent.blur(input)
 
-    expect(onBlur).toHaveBeenCalledOnce()
-    expect(input.value).toBe('next pane draft')
+    expect(onImeSettled).toHaveBeenCalledOnce()
+    expect(onImeSettled).toHaveBeenCalledWith(input)
+    expect(input.value).toBe('각')
   })
 
-  it('adopts the browser value on blur when compositionend is omitted without a deferred draft', () => {
-    const onDraftChange = vi.fn()
-    render(<NativeChatComposerField {...fieldProps({ onDraftChange })} />)
+  it('exposes the browser value on blur when compositionend is omitted', () => {
+    const onImeSettled = vi.fn()
+    render(<TestField {...fieldProps({ onImeSettled })} />)
     const input = textarea()
     fireEvent.compositionStart(input)
     input.value = '각'
 
     fireEvent.blur(input)
 
-    expect(onDraftChange).toHaveBeenCalledOnce()
-    expect(onDraftChange).toHaveBeenCalledWith('각', input)
+    expect(onImeSettled).toHaveBeenCalledOnce()
+    expect(onImeSettled.mock.calls[0]?.[0].value).toBe('각')
   })
 
-  it('does not mistake a same-draft streaming rerender for a deferred draft', () => {
-    const onDraftChange = vi.fn()
-    const props = fieldProps({ onDraftChange })
-    const view = render(<NativeChatComposerField {...props} />)
+  it('settles once when compositionend and blur arrive in one batch', () => {
+    const onImeSettled = vi.fn()
+    render(<TestField {...fieldProps({ onImeSettled })} />)
     const input = textarea()
     fireEvent.compositionStart(input)
     input.value = '각'
 
-    view.rerender(<NativeChatComposerField {...props} />)
+    act(() => {
+      fireEvent.compositionEnd(input, { data: '각' })
+      fireEvent.blur(input)
+    })
+
+    expect(onImeSettled).toHaveBeenCalledOnce()
+    expect(onImeSettled).toHaveBeenCalledWith(input)
+  })
+
+  it('settles once when blur precedes compositionend in one batch', () => {
+    const onImeSettled = vi.fn()
+    render(<TestField {...fieldProps({ onImeSettled })} />)
+    const input = textarea()
+    fireEvent.compositionStart(input)
+    input.value = '각'
+
+    act(() => {
+      fireEvent.blur(input)
+      fireEvent.compositionEnd(input, { data: '각' })
+    })
+
+    expect(onImeSettled).toHaveBeenCalledOnce()
+    expect(onImeSettled).toHaveBeenCalledWith(input)
+  })
+
+  it('keeps the browser value through a same-draft streaming rerender', () => {
+    const onImeSettled = vi.fn()
+    const props = fieldProps({ onImeSettled })
+    const view = render(<TestField {...props} />)
+    const input = textarea()
+    fireEvent.compositionStart(input)
+    input.value = '각'
+
+    view.rerender(<TestField {...props} />)
     fireEvent.blur(input)
 
     expect(input.value).toBe('각')
-    expect(onDraftChange).toHaveBeenCalledWith('각', input)
+    expect(onImeSettled).toHaveBeenCalledWith(input)
   })
 })

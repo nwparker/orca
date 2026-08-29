@@ -13,11 +13,16 @@ import { clearNativeChatModelEnrichmentForTests } from './native-chat-session-op
 const mocks = vi.hoisted(() => ({
   cancelPendingSends: vi.fn(),
   composerIsComposing: null as (() => boolean) | null,
+  attachmentIsComposing: null as (() => boolean) | null,
+  flushPendingAttachments: vi.fn(),
   fieldProps: null as {
     onSend?: () => void
     onStop?: () => void
-    onCompositionStart?: () => void
-    onCompositionEnd?: (event: { currentTarget: HTMLTextAreaElement }) => void
+    imeEnterGesture?: {
+      isComposing: () => boolean
+      setComposing: (active: boolean) => void
+    }
+    onImeSettled?: (element: HTMLTextAreaElement) => void
     sessionOptionsSurface?: SessionOptionsSurface | null
     sessionOptionsSnapshot?: SessionOptionDescriptor[]
     attachDisabled?: boolean
@@ -111,12 +116,16 @@ vi.mock('./use-native-chat-skills', () => ({
   useNativeChatSkills: () => ({ status: 'ready', skills: [], error: null, retry: () => {} })
 }))
 vi.mock('./use-native-chat-composer-attachments', () => ({
-  useNativeChatComposerAttachments: () => ({
-    imageAttachments: mocks.imageAttachments,
-    attachResolvedPaths: vi.fn(),
-    clearImageAttachments: vi.fn(),
-    removeImageAttachment: vi.fn()
-  })
+  useNativeChatComposerAttachments: (args: { isComposing: () => boolean }) => {
+    mocks.attachmentIsComposing = args.isComposing
+    return {
+      imageAttachments: mocks.imageAttachments,
+      attachResolvedPaths: vi.fn(),
+      clearImageAttachments: vi.fn(),
+      flushPendingAttachments: mocks.flushPendingAttachments,
+      removeImageAttachment: vi.fn()
+    }
+  }
 }))
 vi.mock('./use-native-chat-composer-paste', () => ({
   useNativeChatComposerPaste: () => ({
@@ -160,6 +169,7 @@ describe('NativeChatComposer', () => {
     mocks.draftScopeKeys.length = 0
     mocks.confirmationObserver = null
     mocks.composerIsComposing = null
+    mocks.attachmentIsComposing = null
     mocks.createClaudeModelSwitchConfirmationObserver.mockImplementation(() => {
       const observer = {
         ready: Promise.resolve(),
@@ -440,7 +450,7 @@ describe('NativeChatComposer', () => {
       />
     )
     const previousField = view.getByTestId('native-chat-composer-field')
-    act(() => mocks.fieldProps?.onCompositionStart?.())
+    act(() => mocks.fieldProps?.imeEnterGesture?.setComposing(true))
     expect(mocks.composerIsComposing?.()).toBe(true)
 
     view.rerender(
@@ -456,6 +466,21 @@ describe('NativeChatComposer', () => {
     expect(mocks.composerIsComposing?.()).toBe(false)
   })
 
+  it('shares one stable composition owner between keyboard and attachment paths', () => {
+    render(
+      <NativeChatComposer
+        terminalTabId="tab-1"
+        paneKey="tab-1:leaf-1"
+        targetPtyId="pty-1"
+        agent="codex"
+      />
+    )
+
+    expect(mocks.attachmentIsComposing).toBe(mocks.composerIsComposing)
+    act(() => mocks.fieldProps?.imeEnterGesture?.setComposing(true))
+    expect(mocks.attachmentIsComposing?.()).toBe(true)
+  })
+
   it('adopts an IME deletion delivered only by compositionend', () => {
     render(
       <NativeChatComposer
@@ -468,14 +493,19 @@ describe('NativeChatComposer', () => {
     const textarea = document.createElement('textarea')
     textarea.value = ''
     mocks.setDraft.mockClear()
+    mocks.flushPendingAttachments.mockClear()
 
     act(() => {
-      mocks.fieldProps?.onCompositionStart?.()
-      mocks.fieldProps?.onCompositionEnd?.({ currentTarget: textarea })
+      mocks.fieldProps?.imeEnterGesture?.setComposing(false)
+      mocks.fieldProps?.onImeSettled?.(textarea)
     })
 
     expect(mocks.setDraft).toHaveBeenCalledOnce()
     expect(mocks.setDraft).toHaveBeenCalledWith('')
+    expect(mocks.flushPendingAttachments).toHaveBeenCalledOnce()
+    expect(mocks.setDraft.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.flushPendingAttachments.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY
+    )
   })
 
   it('does not duplicate a composition value already adopted by onChange', () => {
@@ -490,10 +520,12 @@ describe('NativeChatComposer', () => {
     const textarea = document.createElement('textarea')
     textarea.value = 'hello'
     mocks.setDraft.mockClear()
+    mocks.flushPendingAttachments.mockClear()
 
-    act(() => mocks.fieldProps?.onCompositionEnd?.({ currentTarget: textarea }))
+    act(() => mocks.fieldProps?.onImeSettled?.(textarea))
 
     expect(mocks.setDraft).not.toHaveBeenCalled()
+    expect(mocks.flushPendingAttachments).toHaveBeenCalledOnce()
   })
 
   it('renders the Claude model picker while host discovery is still pending', () => {

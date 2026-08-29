@@ -16,7 +16,8 @@ vi.mock('@/runtime/runtime-terminal-inspection', () => ({
   isRemoteRuntimePtyId: () => false
 }))
 
-type ProbeApi = ReturnType<typeof useNativeChatComposerAttachments>
+type AttachmentApi = ReturnType<typeof useNativeChatComposerAttachments>
+type ProbeApi = AttachmentApi & { adoptDraft: (draft: string) => void }
 
 const target: NativeChatResolvedTarget = {
   ptyId: 'pty-1',
@@ -26,34 +27,52 @@ const target: NativeChatResolvedTarget = {
 function Probe({
   scopeKey,
   structured = false,
+  disabled = false,
+  isComposing,
   onReady
 }: {
   scopeKey: string
   structured?: boolean
+  disabled?: boolean
+  isComposing: () => boolean
   onReady: (api: ProbeApi) => void
 }): React.JSX.Element {
   const [caret, setCaret] = useState(0)
-  const [, setDraftValue] = useState('')
+  const [draftValue, setDraftValue] = useState('')
   const [, setNotice] = useState<string | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const api = useNativeChatComposerAttachments({
     attachmentScopeKey: scopeKey,
     allowWithoutTarget: structured,
     caret,
+    disabled,
+    isComposing,
     resolveTarget: () => (structured ? null : target),
     textareaRef,
     setCaret,
     setDraft: (updater) => setDraftValue((previous) => updater(previous)),
     setNotice
   })
-  onReady(api)
-  return createElement('textarea', { ref: textareaRef })
+  onReady({ ...api, adoptDraft: setDraftValue })
+  return (
+    <div>
+      <textarea ref={textareaRef} />
+      <output>{draftValue}</output>
+    </div>
+  )
 }
 
 async function renderProbe(
   scopeKey: string,
-  structured = false
-): Promise<{ root: Root; latest: () => ProbeApi; rerender: (scopeKey: string) => Promise<void> }> {
+  structured = false,
+  options: { disabled?: boolean; isComposing?: () => boolean } = {}
+): Promise<{
+  draft: () => string
+  latest: () => ProbeApi
+  rerender: (scopeKey: string, disabled?: boolean) => Promise<void>
+  root: Root
+  textarea: () => HTMLTextAreaElement
+}> {
   const container = document.createElement('div')
   document.body.append(container)
   // onReady fires on every render, so keep the freshest snapshot — reading a
@@ -63,13 +82,26 @@ async function renderProbe(
   const onReady = (next: ProbeApi): void => {
     api = next
   }
-  await act(async () => {
-    root.render(createElement(Probe, { scopeKey, structured, onReady }))
-  })
+  const isComposing = options.isComposing ?? (() => false)
+  const render = async (nextScopeKey: string, disabled: boolean): Promise<void> => {
+    await act(async () => {
+      root.render(
+        createElement(Probe, {
+          scopeKey: nextScopeKey,
+          structured,
+          disabled,
+          isComposing,
+          onReady
+        })
+      )
+    })
+  }
+  await render(scopeKey, options.disabled ?? false)
   if (!api) {
     throw new Error('Probe did not render')
   }
   return {
+    draft: () => container.querySelector('output')?.textContent ?? '',
     root,
     latest: () => {
       if (!api) {
@@ -77,10 +109,14 @@ async function renderProbe(
       }
       return api
     },
-    rerender: async (nextScopeKey: string) => {
-      await act(async () => {
-        root.render(createElement(Probe, { scopeKey: nextScopeKey, structured, onReady }))
-      })
+    rerender: (nextScopeKey: string, disabled = options.disabled ?? false) =>
+      render(nextScopeKey, disabled),
+    textarea: () => {
+      const textarea = container.querySelector('textarea')
+      if (!textarea) {
+        throw new Error('Probe textarea is not mounted')
+      }
+      return textarea
     }
   }
 }
@@ -142,25 +178,46 @@ describe('useNativeChatComposerAttachments', () => {
     act(() => probe.root.unmount())
   })
 
-  it('rescopes attachments when the scope key changes (composer reused for another pane)', async () => {
-    const probe = await renderProbe('pty-1')
-    await act(async () => {
-      probe.latest().attachResolvedPaths(['/tmp/orca-native-chat-pane-1.png'])
+  it('adopts browser text before draining ordered duplicate paths exactly once', async () => {
+    let composing = true
+    const probe = await renderProbe('pty-1', false, { isComposing: () => composing })
+    const textarea = probe.textarea()
+    textarea.focus()
+    textarea.value = '각 '
+    textarea.setSelectionRange(2, 2)
+    const focus = vi.spyOn(textarea, 'focus')
+
+    act(() => {
+      probe.latest().attachResolvedPaths(['/remote/b.txt', '/remote/b.txt'])
+      probe.latest().attachResolvedPaths(['/remote/a.txt'])
     })
-    expect(probe.latest().imageAttachments).toMatchObject([
-      { path: '/tmp/orca-native-chat-pane-1.png' }
-    ])
+    expect(probe.draft()).toBe('')
 
-    // Reused for a different pane: pane-1's chip must not stay live (it would
-    // otherwise be submitted to pane-2's target now that images defer to submit).
-    await probe.rerender('pty-2')
-    expect(probe.latest().imageAttachments).toMatchObject([])
+    composing = false
+    textarea.blur()
+    act(() => {
+      probe.latest().adoptDraft(textarea.value)
+      probe.latest().flushPendingAttachments()
+      probe.latest().flushPendingAttachments()
+    })
 
-    // Switching back restores pane-1's still-cached chip.
-    await probe.rerender('pty-1')
-    expect(probe.latest().imageAttachments).toMatchObject([
-      { path: '/tmp/orca-native-chat-pane-1.png' }
-    ])
+    expect(probe.draft()).toBe('각 @/remote/b.txt @/remote/b.txt @/remote/a.txt ')
+    expect(focus).not.toHaveBeenCalled()
+    expect(document.activeElement).not.toBe(textarea)
+    act(() => probe.root.unmount())
+  })
+
+  it('drops queued paths after any disabled transition', async () => {
+    let composing = true
+    const probe = await renderProbe('pty-1', false, { isComposing: () => composing })
+
+    act(() => probe.latest().attachResolvedPaths(['/remote/a.txt']))
+    await probe.rerender('pty-1', true)
+    await probe.rerender('pty-1', false)
+    composing = false
+    act(() => probe.latest().flushPendingAttachments())
+
+    expect(probe.draft()).toBe('')
     act(() => probe.root.unmount())
   })
 })

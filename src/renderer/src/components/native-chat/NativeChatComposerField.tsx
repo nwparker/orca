@@ -1,14 +1,8 @@
-import type {
-  ClipboardEventHandler,
-  CompositionEventHandler,
-  FocusEventHandler,
-  KeyboardEventHandler,
-  RefObject
-} from 'react'
-import { useLayoutEffect, useRef } from 'react'
+import type { ClipboardEventHandler, KeyboardEventHandler, RefObject } from 'react'
+import { useLayoutEffect } from 'react'
 import { Image as ImageIcon, ImageOff, X } from 'lucide-react'
 import { translate } from '@/i18n/i18n'
-import { useImeEnterGestureOwnership } from '@/lib/ime-composition-keyboard-event'
+import type { useImeEnterGestureOwnership } from '@/lib/ime-composition-keyboard-event'
 import { cn } from '@/lib/utils'
 import { NATIVE_FILE_DROP_TARGET } from '../../../../shared/native-file-drop'
 import { basename } from '@/lib/path'
@@ -39,12 +33,11 @@ export type NativeChatComposerFieldProps = {
   dictationDisabled: boolean
   isDictating: boolean
   isDictationHoldMode: boolean
+  imeEnterGesture: ReturnType<typeof useImeEnterGestureOwnership>
   onDraftChange: (value: string, element: HTMLTextAreaElement) => void
   onTextareaSelect: (element: HTMLTextAreaElement) => void
   onKeyDown: KeyboardEventHandler<HTMLTextAreaElement>
-  onCompositionStart: CompositionEventHandler<HTMLTextAreaElement>
-  onCompositionEnd: CompositionEventHandler<HTMLTextAreaElement>
-  onBlur: FocusEventHandler<HTMLTextAreaElement>
+  onImeSettled: (element: HTMLTextAreaElement) => void
   onPaste: ClipboardEventHandler<HTMLTextAreaElement>
   pickerListboxId: string
   onChoosePickerItem: (item: NativeChatPickerItem) => void
@@ -83,12 +76,11 @@ export function NativeChatComposerField({
   dictationDisabled,
   isDictating,
   isDictationHoldMode,
+  imeEnterGesture,
   onDraftChange,
   onTextareaSelect,
   onKeyDown,
-  onCompositionStart,
-  onCompositionEnd,
-  onBlur,
+  onImeSettled,
   onPaste,
   pickerListboxId,
   onChoosePickerItem,
@@ -105,25 +97,12 @@ export function NativeChatComposerField({
   sessionOptionsSnapshot,
   sessionOptionsPickerRequest
 }: NativeChatComposerFieldProps): React.JSX.Element {
-  const imeEnterGesture = useImeEnterGestureOwnership()
-  const deferredDraftRef = useRef<string | null>(null)
-  const lastDraftRef = useRef(draft)
-
   // Browser owns the provisional value; React synchronizes drafts only between IME sessions.
   useLayoutEffect(() => {
     const textarea = textareaRef.current
-    if (!textarea) {
+    if (!textarea || imeEnterGesture.isComposing()) {
       return
     }
-    if (imeEnterGesture.isComposing()) {
-      if (draft !== lastDraftRef.current) {
-        deferredDraftRef.current = textarea.value === draft ? null : draft
-      }
-      lastDraftRef.current = draft
-      return
-    }
-    deferredDraftRef.current = null
-    lastDraftRef.current = draft
     if (textarea.value === draft) {
       return
     }
@@ -208,26 +187,21 @@ export function NativeChatComposerField({
               }}
               onKeyUp={imeEnterGesture.onKeyUp}
               onBlur={(event) => {
+                const compositionWasActive = imeEnterGesture.isComposing()
                 imeEnterGesture.reset()
-                const deferredDraft = deferredDraftRef.current
-                deferredDraftRef.current = null
-                if (deferredDraft !== null) {
-                  event.currentTarget.value = deferredDraft
-                } else if (event.currentTarget.value !== draft) {
-                  onDraftChange(event.currentTarget.value, event.currentTarget)
+                if (compositionWasActive) {
+                  onImeSettled(event.currentTarget)
                 }
-                onBlur(event)
               }}
-              onCompositionStart={(event) => {
-                deferredDraftRef.current = null
-                lastDraftRef.current = draft
+              onCompositionStart={() => {
                 imeEnterGesture.setComposing(true)
-                onCompositionStart(event)
               }}
               onCompositionEnd={(event) => {
-                deferredDraftRef.current = null
+                const compositionWasActive = imeEnterGesture.isComposing()
                 imeEnterGesture.setComposing(false)
-                onCompositionEnd(event)
+                if (compositionWasActive) {
+                  onImeSettled(event.currentTarget)
+                }
               }}
               onPaste={onPaste}
               onSelect={(e) => onTextareaSelect(e.currentTarget)}
