@@ -106,7 +106,6 @@ export const NativeChatComposer = forwardRef<NativeChatComposerHandle, NativeCha
     )
     const dictationState = useAppStore((store) => store.dictationState)
     const voiceSettings = useAppStore((store) => store.settings?.voice)
-    const isDictationHoldMode = voiceSettings?.dictationMode === 'hold'
     const dictationDisabled = voiceSettings?.enabled !== true || !voiceSettings.sttModel
     const isDictating =
       dictationPressed ||
@@ -120,6 +119,7 @@ export const NativeChatComposer = forwardRef<NativeChatComposerHandle, NativeCha
     const lastDraftScopeKey = useRef(paneKey)
     if (lastDraftScopeKey.current !== paneKey) {
       lastDraftScopeKey.current = paneKey
+      isComposingRef.current = false
       setCaret(readNativeChatDraftCache(paneKey).length)
     }
 
@@ -394,7 +394,7 @@ export const NativeChatComposer = forwardRef<NativeChatComposerHandle, NativeCha
         attachDisabled={disabled}
         dictationDisabled={dictationDisabled}
         isDictating={isDictating}
-        isDictationHoldMode={isDictationHoldMode}
+        isDictationHoldMode={voiceSettings?.dictationMode === 'hold'}
         onDraftChange={handleDraftChange}
         onTextareaSelect={(element) => {
           syncCaret(element)

@@ -12,6 +12,7 @@ import { clearNativeChatModelEnrichmentForTests } from './native-chat-session-op
 
 const mocks = vi.hoisted(() => ({
   cancelPendingSends: vi.fn(),
+  composerIsComposing: null as (() => boolean) | null,
   fieldProps: null as {
     onSend?: () => void
     onStop?: () => void
@@ -133,7 +134,10 @@ vi.mock('../dictation/dictation-control-events', () => ({
   dispatchDictationControl: vi.fn()
 }))
 vi.mock('./use-native-chat-composer-keydown', () => ({
-  useNativeChatComposerKeyDown: () => vi.fn()
+  useNativeChatComposerKeyDown: (args: { isComposing: () => boolean }) => {
+    mocks.composerIsComposing = args.isComposing
+    return vi.fn()
+  }
 }))
 vi.mock('./use-native-chat-send-lifecycle', () => ({
   useNativeChatSendLifecycle: () => ({
@@ -155,6 +159,7 @@ describe('NativeChatComposer', () => {
     mocks.imageAttachments = []
     mocks.draftScopeKeys.length = 0
     mocks.confirmationObserver = null
+    mocks.composerIsComposing = null
     mocks.createClaudeModelSwitchConfirmationObserver.mockImplementation(() => {
       const observer = {
         ready: Promise.resolve(),
@@ -435,6 +440,8 @@ describe('NativeChatComposer', () => {
       />
     )
     const previousField = view.getByTestId('native-chat-composer-field')
+    act(() => mocks.fieldProps?.onCompositionStart?.())
+    expect(mocks.composerIsComposing?.()).toBe(true)
 
     view.rerender(
       <NativeChatComposer
@@ -446,6 +453,7 @@ describe('NativeChatComposer', () => {
     )
 
     expect(view.getByTestId('native-chat-composer-field')).not.toBe(previousField)
+    expect(mocks.composerIsComposing?.()).toBe(false)
   })
 
   it('adopts an IME deletion delivered only by compositionend', () => {
