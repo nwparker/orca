@@ -82,8 +82,7 @@ export const NativeChatComposer = forwardRef<NativeChatComposerHandle, NativeCha
     // images survive both TUI/GUI toggles and PTY replacement on reconnect.
     // Why: local, SSH, and runtime reconnects can replace or temporarily clear
     // the PTY id. Pane identity is the stable ownership key for unsent input.
-    const draftScopeKey = paneKey
-    const { draft, setDraft } = useNativeChatDraft(draftScopeKey)
+    const { draft, setDraft } = useNativeChatDraft(paneKey)
     const [caret, setCaret] = useState(draft.length)
     useNativeChatLaunchDraftAdoption({
       terminalTabId,
@@ -118,10 +117,10 @@ export const NativeChatComposer = forwardRef<NativeChatComposerHandle, NativeCha
     // Place the caret at the end of the (possibly restored) draft when the
     // composer is reused for a different pane. Adjusted during render (matching
     // the draft reload) so caret and text stay consistent on the first paint.
-    const lastDraftScopeKey = useRef(draftScopeKey)
-    if (lastDraftScopeKey.current !== draftScopeKey) {
-      lastDraftScopeKey.current = draftScopeKey
-      setCaret(readNativeChatDraftCache(draftScopeKey).length)
+    const lastDraftScopeKey = useRef(paneKey)
+    if (lastDraftScopeKey.current !== paneKey) {
+      lastDraftScopeKey.current = paneKey
+      setCaret(readNativeChatDraftCache(paneKey).length)
     }
 
     const agentCommands = useMemo(
@@ -134,7 +133,7 @@ export const NativeChatComposer = forwardRef<NativeChatComposerHandle, NativeCha
     const picker = useNativeChatPickerState({
       agent,
       terminalTabId,
-      draftScopeKey,
+      draftScopeKey: paneKey,
       draft,
       caret,
       agentCommands,
@@ -380,6 +379,7 @@ export const NativeChatComposer = forwardRef<NativeChatComposerHandle, NativeCha
 
     return (
       <NativeChatComposerField
+        key={paneKey}
         textareaRef={textareaRef}
         draft={draft}
         disabled={disabled}

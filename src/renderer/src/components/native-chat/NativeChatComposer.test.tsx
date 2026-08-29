@@ -103,7 +103,7 @@ vi.mock('./native-chat-draft-cache', () => ({
 vi.mock('./NativeChatComposerField', () => ({
   NativeChatComposerField: (props: { onSend?: () => void; onStop?: () => void }) => {
     mocks.fieldProps = props
-    return null
+    return <div data-testid="native-chat-composer-field" />
   }
 }))
 vi.mock('./use-native-chat-skills', () => ({
@@ -402,6 +402,7 @@ describe('NativeChatComposer', () => {
         agent="codex"
       />
     )
+    const field = view.getByTestId('native-chat-composer-field')
 
     view.rerender(
       <NativeChatComposer
@@ -421,6 +422,30 @@ describe('NativeChatComposer', () => {
     )
 
     expect(new Set(mocks.draftScopeKeys)).toEqual(new Set(['tab-1:leaf-1']))
+    expect(view.getByTestId('native-chat-composer-field')).toBe(field)
+  })
+
+  it('remounts the composer field when draft ownership moves to another pane', () => {
+    const view = render(
+      <NativeChatComposer
+        terminalTabId="tab-1"
+        paneKey="tab-1:leaf-1"
+        targetPtyId="pty-1"
+        agent="codex"
+      />
+    )
+    const previousField = view.getByTestId('native-chat-composer-field')
+
+    view.rerender(
+      <NativeChatComposer
+        terminalTabId="tab-1"
+        paneKey="tab-1:leaf-2"
+        targetPtyId="pty-2"
+        agent="codex"
+      />
+    )
+
+    expect(view.getByTestId('native-chat-composer-field')).not.toBe(previousField)
   })
 
   it('adopts an IME deletion delivered only by compositionend', () => {
