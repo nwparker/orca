@@ -14,7 +14,6 @@ import {
   pushHistory,
   type HistoryState
 } from './native-chat-composer-state'
-import { readNativeChatDraftCache } from './native-chat-draft-cache'
 import { useNativeChatDraft } from './use-native-chat-draft'
 import { useNativeChatLaunchDraftAdoption } from './use-native-chat-launch-draft-adoption'
 import { NativeChatComposerField } from './NativeChatComposerField'
@@ -57,8 +56,8 @@ const ESC = '\x1b'
  * Slash-command and `@file` autocomplete are agent-aware; image paste persists a
  * temp file and injects the agent-appropriate path (or reports unsupported).
  */
-export const NativeChatComposer = forwardRef<NativeChatComposerHandle, NativeChatComposerProps>(
-  function NativeChatComposer(
+const NativeChatComposerPane = forwardRef<NativeChatComposerHandle, NativeChatComposerProps>(
+  function NativeChatComposerPane(
     {
       terminalTabId,
       paneKey,
@@ -112,16 +111,6 @@ export const NativeChatComposer = forwardRef<NativeChatComposerHandle, NativeCha
       dictationState === 'starting' ||
       dictationState === 'listening' ||
       dictationState === 'stopping'
-
-    // Place the caret at the end of the (possibly restored) draft when the
-    // composer is reused for a different pane. Adjusted during render (matching
-    // the draft reload) so caret and text stay consistent on the first paint.
-    const lastDraftScopeKey = useRef(paneKey)
-    if (lastDraftScopeKey.current !== paneKey) {
-      lastDraftScopeKey.current = paneKey
-      isComposingRef.current = false
-      setCaret(readNativeChatDraftCache(paneKey).length)
-    }
 
     const agentCommands = useMemo(
       () =>
@@ -379,7 +368,6 @@ export const NativeChatComposer = forwardRef<NativeChatComposerHandle, NativeCha
 
     return (
       <NativeChatComposerField
-        key={paneKey}
         textareaRef={textareaRef}
         draft={draft}
         disabled={disabled}
@@ -439,5 +427,11 @@ export const NativeChatComposer = forwardRef<NativeChatComposerHandle, NativeCha
         sessionOptionsPickerRequest={structuredTransport?.optionPickerRequest ?? null}
       />
     )
+  }
+)
+
+export const NativeChatComposer = forwardRef<NativeChatComposerHandle, NativeChatComposerProps>(
+  function NativeChatComposer(props, ref): React.JSX.Element {
+    return <NativeChatComposerPane key={props.paneKey} {...props} ref={ref} />
   }
 )
