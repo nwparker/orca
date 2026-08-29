@@ -1,11 +1,14 @@
 import type {
   ClipboardEventHandler,
   CompositionEventHandler,
+  FocusEventHandler,
   KeyboardEventHandler,
   RefObject
 } from 'react'
+import { useLayoutEffect, useRef } from 'react'
 import { Image as ImageIcon, ImageOff, X } from 'lucide-react'
 import { translate } from '@/i18n/i18n'
+import { useImeEnterGestureOwnership } from '@/lib/ime-composition-keyboard-event'
 import { cn } from '@/lib/utils'
 import { NATIVE_FILE_DROP_TARGET } from '../../../../shared/native-file-drop'
 import { basename } from '@/lib/path'
@@ -41,6 +44,7 @@ export type NativeChatComposerFieldProps = {
   onKeyDown: KeyboardEventHandler<HTMLTextAreaElement>
   onCompositionStart: CompositionEventHandler<HTMLTextAreaElement>
   onCompositionEnd: CompositionEventHandler<HTMLTextAreaElement>
+  onBlur: FocusEventHandler<HTMLTextAreaElement>
   onPaste: ClipboardEventHandler<HTMLTextAreaElement>
   pickerListboxId: string
   onChoosePickerItem: (item: NativeChatPickerItem) => void
@@ -84,6 +88,7 @@ export function NativeChatComposerField({
   onKeyDown,
   onCompositionStart,
   onCompositionEnd,
+  onBlur,
   onPaste,
   pickerListboxId,
   onChoosePickerItem,
@@ -100,6 +105,31 @@ export function NativeChatComposerField({
   sessionOptionsSnapshot,
   sessionOptionsPickerRequest
 }: NativeChatComposerFieldProps): React.JSX.Element {
+  const imeEnterGesture = useImeEnterGestureOwnership()
+  const deferredDraftRef = useRef<string | null>(null)
+  const lastDraftRef = useRef(draft)
+
+  // Browser owns the provisional value; React synchronizes drafts only between IME sessions.
+  useLayoutEffect(() => {
+    const textarea = textareaRef.current
+    if (!textarea) {
+      return
+    }
+    if (imeEnterGesture.isComposing()) {
+      if (draft !== lastDraftRef.current) {
+        deferredDraftRef.current = textarea.value === draft ? null : draft
+      }
+      lastDraftRef.current = draft
+      return
+    }
+    deferredDraftRef.current = null
+    lastDraftRef.current = draft
+    if (textarea.value === draft) {
+      return
+    }
+    textarea.value = draft
+  }, [draft, imeEnterGesture, textareaRef])
+
   return (
     <div className="shrink-0 bg-background">
       {/* Extra bottom padding keeps the input box off the window rim. */}
@@ -167,13 +197,38 @@ export function NativeChatComposerField({
             ) : null}
             <textarea
               ref={textareaRef}
-              value={draft}
+              defaultValue={draft}
               disabled={disabled}
               rows={2}
               onChange={(e) => onDraftChange(e.target.value, e.currentTarget)}
-              onKeyDown={onKeyDown}
-              onCompositionStart={onCompositionStart}
-              onCompositionEnd={onCompositionEnd}
+              onKeyDown={(event) => {
+                if (!imeEnterGesture.ownsKeyDown(event)) {
+                  onKeyDown(event)
+                }
+              }}
+              onKeyUp={imeEnterGesture.onKeyUp}
+              onBlur={(event) => {
+                imeEnterGesture.reset()
+                const deferredDraft = deferredDraftRef.current
+                deferredDraftRef.current = null
+                if (deferredDraft !== null) {
+                  event.currentTarget.value = deferredDraft
+                } else if (event.currentTarget.value !== draft) {
+                  onDraftChange(event.currentTarget.value, event.currentTarget)
+                }
+                onBlur(event)
+              }}
+              onCompositionStart={(event) => {
+                deferredDraftRef.current = null
+                lastDraftRef.current = draft
+                imeEnterGesture.setComposing(true)
+                onCompositionStart(event)
+              }}
+              onCompositionEnd={(event) => {
+                deferredDraftRef.current = null
+                imeEnterGesture.setComposing(false)
+                onCompositionEnd(event)
+              }}
               onPaste={onPaste}
               onSelect={(e) => onTextareaSelect(e.currentTarget)}
               aria-expanded={autocomplete.mode === 'slash' || autocomplete.mode === 'skill'}

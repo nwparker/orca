@@ -49,6 +49,7 @@ function renderField(draft: string): HTMLTextAreaElement {
       onKeyDown={vi.fn()}
       onCompositionStart={vi.fn()}
       onCompositionEnd={vi.fn()}
+      onBlur={vi.fn()}
       onPaste={vi.fn()}
       pickerListboxId="picker"
       onChoosePickerItem={vi.fn()}

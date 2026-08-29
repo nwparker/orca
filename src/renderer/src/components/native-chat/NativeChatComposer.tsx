@@ -411,6 +411,7 @@ export const NativeChatComposer = forwardRef<NativeChatComposerHandle, NativeCha
             handleDraftChange(event.currentTarget.value, event.currentTarget)
           }
         }}
+        onBlur={() => (isComposingRef.current = false)}
         onPaste={handlePaste}
         pickerListboxId={picker.listboxId}
         onChoosePickerItem={completeItem}
