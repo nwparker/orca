@@ -8,6 +8,7 @@ import React, {
   useRef,
   useState
 } from 'react'
+import { flushSync } from 'react-dom'
 import { useShallow } from 'zustand/react/shallow'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -42,7 +43,6 @@ import {
   CommandEmpty,
   CommandItem
 } from '@/components/ui/command'
-import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { parseGitHubIssueOrPRNumber, parseGitHubIssueOrPRLink } from '@/lib/github-links'
 import { getLinkedWorkItemSuggestedName, getLinkedWorkItemWorkspaceName } from '@/lib/new-workspace'
@@ -568,7 +568,7 @@ function PaletteOpenTabPrimaryLine({
     <div className="flex min-w-0 items-center gap-2 overflow-hidden">
       <span
         data-slot="palette-open-tab-title"
-        className="min-w-0 truncate text-[14px] font-semibold tracking-[-0.01em] text-foreground"
+        className="min-w-0 flex-1 truncate text-[14px] font-semibold tracking-[-0.01em] text-foreground"
       >
         <HighlightedText text={title} matchRanges={titleRanges} />
       </span>
@@ -2022,13 +2022,11 @@ function WorktreeJumpPaletteContent({
       fetchLinearIssue: state.fetchLinearIssue
     })
       .catch(() => null)
-      .then(
-        (issue): CmdJLinearIssuePreview => ({
-          ...pendingPreview,
-          issue,
-          loading: false
-        })
-      )
+      .then((issue): CmdJLinearIssuePreview => ({
+        ...pendingPreview,
+        issue,
+        loading: false
+      }))
     linearIssueLookupRef.current = { query: createWorktreeName, promise }
     void promise.then((preview) => {
       if (linearIssueLookupGenerationRef.current === generation) {
@@ -2077,13 +2075,11 @@ function WorktreeJumpPaletteContent({
       sourceContext
     })
       .catch(() => null)
-      .then(
-        (item): CmdJGitHubWorkItemPreview => ({
-          ...pendingPreview,
-          item: item ?? null,
-          loading: false
-        })
-      )
+      .then((item): CmdJGitHubWorkItemPreview => ({
+        ...pendingPreview,
+        item: item ?? null,
+        loading: false
+      }))
     githubLookupRef.current = { query: createWorktreeName, promise }
     void promise.then((preview) => {
       if (githubLookupGenerationRef.current === generation) {
@@ -3262,30 +3258,33 @@ function WorktreeJumpPaletteContent({
               }
 
               if (entry.type === 'hint') {
-                // Why: plain div (not CommandItem) so cmdk can't select it; arrow keys skip it via selectableItems.
                 return (
-                  <div
+                  <CommandItem
                     key={renderKey}
-                    className="mx-0.5 mt-1 flex items-center gap-2 px-3 py-1.5 text-[12px] text-muted-foreground"
+                    value={renderKey}
+                    onSelect={() => {
+                      const previousIndex = selectionItemIds.indexOf(renderKey)
+                      flushSync(() => entry.onSeeMore?.())
+                      const expandedItemId = Array.from(
+                        listRef.current?.querySelectorAll<HTMLElement>('[cmdk-item]') ?? []
+                      )[previousIndex]?.getAttribute('data-value')
+                      if (expandedItemId) {
+                        setSelectedItemId(expandedItemId)
+                      }
+                      inputRef.current?.focus()
+                    }}
+                    className={cn(
+                      JUMP_PALETTE_ITEM_CLASSNAME,
+                      'mt-1 min-h-0 gap-2 py-1.5 text-[12px] text-muted-foreground'
+                    )}
                   >
                     <span className="truncate">{entry.label}</span>
                     {entry.onSeeMore ? (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="xs"
-                        className="h-6 shrink-0 px-2 text-xs font-medium text-foreground hover:bg-accent"
-                        onClick={(event) => {
-                          event.preventDefault()
-                          event.stopPropagation()
-                          entry.onSeeMore?.()
-                          inputRef.current?.focus()
-                        }}
-                      >
+                      <span className="h-6 shrink-0 rounded-md border border-input bg-background px-2 text-xs font-medium leading-6 text-foreground">
                         {translate('worktreeJumpPalette.seeMore', 'See more')}
-                      </Button>
+                      </span>
                     ) : null}
-                  </div>
+                  </CommandItem>
                 )
               }
 
