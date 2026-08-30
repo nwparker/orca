@@ -54,7 +54,9 @@ function Probe({
     setDraft: (updater) => setDraftValue((previous) => updater(previous)),
     setNotice
   })
-  useEffect(() => {\n    onReady({ ...api, adoptDraft: setDraftValue })\n  }, [api, onReady])
+  useEffect(() => {
+    onReady({ ...api, adoptDraft: setDraftValue })
+  }, [api, onReady])
   return (
     <div>
       <textarea ref={textareaRef} />
