@@ -68,6 +68,10 @@ export function registerTerminalPresentationIpcBridge(unsubs: (() => void)[]): v
                 tabId !== undefined ? { preferTabId: tabId } : {}
               )
             : { kind: 'none' as const }
+          if (ownership.kind === 'ambiguous') {
+            // Why: creating a new tab would compound the already-ambiguous PTY binding.
+            throw new Error('Terminal creation is unavailable because the PTY owner is ambiguous')
+          }
           const existingTab =
             ownership.kind === 'owned'
               ? worktreeTabs.find((candidate) => candidate.id === ownership.tabId)
