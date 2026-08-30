@@ -16,14 +16,16 @@ export function mockBrowserManager(
   worktrees = new Map<string, string>(),
   overrides: Partial<BrowserManager> = {}
 ): BrowserManager {
-  const tabIdByWebContentsId = new Map<number, string>()
-  for (const [tabId, webContentsId] of tabs) {
-    tabIdByWebContentsId.set(webContentsId, tabId)
-  }
   return {
     getWebContentsIdByTabId: () => tabs,
-    getTabIdForWebContentsId: (webContentsId: number) =>
-      tabIdByWebContentsId.get(webContentsId) ?? null,
+    getTabIdForWebContentsId: (webContentsId: number) => {
+      for (const [tabId, tabWebContentsId] of tabs) {
+        if (tabWebContentsId === webContentsId) {
+          return tabId
+        }
+      }
+      return null
+    },
     getWorktreeIdForTab: (tabId: string) => worktrees.get(tabId),
     getGuestWebContentsId: vi.fn(() => null),
     getBrowserPageLoadError: vi.fn(() => null),
