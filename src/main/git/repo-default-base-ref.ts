@@ -36,6 +36,26 @@ async function resolveDefaultBaseRefFromProbes(
   return null
 }
 
+/** Probe the conventional refs in one Git process; retain the old loop as a fallback. */
+async function resolveDefaultBaseRefFromBatchedProbes(exec: GitExec): Promise<string | null> {
+  try {
+    const { stdout } = await exec([
+      'for-each-ref',
+      '--format=%(refname)',
+      ...DEFAULT_BASE_REF_PROBES.map(({ ref }) => ref)
+    ])
+    const refs = new Set(
+      stdout
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter((line) => DEFAULT_BASE_REF_PROBES.some(({ ref }) => ref === line))
+    )
+    return DEFAULT_BASE_REF_PROBES.find(({ ref }) => refs.has(ref))?.returnAs ?? null
+  } catch {
+    return resolveDefaultBaseRefFromProbes((ref) => hasGitRefViaExec(exec, ref))
+  }
+}
+
 function hasGitRef(path: string, ref: string): boolean {
   try {
     gitExecFileSync(['rev-parse', '--verify', ref], { cwd: path })
@@ -117,12 +137,25 @@ export async function resolveDefaultBaseRefViaExec(exec: GitExec): Promise<strin
 export function resolveDefaultBaseRefWithLocalGit(
   options: LocalDefaultBaseRefGitOptions
 ): Promise<string | null> {
-  return resolveDefaultBaseRefViaExec((argv) =>
+  const exec = (argv: string[]) =>
     gitExecFileAsync(argv, {
       ...options,
       timeout: DEFAULT_BASE_REF_PROBE_TIMEOUT_MS
     })
-  )
+  // WSL process startup makes the four fallback probes visible in create latency.
+  return options.wslDistro
+    ? resolveDefaultBaseRefViaExecWithBatchedProbes(exec)
+    : resolveDefaultBaseRefViaExec(exec)
+}
+
+async function resolveDefaultBaseRefViaExecWithBatchedProbes(
+  exec: GitExec
+): Promise<string | null> {
+  const originHeadBaseRef = await resolveVerifiedOriginHeadBaseRefViaExec(exec)
+  if (originHeadBaseRef) {
+    return originHeadBaseRef
+  }
+  return resolveDefaultBaseRefFromBatchedProbes(exec)
 }
 
 export function getDefaultBaseRefAsync(
