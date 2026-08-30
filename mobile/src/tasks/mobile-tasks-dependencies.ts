@@ -37,6 +37,7 @@ export type { RpcSuccess } from '../transport/types'
 export { useHostClient } from '../transport/client-context'
 export {
   useLastConnectedAt,
+  useRelayRecoveryStatus,
   useReconnectAttempt
 } from '../transport/client-context-connection-metrics'
 export { classifyConnection } from '../transport/connection-health'
@@ -112,12 +113,6 @@ export {
 } from './setup-hook-trust'
 export { colors, radii, spacing, typography } from '../theme/mobile-theme'
 export { triggerMediumImpact } from '../platform/haptics'
-export { groupRows, isIterationCurrent, sortRows } from './mobile-github-project-group-sort'
-export type {
-  GitHubProjectSortDirection,
-  GitHubProjectTable as SharedGitHubProjectTable,
-  ProjectGroup
-} from './mobile-github-project-group-sort'
 export {
   CROSS_REPO_DISPLAY_LIMIT,
   isGitHubWorkItemsSshRemoteRequiredError,
@@ -140,17 +135,17 @@ export {
   clearMobileTaskCopyFeedbackTimer,
   scheduleMobileTaskCopyFeedbackReset
 } from './mobile-task-copy-feedback-timer'
+export type { BaseRefSearchResult } from '../../../src/shared/repo-types'
 export type {
-  BaseRefSearchResult,
   GitHubOwnerRepo,
-  ProviderCheckSummary,
-  PersistedTrustedOrcaHooks,
-  SparsePreset,
-  TuiAgent
-} from '../../../src/shared/types'
+  ProviderCheckSummary
+} from '../../../src/shared/github/pull-request-types'
+export type { PersistedTrustedOrcaHooks } from '../../../src/shared/orca-yaml-hook-types'
+export type { SparsePreset } from '../../../src/shared/worktree/create-types'
+export type { TuiAgent } from '../../../src/shared/tui-agent'
 export type { SshConnectionState } from '../../../src/shared/ssh-types'
 export type { HostedReviewDecision } from '../../../src/shared/hosted-review'
 export {
   githubProjectHost,
   githubProjectIdentityKey as githubProjectKey
-} from '../../../src/shared/github-project-identity'
+} from '../../../src/shared/github/project-identity'

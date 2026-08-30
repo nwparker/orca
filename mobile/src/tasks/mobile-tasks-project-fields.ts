@@ -1,8 +1,6 @@
-import {
-  type SharedGitHubProjectTable,
-  type ProjectGroup,
-  isIterationCurrent
-} from './mobile-tasks-dependencies'
+import type { GitHubProjectTable as SharedGitHubProjectTable } from '../../../src/shared/github/project-types'
+import { isIterationCurrent } from '../../../src/shared/github/project-group-sort'
+import type { ProjectGroup } from '../../../src/shared/github/project-group-sort'
 import type { ProjectSortOverride } from './mobile-tasks-options'
 import type {
   GitHubProjectField,

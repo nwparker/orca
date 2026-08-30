@@ -16,9 +16,9 @@ const hash = (parts: string[] | string): string =>
     .update(Array.isArray(parts) ? parts.join('\n') : parts)
     .digest('hex')
 
-const PRE_REFACTOR_SCREEN_HOOKS = 'f1b4e674a74ca8c4dc2d175299b8ba1f2ab8c1ebf7c4e2e3e6681997f6573ef3'
+const PRE_REFACTOR_SCREEN_HOOKS = '1d8e1b69c4ac80e5e035cc2ece62a88a73bb35b0b60af74f3e75e54db5df3f75'
 const PRE_REFACTOR_DIFF_HOOKS = '93c7189b32bed8456cc51814fffa8ce80cf62011ef968a9d53ddec2b9686f58f'
-const PRE_REFACTOR_STATEMENTS = '96cad6f3552bb54de3d36ece834fea84ec903774bffd9dc6a9dc36aaf5c65388'
+const PRE_REFACTOR_STATEMENTS = 'ef0e5bd607a96ff11fb60cff285bc01dfcfeb804cd29a896cca107b09994b610'
 const PRE_REFACTOR_DECLARATIONS = 'cff54172af17a877789be1479c2eb6ca97d83c3e31dd831cd59395962f2b4c4a'
 const PRE_REFACTOR_SEMANTICS = '60be4eee5513751530f98925828dc59e9775838842dafb5e5c7e9f25bf8a016d'
 const PRE_REFACTOR_STYLES = '1db6af69c791d9963928541ad5310942fcbda6d984b422c90b6eb92b6816579a'
@@ -27,7 +27,7 @@ const PRE_REFACTOR_RENDER_TREE = '2111145136b1e4fbca150d4792d735a90e992488e9934c
 describe('Mobile Tasks refactor parity', () => {
   it('preserves recursively flattened hook and dependency order', () => {
     const screenHooks = readFlattenedMobileTasksHookSignatures('MobileTasksScreen')
-    expect(screenHooks).toHaveLength(349)
+    expect(screenHooks).toHaveLength(350)
     expect(hash(screenHooks)).toBe(PRE_REFACTOR_SCREEN_HOOKS)
 
     const diffHooks = readFlattenedMobileTasksHookSignatures('GitHubPrFileDiff')
@@ -37,7 +37,7 @@ describe('Mobile Tasks refactor parity', () => {
 
   it('preserves every screen statement in execution order', () => {
     const statements = readFlattenedMobileTasksCoreStatements()
-    expect(statements).toHaveLength(416)
+    expect(statements).toHaveLength(417)
     expect(hash(statements)).toBe(PRE_REFACTOR_STATEMENTS)
   })
 

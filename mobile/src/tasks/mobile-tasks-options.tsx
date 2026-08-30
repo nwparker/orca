@@ -4,10 +4,10 @@ import {
   TaskProviderLogo,
   colors,
   getLinkedWorkItemSuggestedName,
-  type GitHubProjectSortDirection,
-  type ProjectGroup,
   type GitHubProjectSettings
 } from './mobile-tasks-dependencies'
+import type { GitHubProjectSortDirection } from '../../../src/shared/github/project-types'
+import type { ProjectGroup } from '../../../src/shared/github/project-group-sort'
 import type {
   GitHubMode,
   GitHubPreset,

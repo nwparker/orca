@@ -1,16 +1,15 @@
 import type { WorkspaceAndProjectStateModel } from './use-mobile-tasks-workspace-and-project-state'
 import {
-  type ProjectGroup,
   filterGitHubProjectRowsForRepos,
   findRepoForGitHubProjectRepository,
   githubProjectHost,
-  groupRows,
   hasSettledHostRepoList,
   isHostedTaskRepo,
-  sortRows,
   useCallback,
   useMemo
 } from './mobile-tasks-dependencies'
+import { groupRows, sortRows } from '../../../src/shared/github/project-group-sort'
+import type { ProjectGroup } from '../../../src/shared/github/project-group-sort'
 import {
   type GitHubProjectRow,
   type ProjectListEntry,

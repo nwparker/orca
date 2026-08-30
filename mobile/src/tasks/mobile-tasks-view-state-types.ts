@@ -3,9 +3,9 @@ import type {
   TuiAgent,
   TaskProvider,
   GitHubProjectSettings,
-  GitHubProjectSortDirection,
   GitHubProjectRef
 } from './mobile-tasks-dependencies'
+import type { GitHubProjectSortDirection } from '../../../src/shared/github/project-types'
 
 export type GitHubTaskKind = 'issues' | 'prs'
 
