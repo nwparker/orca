@@ -64,7 +64,7 @@ function createContext(overrides?: Partial<HandlerContext>): HandlerContext {
     consumeMissingManifestPrereleaseFallbackResult: vi.fn(() => null),
     getPublishingWindowLastGoodCheck: vi.fn(() => null),
     getMissingManifestPrereleaseFallbackUserInitiated: vi.fn(() => null),
-    getCurrentStatus: vi.fn(() => ({ state: 'checking' }) as never),
+    getCurrentStatus: vi.fn(() => ({ state: 'idle' }) as never),
     getActiveUpdateCheckEventAttemptId: vi.fn(() => 1),
     getKnownReleaseUrl: vi.fn(() => undefined),
     getPendingInstallVersion: vi.fn(() => '1.0.61'),
@@ -249,13 +249,37 @@ describe('registerAutoUpdaterHandlers linux package artifact tracking', () => {
     expect(context.sendErrorStatus).not.toHaveBeenCalled()
   })
 
-  it('drops the artifact once the update resolves as not available', async () => {
-    const { emit, getArtifact } = await register()
+  it('keeps manual-install recovery when a later check finds no newer release', async () => {
+    const { emit, context, getArtifact } = await register()
     emit('update-downloaded', downloadedEvent())
 
     emit('update-not-available')
 
+    expect(getArtifact()).toEqual(expect.objectContaining({ version: '1.0.61' }))
+    expect(context.sendStatus).toHaveBeenLastCalledWith({
+      state: 'error',
+      message: 'Quit Orca before running the system package install command.',
+      recovery: {
+        kind: 'linux-package-install',
+        packageType: 'deb',
+        reason: 'manual-install-required',
+        version: '1.0.61'
+      }
+    })
+  })
+
+  it('clears recovery when a newer update takes over before no-update settles', async () => {
+    const { emit, context, getArtifact } = await register()
+    emit('update-downloaded', downloadedEvent())
+
+    emit('update-available', { version: '1.0.62' })
+    emit('update-not-available')
+
     expect(getArtifact()).toBeNull()
+    expect(context.sendStatus).toHaveBeenLastCalledWith({
+      state: 'not-available',
+      userInitiated: undefined
+    })
   })
 
   it('drops the artifact when another version takes over the cycle', async () => {
@@ -265,6 +289,18 @@ describe('registerAutoUpdaterHandlers linux package artifact tracking', () => {
     emit('update-available', { version: '1.0.62' })
 
     expect(getArtifact()).toBeNull()
+  })
+
+  it('ignores a downloaded event for an older target', async () => {
+    const { emit, context, getArtifact } = await register({
+      getCurrentStatus: vi.fn(() => ({ state: 'available', version: '1.0.62' }) as never),
+      getPendingInstallVersion: vi.fn(() => '1.0.62')
+    })
+
+    emit('update-downloaded', downloadedEvent())
+
+    expect(getArtifact()).toBeNull()
+    expect(context.sendStatus).not.toHaveBeenCalled()
   })
 
   it('drops the artifact when progress reports a different pending version', async () => {

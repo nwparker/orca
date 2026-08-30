@@ -1,18 +1,19 @@
-import { app, autoUpdater as nativeUpdater } from 'electron'
+import { app } from 'electron'
 import type { UpdateStatus } from '../shared/update-status-types'
 import {
-  consumeMacInstallGuardBypass,
-  deferMacQuitUntilInstallerReady,
-  handleMacInstallerReady,
   isMacInstallerReady,
-  isMacQuitAndInstallInFlight,
+  registerMacUpdaterEvents,
   resetMacInstallState
 } from './updater-mac-install'
 import { compareVersions } from './updater-fallback'
 import { fetchChangelog } from './updater-changelog'
 import type { ElectronAutoUpdater } from './electron-updater-loader'
 import { recordUpdaterLifecycle } from './updater-lifecycle-diagnostics'
-import { resolveLinuxPackageDownloadedStatus } from './linux-package-downloaded-status'
+import {
+  getRetainedLinuxPackageManualInstallStatus,
+  resolveLinuxPackageDownloadedStatus,
+  shouldIgnoreDownloadedUpdateEvent
+} from './linux-package-downloaded-status'
 import * as linuxPackageRecovery from './linux-package-update-recovery'
 
 const AUTO_UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000
@@ -98,47 +99,14 @@ export function registerAutoUpdaterHandlers({
   setAvailableVersion,
   setUserInitiatedCheck
 }: UpdaterHandlerContext): void {
-  // Why: electron-updater fires 'update-downloaded' before Squirrel.Mac finishes; track readiness to avoid a premature "ready".
-  if (process.platform === 'darwin') {
-    nativeUpdater.on('update-downloaded', () => {
-      const hasInstallableVersion = hasInstallableDownloadedVersion()
-      handleMacInstallerReady(hasInstallableVersion, performQuitAndInstall, () => {
-        // Send the held status only while its staged build is still installable.
-        sendStatus({
-          state: 'downloaded',
-          version: getPendingInstallVersion(),
-          releaseUrl: getKnownReleaseUrl()
-        })
-      })
-    })
-  }
-
-  app.on('before-quit', (event) => {
-    if (!shouldDeferMacQuitForInstall()) {
-      return
-    }
-    if (consumeMacInstallGuardBypass()) {
-      recordUpdaterLifecycle('macos_before_quit_guard_bypassed')
-      return
-    }
-    if (isMacQuitAndInstallInFlight()) {
-      return
-    }
-
-    // Why: quitting before Squirrel.Mac finishes staging leaves nothing to install; hold the quit until it's ready.
-    if (
-      deferMacQuitUntilInstallerReady(
-        getCurrentStatus(),
-        hasInstallableDownloadedVersion(),
-        getPendingInstallVersion,
-        sendStatus
-      )
-    ) {
-      recordUpdaterLifecycle('macos_before_quit_deferred', {
-        version: getPendingInstallVersion()
-      })
-      event.preventDefault()
-    }
+  registerMacUpdaterEvents({
+    getCurrentStatus,
+    hasInstallableDownloadedVersion,
+    getPendingInstallVersion,
+    getKnownReleaseUrl,
+    performQuitAndInstall,
+    shouldDeferMacQuitForInstall,
+    sendStatus
   })
 
   autoUpdater.on('checking-for-update', () => {
@@ -238,7 +206,7 @@ export function registerAutoUpdaterHandlers({
     }
     clearBackgroundCheckLaunchPending()
     resetMacInstallState()
-    linuxPackageRecovery.clearTrackedLinuxPackageArtifact()
+    const retainedStatus = getRetainedLinuxPackageManualInstallStatus()
     const missingManifestFallback = consumeMissingManifestPrereleaseFallbackResult()
     const publishingWindowLastGoodCheck = getPublishingWindowLastGoodCheck()
     const wasUserInitiated = missingManifestFallback?.userInitiated ?? getUserInitiatedCheck()
@@ -259,7 +227,11 @@ export function registerAutoUpdaterHandlers({
         }
       }
     }
-    sendStatus({ state: 'not-available', userInitiated: wasUserInitiated || undefined })
+    // Why: a later check can report no newer release while a verified deb/rpm is still waiting for
+    // the user to install it outside Orca. Keep both the artifact and its recovery card reachable.
+    sendStatus(
+      retainedStatus ?? { state: 'not-available', userInitiated: wasUserInitiated || undefined }
+    )
     if (localBuildCheck || pinnedBuildCheck) {
       restoreReleaseUpdateSource()
     }
@@ -277,6 +249,16 @@ export function registerAutoUpdaterHandlers({
   })
 
   autoUpdater.on('update-downloaded', (info) => {
+    // Why: an earlier download can finish after a newer target replaced it; uncached pre-staged events have no target to compare.
+    if (
+      shouldIgnoreDownloadedUpdateEvent(
+        getCurrentStatus(),
+        info.version,
+        getPendingInstallVersion()
+      )
+    ) {
+      return
+    }
     clearBackgroundCheckLaunchPending()
     // Release downloads remain newer-only; the local source was validated before checking, and a pinned jump is explicit.
     if (
