@@ -90,6 +90,8 @@ describe('updater Linux root packages', () => {
   ): Promise<void> {
     updater.checkForUpdatesFromMenu()
     await vi.advanceTimersByTimeAsync(0)
+    autoUpdaterMock.downloadUpdate.mockResolvedValue([])
+    updater.downloadUpdate()
     autoUpdaterMock.emit('update-downloaded', event)
     if (markInstallerReady) {
       markMacInstallerReady()

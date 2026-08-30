@@ -160,6 +160,8 @@ async function reachDownloaded(): Promise<typeof UpdaterModule> {
   autoUpdaterMock.emit('checking-for-update')
   autoUpdaterMock.emit('update-available', { version: '1.4.163' })
   await new Promise((resolve) => setTimeout(resolve, 0))
+  autoUpdaterMock.downloadUpdate.mockResolvedValue([])
+  updater.downloadUpdate()
   autoUpdaterMock.emit('update-downloaded', { version: '1.4.163' })
   expect(updater.getUpdateStatus().state).toBe('downloaded')
   return updater

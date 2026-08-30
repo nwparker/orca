@@ -64,7 +64,9 @@ function createContext(overrides?: Partial<HandlerContext>): HandlerContext {
     consumeMissingManifestPrereleaseFallbackResult: vi.fn(() => null),
     getPublishingWindowLastGoodCheck: vi.fn(() => null),
     getMissingManifestPrereleaseFallbackUserInitiated: vi.fn(() => null),
-    getCurrentStatus: vi.fn(() => ({ state: 'idle' }) as never),
+    getCurrentStatus: vi.fn(
+      () => ({ state: 'downloading', percent: 42, version: '1.0.61' }) as never
+    ),
     getActiveUpdateCheckEventAttemptId: vi.fn(() => 1),
     getKnownReleaseUrl: vi.fn(() => undefined),
     getPendingInstallVersion: vi.fn(() => '1.0.61'),
@@ -294,6 +296,62 @@ describe('registerAutoUpdaterHandlers linux package artifact tracking', () => {
   it('ignores a downloaded event for an older target', async () => {
     const { emit, context, getArtifact } = await register({
       getCurrentStatus: vi.fn(() => ({ state: 'available', version: '1.0.62' }) as never),
+      getPendingInstallVersion: vi.fn(() => '1.0.62')
+    })
+
+    emit('update-downloaded', downloadedEvent())
+
+    expect(getArtifact()).toBeNull()
+    expect(context.sendStatus).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['idle', { state: 'idle' }],
+    ['not-available', { state: 'not-available' }],
+    ['check error', { state: 'error', message: 'check failed' }]
+  ] as const)(
+    'ignores a downloaded event after the target is no longer active (%s)',
+    async (_name, status) => {
+      const { emit, context, getArtifact } = await register({
+        getCurrentStatus: vi.fn(() => status as never),
+        getPendingInstallVersion: vi.fn(() => '')
+      })
+
+      emit('update-downloaded', downloadedEvent())
+
+      expect(getArtifact()).toBeNull()
+      expect(context.sendStatus).not.toHaveBeenCalled()
+    }
+  )
+
+  it('accepts a matching event when the pending cache target was cleared', async () => {
+    const { emit, context, getArtifact } = await register({
+      getCurrentStatus: vi.fn(
+        () => ({ state: 'downloading', percent: 42, version: '1.0.61' }) as never
+      ),
+      getPendingInstallVersion: vi.fn(() => '')
+    })
+
+    emit('update-downloaded', downloadedEvent())
+
+    expect(getArtifact()).toEqual(expect.objectContaining({ version: '1.0.61' }))
+    expect(context.sendStatus).toHaveBeenLastCalledWith({
+      state: 'error',
+      message: 'Quit Orca before running the system package install command.',
+      recovery: {
+        kind: 'linux-package-install',
+        packageType: 'deb',
+        reason: 'manual-install-required',
+        version: '1.0.61'
+      }
+    })
+  })
+
+  it('ignores a downloaded event when the active status and pending target disagree', async () => {
+    const { emit, context, getArtifact } = await register({
+      getCurrentStatus: vi.fn(
+        () => ({ state: 'downloading', percent: 42, version: '1.0.62' }) as never
+      ),
       getPendingInstallVersion: vi.fn(() => '1.0.62')
     })
 

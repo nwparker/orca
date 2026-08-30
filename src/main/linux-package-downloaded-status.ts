@@ -35,12 +35,27 @@ export function getRetainedLinuxPackageManualInstallStatus(): UpdateStatus | nul
   return artifact ? createLinuxPackageManualInstallStatus(artifact) : null
 }
 
+function getActiveDownloadVersion(status: UpdateStatus): string | null {
+  if (status.state === 'downloading' || status.state === 'downloaded') {
+    return status.version
+  }
+  if (status.state === 'error' && status.recovery?.kind === 'linux-package-install') {
+    return status.recovery.version
+  }
+  return null
+}
+
 export function shouldIgnoreDownloadedUpdateEvent(
   status: UpdateStatus,
   infoVersion: string,
   pendingVersion: string
 ): boolean {
-  return status.state === 'checking' || (pendingVersion !== '' && infoVersion !== pendingVersion)
+  const activeDownloadVersion = getActiveDownloadVersion(status)
+  return (
+    activeDownloadVersion === null ||
+    infoVersion !== activeDownloadVersion ||
+    (pendingVersion !== '' && infoVersion !== pendingVersion)
+  )
 }
 
 export function resolveLinuxPackageDownloadedStatus(info: {

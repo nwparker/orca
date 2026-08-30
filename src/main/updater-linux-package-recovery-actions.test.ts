@@ -110,7 +110,7 @@ describe('linux package recovery actions', () => {
     vi.useFakeTimers()
     resetHandlers()
     autoUpdaterMock.checkForUpdates.mockReset().mockResolvedValue(null)
-    autoUpdaterMock.downloadUpdate.mockReset()
+    autoUpdaterMock.downloadUpdate.mockReset().mockResolvedValue([])
     autoUpdaterMock.quitAndInstall.mockReset()
     autoUpdaterMock.setFeedURL.mockReset()
     autoUpdaterMock.on.mockClear()
@@ -139,7 +139,18 @@ describe('linux package recovery actions', () => {
     return { send, updater }
   }
 
-  const activateRecovery = (version = '1.0.61'): void => {
+  const activateRecovery = async (
+    updater: typeof UpdaterModule,
+    version = '1.0.61'
+  ): Promise<void> => {
+    autoUpdaterMock.checkForUpdates.mockImplementationOnce(() => {
+      autoUpdaterMock.emit('checking-for-update')
+      queueMicrotask(() => autoUpdaterMock.emit('update-available', { version }))
+      return Promise.resolve(null)
+    })
+    updater.checkForUpdatesFromMenu()
+    await vi.advanceTimersByTimeAsync(0)
+    updater.downloadUpdate()
     autoUpdaterMock.emit('update-downloaded', { version })
   }
 
@@ -166,7 +177,7 @@ describe('linux package recovery actions', () => {
 
   it('validates the retained package on every invocation', async () => {
     const { updater } = await startUpdater()
-    activateRecovery()
+    await activateRecovery(updater)
 
     await expect(updater.getLinuxPackageInstallInstructions()).resolves.toEqual({
       ok: true,
@@ -190,7 +201,7 @@ describe('linux package recovery actions', () => {
 
   it('replaces the structured status when revalidation fails so stale actions die', async () => {
     const { send, updater } = await startUpdater()
-    activateRecovery()
+    await activateRecovery(updater)
     resolveLinuxPackageInstallInstructionsMock.mockResolvedValue({
       ok: false,
       reason: 'hash-mismatch'
@@ -218,7 +229,7 @@ describe('linux package recovery actions', () => {
 
   it('clears recovery for both actions once the package is gone', async () => {
     const { updater } = await startUpdater()
-    activateRecovery()
+    await activateRecovery(updater)
     resolveLinuxPackageRevealTargetMock.mockResolvedValue({ ok: false, reason: 'missing' })
 
     await expect(updater.showLinuxPackage()).rejects.toThrow('no longer in the update cache')
@@ -232,7 +243,7 @@ describe('linux package recovery actions', () => {
     'resolves %s as a result and keeps the card usable instead of rejecting',
     async (reason) => {
       const { send, updater } = await startUpdater()
-      activateRecovery()
+      await activateRecovery(updater)
       resolveLinuxPackageInstallInstructionsMock.mockResolvedValue({ ok: false, reason })
       const statusesBefore = errorStatuses(send).length
 
@@ -257,7 +268,7 @@ describe('linux package recovery actions', () => {
 
   it('keeps recovery available after a transient read failure', async () => {
     const { send, updater } = await startUpdater()
-    activateRecovery()
+    await activateRecovery(updater)
     showItemInFolderMock.mockImplementationOnce(() => {
       throw new Error('no file manager available')
     })
@@ -275,7 +286,7 @@ describe('linux package recovery actions', () => {
 
   it('ignores a stale mismatch after the same package cycle is captured again', async () => {
     const { send, updater } = await startUpdater()
-    activateRecovery()
+    await activateRecovery(updater)
     let settleValidation!: (result: { ok: false; reason: 'hash-mismatch' }) => void
     resolveLinuxPackageInstallInstructionsMock.mockReturnValue(
       new Promise((resolve) => {
@@ -286,7 +297,7 @@ describe('linux package recovery actions', () => {
     const pending = updater.getLinuxPackageInstallInstructions()
     // A 160 MB hash outlives the cycle it started in; a newer download takes over meanwhile.
     getTrackedLinuxPackageArtifactMock.mockReturnValue({ ...ARTIFACT })
-    activateRecovery()
+    await activateRecovery(updater)
     settleValidation({ ok: false, reason: 'hash-mismatch' })
 
     await expect(pending).rejects.toThrow('Package install recovery is no longer current.')
@@ -296,7 +307,7 @@ describe('linux package recovery actions', () => {
 
   it('does not return stale instructions after a same-version recapture', async () => {
     const { send, updater } = await startUpdater()
-    activateRecovery()
+    await activateRecovery(updater)
     let settleValidation!: (result: { ok: true; command: string; packageFileName: string }) => void
     resolveLinuxPackageInstallInstructionsMock.mockReturnValue(
       new Promise((resolve) => {
@@ -306,7 +317,7 @@ describe('linux package recovery actions', () => {
 
     const pending = updater.getLinuxPackageInstallInstructions()
     getTrackedLinuxPackageArtifactMock.mockReturnValue({ ...ARTIFACT })
-    activateRecovery()
+    await activateRecovery(updater)
     settleValidation({ ok: true, command: 'stale command', packageFileName: 'stale.deb' })
 
     await expect(pending).rejects.toThrow('Package install recovery is no longer current.')
@@ -315,7 +326,7 @@ describe('linux package recovery actions', () => {
 
   it('does not reveal a stale path after a same-version recapture', async () => {
     const { updater } = await startUpdater()
-    activateRecovery()
+    await activateRecovery(updater)
     let settleValidation!: (result: { ok: true; path: string }) => void
     resolveLinuxPackageRevealTargetMock.mockReturnValue(
       new Promise((resolve) => {
@@ -325,7 +336,7 @@ describe('linux package recovery actions', () => {
 
     const pending = updater.showLinuxPackage()
     getTrackedLinuxPackageArtifactMock.mockReturnValue({ ...ARTIFACT })
-    activateRecovery()
+    await activateRecovery(updater)
     settleValidation({ ok: true, path: ARTIFACT.path })
 
     await expect(pending).rejects.toThrow('Package install recovery is no longer current.')
