@@ -1,4 +1,5 @@
 import { killWithDescendantSweep } from '../pty-descendant-termination'
+import { hasAgentTeardownEvidence } from './agent-teardown-evidence'
 import type { Session } from './session'
 
 type AgentTeardownOperation = {
@@ -34,7 +35,8 @@ export class TerminalSessionTeardown {
   }
 
   killSession(sessionId: string, session: Session, immediate: boolean): void | Promise<void> {
-    if (session.launchAgent) {
+    // A hand-typed agent has no launchAgent metadata but can still own detached descendants.
+    if (hasAgentTeardownEvidence(session.launchAgent, session)) {
       return this.killAgentSession(sessionId, session, immediate)
     }
     if (immediate) {
