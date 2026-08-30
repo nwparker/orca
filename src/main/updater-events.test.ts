@@ -1,15 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { registerAutoUpdaterHandlers } from './updater-events'
 
-const { appMock, nativeUpdaterMock, getLinuxRootPackageTypeMock } = vi.hoisted(() => ({
-  appMock: {
-    isPackaged: true,
-    getVersion: vi.fn(() => '1.0.51'),
-    on: vi.fn()
-  },
-  nativeUpdaterMock: { on: vi.fn() },
-  getLinuxRootPackageTypeMock: vi.fn<() => 'deb' | 'rpm' | null>(() => 'deb')
-}))
+const { appMock, nativeUpdaterMock, getLinuxPackageTypeMock, getLinuxRootPackageTypeMock } =
+  vi.hoisted(() => ({
+    appMock: {
+      isPackaged: true,
+      getVersion: vi.fn(() => '1.0.51'),
+      on: vi.fn()
+    },
+    nativeUpdaterMock: { on: vi.fn() },
+    getLinuxPackageTypeMock: vi.fn<() => 'deb' | 'rpm' | 'non-root' | 'unusable'>(() => 'deb'),
+    getLinuxRootPackageTypeMock: vi.fn<() => 'deb' | 'rpm' | null>(() => 'deb')
+  }))
 
 vi.mock('electron', () => ({
   app: appMock,
@@ -19,7 +21,10 @@ vi.mock('electron', () => ({
 
 // Why: only the packaged-marker resolver is faked so the real artifact tracking runs.
 vi.mock('./linux-update-package-type', () => ({
-  getLinuxRootPackageType: getLinuxRootPackageTypeMock
+  getLinuxPackageType: getLinuxPackageTypeMock,
+  getLinuxRootPackageType: getLinuxRootPackageTypeMock,
+  LINUX_PACKAGE_MARKER_UNUSABLE_MESSAGE:
+    'Orca could not verify the installed Linux package format, so it will not install this update automatically. Download the update from the official release page and install it manually.'
 }))
 
 vi.mock('./updater-changelog', () => ({ fetchChangelog: vi.fn().mockResolvedValue(null) }))
@@ -107,6 +112,7 @@ describe('registerAutoUpdaterHandlers linux package artifact tracking', () => {
     appMock.on.mockReset()
     nativeUpdaterMock.on.mockReset()
     appMock.getVersion.mockReset().mockReturnValue('1.0.51')
+    getLinuxPackageTypeMock.mockReset().mockReturnValue('deb')
     getLinuxRootPackageTypeMock.mockReset().mockReturnValue('deb')
   })
 
@@ -140,6 +146,94 @@ describe('registerAutoUpdaterHandlers linux package artifact tracking', () => {
       path: DEB_PATH,
       sha512: DEB_SHA512
     })
+  })
+
+  it.each(['deb', 'rpm'] as const)(
+    'publishes manual-install recovery after a %s download',
+    async (packageType) => {
+      getLinuxPackageTypeMock.mockReturnValue(packageType)
+      getLinuxRootPackageTypeMock.mockReturnValue(packageType)
+      const { emit, context } = await register()
+      const fileName = packageType === 'deb' ? 'orca.deb' : 'orca.rpm'
+
+      emit(
+        'update-downloaded',
+        downloadedEvent({
+          downloadedFile: `/home/tester/.cache/orca-updater/pending/${fileName}`,
+          files: [{ url: fileName, sha512: DEB_SHA512 }]
+        })
+      )
+
+      expect(context.sendStatus).toHaveBeenLastCalledWith({
+        state: 'error',
+        message: 'Quit Orca before running the system package install command.',
+        recovery: {
+          kind: 'linux-package-install',
+          packageType,
+          reason: 'manual-install-required',
+          version: '1.0.61'
+        }
+      })
+    }
+  )
+
+  it.each([
+    ['missing', [{ url: 'orca-ide_1.0.61_amd64.deb' }]],
+    ['malformed', [{ url: 'orca-ide_1.0.61_amd64.deb', sha512: 'not-a-digest' }]]
+  ])('does not offer recovery when the package digest is %s', async (_kind, files) => {
+    const { emit, context, getArtifact } = await register()
+
+    emit('update-downloaded', downloadedEvent({ files }))
+
+    const status = {
+      state: 'error',
+      message:
+        'The downloaded package metadata could not be verified. Quit Orca before downloading and installing the update from the official release page.',
+      version: '1.0.61',
+      retryable: false
+    }
+    expect(context.sendStatus).toHaveBeenLastCalledWith(status)
+    expect(context.sendStatus).not.toHaveBeenCalledWith(
+      expect.objectContaining({ recovery: expect.anything() })
+    )
+    expect(getArtifact()).toBeNull()
+  })
+
+  it('publishes the normal downloaded state for AppImage builds', async () => {
+    getLinuxPackageTypeMock.mockReturnValue('non-root')
+    getLinuxRootPackageTypeMock.mockReturnValue(null)
+    const { emit, context } = await register()
+
+    emit('update-downloaded', downloadedEvent())
+    if (process.platform === 'darwin') {
+      const handler = nativeUpdaterMock.on.mock.calls.find(
+        ([eventName]) => eventName === 'update-downloaded'
+      )?.[1] as (() => void) | undefined
+      handler?.()
+    }
+
+    expect(context.sendStatus).toHaveBeenLastCalledWith({
+      state: 'downloaded',
+      version: '1.0.61',
+      releaseUrl: undefined
+    })
+  })
+
+  it('blocks downloaded-state handling when the packaged marker is unusable', async () => {
+    getLinuxPackageTypeMock.mockReturnValue('unusable')
+    getLinuxRootPackageTypeMock.mockReturnValue(null)
+    const { emit, context, getArtifact } = await register()
+
+    emit('update-downloaded', downloadedEvent())
+
+    expect(context.sendStatus).toHaveBeenLastCalledWith({
+      state: 'error',
+      message:
+        'Orca could not verify the installed Linux package format, so it will not install this update automatically. Download the update from the official release page and install it manually.',
+      version: '1.0.61',
+      retryable: false
+    })
+    expect(getArtifact()).toBeNull()
   })
 
   it('passes the actual updater error into the install-failure handler', async () => {
