@@ -1,3 +1,4 @@
+/* oxlint-disable react-doctor/no-prop-callback-in-render -- Render-phase resets keep client-scoped state synchronized before commit; an effect would briefly expose the previous host's rows. */
 import type { ProjectRepositoryResolutionModel } from './use-mobile-tasks-project-repository-resolution'
 import {
   type GitHubProjectSettings,
