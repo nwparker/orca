@@ -8,6 +8,7 @@ import {
   useNativeChatComposerAttachments
 } from './use-native-chat-composer-attachments'
 import type { NativeChatResolvedTarget } from './native-chat-composer-target'
+import { NATIVE_FILE_DROP_MAX_PATHS } from '../../../../shared/native-file-drop'
 
 vi.mock('@/i18n/i18n', () => ({
   translate: (_key: string, fallback: string) => fallback
@@ -39,7 +40,7 @@ function Probe({
 }): React.JSX.Element {
   const [caret, setCaret] = useState(0)
   const [draftValue, setDraftValue] = useState('')
-  const [, setNotice] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const api = useNativeChatComposerAttachments({
     attachmentScopeKey: scopeKey,
@@ -57,7 +58,8 @@ function Probe({
   return (
     <div>
       <textarea ref={textareaRef} />
-      <output>{draftValue}</output>
+      <output data-draft>{draftValue}</output>
+      <output data-notice>{notice}</output>
     </div>
   )
 }
@@ -69,6 +71,7 @@ async function renderProbe(
 ): Promise<{
   draft: () => string
   latest: () => ProbeApi
+  notice: () => string
   rerender: (scopeKey: string, disabled?: boolean) => Promise<void>
   root: Root
   textarea: () => HTMLTextAreaElement
@@ -101,7 +104,7 @@ async function renderProbe(
     throw new Error('Probe did not render')
   }
   return {
-    draft: () => container.querySelector('output')?.textContent ?? '',
+    draft: () => container.querySelector('[data-draft]')?.textContent ?? '',
     root,
     latest: () => {
       if (!api) {
@@ -109,6 +112,7 @@ async function renderProbe(
       }
       return api
     },
+    notice: () => container.querySelector('[data-notice]')?.textContent ?? '',
     rerender: (nextScopeKey: string, disabled = options.disabled ?? false) =>
       render(nextScopeKey, disabled),
     textarea: () => {
@@ -218,6 +222,35 @@ describe('useNativeChatComposerAttachments', () => {
     act(() => probe.latest().flushPendingAttachments())
 
     expect(probe.draft()).toBe('')
+    act(() => probe.root.unmount())
+  })
+
+  it('caps paths queued during composition and keeps overflow visible after flush', async () => {
+    let composing = true
+    const probe = await renderProbe('pty-1', false, { isComposing: () => composing })
+    const acceptedPaths = Array.from(
+      { length: NATIVE_FILE_DROP_MAX_PATHS },
+      (_, index) => `/remote/accepted-${index}.txt`
+    )
+
+    act(() => {
+      probe.latest().attachResolvedPaths(acceptedPaths)
+      probe.latest().attachResolvedPaths(['/remote/rejected.txt'])
+    })
+
+    expect(probe.draft()).toBe('')
+    expect(probe.notice()).toBe(
+      'Too many attachments are waiting. Finish composing before attaching more.'
+    )
+
+    composing = false
+    act(() => probe.latest().flushPendingAttachments())
+
+    expect(probe.draft().match(/@\/remote\/accepted-/g)).toHaveLength(NATIVE_FILE_DROP_MAX_PATHS)
+    expect(probe.draft()).not.toContain('rejected.txt')
+    expect(probe.notice()).toBe(
+      'Too many attachments are waiting. Finish composing before attaching more.'
+    )
     act(() => probe.root.unmount())
   })
 })
