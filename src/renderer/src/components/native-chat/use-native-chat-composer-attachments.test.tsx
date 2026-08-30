@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { act, createElement, useRef, useState } from 'react'
+import { act, createElement, useEffect, useRef, useState } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import {
   clearNativeChatAttachmentCacheForTests,
@@ -54,7 +54,7 @@ function Probe({
     setDraft: (updater) => setDraftValue((previous) => updater(previous)),
     setNotice
   })
-  onReady({ ...api, adoptDraft: setDraftValue })
+  useEffect(() => {\n    onReady({ ...api, adoptDraft: setDraftValue })\n  }, [api, onReady])
   return (
     <div>
       <textarea ref={textareaRef} />
