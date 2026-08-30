@@ -19,7 +19,9 @@ const HOVER_REVEAL_FILES = [
   resolve(__dirname, 'github-project/ProjectRow.tsx'),
   resolve(__dirname, 'right-sidebar/AiVaultSessionRow.tsx'),
   resolve(__dirname, 'right-sidebar/ChecksPanel.tsx'),
-  resolve(__dirname, 'right-sidebar/PortsPanel.tsx'),
+  resolve(__dirname, 'right-sidebar/local-port-row.tsx'),
+  resolve(__dirname, 'right-sidebar/ssh-detected-port-row.tsx'),
+  resolve(__dirname, 'right-sidebar/ssh-forwarded-port-row.tsx'),
   resolve(__dirname, 'right-sidebar/SourceControl.tsx'),
   resolve(__dirname, 'right-sidebar/checks-panel/comment-row.tsx'),
   resolve(__dirname, 'settings/MobilePairingQrSection.tsx'),
@@ -34,7 +36,7 @@ const HOVER_REVEAL_FILES = [
   resolve(__dirname, 'sidebar/worktree-list/rows/HostSectionHeader.tsx'),
   resolve(__dirname, 'sidebar/worktree-list/rows/SectionHeader.tsx'),
   resolve(__dirname, 'sidebar/worktree-list/rows/item-row.tsx'),
-  resolve(__dirname, 'status-bar/ResourceUsageStatusSegment.tsx'),
+  resolve(__dirname, 'status-bar/resource-usage-session-rows.tsx'),
   resolve(__dirname, 'status-bar/ports-status-popover-rows.tsx'),
   resolve(__dirname, 'tab-bar/TabBarQuickCommandsMenu.tsx')
 ]
