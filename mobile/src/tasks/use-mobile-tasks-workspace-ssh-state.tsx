@@ -1,4 +1,3 @@
-/* oxlint-disable react-doctor/no-prop-callback-in-render -- Render-phase updates keep the visible agent selection synchronized before commit; an effect would briefly expose an unavailable override. */
 import type { WorkspaceSparseActionsModel } from './use-mobile-tasks-workspace-sparse-actions'
 import {
   type SshConnectionState,
