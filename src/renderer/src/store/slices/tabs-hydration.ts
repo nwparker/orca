@@ -4,6 +4,7 @@ import { isValidTerminalTabId } from '../../../../shared/terminal-tab-id'
 import { createBrowserUuid } from '@/lib/browser-uuid'
 import {
   adoptGrouplessTabs,
+  appendOwnedTabIdsToGroups,
   layoutSpanningGroups,
   resolveTabGroupOwners
 } from './tab-group-reference-repair'
@@ -156,26 +157,20 @@ function hydrateUnifiedFormat(
     }
 
     const hydratedTabsForWorktree = tabsByWorktree[worktreeId] ?? []
-    const validTabIds = new Set(hydratedTabsForWorktree.map((tab) => tab.id))
     const tabIdAliasesByGroup = tabIdAliasesByWorktree[worktreeId]
     const tabOwners = resolveTabGroupOwners(hydratedTabsForWorktree, groups, tabIdAliasesByGroup)
-
-    const validatedGroups = groups.map((g) => {
+    const validatedGroups = appendOwnedTabIdsToGroups(groups, tabOwners).map((g) => {
       const tabIdAliases = tabIdAliasesByGroup?.get(g.id)
       const canonicalTabId = (tabId: string): string => tabIdAliases?.get(tabId) ?? tabId
       // Why: persisted tabOrder can contain duplicates from older buggy
       // writes. Deduping during hydration restores the store invariant before
       // later group operations branch on tab counts or neighbors.
       const tabOrder = dedupeTabOrder(
-        g.tabOrder
-          .map(canonicalTabId)
-          .filter((tid) => validTabIds.has(tid) && tabOwners.get(tid) === g.id)
+        g.tabOrder.map(canonicalTabId).filter((tid) => tabOwners.get(tid) === g.id)
       )
       const canonicalActiveTabId = g.activeTabId ? canonicalTabId(g.activeTabId) : null
       const activeTabId =
-        canonicalActiveTabId &&
-        validTabIds.has(canonicalActiveTabId) &&
-        tabOwners.get(canonicalActiveTabId) === g.id
+        canonicalActiveTabId && tabOwners.get(canonicalActiveTabId) === g.id
           ? canonicalActiveTabId
           : null
       // Why: persisted MRU may reference tabs that no longer exist. Sanitize
