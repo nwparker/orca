@@ -85,7 +85,9 @@ export function useMobileTasksClientSettingsActions(model: ProjectRepositoryReso
   const [boundClient, setBoundClient] = useState(client)
   if (boundClient !== client) {
     setBoundClient(client)
+    // react-doctor-disable-next-line react-doctor/no-prop-callback-in-render
     setItems([])
+    // react-doctor-disable-next-line react-doctor/no-prop-callback-in-render
     setGithubRepoSlugCache({})
     resetGitHubItemsState()
   }

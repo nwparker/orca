@@ -24,7 +24,11 @@ function parseSource(relativePath: string): ts.SourceFile {
 }
 
 function normalized(node: ts.Node, sourceFile: ts.SourceFile): string {
-  return node.getText(sourceFile).replace(/\s+/g, ' ').trim()
+  return node
+    .getText(sourceFile)
+    .replace(/\/\/ react-doctor-disable-next-line [^\n]*\n/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
 }
 
 function functionBody(sourceFile: ts.SourceFile, functionName: string): ts.Block {

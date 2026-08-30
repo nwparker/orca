@@ -158,7 +158,9 @@ export function useMobileTasksWorkspaceSshState(model: WorkspaceSparseActionsMod
   ) {
     // Why: the drawer can open before SSH/local detection settles. Resolve the
     // visible agent before commit so users do not see an unavailable override.
+    // react-doctor-disable-next-line react-doctor/no-prop-callback-in-render
     setWorkspaceAgent(workspaceAgentSelection.agent)
+    // react-doctor-disable-next-line react-doctor/no-prop-callback-in-render
     setWorkspaceAgentOverridden(workspaceAgentSelection.overridden)
   }
 
