@@ -118,13 +118,17 @@ function getGitHubReleaseAssetReadiness(assetUrl: string): Promise<ReleaseReadin
       resolve(readiness)
     }
     const timeout = setTimeout(() => {
-      request.abort()
+      try {
+        request.abort()
+      } catch {
+        // The request may already have been cancelled by Electron.
+      }
       settle('unavailable')
     }, FETCH_TIMEOUT_MS)
 
     request.on('redirect', (statusCode) => {
       // Why: GitHub's 302 proves the asset exists without probing its signed storage URL.
-      settle(statusCode === 302 ? 'ready' : 'unavailable')
+      settle(statusCode >= 300 && statusCode < 400 ? 'ready' : 'unavailable')
     })
     request.on('response', (response) => {
       settle(

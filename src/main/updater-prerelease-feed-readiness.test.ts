@@ -110,6 +110,7 @@ describe('fetchNewerReleaseTagsWithReadiness', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals()
+    vi.useRealTimers()
     setPlatformForTest(ORIGINAL_PLATFORM)
   })
 
@@ -148,6 +149,113 @@ describe('fetchNewerReleaseTagsWithReadiness', () => {
       state: 'ready'
     })
     expect(assetRequestInits).toEqual([expect.objectContaining({ redirect: 'manual' })])
+  })
+
+  it.each([301, 307, 308])('accepts a GitHub %s asset redirect as ready', async (status) => {
+    setPlatformForTest('win32')
+    netFetchMock.mockImplementation(
+      (url: string, init?: { method?: string }) => {
+        if (url === 'https://github.com/stablyai/orca/releases.atom') {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            text: () => Promise.resolve(buildAtomFeed(['v1.4.190']))
+          })
+        }
+        if (isPlatformManifestRequest(url)) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            text: () => Promise.resolve(buildWindowsManifest('1.4.190'))
+          })
+        }
+        if (init?.method === 'HEAD') {
+          return Promise.resolve({ ok: false, status, text: () => Promise.resolve('') })
+        }
+        return Promise.resolve({ ok: false, status: 503, text: () => Promise.resolve('') })
+      }
+    )
+
+    const { fetchNewerReleaseTagsWithReadiness } = await import('./updater-prerelease-feed')
+
+    await expect(fetchNewerReleaseTagsWithReadiness('1.4.189', 1)).resolves.toEqual({
+      tags: ['v1.4.190'],
+      state: 'ready'
+    })
+  })
+
+  it('reports a GitHub asset request error as unavailable', async () => {
+    setPlatformForTest('win32')
+    netFetchMock.mockImplementation((url: string, init?: { method?: string }) => {
+      if (url === 'https://github.com/stablyai/orca/releases.atom') {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          text: () => Promise.resolve(buildAtomFeed(['v1.4.190']))
+        })
+      }
+      if (isPlatformManifestRequest(url)) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          text: () => Promise.resolve(buildWindowsManifest('1.4.190'))
+        })
+      }
+      if (init?.method === 'HEAD') {
+        return Promise.reject(new Error('network down'))
+      }
+      return Promise.resolve({ ok: false, status: 503, text: () => Promise.resolve('') })
+    })
+
+    const { fetchNewerReleaseTagsWithReadiness } = await import('./updater-prerelease-feed')
+
+    await expect(fetchNewerReleaseTagsWithReadiness('1.4.189', 1)).resolves.toEqual({
+      tags: [],
+      state: 'unavailable',
+      unavailableReason: 'manifest'
+    })
+  })
+
+  it('aborts a GitHub asset request that exceeds the timeout', async () => {
+    vi.useFakeTimers()
+    setPlatformForTest('win32')
+    let resolveAsset: (() => void) | undefined
+    const pendingAsset = new Promise<{ ok: boolean; status: number }>((resolve) => {
+      resolveAsset = () => resolve({ ok: false, status: 503 })
+    })
+    netFetchMock.mockImplementation((url: string, init?: { method?: string }) => {
+      if (url === 'https://github.com/stablyai/orca/releases.atom') {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          text: () => Promise.resolve(buildAtomFeed(['v1.4.190']))
+        })
+      }
+      if (isPlatformManifestRequest(url)) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          text: () => Promise.resolve(buildWindowsManifest('1.4.190'))
+        })
+      }
+      if (init?.method === 'HEAD') {
+        return pendingAsset
+      }
+      return Promise.resolve({ ok: false, status: 503, text: () => Promise.resolve('') })
+    })
+
+    const { fetchNewerReleaseTagsWithReadiness } = await import('./updater-prerelease-feed')
+    const readiness = fetchNewerReleaseTagsWithReadiness('1.4.189', 1)
+    await vi.advanceTimersByTimeAsync(5000)
+
+    await expect(readiness).resolves.toEqual({
+      tags: [],
+      state: 'unavailable',
+      unavailableReason: 'manifest'
+    })
+    const request = netRequestMock.mock.results[0]?.value as { abort: ReturnType<typeof vi.fn> }
+    expect(request.abort).toHaveBeenCalledOnce()
+    resolveAsset?.()
   })
 
   it('reports not-ready with a verified last-good tag when the newest assets are unavailable', async () => {
