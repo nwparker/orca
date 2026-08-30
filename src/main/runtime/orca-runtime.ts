@@ -26542,14 +26542,17 @@ export class OrcaRuntimeService {
     }
 
     const repo = await this.resolveRepoSelector(args.repoSelector)
+    const store = this.requireStore()
+    const gitOptions = getLocalProjectWorktreeGitOptions(store, repo)
     const baseBranch = await prefetchWorktreeCreateBase({
       repo,
       baseBranch: args.baseBranch,
-      runtime: this
+      runtime: this,
+      gitOptions
     })
     if (baseBranch) {
       try {
-        await prepareWorktreeCreateForRepo(this.requireStore(), repo, baseBranch)
+        await prepareWorktreeCreateForRepo(store, repo, baseBranch)
       } catch {
         // Why: speculative preparation is an optimistic warm-up; the real create path reports failures.
       }
