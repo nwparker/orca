@@ -20,6 +20,15 @@ export function parseWorkspaceKey(value: string): WorkspaceScope | null {
   return null
 }
 
+/** Resolve a persisted workspace key to the raw id used by worktree metadata. */
+export function getRawWorktreeIdFromWorkspaceSessionKey(value: string): string | null {
+  const scope = parseWorkspaceKey(value)
+  if (scope?.type === 'folder') {
+    return null
+  }
+  return scope?.type === 'worktree' ? scope.worktreeId : value
+}
+
 export function isWorkspaceKey(value: string): value is WorkspaceKey {
   return parseWorkspaceKey(value) !== null
 }

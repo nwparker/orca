@@ -15,6 +15,7 @@ import { buildPersistedClosedTerminalTabTombstones } from './workspace-session-c
 import { buildActiveConnectionIdsAtShutdown } from './workspace-session-reconnect-targets'
 import { withoutStagedBrowserTabs } from './workspace-session-staged-browser-tabs'
 import { buildBrowserSessionData } from './workspace-session-browser-tabs'
+import { getRawWorktreeIdFromWorkspaceSessionKey } from '../../../shared/workspace-scope'
 
 export { buildActiveConnectionIdsAtShutdown }
 
@@ -239,8 +240,9 @@ export function buildTerminalSessionData(
   // Why: derive here to avoid a fragile sync IPC round-trip during beforeunload (Chromium can drop it under shutdown pressure).
   // Why: pre-indexed above so large workspaces don't rescan every repo/worktree per terminal tab while the renderer is quitting.
   const remoteSessionIdsByTabId: Record<string, string> = {}
-  for (const [worktreeId, tabs] of Object.entries(tabsByWorktree)) {
-    const worktree = worktreeById.get(worktreeId)
+  for (const [workspaceSessionKey, tabs] of Object.entries(tabsByWorktree)) {
+    const rawWorktreeId = getRawWorktreeIdFromWorkspaceSessionKey(workspaceSessionKey)
+    const worktree = rawWorktreeId ? worktreeById.get(rawWorktreeId) : undefined
     const repo = worktree ? repoById.get(worktree.repoId) : null
     if (!repo?.connectionId) {
       continue

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { buildWorkspaceSessionPayload, type WorkspaceSessionSnapshot } from './workspace-session'
+import { worktreeWorkspaceKey } from '../../../shared/workspace-scope'
 
 function createSnapshot(
   overrides: Partial<WorkspaceSessionSnapshot> = {}
@@ -132,6 +133,47 @@ describe('workspace session live PTY persistence', () => {
 
     expect(payload.remoteSessionIdsByTabId).toEqual({
       'tab-ssh': 'ssh:conn-1@@pty-42'
+    })
+    expect(payload.activeConnectionIdsAtShutdown).toEqual(['conn-1'])
+  })
+
+  it('resolves canonical worktree session keys when persisting SSH PTYs', () => {
+    const rawWorktreeId = 'repo-ssh::/remote/canonical-worktree'
+    const payload = buildWorkspaceSessionPayload(
+      createSnapshot({
+        tabsByWorktree: {
+          [worktreeWorkspaceKey(rawWorktreeId)]: [
+            {
+              id: 'tab-ssh-canonical',
+              title: 'remote',
+              ptyId: null,
+              worktreeId: rawWorktreeId
+            } as never
+          ]
+        },
+        ptyIdsByTabId: { 'tab-ssh-canonical': [] },
+        lastKnownRelayPtyIdByTabId: {
+          'tab-ssh-canonical': 'ssh:conn-1@@pty-canonical'
+        },
+        sshConnectionStates: new Map([['conn-1', { status: 'reconnecting' } as never]]),
+        repos: [
+          {
+            id: 'repo-ssh',
+            path: '/repo-ssh',
+            displayName: 'SSH',
+            badgeColor: '#fff',
+            addedAt: 1,
+            connectionId: 'conn-1'
+          }
+        ],
+        worktreesByRepo: {
+          'repo-ssh': [{ id: rawWorktreeId, repoId: 'repo-ssh' } as never]
+        }
+      })
+    )
+
+    expect(payload.remoteSessionIdsByTabId).toEqual({
+      'tab-ssh-canonical': 'ssh:conn-1@@pty-canonical'
     })
     expect(payload.activeConnectionIdsAtShutdown).toEqual(['conn-1'])
   })
