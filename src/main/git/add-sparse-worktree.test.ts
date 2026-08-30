@@ -97,8 +97,8 @@ describe('addSparseWorktree', () => {
     const calls = getGitCalls()
     expect(calls).toEqual(
       expect.arrayContaining([
-        'git -c core.longpaths=true sparse-checkout set -- packages/web',
-        'git -c core.longpaths=true checkout feature/test'
+        'git -c core.longpaths=true -c checkout.workers=-1 sparse-checkout set -- packages/web',
+        'git -c core.longpaths=true -c checkout.workers=-1 checkout feature/test'
       ])
     )
   })

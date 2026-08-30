@@ -181,6 +181,12 @@ describeBinaryCompatibility('real Git binary compatibility', () => {
     await runGit(['branch', '-D', 'compat-prepared-final'])
   })
 
+  it('accepts the optional parallel-checkout config across Git versions', async () => {
+    // Git before 2.32 does not implement the key; command-line config still
+    // accepts unknown keys, so the baseline remains sequential without a retry.
+    await expect(runGit(['-c', 'checkout.workers=-1', 'status', '--short'])).resolves.toBeDefined()
+  })
+
   it('recognizes ref and merge-tree compatibility boundaries', async () => {
     const fetchHeadPath = join(repoPath, '.git', 'FETCH_HEAD')
     await writeFile(fetchHeadPath, 'sentinel\n')

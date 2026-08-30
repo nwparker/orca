@@ -132,7 +132,16 @@ describe('addWorktreeOp', () => {
     )
 
     expect(git.mock.calls.map((call) => call[0])).toEqual([
-      ['-c', 'core.longpaths=true', 'worktree', 'add', 'C:\\repo-feature', 'feature/test']
+      [
+        '-c',
+        'core.longpaths=true',
+        '-c',
+        'checkout.workers=-1',
+        'worktree',
+        'add',
+        'C:\\repo-feature',
+        'feature/test'
+      ]
     ])
   })
 

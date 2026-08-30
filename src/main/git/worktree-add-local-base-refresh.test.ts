@@ -26,6 +26,7 @@ vi.mock('../worktree-trash', () => ({
   scheduleWorktreeTrashDeletion: vi.fn()
 }))
 
+import { refreshLocalBaseRefForWorktreeCreate } from './worktree-base-refresh'
 import { addWorktree, WORKTREE_ADD_TIMEOUT_MS } from './worktree'
 import { registerWorktreeSuiteHooks } from './worktree-test-harness'
 
@@ -40,6 +41,36 @@ describe('addWorktree', () => {
     gitExecFileAsyncMock.mockReset()
     gitExecFileSyncMock.mockReset()
     translateWslOutputPathsMock.mockClear()
+  })
+
+  it('uses parallel checkout workers when refreshing a native Windows owner worktree', async () => {
+    const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
+    const worktreeListOutput = 'worktree C:\\repo\nHEAD abc123\nbranch refs/heads/main\n'
+    gitExecFileAsyncMock
+      .mockResolvedValueOnce({ stdout: '0\t1\n' }) // rev-list drift
+      .mockResolvedValueOnce({ stdout: 'old-main\n' }) // local OID
+      .mockResolvedValueOnce({ stdout: 'remote-main\n' }) // remote OID
+      .mockResolvedValueOnce({ stdout: '' }) // merge-base captured OIDs
+      .mockResolvedValueOnce({ stdout: worktreeListOutput }) // worktree list during evaluation
+      .mockResolvedValueOnce({ stdout: '' }) // status during evaluation
+      .mockResolvedValueOnce({ stdout: worktreeListOutput }) // worktree list before mutation
+      .mockResolvedValueOnce({ stdout: '' }) // status before mutation
+      .mockResolvedValueOnce({ stdout: '' }) // reset --hard
+
+    try {
+      await expect(
+        refreshLocalBaseRefForWorktreeCreate('C:\\repo', 'main', 'refs/remotes/origin/main')
+      ).resolves.toMatchObject({ status: 'updated' })
+      expect(gitExecFileAsyncMock.mock.calls[8]?.[0]).toEqual([
+        '-c',
+        'checkout.workers=-1',
+        'reset',
+        '--hard',
+        'remote-main'
+      ])
+    } finally {
+      platformSpy.mockRestore()
+    }
   })
 
   it('fast-forwards with reset --hard when localBranch is checked out in primary worktree', async () => {

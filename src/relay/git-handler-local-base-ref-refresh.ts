@@ -1,11 +1,13 @@
 import type { GitExec } from './git-handler-ops'
 import { areRelayWorktreePathsEqual, readRelayWorktreeList } from './git-handler-worktree-ops'
 import type { GitCapabilityCache } from '../shared/git-capability-cache'
+import { windowsParallelCheckoutGitArgs } from '../shared/windows-parallel-checkout-git-args'
 
 export async function refreshLocalBaseRefForWorktreeCreateOp(
   git: GitExec,
   params: Record<string, unknown>,
-  capabilities: GitCapabilityCache
+  capabilities: GitCapabilityCache,
+  platform: NodeJS.Platform = process.platform
 ): Promise<void> {
   const repoPath = params.repoPath as string
   const fullRef = params.fullRef as string
@@ -60,7 +62,15 @@ export async function refreshLocalBaseRefForWorktreeCreateOp(
     if (checkOnly) {
       return
     }
-    await git(['reset', '--hard', remoteOid], ownerWorktree.path)
+    await git(
+      [
+        ...windowsParallelCheckoutGitArgs(ownerWorktree.path, platform),
+        'reset',
+        '--hard',
+        remoteOid
+      ],
+      ownerWorktree.path
+    )
     return
   }
 

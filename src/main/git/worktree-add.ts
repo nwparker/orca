@@ -4,6 +4,7 @@ import type {
   LocalBaseRefUpdateSuggestion
 } from '../../shared/worktree/base-ref-drift-types'
 import { windowsLongPathGitArgs } from '../../shared/windows-long-path-git-args'
+import { windowsParallelCheckoutGitArgs } from '../../shared/windows-parallel-checkout-git-args'
 import { gitExecFileAsync } from './runner'
 import { runWithGitReadCacheInvalidation } from './status'
 import {
@@ -175,8 +176,15 @@ async function performAddWorktree(
 ): Promise<AddWorktreeResult> {
   let localBaseRefRefresh: LocalBaseRefRefreshResult | undefined
   let localBaseRefUpdateSuggestion: LocalBaseRefUpdateSuggestion | undefined
-  // Why: enable long paths for this Windows checkout without changing user Git config.
-  const args = [...windowsLongPathGitArgs(repoPath), 'worktree', 'add']
+  // Why: enable per-invocation Windows checkout tuning without changing user Git config.
+  const args = [
+    ...windowsLongPathGitArgs(repoPath),
+    ...(noCheckout
+      ? []
+      : windowsParallelCheckoutGitArgs(repoPath, process.platform, options.wslDistro)),
+    'worktree',
+    'add'
+  ]
   let effectiveBase: string | undefined
   if (noCheckout) {
     args.push('--no-checkout')

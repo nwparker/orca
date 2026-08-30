@@ -1,4 +1,5 @@
 import { windowsLongPathGitArgs } from '../../shared/windows-long-path-git-args'
+import { windowsParallelCheckoutGitArgs } from '../../shared/windows-parallel-checkout-git-args'
 import { resolveWorktreeAddBaseRef } from '../../shared/worktree/base-ref'
 import type { AddWorktreeOptions, AddWorktreeResult, GitWorktreeExecOptions } from './worktree'
 import {
@@ -83,7 +84,13 @@ export async function prepareWorktreeCreateCheckout(
         )
         // Why: reset materializes files without running user post-checkout hooks before submit.
         await gitExecFileAsync(
-          [...windowsLongPathGitArgs(worktreePath), 'reset', '--hard', effectiveBase],
+          [
+            ...windowsLongPathGitArgs(worktreePath),
+            ...windowsParallelCheckoutGitArgs(worktreePath, process.platform, options.wslDistro),
+            'reset',
+            '--hard',
+            effectiveBase
+          ],
           { ...gitExecOptions(worktreePath, options), timeout: resolveWorktreeAddTimeoutMs() }
         )
         await gitExecFileAsync(
@@ -206,7 +213,17 @@ export async function finalizePreparedWorktree(
       const { stdout: preparedHeadOutput } = preparedHeadResult
       if (preparedHeadOutput.trim() !== targetHead) {
         await gitExecFileAsync(
-          [...windowsLongPathGitArgs(preparedPath), 'reset', '--hard', targetHead],
+          [
+            ...windowsLongPathGitArgs(preparedPath),
+            ...windowsParallelCheckoutGitArgs(
+              preparedPath,
+              process.platform,
+              finalizeGitOptions.wslDistro
+            ),
+            'reset',
+            '--hard',
+            targetHead
+          ],
           gitExecOptions(preparedPath, finalizeGitOptions)
         )
       }
@@ -230,6 +247,11 @@ export async function finalizePreparedWorktree(
         await gitExecFileAsync(
           [
             ...windowsLongPathGitArgs(worktreePath),
+            ...windowsParallelCheckoutGitArgs(
+              worktreePath,
+              process.platform,
+              finalizeGitOptions.wslDistro
+            ),
             'checkout',
             '--no-track',
             '-b',

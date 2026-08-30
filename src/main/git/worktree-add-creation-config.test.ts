@@ -123,7 +123,16 @@ describe('addWorktree', () => {
     )
 
     expect(gitExecFileAsyncMock).toHaveBeenCalledWith(
-      ['-c', 'core.longpaths=true', 'worktree', 'add', 'C:\\repo-feature', 'feature/test'],
+      [
+        '-c',
+        'core.longpaths=true',
+        '-c',
+        'checkout.workers=-1',
+        'worktree',
+        'add',
+        'C:\\repo-feature',
+        'feature/test'
+      ],
       { cwd: 'C:\\repo', timeout: WORKTREE_ADD_TIMEOUT_MS }
     )
   })
@@ -148,6 +157,33 @@ describe('addWorktree', () => {
       ['-c', 'core.longpaths=true', 'worktree', 'add', 'C:\\repo-feature', 'feature/test'],
       { cwd: 'C:\\repo', wslDistro: 'Ubuntu', timeout: WORKTREE_ADD_TIMEOUT_MS }
     )
+  })
+
+  it('does not enable checkout workers for a native Windows no-checkout add', async () => {
+    platformSpy.mockReturnValue('win32')
+    gitExecFileAsyncMock
+      .mockResolvedValueOnce({ stdout: '' }) // worktree add --no-checkout
+      .mockResolvedValueOnce({ stdout: 'true\n' }) // push.autoSetupRemote already set
+
+    await addWorktree('C:\\repo', 'C:\\repo-feature', 'feature/test', undefined, false, true)
+
+    expect(gitExecFileAsyncMock.mock.calls).toEqual([
+      [
+        [
+          '-c',
+          'core.longpaths=true',
+          'worktree',
+          'add',
+          '--no-checkout',
+          '--no-track',
+          '-b',
+          'feature/test',
+          'C:\\repo-feature'
+        ],
+        { cwd: 'C:\\repo', timeout: WORKTREE_ADD_TIMEOUT_MS }
+      ],
+      [['config', '--get', 'push.autoSetupRemote'], { cwd: 'C:\\repo-feature' }]
+    ])
   })
 
   it('does not pass the Windows-only long-path option for a WSL UNC repo path', async () => {

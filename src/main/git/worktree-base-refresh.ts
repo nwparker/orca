@@ -1,4 +1,5 @@
 import type { LocalBaseRefRefreshResult } from '../../shared/worktree/base-ref-drift-types'
+import { windowsParallelCheckoutGitArgs } from '../../shared/windows-parallel-checkout-git-args'
 import { gitExecFileAsync, translateWslOutputPaths } from './runner'
 import {
   evaluateLocalBaseRefRefreshability,
@@ -57,7 +58,12 @@ export async function refreshLocalBaseRefForWorktreeCreate(
         }
       }
       await gitExecFileAsync(
-        ['reset', '--hard', evaluation.remoteOid],
+        [
+          ...windowsParallelCheckoutGitArgs(currentOwner.path, process.platform, options.wslDistro),
+          'reset',
+          '--hard',
+          evaluation.remoteOid
+        ],
         gitExecOptions(currentOwner.path, options)
       )
       return { ...resultBase, status: 'updated', ownerWorktreePath: currentOwner.path }

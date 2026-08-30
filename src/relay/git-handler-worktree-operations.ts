@@ -171,7 +171,12 @@ export class GitHandlerWorktreeOperations extends GitHandlerOperationContext {
 
   async refreshLocalBaseRefForWorktreeCreate(params: Record<string, unknown>) {
     return this.runWithGitReadCacheClear(() =>
-      refreshLocalBaseRefForWorktreeCreateOp(this.git.bind(this), params, this.gitCapabilities)
+      refreshLocalBaseRefForWorktreeCreateOp(
+        this.git.bind(this),
+        params,
+        this.gitCapabilities,
+        process.platform
+      )
     )
   }
 }
