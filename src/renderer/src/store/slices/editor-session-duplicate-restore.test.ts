@@ -247,4 +247,56 @@ describe('corrupt editor session restore', () => {
       'editor-right'
     ])
   })
+
+  it('does not let a globally duplicated id hydrate into another group', () => {
+    const store = prepareStore()
+    const session = corruptSession()
+    session.unifiedTabs![WORKTREE_ID] = [
+      {
+        ...session.unifiedTabs![WORKTREE_ID]![0],
+        id: 'shared-id',
+        entityId: '/workspace/.scratch/group-a.png',
+        groupId: 'group-a',
+        label: 'group-a.png',
+        sortOrder: 0
+      },
+      {
+        ...session.unifiedTabs![WORKTREE_ID]![1],
+        id: 'shared-id',
+        entityId: '/workspace/.scratch/group-b.png',
+        groupId: 'group-b',
+        label: 'group-b.png',
+        sortOrder: 1
+      },
+      {
+        ...session.unifiedTabs![WORKTREE_ID]![1],
+        id: 'group-b-only',
+        entityId: '/workspace/.scratch/group-b-only.png',
+        groupId: 'group-b',
+        label: 'group-b-only.png',
+        sortOrder: 2
+      }
+    ]
+    session.tabGroups![WORKTREE_ID] = [
+      {
+        id: 'group-a',
+        worktreeId: WORKTREE_ID,
+        activeTabId: 'shared-id',
+        tabOrder: ['shared-id']
+      },
+      {
+        id: 'group-b',
+        worktreeId: WORKTREE_ID,
+        activeTabId: 'shared-id',
+        tabOrder: ['shared-id', 'group-b-only']
+      }
+    ]
+
+    store.getState().hydrateTabsSession(session)
+
+    expect(store.getState().groupsByWorktree[WORKTREE_ID]).toEqual([
+      expect.objectContaining({ id: 'group-a', tabOrder: ['shared-id'] }),
+      expect.objectContaining({ id: 'group-b', tabOrder: ['group-b-only'], activeTabId: null })
+    ])
+  })
 })

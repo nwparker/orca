@@ -2,7 +2,11 @@ import type { Tab, TabGroup, TabGroupLayoutNode } from '../../../../shared/tab-t
 import type { WorkspaceSessionState } from '../../../../shared/workspace-session-state-types'
 import { isValidTerminalTabId } from '../../../../shared/terminal-tab-id'
 import { createBrowserUuid } from '@/lib/browser-uuid'
-import { adoptGrouplessTabs, layoutSpanningGroups } from './tab-group-reference-repair'
+import {
+  adoptGrouplessTabs,
+  layoutSpanningGroups,
+  resolveTabGroupOwners
+} from './tab-group-reference-repair'
 import {
   dedupeEditorTabsWithinGroups,
   dedupeTabOrder,
@@ -151,8 +155,11 @@ function hydrateUnifiedFormat(
       continue
     }
 
-    const validTabIds = new Set((tabsByWorktree[worktreeId] ?? []).map((t) => t.id))
+    const hydratedTabsForWorktree = tabsByWorktree[worktreeId] ?? []
+    const validTabIds = new Set(hydratedTabsForWorktree.map((tab) => tab.id))
     const tabIdAliasesByGroup = tabIdAliasesByWorktree[worktreeId]
+    const tabOwners = resolveTabGroupOwners(hydratedTabsForWorktree, groups, tabIdAliasesByGroup)
+
     const validatedGroups = groups.map((g) => {
       const tabIdAliases = tabIdAliasesByGroup?.get(g.id)
       const canonicalTabId = (tabId: string): string => tabIdAliases?.get(tabId) ?? tabId
@@ -160,11 +167,17 @@ function hydrateUnifiedFormat(
       // writes. Deduping during hydration restores the store invariant before
       // later group operations branch on tab counts or neighbors.
       const tabOrder = dedupeTabOrder(
-        g.tabOrder.map(canonicalTabId).filter((tid) => validTabIds.has(tid))
+        g.tabOrder
+          .map(canonicalTabId)
+          .filter((tid) => validTabIds.has(tid) && tabOwners.get(tid) === g.id)
       )
       const canonicalActiveTabId = g.activeTabId ? canonicalTabId(g.activeTabId) : null
       const activeTabId =
-        canonicalActiveTabId && validTabIds.has(canonicalActiveTabId) ? canonicalActiveTabId : null
+        canonicalActiveTabId &&
+        validTabIds.has(canonicalActiveTabId) &&
+        tabOwners.get(canonicalActiveTabId) === g.id
+          ? canonicalActiveTabId
+          : null
       // Why: persisted MRU may reference tabs that no longer exist. Sanitize
       // against the live tabOrder, then ensure the current active tab sits at
       // the tail so the first close after restore jumps back to the previous

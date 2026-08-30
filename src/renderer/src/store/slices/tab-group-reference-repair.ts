@@ -30,6 +30,30 @@ export function layoutSpanningGroups(
     )
 }
 
+/** Prevent one retained tab row from hydrating into multiple groups. */
+export function resolveTabGroupOwners(
+  tabs: readonly Tab[],
+  groups: readonly TabGroup[],
+  tabIdAliasesByGroup?: Map<string, Map<string, string>>
+): Map<string, string> {
+  const tabGroupIdById = new Map(tabs.map((tab) => [tab.id, tab.groupId]))
+  const tabOwners = new Map<string, string>()
+  for (const group of groups) {
+    const tabIdAliases = tabIdAliasesByGroup?.get(group.id)
+    for (const persistedTabId of group.tabOrder) {
+      const tabId = tabIdAliases?.get(persistedTabId) ?? persistedTabId
+      const persistedOwner = tabGroupIdById.get(tabId)
+      if (persistedOwner === undefined) {
+        continue
+      }
+      if (!tabOwners.has(tabId) || group.id === persistedOwner) {
+        tabOwners.set(tabId, group.id)
+      }
+    }
+  }
+  return tabOwners
+}
+
 /** Re-home tabs stranded by a dropped group so hydration cannot render a blank workspace. */
 export function adoptGrouplessTabs(
   tabsByWorktree: Record<string, Tab[]>,
