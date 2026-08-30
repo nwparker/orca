@@ -162,6 +162,7 @@ describe('fetchNewerReleaseTag', () => {
       expect(assetUrls).toEqual([
         'https://github.com/stablyai/orca/releases/download/v1.4.1/Orca-1.4.1-arm64-mac.zip'
       ])
+      expect(netRequestMock).toHaveBeenCalledTimes(platform === 'win32' ? 1 : 0)
     }
   )
 

@@ -149,8 +149,11 @@ function getGitHubReleaseAssetReadiness(assetUrl: string): Promise<ReleaseReadin
 }
 
 async function getReleaseAssetReadiness(tag: string, assetName: string): Promise<ReleaseReadiness> {
-  const isGitHubReleaseAsset = !/^https?:\/\//i.test(assetName)
-  const assetUrl = isGitHubReleaseAsset
+  const isRelativeAsset = !/^https?:\/\//i.test(assetName)
+  const isGitHubReleaseAsset =
+    process.platform === 'win32' &&
+    (isRelativeAsset || /^https:\/\/github\.com\/stablyai\/orca\/releases\/download\//i.test(assetName))
+  const assetUrl = isRelativeAsset
     ? getReleaseAssetUrl(tag, assetName.split('/').findLast(Boolean) ?? assetName)
     : assetName
   if (isGitHubReleaseAsset) {
