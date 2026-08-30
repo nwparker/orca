@@ -33,12 +33,16 @@ describe('windowsParallelCheckoutGitArgs', () => {
   it('enables all logical checkout workers for a native Windows drive path', () => {
     expect(windowsParallelCheckoutGitArgs('C:\\Users\\dev\\repo', 'win32')).toEqual([
       '-c',
+      'core.fscache=false',
+      '-c',
       'checkout.workers=-1'
     ])
   })
 
   it('enables workers for a native Windows UNC share', () => {
     expect(windowsParallelCheckoutGitArgs('\\\\server\\share\\repo', 'win32')).toEqual([
+      '-c',
+      'core.fscache=false',
       '-c',
       'checkout.workers=-1'
     ])
@@ -70,6 +74,8 @@ describe('windowsParallelCheckoutGitArgs', () => {
     const first = windowsParallelCheckoutGitArgs('C:\\repo', 'win32')
     first.push('--bogus')
     expect(windowsParallelCheckoutGitArgs('C:\\repo', 'win32')).toEqual([
+      '-c',
+      'core.fscache=false',
       '-c',
       'checkout.workers=-1'
     ])

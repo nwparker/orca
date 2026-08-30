@@ -127,6 +127,8 @@ describe('addWorktree', () => {
         '-c',
         'core.longpaths=true',
         '-c',
+        'core.fscache=false',
+        '-c',
         'checkout.workers=-1',
         'worktree',
         'add',

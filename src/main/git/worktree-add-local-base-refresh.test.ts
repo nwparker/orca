@@ -63,6 +63,8 @@ describe('addWorktree', () => {
       ).resolves.toMatchObject({ status: 'updated' })
       expect(gitExecFileAsyncMock.mock.calls[8]?.[0]).toEqual([
         '-c',
+        'core.fscache=false',
+        '-c',
         'checkout.workers=-1',
         'reset',
         '--hard',
