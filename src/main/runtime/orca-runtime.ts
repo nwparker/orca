@@ -26543,12 +26543,11 @@ export class OrcaRuntimeService {
 
     const repo = await this.resolveRepoSelector(args.repoSelector)
     const store = this.requireStore()
-    const gitOptions = getLocalProjectWorktreeGitOptions(store, repo)
     const baseBranch = await prefetchWorktreeCreateBase({
       repo,
       baseBranch: args.baseBranch,
       runtime: this,
-      gitOptions
+      gitOptions: isFolderRepo(repo) ? undefined : getLocalProjectWorktreeGitOptions(store, repo)
     })
     if (baseBranch) {
       try {

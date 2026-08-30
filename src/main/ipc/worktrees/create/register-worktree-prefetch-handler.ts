@@ -1,4 +1,5 @@
 import { ipcMain } from 'electron'
+import { isFolderRepo } from '../../../../shared/repo-kind'
 import { prefetchWorktreeCreateBase } from '../../../worktree-create-base-prefetch'
 import { prepareWorktreeCreateForRepo } from '../../../worktree-create-preparation'
 import { getLocalProjectWorktreeGitOptions } from '../../../project-runtime-git-options'
@@ -15,12 +16,13 @@ export function registerWorktreePrefetchHandler(context: WorktreeIpcContext): vo
         return
       }
       try {
-        const gitOptions = getLocalProjectWorktreeGitOptions(store, repo)
         const baseBranch = await prefetchWorktreeCreateBase({
           repo,
           baseBranch: args.baseBranch,
           runtime,
-          gitOptions
+          gitOptions: isFolderRepo(repo)
+            ? undefined
+            : getLocalProjectWorktreeGitOptions(store, repo)
         })
         if (baseBranch) {
           await prepareWorktreeCreateForRepo(store, repo, baseBranch)

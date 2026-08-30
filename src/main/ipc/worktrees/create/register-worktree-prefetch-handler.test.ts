@@ -59,4 +59,26 @@ describe('registerWorktreePrefetchHandler', () => {
     })
     expect(mocks.prepareWorktreeCreateForRepo).toHaveBeenCalledWith(store, repo, 'origin/main')
   })
+
+  it('does not resolve Git runtime options for folder repos', async () => {
+    let handler: PrefetchHandler | undefined
+    mocks.handle.mockImplementation((_channel: unknown, callback: unknown) => {
+      handler = callback as PrefetchHandler
+    })
+    const repo = { id: 'folder-1', path: String.raw`C:\folder`, kind: 'folder' }
+    const store = { getRepo: vi.fn().mockReturnValue(repo) }
+    const runtime = {}
+
+    registerWorktreePrefetchHandler({ store, runtime } as never)
+    await handler?.(null, { repoId: 'folder-1' })
+
+    expect(mocks.getLocalProjectWorktreeGitOptions).not.toHaveBeenCalled()
+    expect(mocks.prefetchWorktreeCreateBase).toHaveBeenCalledWith({
+      repo,
+      baseBranch: undefined,
+      runtime,
+      gitOptions: undefined
+    })
+    expect(mocks.prepareWorktreeCreateForRepo).not.toHaveBeenCalled()
+  })
 })
