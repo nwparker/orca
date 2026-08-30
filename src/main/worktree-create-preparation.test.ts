@@ -10,7 +10,9 @@ const mocks = vi.hoisted(() => ({
   finalize: vi.fn(),
   discard: vi.fn(),
   unlock: vi.fn(),
-  getWorktreeOptions: vi.fn()
+  getWorktreeOptions: vi.fn(),
+  getWorktreeMirrorDistro: vi.fn(),
+  getWorktreePathSettings: vi.fn()
 }))
 
 vi.mock('node:fs/promises', () => ({ mkdir: mocks.mkdir }))
@@ -22,17 +24,15 @@ vi.mock('./git/worktree-create-preparation', () => ({
   unlockPreparedWorktree: mocks.unlock
 }))
 vi.mock('./project-runtime-git-options', () => ({
-  getLocalProjectWorktreeGitOptions: mocks.getWorktreeOptions
+  getLocalProjectWorktreeGitOptions: mocks.getWorktreeOptions,
+  getWorktreeMirrorDistro: mocks.getWorktreeMirrorDistro
 }))
 vi.mock('./ipc/worktree-logic', () => ({
   computeWorkspaceRoot: (repoPath: string) =>
     process.platform === 'win32' && /^[A-Za-z]:[\\/]/.test(repoPath)
       ? 'C:\\workspace'
       : '/workspace',
-  getWorktreePathSettings: () => ({
-    workspaceDir: process.platform === 'win32' ? 'C:\\workspace' : '/workspace',
-    nestWorkspaces: false
-  })
+  getWorktreePathSettings: mocks.getWorktreePathSettings
 }))
 
 import {
@@ -52,6 +52,11 @@ beforeEach(() => {
   mocks.discard.mockReset().mockResolvedValue(undefined)
   mocks.unlock.mockReset().mockResolvedValue(undefined)
   mocks.getWorktreeOptions.mockReset().mockReturnValue({})
+  mocks.getWorktreeMirrorDistro.mockReset().mockReturnValue(undefined)
+  mocks.getWorktreePathSettings.mockReset().mockImplementation(() => ({
+    workspaceDir: process.platform === 'win32' ? 'C:\\workspace' : '/workspace',
+    nestWorkspaces: false
+  }))
 })
 
 afterEach(async () => {
@@ -68,6 +73,28 @@ describe('worktree create preparation registry', () => {
       expect(mocks.mkdir).toHaveBeenCalledWith(
         expect.stringMatching(/^\\\\\?\\C:\\workspace\\\.orca-preparing/),
         { recursive: true }
+      )
+    } finally {
+      Object.defineProperty(process, 'platform', { configurable: true, value: originalPlatform })
+    }
+  })
+
+  it('threads the resolved WSL mirror into speculative preparation', async () => {
+    const originalPlatform = process.platform
+    Object.defineProperty(process, 'platform', { configurable: true, value: 'win32' })
+    try {
+      mocks.getWorktreeMirrorDistro.mockReturnValue('Ubuntu')
+
+      await prepareWorktreeCreateForRepo(store, { ...repo, path: 'C:\\repo' }, 'origin/main')
+
+      expect(mocks.getWorktreeMirrorDistro).toHaveBeenCalledWith(
+        store,
+        expect.objectContaining({ path: 'C:\\repo' })
+      )
+      expect(mocks.getWorktreePathSettings).toHaveBeenCalledWith(
+        expect.objectContaining({ path: 'C:\\repo' }),
+        expect.anything(),
+        'Ubuntu'
       )
     } finally {
       Object.defineProperty(process, 'platform', { configurable: true, value: originalPlatform })

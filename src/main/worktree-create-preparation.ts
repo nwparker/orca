@@ -20,7 +20,10 @@ import {
   unlockPreparedWorktree,
   prepareWorktreeCreateCheckout
 } from './git/worktree-create-preparation'
-import { getLocalProjectWorktreeGitOptions } from './project-runtime-git-options'
+import {
+  getLocalProjectWorktreeGitOptions,
+  getWorktreeMirrorDistro
+} from './project-runtime-git-options'
 import { computeWorkspaceRoot, getWorktreePathSettings } from './ipc/worktree-logic'
 import { toHostFilesystemPath } from './host-tree-removal'
 
@@ -165,7 +168,7 @@ export function prepareWorktreeCreateForRepo(
   const options = getLocalProjectWorktreeGitOptions(store, repo)
   const workspaceRoot = computeWorkspaceRoot(
     repo.path,
-    getWorktreePathSettings(repo, store.getSettings())
+    getWorktreePathSettings(repo, store.getSettings(), getWorktreeMirrorDistro(store, repo))
   )
   const key = preparationKey(repo.path, workspaceRoot, baseBranch, options)
   const existing = preparations.get(key)
