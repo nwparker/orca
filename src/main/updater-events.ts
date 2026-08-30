@@ -150,7 +150,12 @@ export function registerAutoUpdaterHandlers({
           scheduleAutomaticUpdateCheck(AUTO_UPDATE_CHECK_INTERVAL_MS)
         }
       }
-      sendStatus({ state: 'not-available', userInitiated: wasUserInitiated || undefined })
+      sendStatus(
+        getRetainedLinuxPackageManualInstallStatus() ?? {
+          state: 'not-available',
+          userInitiated: wasUserInitiated || undefined
+        }
+      )
       return
     }
 

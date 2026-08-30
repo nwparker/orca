@@ -169,6 +169,7 @@ describe('headless serve update install handoff', () => {
 
     checkForUpdatesFromMenu()
     await vi.advanceTimersByTimeAsync(0)
+    autoUpdaterMock.emit('download-progress', { percent: 100 })
     autoUpdaterMock.emit('update-downloaded', { version: pendingInstaller.version })
     const nativeReadyHandler = nativeUpdaterMock.on.mock.calls.find(
       ([event]) => event === 'update-downloaded'

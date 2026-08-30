@@ -270,6 +270,25 @@ describe('registerAutoUpdaterHandlers linux package artifact tracking', () => {
     })
   })
 
+  it('keeps manual-install recovery when a later check finds only the installed release', async () => {
+    const { emit, context, getArtifact } = await register()
+    emit('update-downloaded', downloadedEvent())
+
+    emit('update-available', { version: '1.0.51' })
+
+    expect(getArtifact()).toEqual(expect.objectContaining({ version: '1.0.61' }))
+    expect(context.sendStatus).toHaveBeenLastCalledWith({
+      state: 'error',
+      message: 'Quit Orca before running the system package install command.',
+      recovery: {
+        kind: 'linux-package-install',
+        packageType: 'deb',
+        reason: 'manual-install-required',
+        version: '1.0.61'
+      }
+    })
+  })
+
   it('clears recovery when a newer update takes over before no-update settles', async () => {
     const { emit, context, getArtifact } = await register()
     emit('update-downloaded', downloadedEvent())
