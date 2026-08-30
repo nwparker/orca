@@ -17,6 +17,7 @@
  */
 import { Terminal } from '@xterm/xterm'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { installTerminalImeCandidateAnchor } from '@/lib/pane-manager/terminal-ime-candidate-anchor'
 
 const CELL_WIDTH_PX = 8
 const CELL_HEIGHT_PX = 16
@@ -42,6 +43,26 @@ type Rig = {
 type RigOptions = {
   cursorWidth?: number
   theme?: { background: string; cursor?: string; foreground: string }
+  /** Installs the production candidate-anchor listener, the other writer of `textarea.style`. */
+  withCandidateAnchor?: boolean
+}
+
+/**
+ * happy-dom lays nothing out, so both textarea-geometry owners read zeroes and neither can
+ * overflow. This gives the preedit span a width and the screen its cols*rows box.
+ */
+function stubCompositionLayout(preeditWidth: () => number): void {
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
+    function (this: HTMLElement) {
+      if (this.classList.contains('xterm-composition-preedit')) {
+        return DOMRect.fromRect({ height: CELL_HEIGHT_PX, width: preeditWidth() })
+      }
+      if (this.classList.contains('xterm-screen')) {
+        return DOMRect.fromRect({ height: 24 * CELL_HEIGHT_PX, width: 80 * CELL_WIDTH_PX })
+      }
+      return DOMRect.fromRect({ height: 0, width: 0 })
+    }
+  )
 }
 
 function openTerminal(options: RigOptions = {}): Rig {
@@ -60,6 +81,9 @@ function openTerminal(options: RigOptions = {}): Rig {
     throw new Error('xterm did not create the helper textarea and composition view')
   }
   openTerminals.push(terminal)
+  if (options.withCandidateAnchor && !installTerminalImeCandidateAnchor(terminal)) {
+    throw new Error('the candidate anchor did not install on an opened terminal')
+  }
 
   const cell = (
     terminal as unknown as {
@@ -221,6 +245,22 @@ describe('mid-line composition renders the covered row tail after the preedit', 
     expect(rig.compositionView.style.justifyContent).toBe('flex-end')
   })
 
+  it('cleans the overlay when the terminal is disposed mid-composition', async () => {
+    const rig = openTerminal()
+    await rig.write('안녕하세요\x1b[6D')
+    rig.compose('가')
+    expect(rig.compositionView.classList.contains('active')).toBe(true)
+    expect(viewParts(rig.compositionView).caret).not.toBeNull()
+
+    rig.terminal.dispose()
+
+    expect(rig.compositionView.classList.contains('active')).toBe(false)
+    expect(rig.compositionView.children).toHaveLength(0)
+    expect(rig.compositionView.textContent).toBe('')
+    expect(rig.compositionView.style.display).toBe('')
+    expect(rig.compositionView.style.justifyContent).toBe('')
+  })
+
   it('keeps the themed insertion caret visible inside the final cell', async () => {
     const rig = openTerminal({ cursorWidth: 2 })
     await rig.write('\x1b[80G')
@@ -240,16 +280,19 @@ describe('mid-line composition renders the covered row tail after the preedit', 
     expect([THEME.cursor, 'rgb(221, 238, 255)']).toContain(caret!.style.backgroundColor)
   })
 
+  // Both writers of `textarea.style.left` run here on purpose. xterm's listener is on the
+  // textarea and the candidate anchor's is on `terminal.element`, so within one event the
+  // anchor writes last; a test that installs only one of them proves nothing about which
+  // position the OS actually reads at composition time.
+  //
+  // Neither writer may produce a different answer, because there is no stable "last" writer:
+  // CoreBrowserTerminal drives `updateCompositionElements` from `onRender` too, so a render can
+  // land after the last composition event this module hears. The render arm is the test below.
   it('keeps the caret and IME candidate anchor visible over committed text in the final cell', async () => {
-    const rig = openTerminal({ cursorWidth: 2 })
+    const rig = openTerminal({ cursorWidth: 2, withCandidateAnchor: true })
     await rig.write('x'.repeat(80))
     let preeditWidth = CELL_WIDTH_PX * 2
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      function (this: HTMLElement) {
-        const width = this.classList.contains('xterm-composition-preedit') ? preeditWidth : 0
-        return DOMRect.fromRect({ height: CELL_HEIGHT_PX, width })
-      }
-    )
+    stubCompositionLayout(() => preeditWidth)
 
     rig.compose('가')
 
@@ -271,6 +314,25 @@ describe('mid-line composition renders the covered row tail after the preedit', 
     expect(rig.compositionView.style.justifyContent).toBe('')
     expect(rig.textarea.style.left).toBe(`${(rig.terminal.cols - 1) * CELL_WIDTH_PX}px`)
     expect(rig.textarea.style.width).toBe(`${preeditWidth}px`)
+  })
+
+  it('keeps the candidate anchor inside the screen across a render, not just a composition event', async () => {
+    // The regression this pins: xterm re-runs updateCompositionElements from onRender, so a
+    // repaint with no composition event behind it re-asserts the textarea position on its own.
+    // A clamp that lived only in the composition-event listener is reverted here and stays
+    // reverted, which is what the OS then samples.
+    const rig = openTerminal({ cursorWidth: 2, withCandidateAnchor: true })
+    await rig.write('x'.repeat(80))
+    stubCompositionLayout(() => CELL_WIDTH_PX * 2)
+
+    rig.compose('가')
+    const clamped = `${rig.terminal.cols * CELL_WIDTH_PX - CELL_WIDTH_PX * 2}px`
+    expect(rig.textarea.style.left).toBe(clamped)
+
+    // A TUI repaint under the open composition: no composition event, one render.
+    await rig.writeAwaitingRender('\x1b[0m')
+
+    expect(rig.textarea.style.left).toBe(clamped)
   })
 
   it('keeps the default cursor visible on a light background', async () => {
