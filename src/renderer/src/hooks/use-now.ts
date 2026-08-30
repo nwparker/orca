@@ -1,11 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useLayoutEffect, useState } from 'react'
 
 // A small shared pattern for UI labels that need a current wall-clock value.
 // Callers should keep the interval at the coarsest useful granularity.
 export function useNow(intervalMs = 30_000, enabled = true): number {
   const [now, setNow] = useState(() => Date.now())
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!enabled) {
       return
     }
