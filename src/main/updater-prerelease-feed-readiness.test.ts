@@ -1,12 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { installNetRequestFetchAdapter } from './updater-net-request.fixture'
 import { publishingIncident } from './updater-prerelease-feed-reproduction.fixture'
 
-const { netFetchMock } = vi.hoisted(() => ({
-  netFetchMock: vi.fn()
+const ORIGINAL_PLATFORM = process.platform
+
+const { netFetchMock, netRequestMock } = vi.hoisted(() => ({
+  netFetchMock: vi.fn(),
+  netRequestMock: vi.fn()
 }))
 
 vi.mock('electron', () => ({
-  net: { fetch: netFetchMock }
+  net: { fetch: netFetchMock, request: netRequestMock }
 }))
 
 function buildAtomFeed(tags: string[]): string {
@@ -31,6 +35,20 @@ function buildManifest(tag: string): string {
 
 function isPlatformManifestRequest(url: string): boolean {
   return /\/latest(?:-[a-z]+)?\.yml$/.test(url)
+}
+
+function setPlatformForTest(platform: NodeJS.Platform): void {
+  Object.defineProperty(process, 'platform', { value: platform })
+}
+
+function buildWindowsManifest(version: string): string {
+  return [
+    `version: ${version}`,
+    'files:',
+    '  - url: orca-windows-setup.exe',
+    '    sha512: test',
+    'path: orca-windows-setup.exe'
+  ].join('\n')
 }
 
 function respondWithAtom(
@@ -86,10 +104,50 @@ describe('fetchNewerReleaseTagsWithReadiness', () => {
   beforeEach(() => {
     vi.resetModules()
     netFetchMock.mockReset()
+    netRequestMock.mockReset()
+    installNetRequestFetchAdapter(netRequestMock, netFetchMock)
   })
 
   afterEach(() => {
     vi.unstubAllGlobals()
+    setPlatformForTest(ORIGINAL_PLATFORM)
+  })
+
+  it("offers a Windows release from GitHub's asset redirect without probing Azure", async () => {
+    setPlatformForTest('win32')
+    const assetRequestInits: { method?: string; redirect?: string }[] = []
+
+    netFetchMock.mockImplementation(
+      (url: string, init?: { method?: string; redirect?: string }) => {
+        if (url === 'https://github.com/stablyai/orca/releases.atom') {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            text: () => Promise.resolve(buildAtomFeed(['v1.4.190']))
+          })
+        }
+        if (isPlatformManifestRequest(url)) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            text: () => Promise.resolve(buildWindowsManifest('1.4.190'))
+          })
+        }
+        if (init?.method === 'HEAD') {
+          assetRequestInits.push(init)
+          return Promise.resolve({ ok: false, status: 302, text: () => Promise.resolve('') })
+        }
+        return Promise.resolve({ ok: false, status: 503, text: () => Promise.resolve('') })
+      }
+    )
+
+    const { fetchNewerReleaseTagsWithReadiness } = await import('./updater-prerelease-feed')
+
+    await expect(fetchNewerReleaseTagsWithReadiness('1.4.189', 1)).resolves.toEqual({
+      tags: ['v1.4.190'],
+      state: 'ready'
+    })
+    expect(assetRequestInits).toEqual([expect.objectContaining({ redirect: 'manual' })])
   })
 
   it('reports not-ready with a verified last-good tag when the newest assets are unavailable', async () => {
