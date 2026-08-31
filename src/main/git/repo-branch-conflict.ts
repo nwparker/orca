@@ -26,35 +26,62 @@ async function listRemoteNamesViaExec(exec: GitExec): Promise<string[]> {
   }
 }
 
+function parseRefLines(stdout: string): Set<string> {
+  return new Set(
+    stdout
+      .split(/\r?\n/)
+      .map((ref) => ref.trim())
+      .filter(Boolean)
+  )
+}
+
 /** Run branch-conflict policy through the host that owns Git execution. */
 export async function getBranchConflictKindViaExec(
   exec: GitExec,
   branchName: string,
   allowedBaseRef?: string
 ): Promise<BranchConflictKind | null> {
-  if (await hasGitRefAsync(exec, `refs/heads/${branchName}`)) {
+  const localRef = `refs/heads/${branchName}`
+
+  // One ref walk can answer both questions. Keeping the remote-name probe in
+  // flight removes a WSL/Git process-start interval without changing the
+  // configured-remote matching rules below.
+  const refsPromise = exec([
+    'for-each-ref',
+    '--format=%(refname)',
+    `refs/heads/${branchName}`,
+    'refs/remotes'
+  ])
+  const remoteNamesPromise = listRemoteNamesViaExec(exec)
+
+  let stdout: string
+  try {
+    const refsResult = await refsPromise
+    stdout = refsResult.stdout
+  } catch {
+    // Keep the old local-first behavior if the combined read is unavailable.
+    // A broken refs walk must not turn an existing local branch into a remote
+    // conflict (or make the create path throw).
+    return (await hasGitRefAsync(exec, localRef)) ? 'local' : null
+  }
+
+  const refs = parseRefLines(stdout)
+  if (refs.has(localRef)) {
     return 'local'
   }
 
-  try {
-    // Both probes are read-only and independent. Keeping them in flight together
-    // removes one Git/WSL process-start interval from the common no-conflict path.
-    const [remoteNames, { stdout }] = await Promise.all([
-      listRemoteNamesViaExec(exec),
-      exec(['for-each-ref', '--format=%(refname)', 'refs/remotes'])
-    ])
-    const hasRemoteConflict = stdout.split(/\r?\n/).some((ref) => {
-      const trimmed = ref.trim()
-      if (isAllowedRemoteBaseRef(trimmed, allowedBaseRef)) {
-        return false
-      }
-      return resolveConfiguredRemoteBranchName(trimmed, remoteNames) === branchName
-    })
+  const remoteNames = await remoteNamesPromise
+  const hasRemoteConflict = [...refs].some((ref) => {
+    if (!ref.startsWith('refs/remotes/')) {
+      return false
+    }
+    if (isAllowedRemoteBaseRef(ref, allowedBaseRef)) {
+      return false
+    }
+    return resolveConfiguredRemoteBranchName(ref, remoteNames) === branchName
+  })
 
-    return hasRemoteConflict ? 'remote' : null
-  } catch {
-    return null
-  }
+  return hasRemoteConflict ? 'remote' : null
 }
 
 export function getBranchConflictKind(
