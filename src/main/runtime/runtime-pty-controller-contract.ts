@@ -98,7 +98,7 @@ export type RuntimePtyController = {
    *  False on doubt (absent session, SSH-scoped id, non-daemon provider). */
   attach?(ptyId: string): Promise<boolean>
   kill(ptyId: string): boolean
-  retireRejectedPty?(ptyId: string, stopConfirmed?: boolean): void
+  retireRejectedPty?(ptyId: string, stopConfirmed: boolean): void
   stopAndWait?(
     ptyId: string,
     opts?: { keepHistory?: boolean; deadlineMs?: number }

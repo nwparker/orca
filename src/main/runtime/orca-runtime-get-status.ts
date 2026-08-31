@@ -232,4 +232,3 @@ export class OrcaRuntimeWithGetStatus extends OrcaRuntimeWithGetRuntimeId {
     this.emitClientEvent({ type: 'automationsChanged', ...payload })
   }
 }
-// @ts-nocheck -- mechanically split from OrcaRuntimeService; behavior is covered by AST equivalence and characterization tests.
