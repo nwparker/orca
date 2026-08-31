@@ -5,6 +5,7 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
+  statSync,
   writeFileSync
 } from 'node:fs'
 import { join } from 'node:path'
@@ -412,142 +413,130 @@ describe('install-electron-package-binary', () => {
   })
 
   // The shared cache is macOS-only: it exists to avoid a second copy via APFS clonefile.
-  it.runIf(process.platform === 'darwin')(
-    'publishes a shared Electron dist entry after a fresh download',
-    () => {
-      const projectDir = mkTempProject()
+  it('publishes a shared Electron dist entry after a fresh download', () => {
+    const projectDir = mkTempProject()
 
-      try {
-        initGitRepo(projectDir)
-        writeFakeElectronPackage(projectDir)
-        writeFakeElectronGet(projectDir)
-        writeFakeExtractor(projectDir, { createExecutable: true })
+    try {
+      initGitRepo(projectDir)
+      writeFakeElectronPackage(projectDir)
+      writeFakeElectronGet(projectDir)
+      writeFakeExtractor(projectDir, { createExecutable: true })
 
-        const result = runInstallScript(projectDir, { CI: '' })
-        const entryPath = join(sharedCacheRoot(projectDir), sharedEntryName)
+      const result = runInstallScript(projectDir, { CI: '' })
+      const entryPath = join(sharedCacheRoot(projectDir), sharedEntryName)
 
-        expect(result.status, result.stderr).toBe(0)
-        expect(lstatSync(entryPath).isDirectory()).toBe(true)
-        expect(lstatSync(entryPath).isSymbolicLink()).toBe(false)
-        expect(readFileSync(join(entryPath, 'version'), 'utf8')).toBe('v41.5.0')
-        expect(existsSync(join(entryPath, 'electron'))).toBe(true)
-        expect(readSharedDistMarker(projectDir)).toBe(sharedEntryName)
-        expect(result.stdout).toMatch(/Published Electron 41\.5\.0 to .*41\.5\.0-linux-x64$/m)
-      } finally {
-        rmSync(projectDir, { recursive: true, force: true })
-      }
+      expect(result.status, result.stderr).toBe(0)
+      expect(lstatSync(entryPath).isDirectory()).toBe(true)
+      expect(lstatSync(entryPath).isSymbolicLink()).toBe(false)
+      expect(readFileSync(join(entryPath, 'version'), 'utf8')).toBe('v41.5.0')
+      expect(existsSync(join(entryPath, 'electron'))).toBe(true)
+      expect(readSharedDistMarker(projectDir)).toBe(sharedEntryName)
+      expect(result.stdout).toMatch(/Published Electron 41\.5\.0 to .*41\.5\.0-linux-x64$/m)
+    } finally {
+      rmSync(projectDir, { recursive: true, force: true })
     }
-  )
+  })
 
-  it.runIf(process.platform === 'darwin')(
-    'clones the shared Electron dist into a sibling worktree without downloading',
-    () => {
-      const projectDir = mkTempProject()
-      const siblingDir = `${projectDir}-sibling`
+  it('shares the Electron dist into a sibling worktree without downloading', () => {
+    const projectDir = mkTempProject()
+    const siblingDir = `${projectDir}-sibling`
 
-      try {
-        initGitRepo(projectDir)
-        writeFakeElectronPackage(projectDir)
-        writeFakeElectronGet(projectDir)
-        writeFakeExtractor(projectDir, { createExecutable: true })
-        expect(runInstallScript(projectDir, { CI: '' }).status).toBe(0)
+    try {
+      initGitRepo(projectDir)
+      writeFakeElectronPackage(projectDir)
+      writeFakeElectronGet(projectDir)
+      writeFakeExtractor(projectDir, { createExecutable: true })
+      expect(runInstallScript(projectDir, { CI: '' }).status).toBe(0)
 
-        addSiblingWorktree(projectDir, siblingDir)
-        writeFakeElectronPackage(siblingDir)
-        writeFakeElectronGet(siblingDir)
-        writeFakeExtractor(siblingDir, { createExecutable: true })
+      addSiblingWorktree(projectDir, siblingDir)
+      writeFakeElectronPackage(siblingDir)
+      writeFakeElectronGet(siblingDir)
+      writeFakeExtractor(siblingDir, { createExecutable: true })
 
-        const result = runInstallScript(siblingDir, { CI: '' })
-        const siblingDistDir = join(siblingDir, 'node_modules/electron/dist')
+      const result = runInstallScript(siblingDir, { CI: '' })
+      const siblingDistDir = join(siblingDir, 'node_modules/electron/dist')
 
-        expect(result.status, result.stderr).toBe(0)
-        expect(readExtractorCallCount(siblingDir)).toBe(0)
-        expect(existsSync(join(siblingDir, 'electron-get.log'))).toBe(false)
-        expect(lstatSync(siblingDistDir).isDirectory()).toBe(true)
-        expect(lstatSync(siblingDistDir).isSymbolicLink()).toBe(false)
-        expect(readFileSync(join(siblingDistDir, 'version'), 'utf8')).toBe('v41.5.0')
-        expect(existsSync(join(siblingDistDir, 'electron'))).toBe(true)
-        expect(readFileSync(join(siblingDir, 'node_modules/electron/path.txt'), 'utf8')).toBe(
-          'electron'
-        )
-        expect(readSharedDistMarker(siblingDir)).toBe(sharedEntryName)
-        expect(result.stdout).toContain('Cloned Electron 41.5.0 from')
-      } finally {
-        rmSync(siblingDir, { recursive: true, force: true })
-        rmSync(projectDir, { recursive: true, force: true })
-      }
+      expect(result.status, result.stderr).toBe(0)
+      expect(readExtractorCallCount(siblingDir)).toBe(0)
+      expect(existsSync(join(siblingDir, 'electron-get.log'))).toBe(false)
+      expect(lstatSync(siblingDistDir).isDirectory()).toBe(true)
+      expect(lstatSync(siblingDistDir).isSymbolicLink()).toBe(false)
+      expect(readFileSync(join(siblingDistDir, 'version'), 'utf8')).toBe('v41.5.0')
+      expect(existsSync(join(siblingDistDir, 'electron'))).toBe(true)
+      expect(readFileSync(join(siblingDir, 'node_modules/electron/path.txt'), 'utf8')).toBe(
+        'electron'
+      )
+      expect(readSharedDistMarker(siblingDir)).toBe(sharedEntryName)
+      expect(result.stdout).toContain('Shared Electron 41.5.0 from')
+    } finally {
+      rmSync(siblingDir, { recursive: true, force: true })
+      rmSync(projectDir, { recursive: true, force: true })
     }
-  )
+  })
 
-  it.runIf(process.platform === 'darwin')(
-    'publishes an already installed Electron dist that predates the shared cache',
-    () => {
-      const projectDir = mkTempProject()
+  it('publishes an already installed Electron dist that predates the shared cache', () => {
+    const projectDir = mkTempProject()
 
-      try {
-        initGitRepo(projectDir)
-        writeFakeElectronPackage(projectDir)
-        writeFakeElectronGet(projectDir)
-        writeFakeExtractor(projectDir, { createExecutable: true })
-        writeFakeElectronDist(projectDir, {
-          executableContents: 'existing executable',
-          pathContents: 'electron'
-        })
+    try {
+      initGitRepo(projectDir)
+      writeFakeElectronPackage(projectDir)
+      writeFakeElectronGet(projectDir)
+      writeFakeExtractor(projectDir, { createExecutable: true })
+      writeFakeElectronDist(projectDir, {
+        executableContents: 'existing executable',
+        pathContents: 'electron'
+      })
 
-        const result = runInstallScript(projectDir, { CI: '' })
-        const entryPath = join(sharedCacheRoot(projectDir), sharedEntryName)
-        const distDir = join(projectDir, 'node_modules/electron/dist')
+      const result = runInstallScript(projectDir, { CI: '' })
+      const entryPath = join(sharedCacheRoot(projectDir), sharedEntryName)
+      const distDir = join(projectDir, 'node_modules/electron/dist')
 
-        expect(result.status, result.stderr).toBe(0)
-        expect(readExtractorCallCount(projectDir)).toBe(0)
-        expect(existsSync(join(projectDir, 'electron-get.log'))).toBe(false)
-        expect(readFileSync(join(entryPath, 'version'), 'utf8')).toBe('v41.5.0')
-        expect(readFileSync(join(entryPath, 'electron'), 'utf8')).toBe('existing executable')
-        expect(readSharedDistMarker(projectDir)).toBe(sharedEntryName)
-        expect(readFileSync(join(distDir, 'electron'), 'utf8')).toBe('existing executable')
-        expect(readFileSync(join(distDir, 'version'), 'utf8')).toBe('v41.5.0')
-      } finally {
-        rmSync(projectDir, { recursive: true, force: true })
-      }
+      expect(result.status, result.stderr).toBe(0)
+      expect(readExtractorCallCount(projectDir)).toBe(0)
+      expect(existsSync(join(projectDir, 'electron-get.log'))).toBe(false)
+      expect(readFileSync(join(entryPath, 'version'), 'utf8')).toBe('v41.5.0')
+      expect(readFileSync(join(entryPath, 'electron'), 'utf8')).toBe('existing executable')
+      expect(readSharedDistMarker(projectDir)).toBe(sharedEntryName)
+      expect(readFileSync(join(distDir, 'electron'), 'utf8')).toBe('existing executable')
+      expect(readFileSync(join(distDir, 'version'), 'utf8')).toBe('v41.5.0')
+    } finally {
+      rmSync(projectDir, { recursive: true, force: true })
     }
-  )
+  })
 
-  it.runIf(process.platform === 'darwin')(
-    'replaces a corrupt shared Electron dist entry instead of re-downloading forever',
-    () => {
-      const projectDir = mkTempProject()
+  it('replaces a corrupt shared Electron dist entry instead of re-downloading forever', () => {
+    const projectDir = mkTempProject()
 
-      try {
-        initGitRepo(projectDir)
-        writeFakeElectronPackage(projectDir)
-        writeFakeElectronGet(projectDir)
-        writeFakeExtractor(projectDir, { createExecutable: true })
-        const entryPath = join(sharedCacheRoot(projectDir), sharedEntryName)
-        mkdirSync(entryPath, { recursive: true })
-        writeFileSync(join(entryPath, 'version'), 'v40.0.0')
-        writeFileSync(join(entryPath, 'electron'), 'stale executable')
+    try {
+      initGitRepo(projectDir)
+      writeFakeElectronPackage(projectDir)
+      writeFakeElectronGet(projectDir)
+      writeFakeExtractor(projectDir, { createExecutable: true })
+      const entryPath = join(sharedCacheRoot(projectDir), sharedEntryName)
+      mkdirSync(entryPath, { recursive: true })
+      writeFileSync(join(entryPath, 'version'), 'v40.0.0')
+      writeFileSync(join(entryPath, 'electron'), 'stale executable')
 
-        const result = runInstallScript(projectDir, { CI: '' })
-        const distDir = join(projectDir, 'node_modules/electron/dist')
+      const result = runInstallScript(projectDir, { CI: '' })
+      const distDir = join(projectDir, 'node_modules/electron/dist')
 
-        expect(result.status, result.stderr).toBe(0)
-        expect(result.stderr).not.toContain('Failed to install Electron package binary')
-        expect(readExtractorCallCount(projectDir)).toBe(1)
-        expect(readFileSync(join(distDir, 'version'), 'utf8')).toBe('v41.5.0')
-        expect(readFileSync(join(projectDir, 'node_modules/electron/path.txt'), 'utf8')).toBe(
-          'electron'
-        )
-        // Why not just fall back: an entry left corrupt makes every sibling worktree download again.
-        expect(readFileSync(join(entryPath, 'version'), 'utf8')).toBe('v41.5.0')
-        expect(readSharedDistMarker(projectDir)).toBe(sharedEntryName)
-        expect(readdirSync(sharedCacheRoot(projectDir))).toEqual([sharedEntryName])
-      } finally {
-        rmSync(projectDir, { recursive: true, force: true })
-      }
+      expect(result.status, result.stderr).toBe(0)
+      expect(result.stderr).not.toContain('Failed to install Electron package binary')
+      expect(readExtractorCallCount(projectDir)).toBe(1)
+      expect(readFileSync(join(distDir, 'version'), 'utf8')).toBe('v41.5.0')
+      expect(readFileSync(join(projectDir, 'node_modules/electron/path.txt'), 'utf8')).toBe(
+        'electron'
+      )
+      // Why not just fall back: an entry left corrupt makes every sibling worktree download again.
+      expect(readFileSync(join(entryPath, 'version'), 'utf8')).toBe('v41.5.0')
+      expect(readSharedDistMarker(projectDir)).toBe(sharedEntryName)
+      expect(readdirSync(sharedCacheRoot(projectDir))).toEqual([sharedEntryName])
+    } finally {
+      rmSync(projectDir, { recursive: true, force: true })
     }
-  )
+  })
 
-  it('does not create a shared Electron dist cache off macOS', () => {
+  it('hardlinks the shared Electron dist on a host without copy-on-write', () => {
     const projectDir = mkTempProject()
 
     try {
@@ -556,19 +545,25 @@ describe('install-electron-package-binary', () => {
       writeFakeElectronGet(projectDir)
       writeFakeExtractor(projectDir, { createExecutable: true })
       const preloadPath = writeNonDarwinPlatformPreload(projectDir)
-
-      const result = runInstallScript(projectDir, {
+      const nonDarwinEnv = {
         CI: '',
         NODE_OPTIONS: [process.env.NODE_OPTIONS, `--require=${preloadPath}`]
           .filter(Boolean)
           .join(' ')
-      })
+      }
+
+      const result = runInstallScript(projectDir, nonDarwinEnv)
+      const entryPath = join(sharedCacheRoot(projectDir), sharedEntryName)
+      const distDir = join(projectDir, 'node_modules/electron/dist')
 
       expect(result.status, result.stderr).toBe(0)
-      expect(existsSync(join(projectDir, '.git', 'orca-cache'))).toBe(false)
-      expect(readSharedDistMarker(projectDir)).toBe(null)
-      expect(readFileSync(join(projectDir, 'node_modules/electron/dist/version'), 'utf8')).toBe(
-        'v41.5.0'
+      expect(readFileSync(join(distDir, 'version'), 'utf8')).toBe('v41.5.0')
+      expect(readFileSync(join(entryPath, 'version'), 'utf8')).toBe('v41.5.0')
+      // Why read-only: these are the same inodes, so an extract over dist would otherwise rewrite
+      // the cache and every sibling worktree at once.
+      expect(statSync(join(entryPath, 'electron')).mode & 0o222).toBe(0)
+      expect(statSync(join(entryPath, 'electron')).ino).toBe(
+        statSync(join(distDir, 'electron')).ino
       )
     } finally {
       rmSync(projectDir, { recursive: true, force: true })

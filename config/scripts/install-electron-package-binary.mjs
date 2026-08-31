@@ -16,7 +16,7 @@ import { createRequire } from 'node:module'
 import { platform as osPlatform, tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import {
-  cloneSharedElectronDist,
+  shareElectronDistFromCache,
   hasAdoptedSharedElectronDist,
   publishSharedElectronDist,
   recordAdoptedSharedElectronDist,
@@ -199,7 +199,7 @@ function adoptSharedElectronDist(sharedEntry, electronDistDir) {
   try {
     const stagePath = join(stageRoot, 'dist')
     if (
-      !cloneSharedElectronDist(sharedEntry, stagePath, {
+      !shareElectronDistFromCache(sharedEntry, stagePath, {
         version: electronVersion,
         platformPath
       })
@@ -209,12 +209,12 @@ function adoptSharedElectronDist(sharedEntry, electronDistDir) {
     moveExtractedElectronDist(stagePath, electronDistDir)
     recordAdoptedSharedElectronDist(sharedEntry, writeFileSync)
     console.log(
-      `[electron-package] Cloned Electron ${electronVersion} from ${sharedEntry.entryPath}`
+      `[electron-package] Shared Electron ${electronVersion} from ${sharedEntry.entryPath}`
     )
     return true
   } catch (error) {
     // The download path below is always a correct fallback, so sharing never fails an install.
-    console.warn(`[electron-package] Shared Electron clone unavailable: ${formatShareError(error)}`)
+    console.warn(`[electron-package] Shared Electron dist unavailable: ${formatShareError(error)}`)
     return false
   } finally {
     rmSync(stageRoot, { recursive: true, force: true })

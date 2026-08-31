@@ -15,9 +15,10 @@ import {
 import net from 'node:net'
 import { createRequire } from 'node:module'
 import path from 'node:path'
-import { cloneOrCopyTree } from './apfs-clone-copy.mjs'
+
 import { prepareDevCliTerminalWrappers } from './dev-cli-terminal-wrapper.mjs'
 import { isDevBundleInUse, selectStaleDevBundleDirs } from './dev-electron-bundle-cache.mjs'
+import { copyPrivateTree } from './space-sharing-copy.mjs'
 import {
   DEV_BUNDLE_ID,
   getDevBundlePlistPatches,
@@ -300,7 +301,7 @@ function prepareMacDevElectronApp() {
   mkdirSync(distDir, { recursive: true })
   // Why clone-first: this ~280MB copy is made per branch title x Electron version, and only the
   // plist/helper/codesign bytes patched below ever diverge from the source.
-  cloneOrCopyTree(sourceAppPath, appPath)
+  copyPrivateTree(sourceAppPath, appPath)
   restoreElectronFrameworkSymlinks(appPath)
 
   const plistPath = path.join(appPath, 'Contents', 'Info.plist')

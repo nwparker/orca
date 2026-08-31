@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { existsSync, lstatSync, mkdirSync, readFileSync, renameSync, rmSync } from 'node:fs'
 import path from 'node:path'
-import { cloneTree } from './apfs-clone-copy.mjs'
+import { makeTreeReadOnly, shareTree } from './space-sharing-copy.mjs'
 
 const IDENTITY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
 // Sibling of path.txt, never inside dist: an install replaces dist wholesale.
@@ -11,15 +11,11 @@ const MARKER_FILENAME = '.orca-shared-dist'
 /**
  * Where sibling worktrees of one repository keep their shared extracted Electron.
  *
- * Null means "install normally". Only macOS gets an entry, because the whole point is clonefile:
- * on any other filesystem a shared entry would cost a second full copy instead of saving one.
+ * Null means "install normally" -- every caller treats a missing entry as "do what you did before".
  */
 export function resolveSharedElectronDistEntry(options) {
   const { repoRoot, version, targetPlatform, targetArch } = options
   const env = options.env ?? process.env
-  if ((options.hostPlatform ?? process.platform) !== 'darwin') {
-    return null
-  }
   // Packaging jobs get a fresh checkout per run, so a cache only adds a failure mode.
   if (env.CI === '1' || env.CI === 'true') {
     return null
@@ -70,15 +66,17 @@ export function recordAdoptedSharedElectronDist(entry, write) {
 }
 
 /**
- * Clone a validated cache entry to `stagePath`. Deliberately never falls back to a byte copy --
- * without clonefile the caller is better off with its normal install, which this must not slow down.
+ * Share a validated cache entry into `stagePath`. Deliberately never falls back to a byte copy --
+ * with no storage to share the caller is better off with its normal install, which this must not
+ * slow down.
  */
-export function cloneSharedElectronDist(entry, stagePath, { version, platformPath }) {
+export function shareElectronDistFromCache(entry, stagePath, options) {
+  const { version, platformPath } = options
   if (!isUsableElectronDist(entry.entryPath, version, platformPath)) {
     return false
   }
   try {
-    cloneTree(entry.entryPath, stagePath)
+    ;(options.share ?? shareTree)(entry.entryPath, stagePath)
   } catch {
     return false
   }
@@ -109,7 +107,10 @@ export function publishSharedElectronDist(distPath, entry, options = {}) {
   const stagePath = `${entry.entryPath}.staging-${process.pid}-${uuid()}`
   try {
     mkdirSync(entry.cacheRoot, { recursive: true })
-    ;(options.clone ?? cloneTree)(distPath, stagePath)
+    ;(options.share ?? shareTree)(distPath, stagePath)
+    // Before publishing, not after: an entry is visible the instant the rename lands, and under
+    // hardlink sharing this is the only thing standing between a stray write and every worktree.
+    ;(options.protect ?? makeTreeReadOnly)(stagePath)
     renameSync(stagePath, entry.entryPath)
     return true
   } catch {
