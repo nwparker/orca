@@ -21,6 +21,7 @@ import {
   listProjects,
   listTransitions,
   searchIssues,
+  searchUsers,
   updateIssue
 } from '../jira/issues'
 
@@ -129,6 +130,11 @@ export class RuntimeJiraCommands {
     siteId?: string
   ): ReturnType<typeof listAssignableUsers> {
     return listAssignableUsers(key, query, siteId)
+  }
+
+  /** Searches all users on the site, for reporter and user-picker create fields. */
+  jiraSearchUsers(query?: string, siteId?: string): ReturnType<typeof searchUsers> {
+    return searchUsers(query, siteId)
   }
 
   jiraListTransitions(key: string, siteId?: string): ReturnType<typeof listTransitions> {

@@ -14,6 +14,7 @@ import {
   type SelectedReviewBranchInput
 } from './selected-review-branch'
 import { hasLocalGitOptions, normalizeLocalBranchName } from './runtime-worktree-selection'
+import type { HostedReviewExecutionOptions } from '../source-control/hosted-review-git-options'
 
 export async function resolveCreateBranchName(
   repoPath: string,
@@ -92,7 +93,7 @@ export async function getSelectedHostedReviewForBranch(
   repo: Pick<Repo, 'path' | 'connectionId'>,
   branchName: string,
   args: SelectedReviewBranchInput,
-  executionOptions: { localGitExecOptions?: { wslDistro?: string } } = {}
+  executionOptions: HostedReviewExecutionOptions = {}
 ): Promise<{ matchesSelected: boolean; number: number } | null> {
   const selectedReview = getSelectedReviewBranch(args)
   if (!selectedReview) {

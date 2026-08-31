@@ -124,7 +124,8 @@ export class OrcaRuntimeWithFileCommands extends OrcaRuntimeWithPreservedBranchC
   protected readonly hostedReviews = new RuntimeHostedReviewCommands({
     resolveRepo: (selector) => this.resolveRepoSelector(selector),
     resolveTarget: (args) => this.resolveHostedReviewTarget(args),
-    getExecutionOptions: (repo) => this.getHostedReviewExecutionOptions(repo),
+    getExecutionOptions: (repo, admissionTier) =>
+      this.getHostedReviewExecutionOptions(repo, admissionTier),
     recordCreated: (repoId, number, url) => {
       if (!this.stats || this.stats.hasCountedPR(url)) {
         return

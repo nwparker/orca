@@ -105,6 +105,7 @@ export class RuntimeRepositoryCloneController {
         ['clone', '--progress', '--', trimmedUrl, clonePath],
         {
           cwd: trimmedDestination,
+          admissionTier: 'interactive',
           env: nonInteractiveGitEnv(),
           stdio: ['ignore', 'ignore', 'pipe']
         }

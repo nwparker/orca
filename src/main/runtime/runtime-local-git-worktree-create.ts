@@ -1,6 +1,6 @@
-import type { GitPushTarget } from '../../shared/worktree/types'
+import type { GitPushTarget, GitWorktreeInfo } from '../../shared/worktree/types'
 import type { Repo } from '../../shared/repo-types'
-import { findCreatedWorktree } from '../ipc/created-worktree-reconciliation'
+import { resolveCreatedWorktree } from '../ipc/created-worktree-reconciliation'
 import { normalizeSparseDirectories } from '../ipc/sparse-checkout-directories'
 import {
   configureCreatedWorktreePushTarget,
@@ -9,7 +9,6 @@ import {
 import {
   addSparseWorktree,
   addWorktree,
-  listWorktrees,
   type AddWorktreeOptions,
   type AddWorktreeResult
 } from '../git/worktree'
@@ -67,7 +66,7 @@ export async function createRuntimeLocalGitWorktree(args: {
   remoteTrackingBase: RemoteTrackingBase | null
   sparseDirectories: string[]
   configuredPushTarget?: GitPushTarget
-  created: Awaited<ReturnType<typeof listWorktrees>>[number]
+  created: GitWorktreeInfo
   addResult: AddWorktreeResult
 }> {
   let remoteTrackingBase = await args.resolveRemoteTrackingBase(
@@ -250,13 +249,12 @@ export async function createRuntimeLocalGitWorktree(args: {
         args.localWorktreeGitOptions
       )
     : undefined
-  const worktrees = args.hasLocalWorktreeGitOptions
-    ? await listWorktrees(args.repo.path, args.localWorktreeGitOptions)
-    : await listWorktrees(args.repo.path)
-  const created = findCreatedWorktree(worktrees, args.worktreePath, args.branchName)
-  if (!created) {
-    throw new Error('Worktree created but not found in listing')
-  }
+  const { created } = await resolveCreatedWorktree(
+    args.repo.path,
+    args.worktreePath,
+    args.branchName,
+    args.hasLocalWorktreeGitOptions ? args.localWorktreeGitOptions : undefined
+  )
   return {
     remoteTrackingBase,
     sparseDirectories,

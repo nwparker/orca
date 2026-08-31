@@ -99,6 +99,7 @@ const BROWSER_COMMAND_NAMES = [
   'browserHighlight',
   'browserExec',
   'browserTabCreate',
+  'browserOpenUrlOnClient',
   'browserTabSetProfile',
   'browserTabProfileShow',
   'browserTabProfileClone',

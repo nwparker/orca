@@ -30,6 +30,7 @@ import {
 } from './runtime-worktree-create-git'
 import { runtimePathExists } from './runtime-worktree-filesystem'
 import type { RuntimeStore } from './runtime-store-contract'
+import type { HostedReviewExecutionOptions } from '../source-control/hosted-review-git-options'
 
 export type RuntimeLocalWorktreeCreateCandidate = {
   effectiveRequestedName: string
@@ -54,7 +55,7 @@ export async function resolveRuntimeLocalWorktreeCreateCandidate(args: {
   baseBranch: string
   localWorktreeGitOptions: { wslDistro?: string }
   localWorktreeGitOptionArgs: [] | [{ wslDistro?: string }]
-  hostedReviewExecutionContext?: { localGitExecOptions: { wslDistro?: string } }
+  hostedReviewExecutionContext?: HostedReviewExecutionOptions
 }): Promise<RuntimeLocalWorktreeCreateCandidate> {
   const sanitizedName = sanitizeWorktreeName(args.request.name)
   let effectiveRequestedName = args.request.name

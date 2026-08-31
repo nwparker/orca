@@ -10,6 +10,10 @@ import { HEADLESS_RUNTIME_WINDOW_ID } from '../../shared/runtime-types'
 import type { RuntimeLeafRecord } from './runtime-terminal-state-records'
 
 export class OrcaRuntimeWithSyncWindowGraph extends OrcaRuntimeWithAttachWindow {
+  shouldRelayTerminalBrowserOpens(): boolean {
+    return this.authoritativeWindowId === HEADLESS_RUNTIME_WINDOW_ID
+  }
+
   syncWindowGraph(
     windowId: number,
     graph: RuntimeSyncWindowGraph | RuntimeRendererSyncWindowGraph

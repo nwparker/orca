@@ -15,6 +15,8 @@ import {
 } from './runtime-browser-client-page-creation'
 import { browserNetworkExecutionHostKey } from '../browser/browser-network-execution-route'
 import { waitForTabRegistration } from '../ipc/browser-tab-registration-wait'
+import { BROWSER_CLIENT_AUTOMATION_HOST_CAPABILITY } from '../../shared/browser-client-automation-protocol'
+import { BROWSER_HOST_WEBVIEW_CAPABILITY } from './browser-host-capability-selection'
 
 export class RuntimeBrowserCommandsWithBrowserTabCreate extends RuntimeBrowserCommandsWithBrowserSetHeaders {
   async browserTabCreate(
@@ -182,5 +184,31 @@ export class RuntimeBrowserCommandsWithBrowserTabCreate extends RuntimeBrowserCo
     }
 
     return { browserPageId }
+  }
+
+  async browserOpenUrlOnClient(params: {
+    url: string
+    worktree: string
+  }): Promise<{ browserPageId: string }> {
+    const protocol = new URL(params.url).protocol
+    if (protocol !== 'http:' && protocol !== 'https:') {
+      throw new BrowserError('invalid_argument', 'Only http(s) URLs can be opened on the client.')
+    }
+    const lease = this.host
+      .getBrowserHostLeaseRegistry()
+      .select(undefined, [
+        BROWSER_HOST_WEBVIEW_CAPABILITY,
+        BROWSER_CLIENT_AUTOMATION_HOST_CAPABILITY
+      ])
+    return this.browserTabCreate(
+      {
+        url: params.url,
+        worktree: params.worktree,
+        activate: true,
+        navigation: 'caller',
+        placement: { kind: 'client', browserHostClientId: lease.browserHostClientId }
+      },
+      { pairedDeviceId: lease.pairedDeviceId, clientKind: 'runtime' }
+    )
   }
 }

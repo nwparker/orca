@@ -28,6 +28,7 @@ import type {
   SkillUploadChunkRequest
 } from './runtime-skill-types'
 import { RuntimeSkillInstallCommands } from './runtime-skill-install-commands'
+import { normalizeSshRelaySkillDestination } from '../skills/skill-ssh-relay-destination'
 
 export class RuntimeSkillInstallQueries extends RuntimeSkillInstallCommands {
   async previewSharedSkillInstallRequest(request: SkillInstallPreviewRequest) {
@@ -37,10 +38,7 @@ export class RuntimeSkillInstallQueries extends RuntimeSkillInstallCommands {
         provider: target.provider,
         request: {
           ...request,
-          destination:
-            request.destination.scope === 'global'
-              ? { scope: 'global', executionTarget: { kind: 'host' } }
-              : request.destination
+          destination: normalizeSshRelaySkillDestination(request.destination)
         },
         workspace: target.workspace
       })
@@ -60,10 +58,7 @@ export class RuntimeSkillInstallQueries extends RuntimeSkillInstallCommands {
         provider: target.provider,
         request: {
           ...request,
-          destination:
-            request.destination.scope === 'global'
-              ? { scope: 'global', executionTarget: { kind: 'host' } }
-              : request.destination
+          destination: normalizeSshRelaySkillDestination(request.destination)
         },
         workspace: target.workspace
       })
@@ -83,10 +78,7 @@ export class RuntimeSkillInstallQueries extends RuntimeSkillInstallCommands {
         provider: target.provider,
         request: {
           ...request,
-          destination:
-            request.destination.scope === 'global'
-              ? { scope: 'global', executionTarget: { kind: 'host' } }
-              : request.destination
+          destination: normalizeSshRelaySkillDestination(request.destination)
         },
         workspace: target.workspace
       })
