@@ -6,14 +6,14 @@ import {
 } from '../../../shared/execution-host'
 import { FLOATING_TERMINAL_WORKTREE_ID } from '../../../shared/constants'
 import { folderWorkspaceKey, parseWorkspaceKey } from '../../../shared/workspace-scope'
-import { normalizeWorktreeLookupId } from './worktree-runtime-owner-index'
 import {
   findIndexedFolderWorkspaceOwner,
   findIndexedProjectGroupOwner,
   findIndexedRepoOwner,
   findIndexedRepoOwnerForHost,
   findIndexedWorktreeOwner,
-  findIndexedWorktreeOwnerForHost
+  findIndexedWorktreeOwnerForHost,
+  normalizeWorktreeLookupId
 } from './worktree-runtime-owner-index'
 import type { WorktreeRuntimeOwnerState } from './worktree-runtime-owner'
 
