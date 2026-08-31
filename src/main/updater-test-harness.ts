@@ -291,8 +291,12 @@ export function createUpdaterMocks(): UpdaterMocks {
     trackRealTimers()
   }
 
-  // Why: keeps the timer patch scoped to files that use the harness instead of the whole worker.
-  afterAll(clearTrackedRealTimers)
+  // Why: keeps the timer patch scoped to files that use the harness. Fakes are dropped first
+  // because a file ending on a fake clock fails the wrapper's identity guard, stranding it.
+  afterAll(() => {
+    vi.useRealTimers()
+    clearTrackedRealTimers()
+  })
 
   return {
     appMock,

@@ -9,6 +9,10 @@ import { vi } from 'vitest'
  *
  * Vitest arms its own test timeouts through `getSafeTimers()`, snapshotted at worker setup, so
  * nothing here can capture or cancel them.
+ *
+ * Scope: the `globalThis` timer functions only. `node:timers/promises` and `util.promisify`
+ * bypass this entirely, so an `await setTimeout(...)` added to `updater.ts` would reopen the
+ * leak without failing a test here.
  */
 
 /** Node hands back a `Timeout` object; other environments hand back an id. */
