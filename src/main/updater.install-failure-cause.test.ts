@@ -2,6 +2,7 @@ import os from 'node:os'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as TracerModule from './observability/tracer'
 import type * as UpdaterModule from './updater'
+import { loadUpdaterModule, warmUpdaterModule } from './updater-test-module-loader'
 
 const {
   appMock,
@@ -145,7 +146,7 @@ async function reachDownloaded(): Promise<typeof UpdaterModule> {
   // same tracer instance updater.ts will import.
   tracer = await import('./observability/tracer')
   tracer.setActiveSink(capturingSink())
-  const updater = await import('./updater')
+  const updater = await loadUpdaterModule()
 
   updater.setupAutoUpdater(mainWindow as never)
   await vi.waitFor(() => {
@@ -165,6 +166,8 @@ async function reachDownloaded(): Promise<typeof UpdaterModule> {
  * recovers the app state, so the payload has to survive on the status and the span has to exit
  * Failure — otherwise the only record of why the install never ran is destroyed (#11906).
  */
+warmUpdaterModule()
+
 describe('quitAndInstall failure carries the updater cause', () => {
   beforeEach(() => {
     vi.resetModules()
