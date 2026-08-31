@@ -151,8 +151,8 @@
     "@floating-ui/dom": "1.7.6",
     "@linear/sdk": "^82.1.0",
     "@parcel/watcher": "^2.5.6",
-    "@xterm/addon-serialize": "0.15.0-beta.287",
-    "@xterm/headless": "6.1.0-beta.287",
+    "@xterm/addon-serialize": "0.15.0-beta.300",
+    "@xterm/headless": "6.1.0-beta.302",
     "agent-browser": "~0.27.0",
     "electron-updater": "^6.8.9",
     "i18next": "^26.3.1",
@@ -211,13 +211,13 @@
     "@types/ssh2": "^1.15.5",
     "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^5.2.0",
-    "@xterm/addon-fit": "0.12.0-beta.287",
-    "@xterm/addon-ligatures": "0.11.0-beta.287",
-    "@xterm/addon-search": "0.17.0-beta.287",
-    "@xterm/addon-unicode11": "0.10.0-beta.287",
-    "@xterm/addon-web-links": "0.13.0-beta.287",
-    "@xterm/addon-webgl": "0.20.0-beta.286",
-    "@xterm/xterm": "6.1.0-beta.287",
+    "@xterm/addon-fit": "0.12.0-beta.300",
+    "@xterm/addon-ligatures": "0.11.0-beta.300",
+    "@xterm/addon-search": "0.17.0-beta.300",
+    "@xterm/addon-unicode11": "0.10.0-beta.300",
+    "@xterm/addon-web-links": "0.13.0-beta.300",
+    "@xterm/addon-webgl": "0.20.0-beta.299",
+    "@xterm/xterm": "6.1.0-beta.303",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
@@ -300,6 +300,28 @@
   },
   "packageManager": "pnpm@12.0.0+sha512.9e2e3dc3911995868dc94b8175c217c27e95408fa03b4a22749778f2b34f773b77cdd3b39ede8171b22fcd53be6a35342e9fac9948a68ef58df6488ce89a7e67",
   "reactDoctor": {
+    "ignore": {
+      "overrides": [
+        {
+          "files": [
+            "src/renderer/src/components/editor/combined-diff/review-controls/use-combined-diff-view-preferences.ts"
+          ],
+          "rules": [
+            "react-doctor/no-derived-state-effect"
+          ]
+        },
+        {
+          "files": [
+            "src/renderer/src/components/editor/combined-diff/browse-files/use-combined-diff-tree-navigation.ts",
+            "src/renderer/src/components/editor/combined-diff/load-sections/combined-diff-section-load-registry.ts",
+            "src/renderer/src/components/editor/combined-diff/review-controls/use-combined-diff-section-actions.ts"
+          ],
+          "rules": [
+            "react-doctor/no-ref-current-in-render"
+          ]
+        }
+      ]
+    },
     "rules": {
       "react-doctor/js-combine-iterations": "off"
     }

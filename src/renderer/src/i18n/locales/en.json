@@ -3901,6 +3901,16 @@
             "onDescription": "Keep this computer awake continuously",
             "autoDescription": "Stay awake while an agent is working",
             "offDescription": "Allow normal system sleep behavior"
+          },
+          "RuntimeHostStatusRow": {
+            "previous_connection_closed": "The previous connection closed",
+            "workspace_window_closed": "The workspace window is closed",
+            "checking_host": "Orca is checking whether this host is reachable",
+            "restoring_connection": "Orca is trying to restore the connection",
+            "host_unreachable": "Orca isn’t reachable on this host",
+            "contact_note": "The host may still be running; only the Orca connection is unavailable.",
+            "last_connected": "Last connected {{value0}}",
+            "reconnect_attempt": "Attempt {{value0}}"
           }
         }
       },
@@ -14239,8 +14249,9 @@
           "7e7ca60816": "changed files",
           "b6c3b84476": "Show file tree",
           "39f8007549": "Review conflicts",
-          "39e73e7181": "were excluded from this diff view.",
-          "689b99f8ad": "unresolved conflict",
+          "skippedConflictsExcluded": "{{count}} unresolved conflicts were excluded from this diff view.",
+          "skippedConflictsExcluded_one": "{{count}} unresolved conflict was excluded from this diff view.",
+          "skippedConflictsExcluded_other": "{{count}} unresolved conflicts were excluded from this diff view.",
           "820ec01f24": "Conflicted files are reviewed separately",
           "fd8892b120": "No changes to display",
           "eb5f40e49c": "This diff view excludes unresolved conflicts because the normal two-way diff pipeline is not conflict-safe.",
@@ -15259,6 +15270,18 @@
                       "c937229f19": "Screenshotted",
                       "1f5cb19034": "Annotation added"
                     }
+                  }
+                }
+              }
+            },
+            "browser": {
+              "page": {
+                "annotation": {
+                  "tray": {
+                    "09a7c1df70": "Edit annotation {{value0}}",
+                    "c16f932cb3": "Save",
+                    "024467ceac": "Cancel",
+                    "449d2c2629": "Annotation intent"
                   }
                 }
               }
@@ -16513,6 +16536,11 @@
     }
   },
   "components": {
+    "jiraUserPicker": {
+      "select": "Select {{value0}}",
+      "search": "Search users",
+      "empty": "No users found"
+    },
     "native-chat": {
       "composer": {
         "imageUnsupported": "Image paste is not supported for this agent.",
@@ -16572,7 +16600,10 @@
           "on": "On",
           "off": "Off"
         },
-        "pendingAttachmentLimit": "Too many attachments are waiting. Finish composing before attaching more."
+        "pendingAttachmentLimit": "Too many attachments are waiting. Finish composing before attaching more.",
+        "viewAttachment": "View image",
+        "imagePreview": "Full-size image preview",
+        "imagePreviewUnavailable": "Preview unavailable"
       },
       "tool": {
         "running": "Running…",

@@ -112,6 +112,7 @@ import {
   isAskUserQuestionTool,
   type AgentQuestionAnsweredInferenceRequest
 } from '../../shared/agent-question-answered-intent'
+import { canRegisterPaneKeyAlias, isOpaqueRemintedPaneKey } from '../../shared/pane-key-alias'
 import { parseLegacyNumericPaneKey, parsePaneKey } from '../../shared/stable-pane-id'
 import type { LegacyPaneKeyAliasEntry } from '../../shared/persisted-state-types'
 import {
@@ -200,6 +201,7 @@ export type AgentHookAuthorityAttestation = Readonly<{
 type StatusChangeListener = (statuses: AgentHookStatusChangeEntry[]) => void
 type ProviderSessionChangeListener = (providerSessions: AgentHookProviderSessionIdentity[]) => void
 type PaneStatusClearListener = (clear: AgentStatusClearIpcPayload) => void
+type StatusDropListener = (paneKey: string) => void
 type PaneKeyAliasPersistenceListener = (entries: LegacyPaneKeyAliasEntry[]) => void
 type PaneKeyAliasEntry = {
   stablePaneKey: string
@@ -704,6 +706,7 @@ export class AgentHookServer {
   private onClaudeStatusLine: ((event: ClaudeStatusLineRateLimits) => void) | null = null
   private onPaneStatusCleared: PaneStatusClearListener | null = null
   private paneStatusClearListeners = new Set<PaneStatusClearListener>()
+  private statusDropListeners = new Set<StatusDropListener>()
   private statusChangeListeners = new Set<StatusChangeListener>()
   private providerSessionChangeListeners = new Set<ProviderSessionChangeListener>()
   // Why: setListener is a single slot owned by the main-window fanout; the
@@ -860,6 +863,27 @@ export class AgentHookServer {
     this.paneStatusClearListeners.add(listener)
     return () => {
       this.paneStatusClearListeners.delete(listener)
+    }
+  }
+
+  /** Multi-subscriber tap on definitive live-row deletions. `dropStatusEntry` is a user
+   *  dismissal, so it never routes through the pane-status-clear fan-out — pane-owned
+   *  cleanup (synthetic spinners) still has to retire with the row it was driving. */
+  subscribeStatusDrop(listener: StatusDropListener): () => void {
+    this.statusDropListeners.add(listener)
+    return () => {
+      this.statusDropListeners.delete(listener)
+    }
+  }
+
+  private emitStatusDropped(paneKey: string): void {
+    for (const listener of this.statusDropListeners) {
+      // Why: matches every other fan-out here — one throwing subscriber must not strand the rest.
+      try {
+        listener(paneKey)
+      } catch (err) {
+        console.error('[agent-hooks] status-drop listener threw', err)
+      }
     }
   }
 
@@ -1828,13 +1852,18 @@ export class AgentHookServer {
     updatedAt = Date.now(),
     options?: { overwriteExisting?: boolean; authorityVerified?: boolean }
   ): void {
-    const legacy = parseLegacyNumericPaneKey(legacyPaneKey)
-    const stable = isValidPaneKey(stablePaneKey) ? parsePaneKey(stablePaneKey) : null
-    if (!legacy || !stable || legacy.tabId !== stable.tabId) {
+    const fromPaneKey = legacyPaneKey.trim()
+    const toPaneKey = stablePaneKey.trim()
+    if (!canRegisterPaneKeyAlias(fromPaneKey, toPaneKey)) {
       return
     }
-    const existing = this.legacyPaneKeyAliases.get(legacy.paneKey)
+    const existing = this.legacyPaneKeyAliases.get(fromPaneKey)
     if (existing && options?.overwriteExisting === false) {
+      return
+    }
+    // Why: remint tokens have no embedded tab id; first pane wins so a later spawn
+    // cannot steal leftover $$…:L$$ posts onto a different tab:leaf.
+    if (existing && existing.stablePaneKey !== toPaneKey && isOpaqueRemintedPaneKey(fromPaneKey)) {
       return
     }
     const normalizedPtyId =
@@ -1844,15 +1873,15 @@ export class AgentHookServer {
     const authorityVerified = options?.authorityVerified ?? false
     if (
       existing &&
-      existing.stablePaneKey === stablePaneKey &&
+      existing.stablePaneKey === toPaneKey &&
       existing.ptyId === (normalizedPtyId ?? null) &&
       existing.updatedAt === normalizedUpdatedAt &&
       existing.authorityVerified === authorityVerified
     ) {
       return
     }
-    this.legacyPaneKeyAliases.set(legacy.paneKey, {
-      stablePaneKey,
+    this.legacyPaneKeyAliases.set(fromPaneKey, {
+      stablePaneKey: toPaneKey,
       ptyId: normalizedPtyId ?? null,
       updatedAt: normalizedUpdatedAt,
       authorityVerified
@@ -2761,6 +2790,7 @@ export class AgentHookServer {
     }
     this.scheduleStatusPersist()
     this.notifyStatusChangeListeners()
+    this.emitStatusDropped(deleted.paneKey)
   }
 
   /** Retire panes whose owning process is certifiably dead.
