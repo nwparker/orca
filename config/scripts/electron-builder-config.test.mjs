@@ -534,6 +534,7 @@ describe('electron-builder config', () => {
       await writeFile(join(packageDir, 'dist', 'index.cjs'), 'module.exports = {}', 'utf8')
       await writeFile(join(packageDir, 'dist', 'index.d.ts'), 'export type Value = string', 'utf8')
       await writeFile(join(packageDir, 'dist', 'index.d.cts'), 'export type Value = string', 'utf8')
+      await writeFile(join(packageDir, 'dist', 'index.d.mts'), 'export type Value = string', 'utf8')
       await writeFile(join(packageDir, 'dist', 'index.d.cts.map'), '{}', 'utf8')
       await writeFile(join(packageDir, 'dist', 'index.d.mts.map'), '{}', 'utf8')
 

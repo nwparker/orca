@@ -442,19 +442,19 @@ function prunePackagedParcelWatcher(resourcesDir, electronPlatformName, electron
 // Why type declarations: they are compile-time only; the packaged app never resolves them.
 // Why source maps: they embed the original sources (megabytes for @linear/sdk alone) and
 // nothing in the packaged app turns on Node's source-map support, so they are never read.
-// Orca's own main-process maps live outside node_modules and ship as a separate artifact.
-function isPrunablePackagedRuntimeArtifact(filename) {
+// Orca's own main-process maps live outside node_modules and ship as a separate release artifact.
+function isPrunableTypeOrSourceMapArtifact(filename) {
   return TYPE_DECLARATION_ARTIFACT_RE.test(filename) || JS_SOURCE_MAP_ARTIFACT_RE.test(filename)
 }
 
-// Why one walk: both predicates are disjoint filename tests over the same tree, and a
-// second recursive traversal of packaged node_modules costs seconds for no extra deletions.
+// Why one walk: pruneMatchingFiles only ever deletes files, so passes over the same tree
+// commute — a second recursive traversal costs seconds for no extra deletions.
 function prunePackagedRuntimeTypeAndSourceMapArtifacts(resourcesDir) {
   const nodeModulesDir = join(resourcesDir, 'node_modules')
   if (!existsSync(nodeModulesDir)) {
     return
   }
-  pruneMatchingFiles(nodeModulesDir, isPrunablePackagedRuntimeArtifact)
+  pruneMatchingFiles(nodeModulesDir, isPrunableTypeOrSourceMapArtifact)
 }
 
 function prunePackagedSherpaOnnx(resourcesDir, electronPlatformName) {
