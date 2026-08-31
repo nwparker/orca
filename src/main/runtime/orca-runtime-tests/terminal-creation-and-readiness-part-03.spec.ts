@@ -270,6 +270,7 @@ describe('OrcaRuntimeService', () => {
       env: {
         ORCA_AGENT_HOOK_PORT: '1111',
         ORCA_AGENT_HOOK_TOKEN: 'stale-token',
+        ORCA_AGENT_HOOK_TRANSPORT: 'stale-transport',
         ORCA_AGENT_HOOK_ENDPOINT: '/tmp/stale-endpoint.env'
       },
       envToDelete: ['CODEX_HOME', 'ORCA_CODEX_HOME']
@@ -290,6 +291,7 @@ describe('OrcaRuntimeService', () => {
       })
     )
     expect(spawnCall?.env?.ORCA_AGENT_HOOK_ENDPOINT).toBeUndefined()
+    expect(spawnCall?.env?.ORCA_AGENT_HOOK_TRANSPORT).toBeUndefined()
     expect(spawnCall?.envToDelete).toEqual(['CODEX_HOME', 'ORCA_CODEX_HOME'])
   })
 
