@@ -37,8 +37,12 @@ export async function getBranchConflictKindViaExec(
   }
 
   try {
-    const remoteNames = await listRemoteNamesViaExec(exec)
-    const { stdout } = await exec(['for-each-ref', '--format=%(refname)', 'refs/remotes'])
+    // Both probes are read-only and independent. Keeping them in flight together
+    // removes one Git/WSL process-start interval from the common no-conflict path.
+    const [remoteNames, { stdout }] = await Promise.all([
+      listRemoteNamesViaExec(exec),
+      exec(['for-each-ref', '--format=%(refname)', 'refs/remotes'])
+    ])
     const hasRemoteConflict = stdout.split(/\r?\n/).some((ref) => {
       const trimmed = ref.trim()
       if (isAllowedRemoteBaseRef(trimmed, allowedBaseRef)) {
