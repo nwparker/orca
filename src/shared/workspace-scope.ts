@@ -26,6 +26,10 @@ export function getRawWorktreeIdFromWorkspaceSessionKey(value: string): string |
   if (scope?.type === 'folder') {
     return null
   }
+  // Do not reinterpret malformed scoped keys as legacy raw ids.
+  if (!scope && (value.startsWith('worktree:') || value.startsWith('folder:'))) {
+    return null
+  }
   return scope?.type === 'worktree' ? scope.worktreeId : value
 }
 

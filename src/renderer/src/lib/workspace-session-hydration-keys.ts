@@ -2,11 +2,9 @@ import type { ExecutionHostId } from '../../../shared/execution-host'
 import { parseExecutionHostId } from '../../../shared/execution-host'
 import type { WorkspaceKey } from '../../../shared/folder-workspace-types'
 import type { WorkspaceSessionState } from '../../../shared/workspace-session-state-types'
-import {
-  getRawWorktreeIdFromWorkspaceSessionKey,
-  parseWorkspaceKey
-} from '../../../shared/workspace-scope'
 import { getRepoIdFromWorktreeId } from '../../../shared/worktree/id'
+import { parseWorkspaceKey } from '../../../shared/workspace-scope'
+import { normalizeWorktreeLookupId } from './worktree-runtime-owner-index'
 
 export type WorkspaceSessionHydrationOptions = {
   additionalValidWorkspaceKeys?: readonly WorkspaceKey[]
@@ -135,7 +133,7 @@ export function collectWorktreeHydrationRepoIdsFromSession(
     if (typeof value !== 'string') {
       return
     }
-    const rawWorktreeId = getRawWorktreeIdFromWorkspaceSessionKey(value)
+    const rawWorktreeId = normalizeWorktreeLookupId(value)
     if (rawWorktreeId === null) {
       return
     }
