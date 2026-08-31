@@ -46,14 +46,22 @@ describe('addWorktree', () => {
   it('uses parallel checkout workers when refreshing a native Windows owner worktree', async () => {
     const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
     const worktreeListOutput = 'worktree C:\\repo\nHEAD abc123\nbranch refs/heads/main\n'
+    const localOid = '0123456789abcdef0123456789abcdef01234567'
+    const remoteOid = '89abcdef0123456789abcdef0123456789abcdef'
+    const batchFormat =
+      '%(refname)%00%(objectname)%00%(objecttype)%00%(*objectname)%00%(*objecttype)%00%(symref)'
     gitExecFileAsyncMock
       .mockResolvedValueOnce({ stdout: '0\t1\n' }) // rev-list drift
-      .mockResolvedValueOnce({ stdout: 'old-main\n' }) // local OID
-      .mockResolvedValueOnce({ stdout: 'remote-main\n' }) // remote OID
+      .mockResolvedValueOnce({
+        stdout:
+          `refs/heads/main\0${localOid}\0commit\0\0\0\n` +
+          `refs/remotes/origin/main\0${remoteOid}\0commit\0\0\0\n`
+      }) // batched local + remote OIDs
       .mockResolvedValueOnce({ stdout: '' }) // merge-base captured OIDs
       .mockResolvedValueOnce({ stdout: worktreeListOutput }) // worktree list during evaluation
       .mockResolvedValueOnce({ stdout: '' }) // status during evaluation
       .mockResolvedValueOnce({ stdout: worktreeListOutput }) // worktree list before mutation
+      .mockResolvedValueOnce({ stdout: 'git version 2.54.0.windows.1' }) // native Git capability probe
       .mockResolvedValueOnce({ stdout: '' }) // status before mutation
       .mockResolvedValueOnce({ stdout: '' }) // reset --hard
 
@@ -61,14 +69,52 @@ describe('addWorktree', () => {
       await expect(
         refreshLocalBaseRefForWorktreeCreate('C:\\repo', 'main', 'refs/remotes/origin/main')
       ).resolves.toMatchObject({ status: 'updated' })
-      expect(gitExecFileAsyncMock.mock.calls[8]?.[0]).toEqual([
+      const resetCall = gitExecFileAsyncMock.mock.calls.find(([args]) =>
+        (args as string[]).includes('reset')
+      )
+      expect(resetCall?.[0]).toEqual([
         '-c',
         'core.fscache=false',
         '-c',
         'checkout.workers=-1',
         'reset',
         '--hard',
-        'remote-main'
+        remoteOid
+      ])
+      expect(gitExecFileAsyncMock).toHaveBeenCalledWith(
+        ['for-each-ref', `--format=${batchFormat}`, 'refs/heads/main', 'refs/remotes/origin/main'],
+        expect.objectContaining({ cwd: 'C:\\repo' })
+      )
+    } finally {
+      platformSpy.mockRestore()
+    }
+  })
+
+  it('falls back to two rev-parse reads when the Windows OID batch is malformed', async () => {
+    const platformSpy = vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
+    const localOid = '0123456789abcdef0123456789abcdef01234567'
+    const remoteOid = '89abcdef0123456789abcdef0123456789abcdef'
+    gitExecFileAsyncMock
+      .mockResolvedValueOnce({ stdout: '0\t1\n' }) // rev-list drift
+      .mockResolvedValueOnce({ stdout: 'login banner\n' }) // malformed for-each-ref output
+      .mockResolvedValueOnce({ stdout: `${localOid}\n` }) // local rev-parse fallback
+      .mockResolvedValueOnce({ stdout: `${remoteOid}\n` }) // remote rev-parse fallback
+      .mockResolvedValueOnce({ stdout: '' }) // merge-base captured OIDs
+      .mockResolvedValueOnce({ stdout: 'worktree C:\\repo\nbranch refs/heads/develop\n' }) // list
+      .mockResolvedValueOnce({ stdout: '' }) // update-ref
+
+    try {
+      await expect(
+        refreshLocalBaseRefForWorktreeCreate('C:\\repo', 'main', 'refs/remotes/origin/main')
+      ).resolves.toMatchObject({ status: 'updated' })
+      expect(gitExecFileAsyncMock.mock.calls.map(([args]) => args[0])).toEqual([
+        'rev-list',
+        'for-each-ref',
+        'rev-parse',
+        'rev-parse',
+        'merge-base',
+        'worktree',
+        'update-ref'
       ])
     } finally {
       platformSpy.mockRestore()

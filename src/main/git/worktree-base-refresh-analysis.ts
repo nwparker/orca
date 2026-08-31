@@ -64,6 +64,130 @@ function parseRevListDrift(output: string): { ahead: number; behind: number } | 
   return counts.status === 'ok' ? { ahead: counts.ahead, behind: counts.behind } : null
 }
 
+// `rev-parse --verify` is a cheap read on POSIX, but each invocation still pays
+// a wsl.exe/Windows process start. Keep the format to atoms available in Git
+// 2.25 (Orca's baseline) and read both OIDs in one process on those hosts.
+const LOCAL_BASE_OID_BATCH_FORMAT =
+  '%(refname)%00%(objectname)%00%(objecttype)%00%(*objectname)%00%(*objecttype)%00%(symref)'
+
+type BatchedRefOidRecord = {
+  ref: string
+  objectName: string
+  objectType: string
+  peeledObjectName: string
+  peeledObjectType: string
+  symref: string
+}
+
+type BatchedRefOids = { localOid: string; remoteOid: string }
+
+function isWindowsOrWslExecution(options: GitWorktreeExecOptions): boolean {
+  return process.platform === 'win32' || Boolean(options.wslDistro?.trim())
+}
+
+function isPlausibleObjectName(value: string): boolean {
+  // SHA-1 is 40 chars and SHA-256 is 64; accepting a bounded even-length hex
+  // token leaves room for future Git object formats without accepting shell text.
+  return (
+    value.length >= 4 && value.length <= 128 && value.length % 2 === 0 && /^[0-9a-f]+$/i.test(value)
+  )
+}
+
+function parseBatchedRefOidRecords(stdout: string): BatchedRefOidRecord[] | undefined {
+  const records: BatchedRefOidRecord[] = []
+  for (const line of stdout.split(/\r?\n/)) {
+    if (line.length === 0) {
+      continue
+    }
+    const fields = line.split('\0')
+    // A shell banner, truncated output, or an old Git that echoed the format
+    // must never be mistaken for an OID. Fall back to the proven rev-parse path.
+    if (fields.length !== 6) {
+      return undefined
+    }
+    const [ref, objectName, objectType, peeledObjectName, peeledObjectType, symref] = fields
+    if (!ref || !objectName || !objectType || symref.includes('\n') || symref.includes('\r')) {
+      return undefined
+    }
+    if (!isPlausibleObjectName(objectName)) {
+      return undefined
+    }
+    if (peeledObjectName && !isPlausibleObjectName(peeledObjectName)) {
+      return undefined
+    }
+    records.push({ ref, objectName, objectType, peeledObjectName, peeledObjectType, symref })
+  }
+  return records
+}
+
+function objectNameForCommitRecord(record: BatchedRefOidRecord): string | undefined {
+  if (record.objectType === 'commit') {
+    return record.objectName
+  }
+  if (record.peeledObjectType === 'commit' && record.peeledObjectName) {
+    return record.peeledObjectName
+  }
+  return undefined
+}
+
+function parseBatchedRefOids(
+  stdout: string,
+  localRef: string,
+  remoteRef: string
+): BatchedRefOids | undefined {
+  const records = parseBatchedRefOidRecords(stdout)
+  if (!records) {
+    return undefined
+  }
+  const byRef = new Map<string, BatchedRefOidRecord>()
+  for (const record of records) {
+    // `for-each-ref refs/heads/foo` also returns refs below that prefix. Ignore
+    // those valid siblings and require an exact record for each requested ref.
+    if (record.ref !== localRef && record.ref !== remoteRef) {
+      continue
+    }
+    if (byRef.has(record.ref)) {
+      return undefined
+    }
+    byRef.set(record.ref, record)
+  }
+  const localRecord = byRef.get(localRef)
+  const remoteRecord = byRef.get(remoteRef)
+  const localOid = localRecord ? objectNameForCommitRecord(localRecord) : undefined
+  const remoteOid = remoteRecord ? objectNameForCommitRecord(remoteRecord) : undefined
+  return localOid && remoteOid ? { localOid, remoteOid } : undefined
+}
+
+async function resolveLocalAndRemoteOids(
+  exec: (args: string[]) => Promise<{ stdout: string }>,
+  localRef: string,
+  remoteRef: string,
+  options: GitWorktreeExecOptions
+): Promise<{ localOid: string; remoteOid: string }> {
+  if (isWindowsOrWslExecution(options)) {
+    try {
+      const { stdout } = await exec([
+        'for-each-ref',
+        `--format=${LOCAL_BASE_OID_BATCH_FORMAT}`,
+        localRef,
+        remoteRef
+      ])
+      const batched = parseBatchedRefOids(stdout, localRef, remoteRef)
+      if (batched) {
+        return batched
+      }
+    } catch {
+      // Fall through to the compatibility path below.
+    }
+  }
+
+  const [{ stdout: localOidOutput }, { stdout: remoteOidOutput }] = await Promise.all([
+    exec(['rev-parse', '--verify', `${localRef}^{commit}`]),
+    exec(['rev-parse', '--verify', `${remoteRef}^{commit}`])
+  ])
+  return { localOid: localOidOutput.trim(), remoteOid: remoteOidOutput.trim() }
+}
+
 export async function evaluateLocalBaseRefRefreshability(
   repoPath: string,
   baseBranch: string,
@@ -96,20 +220,15 @@ export async function evaluateLocalBaseRefRefreshability(
       // Why: a current local ref yields no update suggestion, so the advisory path skips OID resolution and owner inspection.
       return undefined
     }
-    // These probes read independent refs. Start them together so WSL-routed
-    // creates pay one process-start interval instead of two.
-    const [{ stdout: localOidOutput }, { stdout: remoteOidOutput }] = await Promise.all([
-      gitExecFileAsync(
-        ['rev-parse', '--verify', `${parsed.fullRef}^{commit}`],
-        gitExecOptions(repoPath, options)
-      ),
-      gitExecFileAsync(
-        ['rev-parse', '--verify', `${remoteTrackingRef}^{commit}`],
-        gitExecOptions(repoPath, options)
+    const { localOid: resolvedLocalOid, remoteOid: resolvedRemoteOid } =
+      await resolveLocalAndRemoteOids(
+        (args) => gitExecFileAsync(args, gitExecOptions(repoPath, options)),
+        parsed.fullRef,
+        remoteTrackingRef,
+        options
       )
-    ])
-    localOid = localOidOutput.trim()
-    remoteOid = remoteOidOutput.trim()
+    localOid = resolvedLocalOid
+    remoteOid = resolvedRemoteOid
     if (!localOid) {
       return { refreshable: false, result: { ...resultBase, status: 'skipped_not_fast_forward' } }
     }
