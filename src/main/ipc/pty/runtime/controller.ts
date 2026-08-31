@@ -53,7 +53,7 @@ export function installPtyRuntimeController(deps: PtyRuntimeControllerDeps): voi
     attach: (ptyId) => attachPtyFromRuntimeController(deps, ptyId),
     kill: (ptyId) => killPtyFromRuntimeController(deps, ptyId),
     retireRejectedPty: (ptyId, stopConfirmed) =>
-      retireRejectedPtyFromRuntimeController(deps, ptyId, stopConfirmed),
+      retireRejectedPtyFromRuntimeController(deps, ptyId, stopConfirmed === true),
     markReversibleStops: (ptyIds) => markReversibleStopsFromRuntimeController(deps, ptyIds),
     stopAndWait: (ptyId, opts) => stopAndWaitPtyFromRuntimeController(deps, ptyId, opts),
     getForegroundProcess: (ptyId) => getForegroundProcessFromRuntimeController(ptyId),
