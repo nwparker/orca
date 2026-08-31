@@ -86,25 +86,33 @@ export async function persistWorktreeCreationBase(
   }
 }
 
-export async function configurePushAutoSetupRemote(
+async function readPushAutoSetupRemote(
   worktreePath: string,
   options: GitWorktreeExecOptions
-): Promise<void> {
+): Promise<boolean> {
   try {
     // Why: `--get` (not `--local --get`) treats a value at any scope as an explicit user choice.
-    let alreadySet = false
-    try {
-      await gitExecFileAsync(['config', '--get', 'push.autoSetupRemote'], {
-        ...gitExecOptions(worktreePath, options)
-      })
-      alreadySet = true
-    } catch (readError) {
-      // Why: exit 1 means unset; other codes are real read failures and must not overwrite config.
-      const code = (readError as { code?: unknown })?.code
-      if (code !== 1) {
-        throw readError
-      }
+    await gitExecFileAsync(['config', '--get', 'push.autoSetupRemote'], {
+      ...gitExecOptions(worktreePath, options)
+    })
+    return true
+  } catch (readError) {
+    // Why: exit 1 means unset; other codes are real read failures and must not overwrite config.
+    const code = (readError as { code?: unknown })?.code
+    if (code === 1) {
+      return false
     }
+    throw readError
+  }
+}
+
+export async function configurePushAutoSetupRemote(
+  worktreePath: string,
+  options: GitWorktreeExecOptions,
+  probe: Promise<boolean> = readPushAutoSetupRemote(worktreePath, options)
+): Promise<void> {
+  try {
+    const alreadySet = await probe
     if (!alreadySet) {
       await gitExecFileAsync(['config', '--local', 'push.autoSetupRemote', 'true'], {
         ...gitExecOptions(worktreePath, options)
@@ -218,6 +226,16 @@ async function performAddWorktree(
     return localBaseRefRefresh ? { localBaseRefRefresh } : {}
   }
 
+  // The read-only push setting probe can overlap the base metadata write. The
+  // eventual `--local` write remains after both operations, so config locks do
+  // not race.
+  const pushAutoSetupRemoteProbe = effectiveBase && process.platform === 'win32'
+    ? readPushAutoSetupRemote(worktreePath, options)
+    : undefined
+  if (pushAutoSetupRemoteProbe) {
+    // Keep a rejection observed if an unexpected persistence failure exits early.
+    void pushAutoSetupRemoteProbe.catch(() => {})
+  }
   if (effectiveBase) {
     await persistWorktreeCreationBase(worktreePath, branch, effectiveBase, options)
   }
@@ -227,7 +245,7 @@ async function performAddWorktree(
   // `git push` create+set origin/<branch> (git >=2.37; older clients ignore it). `--local` on a
   // linked worktree writes the shared common-dir config (whole repo) — intentional and idempotent,
   // so it's warn-only and not rolled back on failure.
-  await configurePushAutoSetupRemote(worktreePath, options)
+  await configurePushAutoSetupRemote(worktreePath, options, pushAutoSetupRemoteProbe)
   return {
     ...(localBaseRefRefresh ? { localBaseRefRefresh } : {}),
     ...(localBaseRefUpdateSuggestion ? { localBaseRefUpdateSuggestion } : {})
