@@ -15,6 +15,7 @@ const { createStackedHostedReviewMock, detectInstalledAgentsWithShellPathHydrati
 const { detectRemoteAgentsMock, electronMocks, ensurePathWithinWorkspaceMock } = mocks
 const { findExistingWorktreeSymlinkPathsMock, forceDeleteLocalBranchMock } = mocks
 const { forgetLocalWatcherRemovalSnapshotMock, forgetRemoteWatcherRemovalSnapshotMock } = mocks
+const { describeCreatedWorktree } = mocks
 const { getActiveMultiplexerMock, getDefaultTabsLaunch, getEffectiveHooks } = mocks
 const { getEffectiveHooksFromConfig, getGitHubPRCheckDetailsMock, getGitHubPRChecksMock } = mocks
 const { getGitHubPRCommentsMock, getGitHubPRFileContentsMock, getGitHubWorkItemByOwnerRepoMock } =
@@ -28,8 +29,13 @@ const { getRepoSlugMock, getRepoUpstreamMock, getSshGitProviderMock, hasHooksFil
 const { installFakeAppEnvironment, invalidateAuthorizedRootsCacheMock } = mocks
 const { listGitHubAssignableUsersMock, listGitHubIssuesMock, listGitHubLabelsMock } = mocks
 const { listGitHubWorkItemsMock, listGitLabIssuesMock, listGitLabLabelsMock } = mocks
-const { listGitLabMergeRequestsMock, listGitLabTodosMock, listGitLabWorkItemsMock, listWorktrees } =
-  mocks
+const {
+  listGitLabMergeRequestsMock,
+  listGitLabTodosMock,
+  listGitLabWorkItemsMock,
+  listWorktrees,
+  listWorktreesSharedStrict
+} = mocks
 const { listWorktreesStrict, loadHooks, markCodexProjectTrustedMock } = mocks
 const { markCopilotFolderTrustedMock, markCursorWorkspaceTrustedMock, mergeGitHubPRMock } = mocks
 const { mergeGitLabMRMock, muxRequestMock, parseOrcaYaml, prepareLocalWorktreeRootForRepoMock } =
@@ -94,6 +100,12 @@ function resetRuntimeTestMocks(): void {
   forgetRemoteWatcherRemovalSnapshotMock.mockReset()
   vi.mocked(listWorktrees).mockResolvedValue(MOCK_GIT_WORKTREES)
   vi.mocked(listWorktreesStrict).mockResolvedValue(MOCK_GIT_WORKTREES)
+  vi.mocked(describeCreatedWorktree).mockResolvedValue(undefined)
+  // Why delegate: production reads both from one repo state, so a test that stubs the listing must
+  // see the same rows through the create path's strict read.
+  vi.mocked(listWorktreesSharedStrict).mockImplementation((repoPath, options) =>
+    options ? listWorktrees(repoPath, options) : listWorktrees(repoPath)
+  )
   scanLocalRepoWorktreesForResolutionMock
     .mockReset()
     .mockImplementation(async (repoPath: string, options: { wslDistro?: string }) => {

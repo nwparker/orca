@@ -29,7 +29,9 @@ import {
   addSparseWorktree,
   addWorktree,
   assertWorktreeCleanForRemoval,
+  describeCreatedWorktree,
   listWorktrees,
+  listWorktreesSharedStrict,
   listWorktreesStrict,
   removeWorktree
 } from '../../git/worktree'
@@ -180,6 +182,7 @@ export const exportedCreateHash = createHash
 export const exportedCreateRootDispatch = createRootDispatch
 export const exportedCreateSetupRunnerScript = createSetupRunnerScript
 export const exportedDescribe = describe
+export const exportedDescribeCreatedWorktree = describeCreatedWorktree
 export const exportedDetectAgentStatusFromTitle = detectAgentStatusFromTitle
 export const exportedExecFileSync = execFileSync
 export const exportedExpect = expect
@@ -204,6 +207,7 @@ export const exportedIt = it
 export const exportedJoin = join
 export const exportedListSubmodulePaths = listSubmodulePaths
 export const exportedListWorktrees = listWorktrees
+export const exportedListWorktreesSharedStrict = listWorktreesSharedStrict
 export const exportedListWorktreesStrict = listWorktreesStrict
 export const exportedLoadHooks = loadHooks
 export const exportedLocalWorktreeFilesystem = localWorktreeFilesystem
