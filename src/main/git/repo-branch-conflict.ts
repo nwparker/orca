@@ -35,6 +35,23 @@ function parseRefLines(stdout: string): Set<string> {
   )
 }
 
+function hasRemoteBranchConflict(
+  refs: Iterable<string>,
+  remoteNames: readonly string[],
+  branchName: string,
+  allowedBaseRef: string | undefined
+): boolean {
+  return [...refs].some((ref) => {
+    if (!ref.startsWith('refs/remotes/')) {
+      return false
+    }
+    if (isAllowedRemoteBaseRef(ref, allowedBaseRef)) {
+      return false
+    }
+    return resolveConfiguredRemoteBranchName(ref, remoteNames) === branchName
+  })
+}
+
 /** Run branch-conflict policy through the host that owns Git execution. */
 export async function getBranchConflictKindViaExec(
   exec: GitExec,
@@ -61,8 +78,26 @@ export async function getBranchConflictKindViaExec(
   } catch {
     // Keep the old local-first behavior if the combined read is unavailable.
     // A broken refs walk must not turn an existing local branch into a remote
-    // conflict (or make the create path throw).
-    return (await hasGitRefAsync(exec, localRef)) ? 'local' : null
+    // conflict (or make the create path throw). If local is absent, retry the
+    // old remote-only walk so a transient/unsupported multi-pattern command
+    // does not hide a real remote conflict.
+    if (await hasGitRefAsync(exec, localRef)) {
+      return 'local'
+    }
+    try {
+      const remoteNames = await remoteNamesPromise
+      const remoteRefs = await exec(['for-each-ref', '--format=%(refname)', 'refs/remotes'])
+      return hasRemoteBranchConflict(
+        parseRefLines(remoteRefs.stdout),
+        remoteNames,
+        branchName,
+        allowedBaseRef
+      )
+        ? 'remote'
+        : null
+    } catch {
+      return null
+    }
   }
 
   const refs = parseRefLines(stdout)
@@ -71,15 +106,12 @@ export async function getBranchConflictKindViaExec(
   }
 
   const remoteNames = await remoteNamesPromise
-  const hasRemoteConflict = [...refs].some((ref) => {
-    if (!ref.startsWith('refs/remotes/')) {
-      return false
-    }
-    if (isAllowedRemoteBaseRef(ref, allowedBaseRef)) {
-      return false
-    }
-    return resolveConfiguredRemoteBranchName(ref, remoteNames) === branchName
-  })
+  const hasRemoteConflict = hasRemoteBranchConflict(
+    refs,
+    remoteNames,
+    branchName,
+    allowedBaseRef
+  )
 
   return hasRemoteConflict ? 'remote' : null
 }
