@@ -98,9 +98,7 @@ describe('registerWorktreeHandlers', () => {
     setupWorktreeHandlers()
     strictListWorktreesMock.mockReset()
     strictListWorktreesMock.mockImplementation((repoPath: string, options?: unknown) =>
-      options === undefined
-        ? listWorktreesMock(repoPath)
-        : listWorktreesMock(repoPath, options)
+      options === undefined ? listWorktreesMock(repoPath) : listWorktreesMock(repoPath, options)
     )
   })
 
