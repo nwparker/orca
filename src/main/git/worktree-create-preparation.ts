@@ -6,57 +6,25 @@ import {
   notifyPreparedWorktreeMutation,
   persistWorktreeCreationBase,
   resolveWorktreeAddBaseContext,
-  resolveWorktreeAddTimeoutMs,
-  WORKTREE_REMOVAL_REGISTRATION_TIMEOUT_MS
+  resolveWorktreeAddTimeoutMs
 } from './worktree'
 import { hasWorktreeBaseCommitRef } from './worktree-base-ref-probe'
 import { gitExecFileAsync } from './runner'
 import { resolveLocalWindowsParallelCheckoutGitArgs } from './windows-parallel-checkout'
-import { isWslLinkedWorktreeGitRoutingCandidate } from './wsl-linked-worktree-git-routing'
+import {
+  gitExecOptions,
+  WORKTREE_REMOVAL_REGISTRATION_TIMEOUT_MS
+} from './worktree-operation-options'
+import {
+  gitCleanupOptions,
+  performDiscardPreparedWorktree,
+  removeFailedFinalization
+} from './worktree-create-preparation-cleanup'
+import {
+  invalidateWslLinkedWorktreeGitRouting,
+  isWslLinkedWorktreeGitRoutingCandidate
+} from './wsl-linked-worktree-git-routing'
 import { runWithGitReadCacheInvalidation } from './status'
-
-function gitExecOptions(
-  cwd: string,
-  options: GitWorktreeExecOptions
-): { cwd: string; wslDistro?: string; signal?: AbortSignal; timeout?: number } {
-  return {
-    cwd,
-    ...(options.wslDistro ? { wslDistro: options.wslDistro } : {}),
-    ...(options.signal ? { signal: options.signal } : {}),
-    ...(options.timeout ? { timeout: options.timeout } : {})
-  }
-}
-
-function gitCleanupOptions(
-  cwd: string,
-  options: GitWorktreeExecOptions
-): { cwd: string; wslDistro?: string; timeout?: number } {
-  // Why: cancellation must not strand a partially moved worktree; cleanup is bounded separately.
-  return gitExecOptions(cwd, { ...options, signal: undefined })
-}
-
-async function performDiscardPreparedWorktree(
-  repoPath: string,
-  worktreePath: string,
-  options: GitWorktreeExecOptions
-): Promise<void> {
-  const cleanupGitOptions = {
-    ...gitCleanupOptions(repoPath, options),
-    timeout: options.timeout ?? WORKTREE_REMOVAL_REGISTRATION_TIMEOUT_MS
-  }
-  try {
-    await gitExecFileAsync(
-      [...windowsLongPathGitArgs(repoPath), 'worktree', 'unlock', worktreePath],
-      cleanupGitOptions
-    )
-  } catch {
-    // It may be unlocked already or only partially registered.
-  }
-  await gitExecFileAsync(
-    [...windowsLongPathGitArgs(repoPath), 'worktree', 'remove', '--force', worktreePath],
-    cleanupGitOptions
-  )
-}
 
 export async function prepareWorktreeCreateCheckout(
   repoPath: string,
@@ -90,6 +58,9 @@ export async function prepareWorktreeCreateCheckout(
           ],
           { ...gitExecOptions(repoPath, options), timeout: resolveWorktreeAddTimeoutMs() }
         )
+        // The add just created the marker; clear any speculative miss/backoff
+        // before routing the materializing reset.
+        invalidateWslLinkedWorktreeGitRouting(worktreePath)
         // Why: reset materializes files without running user post-checkout hooks before submit.
         const checkoutArgs = isWslLinkedWorktreeGitRoutingCandidate(worktreePath, options.wslDistro)
           ? await resolveLocalWindowsParallelCheckoutGitArgs(worktreePath, {
@@ -163,34 +134,6 @@ export async function unlockPreparedWorktree(
   }
 }
 
-async function removeFailedFinalization(
-  repoPath: string,
-  cleanupPath: string,
-  branch: string,
-  moved: boolean,
-  options: GitWorktreeExecOptions
-): Promise<void> {
-  let branchAttached = false
-  if (moved) {
-    try {
-      const { stdout } = await gitExecFileAsync(
-        ['symbolic-ref', '--short', 'HEAD'],
-        gitCleanupOptions(cleanupPath, options)
-      )
-      branchAttached = stdout.trim() === branch
-    } catch {
-      // Detached or no longer readable.
-    }
-  }
-  await performDiscardPreparedWorktree(repoPath, cleanupPath, options).catch(() => {})
-  if (branchAttached) {
-    await gitExecFileAsync(
-      ['branch', '-D', '--', branch],
-      gitCleanupOptions(repoPath, options)
-    ).catch(() => {})
-  }
-}
-
 export async function finalizePreparedWorktree(
   repoPath: string,
   preparedPath: string,
@@ -260,6 +203,8 @@ export async function finalizePreparedWorktree(
           gitExecOptions(repoPath, finalizeGitOptions)
         )
         moved = true
+        invalidateWslLinkedWorktreeGitRouting(preparedPath)
+        invalidateWslLinkedWorktreeGitRouting(worktreePath)
         // Resolve after the move so a newly-created `.git` marker can select
         // the correct WSL/host route for the final checkout.
         const targetParallelCheckoutArgs = await resolveLocalWindowsParallelCheckoutGitArgs(
@@ -294,6 +239,10 @@ export async function finalizePreparedWorktree(
           gitExecOptions(repoPath, finalizeGitOptions)
         )
       } catch (error) {
+        // A failed move may have changed one marker before returning an error;
+        // clear both route keys before best-effort rollback probes them.
+        invalidateWslLinkedWorktreeGitRouting(preparedPath)
+        invalidateWslLinkedWorktreeGitRouting(worktreePath)
         await removeFailedFinalization(
           repoPath,
           moved ? worktreePath : preparedPath,

@@ -1,5 +1,6 @@
 import { gitExecFileAsync } from './runner'
 import { runWithGitReadCacheInvalidation } from './status'
+import { invalidateWslLinkedWorktreeGitRouting } from './wsl-linked-worktree-git-routing'
 import { bumpWorktreeScanGeneration } from './worktree-scan-cache'
 
 /**
@@ -18,6 +19,10 @@ export async function moveWorktree(
       gitExecFileAsync(['worktree', 'move', oldPath, newPath], { cwd: repoPath })
     )
   } finally {
+    // A failed move can still leave Git's marker state changed; force both
+    // paths to be re-probed before a subsequent command.
+    invalidateWslLinkedWorktreeGitRouting(oldPath)
+    invalidateWslLinkedWorktreeGitRouting(newPath)
     bumpWorktreeScanGeneration(repoPath)
   }
 }

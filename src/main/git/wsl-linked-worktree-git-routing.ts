@@ -1,9 +1,18 @@
-import * as fsPromises from 'node:fs/promises'
 import { win32 } from 'node:path'
-import type { Stats } from 'node:fs'
+import {
+  defaultWslLinkedWorktreeRoutingFileSystem,
+  probeWslLinkedWorktreeGitRoute,
+  type WslLinkedWorktreeRoutingFileSystem
+} from './wsl-linked-worktree-git-route-probe'
+
+export {
+  parseWindowsLinkedGitdir,
+  type WslLinkedWorktreeRoutingFileSystem
+} from './wsl-linked-worktree-git-route-probe'
 
 type CachedRoute = { usesHostGit: boolean; known: boolean; expiresAt: number }
 type TransientRouteFailure = { count: number; retryAfter: number }
+type PendingRoute = { promise: Promise<boolean>; token: symbol }
 
 // Bounds stale routing after delete/recreate while amortizing async parent walks on slow storage.
 export const WSL_LINKED_WORKTREE_ROUTE_TTL_MS = 30_000
@@ -15,7 +24,7 @@ export const WSL_LINKED_WORKTREE_ROUTE_RETRY_BASE_MS = 1_000
 const WSL_LINKED_WORKTREE_ROUTE_RETRY_MAX_MS = 30_000
 
 const routeByCwd = new Map<string, CachedRoute>()
-const pendingRoutes = new Map<string, Promise<boolean>>()
+const pendingRoutes = new Map<string, PendingRoute>()
 const transientFailuresByCwd = new Map<string, TransientRouteFailure>()
 const activeProbeCountByCwd = new Map<string, number>()
 let activeProbeCount = 0
@@ -46,57 +55,11 @@ function cachedRoute(cwd: string, now: number): CachedRoute | undefined {
   return exact
 }
 
-export function parseWindowsLinkedGitdir(content: string): string | null {
-  const firstLine = content.split(/\r?\n/, 1)[0] ?? ''
-  return firstLine.match(/^gitdir:\s*([A-Za-z]:[/\\].*?)\s*$/i)?.[1] ?? null
-}
-
-export type WslLinkedWorktreeRoutingFileSystem = {
-  stat(path: string): Promise<Pick<Stats, 'isDirectory' | 'isFile'>>
-  readFile(path: string): Promise<string>
-}
-
 export type WslLinkedWorktreeRoutingOptions = {
   platform?: NodeJS.Platform
   fileSystem?: WslLinkedWorktreeRoutingFileSystem
   now?: () => number
   signal?: AbortSignal
-}
-
-const defaultFileSystem: WslLinkedWorktreeRoutingFileSystem = {
-  stat: (path) => fsPromises.stat(path),
-  readFile: (path) => fsPromises.readFile(path, 'utf8')
-}
-
-async function shouldUseHostGit(
-  cwd: string,
-  fileSystem: WslLinkedWorktreeRoutingFileSystem
-): Promise<{ usesHostGit: boolean; known: boolean }> {
-  let candidate = cwd
-  const driveRoot = win32.parse(candidate).root
-  while (true) {
-    const markerPath = win32.join(candidate, '.git')
-    try {
-      const marker = await fileSystem.stat(markerPath)
-      if (marker.isDirectory()) {
-        return { usesHostGit: false, known: true }
-      }
-      if (marker.isFile()) {
-        const usesHostGit = parseWindowsLinkedGitdir(await fileSystem.readFile(markerPath)) !== null
-        return { usesHostGit, known: usesHostGit }
-      }
-      return { usesHostGit: false, known: false }
-    } catch (error) {
-      const code = error && typeof error === 'object' ? (error as NodeJS.ErrnoException).code : null
-      if (code !== 'ENOENT' && code !== 'ENOTDIR') {
-        throw error
-      }
-    }
-    if (candidate === driveRoot) {
-      return { usesHostGit: false, known: false }
-    }
-    candidate = win32.dirname(candidate)
-  }
 }
 
 function rememberRoute(cwd: string, usesHostGit: boolean, now: number): boolean {
@@ -118,6 +81,24 @@ function rememberRoute(cwd: string, usesHostGit: boolean, now: number): boolean 
 
 function routingAbortError(): Error {
   return Object.assign(new Error('The operation was aborted.'), { name: 'AbortError' })
+}
+
+/**
+ * Drop route state after Git materializes, moves, or removes a worktree.
+ *
+ * A missing `.git` marker is retried with backoff.  Creation can make that
+ * marker appear during the backoff window, so leave no stale route (or stale
+ * in-flight probe) for the next Git command to inherit.
+ */
+export function invalidateWslLinkedWorktreeGitRouting(cwd: string): void {
+  const normalizedCwd = normalize(cwd)
+  routeByCwd.delete(normalizedCwd)
+  transientFailuresByCwd.delete(normalizedCwd)
+  if (pendingRoutes.has(normalizedCwd)) {
+    // Let the old probe settle in the background, but don't let callers join it
+    // after the filesystem mutation.
+    pendingRoutes.delete(normalizedCwd)
+  }
 }
 
 function rememberTransientFailure(cwd: string, now: number): void {
@@ -201,7 +182,8 @@ function waitForRouteUnlessAborted(
 function discoverRoute(
   cwd: string,
   fileSystem: WslLinkedWorktreeRoutingFileSystem,
-  now: () => number
+  now: () => number,
+  isCurrent: () => boolean
 ): Promise<boolean> {
   return new Promise((resolve) => {
     const generation = routeProbeGeneration
@@ -212,7 +194,7 @@ function discoverRoute(
       }
       settled = true
       clearTimeout(timer)
-      if (generation !== routeProbeGeneration) {
+      if (generation !== routeProbeGeneration || !isCurrent()) {
         resolve(false)
         return
       }
@@ -234,7 +216,7 @@ function discoverRoute(
     )
     timer.unref()
     const releaseProbe = trackRouteProbe(cwd)
-    void shouldUseHostGit(cwd, fileSystem).then(
+    void probeWslLinkedWorktreeGitRoute(cwd, fileSystem).then(
       ({ usesHostGit, known }) => {
         releaseProbe()
         finish(usesHostGit, known, true)
@@ -253,7 +235,7 @@ export async function prepareWslLinkedWorktreeGitRouting(
   options: WslLinkedWorktreeRoutingOptions = {}
 ): Promise<boolean> {
   const platform = options.platform ?? process.platform
-  const fileSystem = options.fileSystem ?? defaultFileSystem
+  const fileSystem = options.fileSystem ?? defaultWslLinkedWorktreeRoutingFileSystem
   const now = options.now ?? Date.now
   if (!isWslLinkedWorktreeGitRoutingCandidate(cwd, wslDistro, platform)) {
     return false
@@ -268,18 +250,24 @@ export async function prepareWslLinkedWorktreeGitRouting(
   }
   const pending = pendingRoutes.get(normalizedCwd)
   if (pending) {
-    return waitForRouteUnlessAborted(pending, options.signal)
+    return waitForRouteUnlessAborted(pending.promise, options.signal)
   }
   if (!canStartRouteProbe(normalizedCwd, now())) {
     return false
   }
-  const discovery = discoverRoute(normalizedCwd, fileSystem, now)
+  const token = Symbol('wsl-linked-route-probe')
+  const discovery = discoverRoute(
+    normalizedCwd,
+    fileSystem,
+    now,
+    () => pendingRoutes.get(normalizedCwd)?.token === token
+  )
   const route = discovery.finally(() => {
-    if (pendingRoutes.get(normalizedCwd) === route) {
+    if (pendingRoutes.get(normalizedCwd)?.token === token) {
       pendingRoutes.delete(normalizedCwd)
     }
   })
-  pendingRoutes.set(normalizedCwd, route)
+  pendingRoutes.set(normalizedCwd, { promise: route, token })
   return waitForRouteUnlessAborted(route, options.signal)
 }
 

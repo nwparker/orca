@@ -7,6 +7,7 @@ import { windowsLongPathGitArgs } from '../../shared/windows-long-path-git-args'
 import { gitExecFileAsync } from './runner'
 import { resolveLocalWindowsParallelCheckoutGitArgs } from './windows-parallel-checkout'
 import { runWithGitReadCacheInvalidation } from './status'
+import { invalidateWslLinkedWorktreeGitRouting } from './wsl-linked-worktree-git-routing'
 import {
   getLocalBaseRefUpdateSuggestionForWorktreeCreate,
   refreshLocalBaseRefForWorktreeCreate
@@ -225,11 +226,17 @@ async function performAddWorktree(
   // Keep all checkout tuning before the subcommand, after the async probe has
   // had a chance to overlap base resolution.
   args.splice(windowsLongPathGitArgs(repoPath).length, 0, ...(await parallelCheckoutArgsPromise))
-  await gitExecFileAsync(args, {
-    ...gitExecOptions(repoPath, options),
-    // Why: resolve per call — hoisting this to a module const would freeze the override at import.
-    timeout: resolveWorktreeAddTimeoutMs()
-  })
+  try {
+    await gitExecFileAsync(args, {
+      ...gitExecOptions(repoPath, options),
+      // Why: resolve per call — hoisting this to a module const would freeze the override at import.
+      timeout: resolveWorktreeAddTimeoutMs()
+    })
+  } finally {
+    // Git may have materialized the target's `.git` marker even when it reports
+    // a late failure; never carry a pre-create miss/backoff into follow-ups.
+    invalidateWslLinkedWorktreeGitRouting(worktreePath)
+  }
 
   if (options.checkoutExistingBranch) {
     return localBaseRefRefresh ? { localBaseRefRefresh } : {}

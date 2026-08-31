@@ -26840,7 +26840,7 @@ export class OrcaRuntimeService {
       settings,
       getWorktreeMirrorDistro(this.requireStore(), repo)
     )
-    // WSL mirror roots require a `wsl.exe` home probe. Start it before the Git
+    // WSL mirror roots require a host-home probe. Start it before the Git
     // preflight so root discovery overlaps branch/base validation and does not
     // block the runtime event loop on the submit path.
     const workspaceRootPromise = computeWorkspaceRootAsync(repo.path, worktreePathSettings)
@@ -26870,11 +26870,18 @@ export class OrcaRuntimeService {
         ...localWorktreeGitOptionArgs
       )
       remoteTrackingBaseByBranch.set(candidate, pending)
-      void pending.catch(() => {
-        if (remoteTrackingBaseByBranch.get(candidate) === pending) {
-          remoteTrackingBaseByBranch.delete(candidate)
+      void pending.then(
+        (result) => {
+          if (result === null && remoteTrackingBaseByBranch.get(candidate) === pending) {
+            remoteTrackingBaseByBranch.delete(candidate)
+          }
+        },
+        () => {
+          if (remoteTrackingBaseByBranch.get(candidate) === pending) {
+            remoteTrackingBaseByBranch.delete(candidate)
+          }
         }
-      })
+      )
       return pending
     }
     const addProjectGitOptions = (options?: AddWorktreeOptions): AddWorktreeOptions | undefined => {

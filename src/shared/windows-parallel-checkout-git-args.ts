@@ -72,7 +72,7 @@ export function windowsParallelCheckoutGitArgs(
   // routing may deliberately send a C:\ path back to host Git even when a
   // distro override is present.
   if (
-    parseWslUncPath(cwd) ||
+    (options.nativeWindowsGit !== true && parseWslUncPath(cwd)) ||
     options.nativeWindowsGit === false ||
     (options.nativeWindowsGit !== true &&
       wslDistro &&

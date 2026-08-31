@@ -92,7 +92,11 @@ export async function addWorktreeOp(
       : undefined
 
   // Why: a Windows SSH host hits the same MAX_PATH ceiling as a local Windows checkout.
-  const longPathArgs = windowsLongPathGitArgs(targetDir, platform)
+  const longPathArgs = windowsLongPathGitArgs(targetDir, platform, {
+    // GitHandler executes the relay command with the host's native git.exe;
+    // do not reinterpret a client-supplied WSL UNC path as a WSL invocation.
+    nativeWindowsGit: platform === 'win32'
+  })
   const parallelCheckoutArgs = await parallelCheckoutArgsPromise
   const args = checkoutExistingBranch
     ? [...longPathArgs, ...parallelCheckoutArgs, 'worktree', 'add', targetDir, branchName]

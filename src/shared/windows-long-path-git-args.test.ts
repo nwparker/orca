@@ -22,6 +22,14 @@ describe('windowsLongPathGitArgs', () => {
     }
   )
 
+  it('honors an explicit native Windows route for a WSL UNC spelling', () => {
+    expect(
+      windowsLongPathGitArgs('\\\\wsl.localhost\\Ubuntu\\home\\dev\\repo', 'win32', {
+        nativeWindowsGit: true
+      })
+    ).toEqual(['-c', 'core.longpaths=true'])
+  })
+
   it('never mutates the shared constant', () => {
     const first = windowsLongPathGitArgs('C:\\repo', 'win32')
     first.push('--bogus')
@@ -95,6 +103,17 @@ describe('windowsParallelCheckoutGitArgs', () => {
       '-c',
       'checkout.workers=-1'
     ])
+  })
+
+  it('honors an explicit native Windows route for a WSL UNC path', () => {
+    expect(
+      windowsParallelCheckoutGitArgs(
+        '\\\\wsl.localhost\\Ubuntu\\home\\dev\\repo',
+        'win32',
+        'Ubuntu',
+        { nativeWindowsGit: true }
+      )
+    ).toEqual(['-c', 'core.fscache=false', '-c', 'checkout.workers=-1'])
   })
 
   it.each(['relative\\repo', '/home/dev/repo', '\\repo'])(

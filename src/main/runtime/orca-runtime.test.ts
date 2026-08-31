@@ -5604,6 +5604,69 @@ describe('OrcaRuntimeService', () => {
     }
   })
 
+  it('retries a remote-tracking base lookup after an unresolved probe', async () => {
+    const runtime = new OrcaRuntimeService(store)
+    const createdWorktree = {
+      path: '/tmp/workspaces/retry-null-base',
+      head: 'base-sha',
+      branch: 'retry-null-base',
+      isBare: false,
+      isMainWorktree: false
+    }
+    const repo = { ...store.getRepos()[0], worktreeBaseRef: 'origin/master' }
+    const getReposSpy = vi.spyOn(store, 'getRepos').mockReturnValue([repo] as never)
+    const remoteBase = {
+      remote: 'origin',
+      branch: 'master',
+      ref: 'refs/remotes/origin/master',
+      base: 'origin/master'
+    }
+    const resolveRemoteTrackingBaseSpy = vi
+      .spyOn(runtime, 'resolveRemoteTrackingBase')
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(remoteBase)
+    computeWorktreePathMock.mockReturnValue(createdWorktree.path)
+    ensurePathWithinWorkspaceMock.mockReturnValue(createdWorktree.path)
+    vi.mocked(addWorktree).mockResolvedValueOnce({})
+    vi.mocked(listWorktrees).mockResolvedValue([createdWorktree])
+    const gitSpy = vi.spyOn(gitRunner, 'gitExecFileAsync').mockImplementation(async (args) => {
+      if (args[0] === 'rev-parse' && args.includes('refs/remotes/origin/master^{commit}')) {
+        return { stdout: 'base-sha\n', stderr: '' }
+      }
+      if (args[0] === 'rev-parse' && args.includes('--git-common-dir')) {
+        return { stdout: '/tmp/repo/.git\n', stderr: '' }
+      }
+      if (args.includes('fetch')) {
+        return { stdout: '', stderr: '' }
+      }
+      return { stdout: '', stderr: '' }
+    })
+    try {
+      await expect(
+        runtime.createManagedWorktree({
+          repoSelector: 'id:repo-1',
+          name: 'retry-null-base'
+        })
+      ).resolves.toMatchObject({ worktree: { path: createdWorktree.path } })
+
+      expect(resolveRemoteTrackingBaseSpy).toHaveBeenCalledTimes(2)
+      expect(resolveRemoteTrackingBaseSpy).toHaveBeenNthCalledWith(
+        1,
+        TEST_REPO_PATH,
+        'origin/master'
+      )
+      expect(resolveRemoteTrackingBaseSpy).toHaveBeenNthCalledWith(
+        2,
+        TEST_REPO_PATH,
+        'origin/master'
+      )
+    } finally {
+      getReposSpy.mockRestore()
+      resolveRemoteTrackingBaseSpy.mockRestore()
+      gitSpy.mockRestore()
+    }
+  })
+
   it('creates a runtime local worktree from a slash-named local branch matching a remote prefix', async () => {
     const runtime = new OrcaRuntimeService(store)
     const createdWorktree = {

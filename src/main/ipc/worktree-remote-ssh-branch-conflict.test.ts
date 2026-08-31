@@ -20,7 +20,15 @@ function providerAnswering(answers: {
       return { stdout: `${answers.localBranchHead}\n`, stderr: '' }
     }
     if (args[0] === 'for-each-ref') {
-      return { stdout: `${answers.remoteRefs.join('\n')}\n`, stderr: '' }
+      // The local implementation batches the exact local-head pattern with
+      // the remote scan. Model that extra pattern while retaining the
+      // remote-only response used by the fallback path.
+      const localPattern = args.find((arg) => arg.startsWith('refs/heads/'))
+      const refs =
+        localPattern && answers.localBranchHead
+          ? [localPattern, ...answers.remoteRefs]
+          : answers.remoteRefs
+      return { stdout: `${refs.join('\n')}\n`, stderr: '' }
     }
     throw new Error(`unexpected git ${args.join(' ')}`)
   })

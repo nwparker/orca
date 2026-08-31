@@ -158,7 +158,7 @@ describe('registerWorktreeHandlers', () => {
     })
   })
 
-  it('reuses the remote-tracking base probe used to validate a persisted base', async () => {
+  it('retries an unresolved remote-tracking base probe before final create', async () => {
     const remoteBase = {
       remote: 'origin',
       branch: 'master',
@@ -173,8 +173,11 @@ describe('registerWorktreeHandlers', () => {
       addedAt: 0,
       worktreeBaseRef: 'origin/master'
     })
-    runtimeStub.resolveRemoteTrackingBase.mockResolvedValue(remoteBase)
+    runtimeStub.resolveRemoteTrackingBase
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(remoteBase)
     runtimeStub.hasRemoteTrackingRef.mockResolvedValue(true)
+    gitExecFileAsyncMock.mockResolvedValue({ stdout: 'base-sha\n', stderr: '' })
     listWorktreesMock.mockResolvedValue([
       {
         path: '/workspace/reused-base-probe',
@@ -192,7 +195,7 @@ describe('registerWorktreeHandlers', () => {
       })
     ).resolves.toMatchObject({ worktree: { path: '/workspace/reused-base-probe' } })
 
-    expect(runtimeStub.resolveRemoteTrackingBase).toHaveBeenCalledTimes(1)
+    expect(runtimeStub.resolveRemoteTrackingBase).toHaveBeenCalledTimes(2)
     expect(runtimeStub.resolveRemoteTrackingBase).toHaveBeenCalledWith(
       '/workspace/repo',
       'origin/master'

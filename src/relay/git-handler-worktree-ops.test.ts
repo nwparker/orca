@@ -174,7 +174,7 @@ describe('addWorktreeOp', () => {
     ])
   })
 
-  it('omits the long-path option on a WSL UNC target on a Windows SSH host', async () => {
+  it('keeps native Windows tuning for a WSL UNC target on a Windows SSH host', async () => {
     const git = vi.fn<GitExec>(async () => ({ stdout: '', stderr: '' }))
 
     await addWorktreeOp(
@@ -188,9 +188,15 @@ describe('addWorktreeOp', () => {
       'win32'
     )
 
-    // A WSL UNC path is executed by WSL Git, not Git for Windows. Keep the
-    // native Windows checkout tuning off this route.
+    // The relay's GitHandler always executes native Git on the SSH host. A
+    // UNC spelling in client params must not override that execution boundary.
     expect(git.mock.calls[0][0]).toEqual([
+      '-c',
+      'core.longpaths=true',
+      '-c',
+      'core.fscache=false',
+      '-c',
+      'checkout.workers=-1',
       'worktree',
       'add',
       '\\\\wsl.localhost\\Ubuntu\\home\\dev\\repo-feature',

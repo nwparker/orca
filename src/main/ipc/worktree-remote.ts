@@ -2011,7 +2011,7 @@ export async function createLocalWorktree(
     settings,
     getWorktreeMirrorDistro(store, repo)
   )
-  // WSL mirror roots require a `wsl.exe` home probe. Start it before the Git
+  // WSL mirror roots require a host-home probe. Start it before the Git
   // preflight so that probe overlaps branch/base validation and never blocks
   // the Electron main thread on the submit path.
   const workspaceRootPromise = computeWorkspaceRootAsync(repo.path, worktreePathSettings)
@@ -2049,13 +2049,21 @@ export async function createLocalWorktree(
       ...localWorktreeGitOptionArgs
     )
     remoteTrackingBaseProbes.set(baseBranch, pending)
-    // A transient runtime failure should not poison a later retry in this
-    // create; preserve the existing rejection behavior while dropping it.
-    void pending.catch(() => {
-      if (remoteTrackingBaseProbes.get(baseBranch) === pending) {
-        remoteTrackingBaseProbes.delete(baseBranch)
+    // A transient runtime failure or an unresolved base should not poison a
+    // later retry in this create; preserve rejection behavior while dropping
+    // either non-success result.
+    void pending.then(
+      (result) => {
+        if (result === null && remoteTrackingBaseProbes.get(baseBranch) === pending) {
+          remoteTrackingBaseProbes.delete(baseBranch)
+        }
+      },
+      () => {
+        if (remoteTrackingBaseProbes.get(baseBranch) === pending) {
+          remoteTrackingBaseProbes.delete(baseBranch)
+        }
       }
-    })
+    )
     return pending
   }
 

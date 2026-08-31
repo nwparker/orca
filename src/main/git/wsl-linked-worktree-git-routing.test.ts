@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   parseWindowsLinkedGitdir,
   getWslLinkedWorktreeGitRoute,
+  invalidateWslLinkedWorktreeGitRouting,
   prepareWslLinkedWorktreeGitRouting,
   resetWslLinkedWorktreeGitRoutingForTests,
   seedWslLinkedWorktreeGitRoutingForTests,
@@ -118,6 +119,67 @@ describe('getWslLinkedWorktreeGitRoute', () => {
       })
     ).resolves.toBe(true)
     expect(getWslLinkedWorktreeGitRoute(cwd, 'Ubuntu', 'win32')).toBe('host')
+  })
+
+  it('invalidates a repeated miss so marker appearance is not held by backoff', async () => {
+    let markerExists = false
+    const stat = vi.fn<WslLinkedWorktreeRoutingFileSystem['stat']>(async () => {
+      if (!markerExists) {
+        throw Object.assign(new Error('missing'), { code: 'ENOENT' })
+      }
+      return fileMarker
+    })
+    const fileSystem: WslLinkedWorktreeRoutingFileSystem = {
+      stat,
+      readFile: vi.fn(async () => 'gitdir: C:/main/.git/worktrees/linked\n')
+    }
+    const cwd = String.raw`C:\new-target`
+    const prepare = (): Promise<boolean> =>
+      prepareWslLinkedWorktreeGitRouting(cwd, 'Ubuntu', {
+        platform: 'win32',
+        fileSystem
+      })
+
+    // The second miss enters the exponential retry window.
+    await expect(prepare()).resolves.toBe(false)
+    await expect(prepare()).resolves.toBe(false)
+    const statCallsBeforeInvalidation = stat.mock.calls.length
+
+    markerExists = true
+    invalidateWslLinkedWorktreeGitRouting(cwd)
+    await expect(prepare()).resolves.toBe(true)
+
+    expect(stat.mock.calls.length).toBeGreaterThan(statCallsBeforeInvalidation)
+    expect(getWslLinkedWorktreeGitRoute(cwd, 'Ubuntu', 'win32')).toBe('host')
+  })
+
+  it('does not let an invalidated in-flight probe repopulate the route cache', async () => {
+    let releaseOldProbe: ((marker: typeof fileMarker) => void) | undefined
+    const oldProbe = new Promise<typeof fileMarker>((resolve) => {
+      releaseOldProbe = resolve
+    })
+    const fileSystem: WslLinkedWorktreeRoutingFileSystem = {
+      stat: vi
+        .fn<WslLinkedWorktreeRoutingFileSystem['stat']>()
+        .mockReturnValueOnce(oldProbe)
+        .mockResolvedValueOnce(directoryMarker),
+      readFile: vi.fn(async () => 'gitdir: C:/main/.git/worktrees/linked\n')
+    }
+    const cwd = String.raw`C:\new-target`
+    const oldRoute = prepareWslLinkedWorktreeGitRouting(cwd, 'Ubuntu', {
+      platform: 'win32',
+      fileSystem
+    })
+
+    invalidateWslLinkedWorktreeGitRouting(cwd)
+    const currentRoute = prepareWslLinkedWorktreeGitRouting(cwd, 'Ubuntu', {
+      platform: 'win32',
+      fileSystem
+    })
+    await expect(currentRoute).resolves.toBe(false)
+    releaseOldProbe?.(fileMarker)
+    await expect(oldRoute).resolves.toBe(false)
+    expect(getWslLinkedWorktreeGitRoute(cwd, 'Ubuntu', 'win32')).toBe('wsl')
   })
 })
 
