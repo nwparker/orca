@@ -71,7 +71,7 @@ describe('CodexSubagentPollScheduler', () => {
     vi.useFakeTimers()
     const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout')
     const seen: string[] = []
-    const scheduler = new CodexSubagentPollScheduler(1_000, (key, value) => {
+    const scheduler = new CodexSubagentPollScheduler<string>(1_000, (key, value) => {
       seen.push(`${key}:${value}`)
     })
 
