@@ -22,9 +22,13 @@ export type TerminalOutputBeforeWrite = (data: string) => void
 type TerminalBacklogRecoveryRequest = () => boolean
 export type TerminalOutputParsedCallback = () => void
 type ForegroundRefreshSyncResolver = () => boolean
+export type ForegroundTerminalOutputPriority = 'active' | 'visible-background'
+export type TerminalOutputQueuePriority = 'high' | 'visible-background' | 'background'
 
 export type WriteTerminalOutputOptions = {
   foreground: boolean
+  /** Keep inactive visible redraws cooperative while preserving foreground writes. */
+  foregroundPriority?: ForegroundTerminalOutputPriority
   beforeWrite?: TerminalOutputBeforeWrite
   onParsed?: TerminalOutputParsedCallback
   /** Parse-deferred delivery ACK (terminal-pty-ack-gate). MUST be invoked when the chunk is parsed OR discarded by any drop path; fire-once, so double invocation is safe but omission permanently shrinks main's in-flight window. */
@@ -72,7 +76,7 @@ export type QueueEntry = {
   queuedChars: number
   onBackgroundBacklogDropped?: () => void
   backgroundBacklogDropped: boolean
-  highPriority: boolean
+  priority: TerminalOutputQueuePriority
   foregroundHold: boolean
   foregroundHoldSafetyDelayMs: number
   foregroundCoalesce: boolean
@@ -113,8 +117,65 @@ export const FOREGROUND_BACKLOG_WARNING =
   '\x18\x1b[0m\r\n[Orca skipped a burst of terminal output because the backlog grew too large.]\r\n'
 export const ALWAYS_REFRESH_FOREGROUND_SYNCHRONOUSLY = (): boolean => true
 
+export function isHighPriorityQueueEntry(
+  entry: Pick<QueueEntry, 'priority' | 'queuedChars'>
+): boolean {
+  return entry.priority === 'high' || entry.queuedChars > LARGE_BACKLOG_CHARS
+}
+
+export function isCooperativeQueueEntry(entry: Pick<QueueEntry, 'priority'>): boolean {
+  // Size promotion selects a larger throughput budget but does not make a
+  // visible/background queue eligible to monopolize the renderer.
+  return entry.priority !== 'high'
+}
+
+export function queuedEntryDrainDelay(
+  entry: Pick<QueueEntry, 'priority' | 'queuedChars'>,
+  wasEmpty = false
+): number {
+  if (isHighPriorityQueueEntry(entry)) {
+    return 0
+  }
+  // Give the first visible redraw a prompt paint, then pace the remaining
+  // flood at one frame-sized cadence.
+  if (wasEmpty && entry.priority === 'visible-background') {
+    return 0
+  }
+  return entry.priority === 'visible-background'
+    ? BACKGROUND_DRAIN_INTERVAL_MS
+    : BACKGROUND_FLUSH_DELAY_MS
+}
+
+export function promoteForegroundQueuePriority(
+  entry: QueueEntry,
+  requested: ForegroundTerminalOutputPriority,
+  forceHighPriority: boolean
+): void {
+  if (forceHighPriority || requested === 'active' || entry.priority === 'high') {
+    entry.priority = 'high'
+    return
+  }
+  entry.priority = 'visible-background'
+}
+
 export const queuedByTerminal = new Map<TerminalOutputTarget, QueueEntry>()
 setTerminalOutputDebugQueueReader(() => queuedByTerminal.values())
+// A continuously active pane must stay responsive, but it cannot monopolize
+// the shared renderer forever when other panes have pending output.
+let cooperativeTurnPending = false
+
+export function isCooperativeTurnPending(): boolean {
+  return cooperativeTurnPending
+}
+
+export function setCooperativeTurnPending(value: boolean): void {
+  cooperativeTurnPending = value
+}
+
+export function resetCooperativeTurnPending(): void {
+  cooperativeTurnPending = false
+}
+
 const backlogRecoveryByTerminal = new WeakMap<
   TerminalOutputTarget,
   TerminalBacklogRecoveryRequest
@@ -239,6 +300,9 @@ export function discardTerminalOutput(terminal: TerminalOutputTarget): void {
   }
   discardInFlightTerminalOutputAckCredits(terminal)
   queuedByTerminal.delete(terminal)
+  if (queuedByTerminal.size === 0) {
+    resetCooperativeTurnPending()
+  }
   discardForegroundRenderSettle(terminal)
   // Why: cancel the watch without masquerading as parse progress; replay guards use real completions to tell slow from wedged.
   cancelTerminalWriteStallWatch(terminal)

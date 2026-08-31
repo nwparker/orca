@@ -10,7 +10,7 @@ function createEntry(): QueueEntry {
     chunkIndex: 0,
     queuedChars: 0,
     backgroundBacklogDropped: false,
-    highPriority: false,
+    priority: 'background',
     foregroundHold: false,
     foregroundHoldSafetyDelayMs: 0,
     foregroundCoalesce: false,

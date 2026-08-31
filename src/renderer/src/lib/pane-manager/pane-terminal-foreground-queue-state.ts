@@ -22,7 +22,12 @@ export function createQueueEntry(
     queuedChars: 0,
     onBackgroundBacklogDropped: options.onBackgroundBacklogDropped,
     backgroundBacklogDropped: false,
-    highPriority: true,
+    priority:
+      options.foreground && options.foregroundPriority === 'visible-background'
+        ? 'visible-background'
+        : options.foreground
+          ? 'high'
+          : 'background',
     foregroundHold: false,
     foregroundHoldSafetyDelayMs: FOREGROUND_HOLD_SAFETY_DELAY_MS,
     foregroundCoalesce: false,

@@ -27,6 +27,7 @@ import {
   queuedByTerminal,
   requestRegisteredTerminalBacklogRecovery,
   scheduleDrain,
+  resetCooperativeTurnPending,
   type TerminalOutputTarget
 } from './pane-terminal-output-queue-registry'
 
@@ -40,6 +41,9 @@ export function flushTerminalOutputImpl(
     return
   }
   queuedByTerminal.delete(terminal)
+  if (queuedByTerminal.size === 0) {
+    resetCooperativeTurnPending()
+  }
   if (isTerminalWritePipelineCertifiedDead(terminal)) {
     discardDetachedQueueEntry(entry)
     discardTerminalOutput(terminal)
@@ -54,7 +58,7 @@ export function flushTerminalOutputImpl(
     entry.chunks.length = 0
     entry.chunkIndex = 0
     entry.queuedChars = 0
-    entry.highPriority = false
+    entry.priority = 'background'
     clearForegroundRelease(entry)
     recordQueueDebugPressure()
     return
@@ -119,11 +123,11 @@ export function flushTerminalOutputImpl(
     queuedWrite = takeQueuedChunk(entry, BACKGROUND_CHUNK_CHARS)
   }
   if (hasQueuedChunks(entry)) {
-    entry.highPriority = true
+    entry.priority = 'high'
     queuedByTerminal.set(terminal, entry)
     scheduleDrain(0)
   } else {
-    entry.highPriority = false
+    entry.priority = 'background'
     clearForegroundRelease(entry)
   }
   recordQueueDebugPressure()

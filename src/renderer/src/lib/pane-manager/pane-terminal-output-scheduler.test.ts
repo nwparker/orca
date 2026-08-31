@@ -137,6 +137,225 @@ describe('pane terminal output scheduler', () => {
     )
   })
 
+  it('keeps inactive visible redraws foreground while using the cooperative lane', async () => {
+    vi.useFakeTimers()
+    const { writeTerminalOutput } = await loadScheduler()
+    const terminal = createForegroundTerminal()
+    const redraw = '\x1b[2J\x1b[Hinactive redraw'
+
+    writeTerminalOutput(terminal, redraw, {
+      foreground: true,
+      foregroundPriority: 'visible-background',
+      latencySensitive: false,
+      forceForegroundRefresh: true
+    })
+
+    expect(terminal.write).not.toHaveBeenCalled()
+    vi.advanceTimersByTime(0)
+
+    expect(terminal.write).toHaveBeenCalledWith(redraw, expect.any(Function))
+    expect(terminal._core.refresh).toHaveBeenCalledWith(0, terminal.rows - 1, true)
+  })
+
+  it('paces subsequent inactive visible redraws after the first prompt frame', async () => {
+    vi.useFakeTimers()
+    const { writeTerminalOutput } = await loadScheduler()
+    const terminal = createForegroundTerminal()
+    const chunk = 'x'.repeat(16 * 1024)
+
+    for (let index = 0; index < 3; index += 1) {
+      writeTerminalOutput(terminal, chunk, {
+        foreground: true,
+        foregroundPriority: 'visible-background',
+        latencySensitive: false
+      })
+    }
+    vi.advanceTimersByTime(0)
+    expect(terminal.write).toHaveBeenCalledTimes(2)
+
+    vi.advanceTimersByTime(15)
+    expect(terminal.write).toHaveBeenCalledTimes(2)
+    vi.advanceTimersByTime(1)
+    expect(terminal.write).toHaveBeenCalledTimes(3)
+  })
+
+  it('drains active foreground output before an inactive visible redraw', async () => {
+    vi.useFakeTimers()
+    const { writeTerminalOutput } = await loadScheduler()
+    const inactive = createForegroundTerminal()
+    const active = createForegroundTerminal()
+
+    writeTerminalOutput(inactive, 'inactive', {
+      foreground: true,
+      foregroundPriority: 'visible-background',
+      latencySensitive: false
+    })
+    writeTerminalOutput(active, 'active', {
+      foreground: true,
+      foregroundPriority: 'active',
+      latencySensitive: false
+    })
+
+    vi.advanceTimersByTime(0)
+
+    expect(active.write).toHaveBeenCalledWith('active', expect.any(Function))
+    expect(inactive.write).not.toHaveBeenCalled()
+
+    vi.advanceTimersByTime(16)
+    expect(inactive.write).toHaveBeenCalledWith('inactive', expect.any(Function))
+  })
+
+  it('does not let a sustained active flood starve a queued background pane', async () => {
+    vi.useFakeTimers()
+    const { writeTerminalOutput } = await loadScheduler()
+    const active = createTerminal()
+    const background = createTerminal()
+    const chunk = 'a'.repeat(16 * 1024)
+
+    writeTerminalOutput(background, 'background', { foreground: false })
+    for (let index = 0; index < 32; index += 1) {
+      writeTerminalOutput(active, chunk, {
+        foreground: true,
+        latencySensitive: false
+      })
+    }
+
+    vi.advanceTimersByTime(0)
+    expect(active.write).toHaveBeenCalledTimes(8)
+    expect(background.write).not.toHaveBeenCalled()
+
+    vi.advanceTimersByTime(4)
+    expect(active.write).toHaveBeenCalledTimes(8)
+    expect(background.write).toHaveBeenCalledWith('background', expect.any(Function))
+  })
+
+  it('gives a large visible redraw a cooperative turn during sustained active output', async () => {
+    vi.useFakeTimers()
+    const { writeTerminalOutput } = await loadScheduler()
+    const active = createForegroundTerminal()
+    const visible = createForegroundTerminal()
+    const activeChunk = 'a'.repeat(16 * 1024)
+    const visibleChunk = 'v'.repeat(16 * 1024)
+
+    for (let index = 0; index < 33; index += 1) {
+      writeTerminalOutput(visible, visibleChunk, {
+        foreground: true,
+        foregroundPriority: 'visible-background',
+        latencySensitive: false
+      })
+    }
+    for (let index = 0; index < 64; index += 1) {
+      writeTerminalOutput(active, activeChunk, {
+        foreground: true,
+        latencySensitive: false
+      })
+    }
+
+    vi.advanceTimersByTime(0)
+    expect(active.write).toHaveBeenCalledTimes(8)
+    expect(visible.write).not.toHaveBeenCalled()
+
+    vi.advanceTimersByTime(4)
+    expect(active.write).toHaveBeenCalledTimes(8)
+    expect(visible.write).toHaveBeenCalledTimes(1)
+    expect(visible.write).toHaveBeenCalledWith(visibleChunk, expect.any(Function))
+  })
+
+  it('chooses a small visible turn before a size-promoted hidden backlog', async () => {
+    vi.useFakeTimers()
+    const { writeTerminalOutput } = await loadScheduler()
+    const active = createTerminal()
+    const hidden = createTerminal()
+    const visible = createForegroundTerminal()
+    const chunk = 'h'.repeat(16 * 1024)
+
+    for (let index = 0; index < 40; index += 1) {
+      writeTerminalOutput(hidden, chunk, { foreground: false })
+    }
+    writeTerminalOutput(visible, 'visible redraw', {
+      foreground: true,
+      foregroundPriority: 'visible-background',
+      latencySensitive: false
+    })
+    for (let index = 0; index < 32; index += 1) {
+      writeTerminalOutput(active, chunk, {
+        foreground: true,
+        latencySensitive: false
+      })
+    }
+
+    vi.advanceTimersByTime(0)
+    vi.advanceTimersByTime(4)
+
+    expect(visible.write).toHaveBeenCalledWith('visible redraw', expect.any(Function))
+    expect(hidden.write).not.toHaveBeenCalled()
+  })
+
+  it('promotes an inactive visible queue when active output follows it without reordering', async () => {
+    vi.useFakeTimers()
+    const { writeTerminalOutput } = await loadScheduler()
+    const terminal = createForegroundTerminal()
+
+    writeTerminalOutput(terminal, 'inactive-before', {
+      foreground: true,
+      foregroundPriority: 'visible-background',
+      latencySensitive: false
+    })
+    writeTerminalOutput(terminal, 'active-after', {
+      foreground: true,
+      foregroundPriority: 'active',
+      latencySensitive: true,
+      forceForegroundRefresh: true
+    })
+
+    vi.advanceTimersByTime(0)
+
+    expect(terminal.write).toHaveBeenCalledWith('inactive-beforeactive-after', expect.any(Function))
+    expect(terminal._core.refresh).toHaveBeenCalledWith(0, terminal.rows - 1, true)
+  })
+
+  it('keeps later latency-sensitive inactive output on the visible cooperative lane', async () => {
+    vi.useFakeTimers()
+    const { writeTerminalOutput } = await loadScheduler()
+    const terminal = createForegroundTerminal()
+
+    writeTerminalOutput(terminal, '\x1b[2Jinactive-redraw', {
+      foreground: true,
+      foregroundPriority: 'visible-background',
+      latencySensitive: false
+    })
+    writeTerminalOutput(terminal, 'tiny-followup', {
+      foreground: true,
+      foregroundPriority: 'visible-background',
+      latencySensitive: true
+    })
+
+    vi.advanceTimersByTime(0)
+    expect(terminal.write).toHaveBeenCalledWith(
+      '\x1b[2Jinactive-redrawtiny-followup',
+      expect.any(Function)
+    )
+  })
+
+  it('keeps a large visible-background backlog on the throughput budget', async () => {
+    vi.useFakeTimers()
+    const { writeTerminalOutput } = await loadScheduler()
+    const terminal = createTerminal()
+    const chunk = 'x'.repeat(16 * 1024)
+
+    for (let index = 0; index < 33; index += 1) {
+      writeTerminalOutput(terminal, chunk, {
+        foreground: true,
+        foregroundPriority: 'visible-background',
+        latencySensitive: false
+      })
+    }
+
+    vi.advanceTimersByTime(0)
+
+    expect(terminal.write).toHaveBeenCalledTimes(8)
+  })
+
   it('defers background write preparation until coalesced output drains', async () => {
     vi.useFakeTimers()
     const { writeTerminalOutput } = await loadScheduler()

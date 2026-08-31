@@ -13,10 +13,10 @@ import {
   ALWAYS_REFRESH_FOREGROUND_SYNCHRONOUSLY,
   BACKGROUND_BACKLOG_WARNING,
   FOREGROUND_BACKLOG_WARNING,
-  LARGE_BACKLOG_CHARS,
   MAX_BACKGROUND_QUEUE_CHUNKS,
   fireQueuedAckCredits,
   getTerminalOutputMaxQueueChars,
+  isHighPriorityQueueEntry,
   queuedByTerminal,
   type QueueEntry,
   type TerminalOutputBeforeWrite
@@ -27,7 +27,7 @@ export function discardDetachedQueueEntry(entry: QueueEntry): void {
   entry.chunks.length = 0
   entry.chunkIndex = 0
   entry.queuedChars = 0
-  entry.highPriority = false
+  entry.priority = 'background'
   clearForegroundRelease(entry)
 }
 
@@ -75,7 +75,7 @@ export function replaceBacklogWithWarning(
   entry.chunkIndex = 0
   entry.queuedChars = warning.length
   entry.backgroundBacklogDropped = true
-  entry.highPriority = true
+  entry.priority = 'high'
   entry.foregroundHold = false
   if (debugEnabled && shouldNotify) {
     debugState.droppedBacklogCount++
@@ -93,10 +93,7 @@ export function hasQueuedChunks(entry: QueueEntry): boolean {
 
 export function hasHighPriorityBacklog(): boolean {
   for (const entry of queuedByTerminal.values()) {
-    if (
-      isEntryDrainable(entry) &&
-      (entry.highPriority || entry.queuedChars > LARGE_BACKLOG_CHARS)
-    ) {
+    if (isEntryDrainable(entry) && isHighPriorityQueueEntry(entry)) {
       return true
     }
   }

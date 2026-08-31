@@ -112,7 +112,7 @@ export function writeQueuedChunk(entry: QueueEntry): 'foreground' | 'background'
   if (!queuedWrite) {
     return null
   }
-  const pacer = entry.highPriority ? makeParseClockPacer() : undefined
+  const pacer = entry.priority === 'high' ? makeParseClockPacer() : undefined
   const ackCreditsParsed = registerTerminalOutputAckCredits(entry.terminal, queuedWrite.ackCredits)
   // Why armed BEFORE the write: a wedged WriteBuffer (issue #2836) or disposed xterm (6.1.0-beta.287) never runs the parsed callback, so the watch must be live first to catch it.
   armTerminalWriteStallWatch(entry.terminal, {

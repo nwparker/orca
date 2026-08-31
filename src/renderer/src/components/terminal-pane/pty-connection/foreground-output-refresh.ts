@@ -210,8 +210,11 @@ export function bindForegroundOutputRefresh(session: ConnectPanePtySession): voi
     return activePane ? activePane.id === session.pane.id : true
   }
 
-  session.isLatencySensitiveForegroundOutput = function (data: string): boolean {
-    if (!session.isActiveSplitPane()) {
+  session.isLatencySensitiveForegroundOutput = function (
+    data: string,
+    activeSplitPane: boolean = session.isActiveSplitPane()
+  ): boolean {
+    if (!activeSplitPane) {
       // Why: many visible split panes each emit tiny TUI frames; a shared budget keeps them live without letting aggregate xterm work starve typing in the active pane.
       if (data.includes('\x1b[')) {
         return false

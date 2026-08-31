@@ -75,6 +75,17 @@ export function bindWritePtyOutputToXterm(session: ConnectPanePtySession): void 
     // Why: ConPTY can split a submit repaint's closing chunk past the 150ms window, so treat a keystroke-opened frame as latency-sensitive to drain it fast (~16-32ms) not the 1s coalesce fallback.
     const synchronizedFrameLatencySensitive =
       synchronizedForegroundOutput && session.synchronizedForegroundFrameInteractive
+    // Read pane activity once per chunk; the classifier and scheduler lane
+    // must agree even if focus changes while this callback is running.
+    const activeSplitPane =
+      foreground && !parseHiddenStartupOutput ? session.isActiveSplitPane() : false
+    const latencySensitive =
+      !foreground || parseHiddenStartupOutput
+        ? true
+        : synchronizedFrameLatencySensitive ||
+          session.isLatencySensitiveForegroundOutput(data, activeSplitPane)
+    const foregroundPriority =
+      foregroundOutput && foreground && !activeSplitPane ? 'visible-background' : 'active'
     session.synchronizedForegroundOutputActive = nextSynchronizedForegroundOutputActive
     session.synchronizedForegroundMarkerTail = synchronizedForegroundScan?.markerTail ?? ''
     writeTerminalOutput(session.pane.terminal, data, {
@@ -83,10 +94,8 @@ export function bindWritePtyOutputToXterm(session: ConnectPanePtySession): void 
       // Why: every scheduler write claims one child so a split delivery is credited only after all children parse or discard.
       ackCredit: takeCurrentTerminalDeliveryCredit() ?? undefined,
       onBackgroundBacklogDropped: session.markHiddenOutputRestoreNeeded,
-      latencySensitive:
-        !foreground || parseHiddenStartupOutput
-          ? true
-          : synchronizedFrameLatencySensitive || session.isLatencySensitiveForegroundOutput(data),
+      latencySensitive,
+      foregroundPriority,
       forceForegroundRefresh:
         foregroundOutput &&
         (synchronizedForegroundOutput ||

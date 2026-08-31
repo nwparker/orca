@@ -19,7 +19,11 @@ import {
 } from './pane-terminal-output-scheduler-debug'
 import { flushTerminalOutputImpl } from './pane-terminal-output-flusher'
 import { composeParsedCallback, composeWriteFailureCallback } from './pane-terminal-output-pipeline'
-import { queueCapExceeded, replaceBacklogWithWarning } from './pane-terminal-output-queue-backlog'
+import {
+  hasQueuedChunks,
+  queueCapExceeded,
+  replaceBacklogWithWarning
+} from './pane-terminal-output-queue-backlog'
 import {
   FOREGROUND_HOLD_SAFETY_DELAY_MS,
   LATENCY_SENSITIVE_FOREGROUND_COALESCE_DELAY_MS,
@@ -33,10 +37,10 @@ import {
 } from './pane-terminal-foreground-queue-state'
 import {
   ALWAYS_REFRESH_FOREGROUND_SYNCHRONOUSLY,
-  BACKGROUND_FLUSH_DELAY_MS,
   FOREGROUND_BACKLOG_WARNING,
-  LARGE_BACKLOG_CHARS,
   discardTerminalOutput,
+  promoteForegroundQueuePriority,
+  queuedEntryDrainDelay,
   queuedByTerminal,
   scheduleDrain,
   type TerminalOutputTarget,
@@ -62,11 +66,23 @@ export function writeTerminalOutputImpl(
 
   if (options.foreground) {
     const entry = queuedByTerminal.get(terminal)
-    if (entry?.highPriority || options.coalesceForeground || options.holdForeground) {
+    const foregroundPriority = options.foregroundPriority ?? 'active'
+    if (
+      entry?.priority === 'high' ||
+      entry?.priority === 'visible-background' ||
+      (foregroundPriority === 'visible-background' && options.latencySensitive === false) ||
+      options.coalesceForeground ||
+      options.holdForeground
+    ) {
       const queued = entry ?? createQueueEntry(terminal, options)
       queued.onBackgroundBacklogDropped = options.onBackgroundBacklogDropped
-      queued.highPriority = true
+      promoteForegroundQueuePriority(
+        queued,
+        foregroundPriority,
+        options.coalesceForeground === true || options.holdForeground === true
+      )
       queuedByTerminal.set(terminal, queued)
+      const wasEmpty = !hasQueuedChunks(queued)
       enqueueChunk(queued, data, {
         foreground: true,
         forceForegroundRefresh: options.forceForegroundRefresh,
@@ -130,11 +146,11 @@ export function writeTerminalOutputImpl(
       }
       queued.foregroundHold = false
       clearForegroundRelease(queued)
-      scheduleDrain(0)
+      scheduleDrain(queuedEntryDrainDelay(queued, wasEmpty))
       return
     }
     if (entry && entry.queuedChars > SYNC_FOREGROUND_FLUSH_CHARS) {
-      entry.highPriority = true
+      entry.priority = 'high'
       enqueueChunk(entry, data, {
         foreground: true,
         forceForegroundRefresh: options.forceForegroundRefresh,
@@ -163,8 +179,9 @@ export function writeTerminalOutputImpl(
         queuedByTerminal.set(terminal, queued)
       } else {
         queued.onBackgroundBacklogDropped = options.onBackgroundBacklogDropped
-        queued.highPriority = true
       }
+      promoteForegroundQueuePriority(queued, foregroundPriority, false)
+      const wasEmpty = !hasQueuedChunks(queued)
       enqueueChunk(queued, data, {
         foreground: true,
         forceForegroundRefresh: options.forceForegroundRefresh,
@@ -183,7 +200,7 @@ export function writeTerminalOutputImpl(
         replaceBacklogWithWarning(queued, FOREGROUND_BACKLOG_WARNING)
       }
       // Why: visible command floods are throughput work, not keystroke echo — queue behind a zero-delay drain so one IPC callback can't pin the renderer while input/paint wait.
-      scheduleDrain(0)
+      scheduleDrain(queuedEntryDrainDelay(queued, wasEmpty))
       return
     }
     flushTerminalOutputImpl(terminal)
@@ -223,7 +240,6 @@ export function writeTerminalOutputImpl(
   let entry = queuedByTerminal.get(terminal)
   if (!entry) {
     entry = createQueueEntry(terminal, options)
-    entry.highPriority = false
     queuedByTerminal.set(terminal, entry)
   } else {
     entry.onBackgroundBacklogDropped = options.onBackgroundBacklogDropped
@@ -240,7 +256,5 @@ export function writeTerminalOutputImpl(
     debugState.backgroundEnqueueCount++
   }
   // Why: letting every non-focused pane call xterm.write immediately spawns a WriteBuffer timer per pane, starving the focused terminal on the shared renderer thread.
-  scheduleDrain(
-    entry.highPriority || entry.queuedChars > LARGE_BACKLOG_CHARS ? 0 : BACKGROUND_FLUSH_DELAY_MS
-  )
+  scheduleDrain(queuedEntryDrainDelay(entry))
 }
