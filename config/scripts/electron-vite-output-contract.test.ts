@@ -73,6 +73,14 @@ function failBootstrapWithBanner(options: {
 }
 
 describe('Electron Vite output contract', () => {
+  it('minifies main and renderer bundles while preserving function names', () => {
+    // Minification trims shipped JavaScript; names keep startup diagnostics actionable.
+    expect(electronViteConfig.main?.build?.minify).toBe('esbuild')
+    expect(electronViteConfig.main?.esbuild?.keepNames).toBe(true)
+    expect(electronViteConfig.renderer?.build?.minify).toBe('esbuild')
+    expect(electronViteConfig.renderer?.esbuild?.keepNames).toBe(true)
+  })
+
   it('keeps main-process and plain-Node entries at stable CommonJS paths', () => {
     const output = electronViteConfig.main?.build?.rollupOptions?.output
     if (!output || Array.isArray(output)) {
