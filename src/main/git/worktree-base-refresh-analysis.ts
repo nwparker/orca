@@ -96,19 +96,23 @@ export async function evaluateLocalBaseRefRefreshability(
       // Why: a current local ref yields no update suggestion, so the advisory path skips OID resolution and owner inspection.
       return undefined
     }
-    const { stdout: localOidOutput } = await gitExecFileAsync(
-      ['rev-parse', '--verify', `${parsed.fullRef}^{commit}`],
-      gitExecOptions(repoPath, options)
-    )
+    // These probes read independent refs. Start them together so WSL-routed
+    // creates pay one process-start interval instead of two.
+    const [{ stdout: localOidOutput }, { stdout: remoteOidOutput }] = await Promise.all([
+      gitExecFileAsync(
+        ['rev-parse', '--verify', `${parsed.fullRef}^{commit}`],
+        gitExecOptions(repoPath, options)
+      ),
+      gitExecFileAsync(
+        ['rev-parse', '--verify', `${remoteTrackingRef}^{commit}`],
+        gitExecOptions(repoPath, options)
+      )
+    ])
     localOid = localOidOutput.trim()
+    remoteOid = remoteOidOutput.trim()
     if (!localOid) {
       return { refreshable: false, result: { ...resultBase, status: 'skipped_not_fast_forward' } }
     }
-    const { stdout: remoteOidOutput } = await gitExecFileAsync(
-      ['rev-parse', '--verify', `${remoteTrackingRef}^{commit}`],
-      gitExecOptions(repoPath, options)
-    )
-    remoteOid = remoteOidOutput.trim()
     if (!remoteOid) {
       return { refreshable: false, result: { ...resultBase, status: 'skipped_not_fast_forward' } }
     }
