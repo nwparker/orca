@@ -14,7 +14,6 @@ import { readdir, stat } from 'node:fs/promises'
 import type { DirEntry, FsChangeEvent } from '../../shared/filesystem-entry-types'
 import { sortDirEntries } from '../../shared/file-name-sort'
 import { resolveAuthorizedPath } from '../ipc/filesystem-auth'
-import { join } from 'node:path'
 import {
   isRuntimeDirectoryEntry,
   watchWindowsRuntimeFileExplorer
@@ -69,16 +68,11 @@ export class RuntimeFileCommandsWithAssertRemoteTerminalFileGrantPathStillCanoni
 
     const dirPath = await resolveAuthorizedPath(target.path, this.host.requireStore())
     const entries = await readdir(dirPath, { withFileTypes: true })
-    const mapped = await Promise.all(
-      entries.map(async (entry) => {
-        const entryPath = join(dirPath, entry.name)
-        return {
-          name: entry.name,
-          isDirectory: await isRuntimeDirectoryEntry(entry, entryPath),
-          isSymlink: entry.isSymbolicLink()
-        }
-      })
-    )
+    const mapped = entries.map((entry) => ({
+      name: entry.name,
+      isDirectory: isRuntimeDirectoryEntry(entry),
+      isSymlink: entry.isSymbolicLink()
+    }))
     return sortDirEntries(mapped)
   }
 
