@@ -3,6 +3,7 @@ import { OrcaRuntimeWithOnPtyExit } from './orca-runtime-on-pty-exit'
 import type { PtyLivenessVerdict } from '../../shared/pty-liveness-verdict'
 import type { DriverState } from './orca-runtime-core'
 import { clampTerminalViewport } from './terminal-viewport'
+import { getPtyTerminalState, getTerminalState } from './terminal-wait-results'
 
 // Orphaned verdicts are bounded; active PTYs retain theirs until new evidence resolves them.
 const MAX_TRACKED_PTY_LIVENESS_VERDICTS = 256
@@ -43,9 +44,23 @@ export class OrcaRuntimeWithMarkPtyLivenessUnverifiable extends OrcaRuntimeWithO
     return this.ptyLivenessVerdictByPtyId.get(ptyId)?.verdict ?? null
   }
 
-  subscribeToPtyExit(ptyId: string, listener: () => void): () => void {
+  protected isPtyKnownExited(ptyId: string): boolean {
     const pty = this.ptysById.get(ptyId)
-    if (pty && !pty.connected && pty.lastExitCode !== null) {
+    if (pty) {
+      // Why: `!connected` is an inference, not proof. The liveness sweep clears it with no
+      // exit code for every PTY of a dropped relay, so reading that as an exit retires the
+      // lease of a process still running on the host — 'unknown' must keep watching.
+      return getPtyTerminalState(pty) === 'exited'
+    }
+    // Why: leavesByPtyId is rebuilt from the renderer graph independently of ptysById, so a
+    // leaf can outlive (or precede) its pty record; without this an already-dead pty never
+    // fires and the caller's release waits forever.
+    return this.getLeavesForPty(ptyId).some((leaf) => getTerminalState(leaf) === 'exited')
+  }
+
+  subscribeToPtyExit(ptyId: string, listener: () => void): () => void {
+    const lifecycleGeneration = this.getPtyLifecycleGeneration(ptyId)
+    if (this.isPtyKnownExited(ptyId)) {
       listener()
       return () => {}
     }
@@ -55,8 +70,7 @@ export class OrcaRuntimeWithMarkPtyLivenessUnverifiable extends OrcaRuntimeWithO
       this.ptyExitListenersByPtyId.set(ptyId, listeners)
     }
     let active = true
-    listeners.add(listener)
-    return () => {
+    const unsubscribe = (): void => {
       if (!active) {
         return
       }
@@ -66,6 +80,15 @@ export class OrcaRuntimeWithMarkPtyLivenessUnverifiable extends OrcaRuntimeWithO
         this.ptyExitListenersByPtyId.delete(ptyId)
       }
     }
+    listeners.add(listener)
+    if (
+      this.getPtyLifecycleGeneration(ptyId) !== lifecycleGeneration ||
+      this.isPtyKnownExited(ptyId)
+    ) {
+      unsubscribe()
+      listener()
+    }
+    return unsubscribe
   }
 
   protected rememberPtyLivenessVerdict(ptyId: string, verdict: PtyLivenessVerdict): void {

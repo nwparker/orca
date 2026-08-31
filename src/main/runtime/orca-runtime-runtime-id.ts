@@ -50,8 +50,6 @@ import { RuntimeTerminalWait as RuntimeTerminalWaitController } from './runtime-
 import type { PtyLivenessVerdict } from '../../shared/pty-liveness-verdict'
 
 export class OrcaRuntimeWithRuntimeId {
-  [key: string]: unknown
-
   protected readonly runtimeId = randomUUID()
 
   protected readonly startedAt = Date.now()

@@ -169,6 +169,18 @@ export class OrcaRuntimeWithOnPtyExit extends OrcaRuntimeWithOnClientDisconnecte
     // delayed-Enter window; the armed Enter would inject \r into the
     // replacement and stamp rows it never received.
     this.orchestrationMailboxNotifications.retirePty(ptyId)
+    // Why: the dead pty's terminal handle and any run bound to its panes still carry mailbox
+    // pointers; schedule a debounced repoint so they do not stay aimed at a retired session.
+    for (const leaf of this.getLeavesForPty(ptyId)) {
+      const mailboxHandle = this.handleByLeafKey.get(this.getLeafKey(leaf.tabId, leaf.leafId))
+      if (mailboxHandle) {
+        this.mailPointerRepointScheduler.schedule(mailboxHandle)
+      }
+      const boundRun = this._orchestrationDb?.getCurrentRunForPane?.(`${leaf.tabId}:${leaf.leafId}`)
+      if (boundRun) {
+        this.mailPointerRepointScheduler.schedule(`run:${boundRun.id}`)
+      }
+    }
 
     if (this.terminalFitOverrides.has(ptyId)) {
       this.terminalFitOverrides.delete(ptyId)
