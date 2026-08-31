@@ -114,6 +114,9 @@ export class RuntimeSkillCommands
             throw error
           })
         preparationId = preview.preparationId
+        if (signal?.aborted) {
+          throw signal.reason ?? new Error('skill-share-cancelled')
+        }
         this.assertAgentSkillSharingAllowed()
         const published = await preparations.publish({
           preparationId,
