@@ -10,7 +10,11 @@ import type {
   RuntimeAutomationCreateInput,
   RuntimeAutomationUpdateInput
 } from './runtime-automation-controller'
-import type { AutomationListResult } from '../../shared/automation-list-scope'
+import {
+  automationChangePublications,
+  type AutomationChangeSelector,
+  type AutomationListResult
+} from '../../shared/automation-list-scope'
 import { OrchestrationDb } from './orchestration/db'
 import { join } from 'node:path'
 import { getAppEnvironment } from '../../shared/app-environment'
@@ -55,16 +59,28 @@ export class OrcaRuntimeWithFenceAutomationOwner extends OrcaRuntimeWithPtyForeg
     return automation
   }
 
+  protected automationChangeSelector(id: string): AutomationChangeSelector | null {
+    return this.store?.automationChangeSelector?.(id) ?? null
+  }
+
+  /** A store that cannot name the affected host degrades to one unscoped authority event. */
+  protected publishAutomationDefinitionChange(
+    before: AutomationChangeSelector | null,
+    after: AutomationChangeSelector | null
+  ): void {
+    for (const selector of automationChangePublications(before, after)) {
+      this.notifyAutomationsChanged({ reason: 'definition', ...(selector ? { selector } : {}) })
+    }
+  }
+
   createAutomation(
     input: RuntimeAutomationCreateInput,
     destination?: AutomationDestination
   ): Promise<Automation> {
     return this.automation.withExternalProbePriority(() =>
       this.automation.create(input, destination).then((automation) => {
-        this.notifyAutomationsChanged({
-          reason: 'definition',
-          selector: this.store?.automationChangeSelector?.(automation.id) ?? undefined
-        })
+        const selector = this.automationChangeSelector(automation.id)
+        this.publishAutomationDefinitionChange(selector, selector)
         return automation
       })
     )
@@ -76,13 +92,9 @@ export class OrcaRuntimeWithFenceAutomationOwner extends OrcaRuntimeWithPtyForeg
     options?: unknown
   ): Promise<Automation> {
     return this.automation.withExternalProbePriority(() => {
-      const source = this.store?.automationChangeSelector?.(id) ?? undefined
+      const source = this.automationChangeSelector(id)
       return this.automation.update(id, updates, options as never).then((automation) => {
-        const destination = this.store?.automationChangeSelector?.(automation.id) ?? undefined
-        this.notifyAutomationsChanged({ reason: 'definition', selector: source })
-        if (destination && JSON.stringify(destination) !== JSON.stringify(source)) {
-          this.notifyAutomationsChanged({ reason: 'definition', selector: destination })
-        }
+        this.publishAutomationDefinitionChange(source, this.automationChangeSelector(automation.id))
         return automation
       })
     })
@@ -93,9 +105,9 @@ export class OrcaRuntimeWithFenceAutomationOwner extends OrcaRuntimeWithPtyForeg
     expectedOwner?: AutomationOwnerPrecondition
   ): { removed: boolean; id: string } {
     return this.automation.withExternalProbePriority(() => {
-      const selector = this.store?.automationChangeSelector?.(id) ?? undefined
+      const selector = this.automationChangeSelector(id)
       const result = this.automation.delete(id, expectedOwner as never)
-      this.notifyAutomationsChanged({ reason: 'definition', selector })
+      this.publishAutomationDefinitionChange(selector, selector)
       return result
     })
   }

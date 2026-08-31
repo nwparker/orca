@@ -21,6 +21,7 @@ import {
   parseWorkerTerminalHostScope
 } from './orchestration/worker-terminal-process-liveness'
 import { getRepoIdFromWorktreeId } from '../../shared/worktree/id'
+import { buildOrchestrationTaskDisplayMetadata } from '../../shared/orchestration-task-display'
 
 export class OrcaRuntimeWithSubscribeToTerminalResize extends OrcaRuntimeWithApplyMobileDisplayMode {
   subscribeToTerminalResize(
@@ -61,10 +62,8 @@ export class OrcaRuntimeWithSubscribeToTerminalResize extends OrcaRuntimeWithApp
       return
     }
 
-    if (!handle) {
-      return
-    }
-
+    // Why the pane key too: a reminted handle no longer matches the row, but the
+    // pane identity behind it outlives the remint.
     const dispatch = this._orchestrationDb.getActiveDispatchForTerminal(
       handle,
       paneKey ?? undefined
@@ -98,12 +97,22 @@ export class OrcaRuntimeWithSubscribeToTerminalResize extends OrcaRuntimeWithApp
         return
       }
       const task = this._orchestrationDb.getTask?.(dispatch.task_id, dispatch.run_id)
-      const taskTitle = typeof task?.spec === 'string' ? task.spec : dispatch.task_id
-      this._orchestrationDb.insertMessage({
+      // Why: prefer the explicit task title and keep the derived one single-line and bounded;
+      // a raw multi-paragraph spec inlined here breaks the coordinator's escalation banner.
+      const title =
+        typeof task?.spec === 'string'
+          ? buildOrchestrationTaskDisplayMetadata({
+              spec: task.spec,
+              taskTitle: task.task_title,
+              displayName: task.display_name
+            }).taskTitle
+          : ''
+      const named = title ? `"${title}" (${dispatch.task_id})` : dispatch.task_id
+      const escalation = this._orchestrationDb.insertMessage({
         from: handle,
         to: recipient.to,
         subject: `Agent exited unexpectedly (${errorContext})`,
-        body: `Worker ${handle} stopped while running task "${taskTitle}" (${dispatch.task_id}). ${errorContext}.${settled?.status === 'circuit_broken' ? ' This task has now failed too many times, so it will not be retried automatically.' : settled?.status === 'failed' ? ' The task is ready to be dispatched again.' : ''}`,
+        body: `Worker ${handle} stopped while running task ${named}. ${errorContext}.${settled?.status === 'circuit_broken' ? ' This task has now failed too many times, so it will not be retried automatically.' : settled?.status === 'failed' ? ' The task is ready to be dispatched again.' : ''}`,
         type: 'escalation',
         priority: 'high',
         payload: JSON.stringify({
@@ -115,7 +124,7 @@ export class OrcaRuntimeWithSubscribeToTerminalResize extends OrcaRuntimeWithApp
         }),
         ...(recipient.runId ? { runId: recipient.runId } : {})
       })
-      this.notifyMessageArrived(recipient.to, 'escalation')
+      this.notifyMessageArrived(escalation.to_handle, escalation.type)
     } catch (error) {
       console.warn('[orchestration] failed to escalate worker exit', {
         dispatchId: dispatch.id,
