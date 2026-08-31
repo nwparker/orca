@@ -15,6 +15,13 @@ import { spawnSync } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { platform as osPlatform, tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import {
+  cloneSharedElectronDist,
+  hasAdoptedSharedElectronDist,
+  publishSharedElectronDist,
+  recordAdoptedSharedElectronDist,
+  resolveSharedElectronDistEntry
+} from './shared-electron-dist-cache.mjs'
 
 const projectDir = resolve(import.meta.dirname, '../..')
 const electronPackageDir = resolve(projectDir, 'node_modules/electron')
@@ -54,7 +61,18 @@ try {
 
 async function main() {
   repairElectronPathFile()
+  const sharedEntry = resolveSharedElectronDistEntry({
+    repoRoot: projectDir,
+    electronPackageDir,
+    version: electronVersion,
+    targetPlatform,
+    targetArch
+  })
+
   if (electronPackageIsUsable()) {
+    if (sharedEntry !== null && !hasAdoptedSharedElectronDist(sharedEntry)) {
+      shareExistingElectronDist(sharedEntry)
+    }
     return
   }
 
@@ -62,7 +80,7 @@ async function main() {
   // Node. Install only Electron's npm package binary here; do not run the full
   // Electron native-module rebuild path, which would undo the Node ABI rebuild.
   console.log('[electron-package] Electron package binary is missing; running Electron install.')
-  await installElectronPackageBinary()
+  await installElectronPackageBinary(sharedEntry)
 
   repairElectronPathFile()
 
@@ -122,8 +140,11 @@ function repairElectronPathFile() {
   }
 }
 
-async function installElectronPackageBinary() {
+async function installElectronPackageBinary(sharedEntry) {
   const electronDistDir = resolve(electronPackageDir, 'dist')
+  if (sharedEntry !== null && adoptSharedElectronDist(sharedEntry, electronDistDir)) {
+    return
+  }
   const tempDir = mkdtempSync(resolve(tmpdir(), 'orca-electron-'))
   const persistentCacheRoot =
     process.env.ORCA_ELECTRON_PACKAGE_CACHE_ROOT || process.env.ELECTRON_CACHE || null
@@ -158,9 +179,71 @@ async function installElectronPackageBinary() {
     }
 
     moveExtractedElectronDist(extractDir, electronDistDir)
+    if (sharedEntry !== null) {
+      publishElectronDistForSiblingWorktrees(sharedEntry, electronDistDir)
+    }
   } finally {
     rmSync(tempDir, { recursive: true, force: true })
   }
+}
+
+/**
+ * Point this worktree's dist at the copy its siblings already share, so the ~295MB tree costs one
+ * allocation per repository instead of one per worktree.
+ *
+ * Staged inside node_modules/electron on purpose: clonefile only shares blocks within a volume, and
+ * staging elsewhere would silently downgrade the publish rename to a cross-device byte copy.
+ */
+function adoptSharedElectronDist(sharedEntry, electronDistDir) {
+  const stageRoot = mkdtempSync(resolve(electronPackageDir, '.dist-clone-'))
+  try {
+    const stagePath = join(stageRoot, 'dist')
+    if (
+      !cloneSharedElectronDist(sharedEntry, stagePath, {
+        version: electronVersion,
+        platformPath
+      })
+    ) {
+      return false
+    }
+    moveExtractedElectronDist(stagePath, electronDistDir)
+    recordAdoptedSharedElectronDist(sharedEntry, writeFileSync)
+    console.log(
+      `[electron-package] Cloned Electron ${electronVersion} from ${sharedEntry.entryPath}`
+    )
+    return true
+  } catch (error) {
+    // The download path below is always a correct fallback, so sharing never fails an install.
+    console.warn(`[electron-package] Shared Electron clone unavailable: ${formatShareError(error)}`)
+    return false
+  } finally {
+    rmSync(stageRoot, { recursive: true, force: true })
+  }
+}
+
+/** An already-installed dist joins the cache: clone from it if it exists, seed it otherwise. */
+function shareExistingElectronDist(sharedEntry) {
+  const electronDistDir = resolve(electronPackageDir, 'dist')
+  if (!adoptSharedElectronDist(sharedEntry, electronDistDir)) {
+    publishElectronDistForSiblingWorktrees(sharedEntry, electronDistDir)
+  }
+}
+
+function publishElectronDistForSiblingWorktrees(sharedEntry, electronDistDir) {
+  const published = publishSharedElectronDist(electronDistDir, sharedEntry, {
+    version: electronVersion,
+    platformPath
+  })
+  if (published) {
+    console.log(
+      `[electron-package] Published Electron ${electronVersion} to ${sharedEntry.entryPath}`
+    )
+    recordAdoptedSharedElectronDist(sharedEntry, writeFileSync)
+  }
+}
+
+function formatShareError(error) {
+  return error instanceof Error ? error.message : String(error)
 }
 
 async function downloadElectronArtifactWithRetry(downloadOptions, { cacheRootIsPersistent }) {
