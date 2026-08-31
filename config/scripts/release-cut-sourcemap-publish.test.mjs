@@ -4,23 +4,25 @@ import { describe, expect, it } from 'vitest'
 import { parse } from 'yaml'
 
 const projectDir = resolve(import.meta.dirname, '../..')
+const buildSteps = parse(
+  readFileSync(join(projectDir, '.github/workflows/release-cut.yml'), 'utf8')
+).jobs.build.steps
 
-function buildSteps() {
-  return parse(readFileSync(join(projectDir, '.github/workflows/release-cut.yml'), 'utf8')).jobs
-    .build.steps
+function stepIndex(name) {
+  const index = buildSteps.findIndex((step) => step.name === name)
+  expect(index, `missing build step: ${name}`).toBeGreaterThanOrEqual(0)
+  return index
 }
 
 describe('release-cut source map publication', () => {
   it('bundles and uploads main source maps from exactly one platform leg', () => {
-    const steps = buildSteps()
-    const bundle = steps.find((step) => step.name === 'Bundle main-process source maps')
-    const publish = steps.find((step) => step.name === 'Publish main-process source maps')
+    const bundle = buildSteps[stepIndex('Bundle main-process source maps')]
+    const publish = buildSteps[stepIndex('Publish main-process source maps')]
 
     // Why: the main bundle is platform-independent, so duplicating the ~8MB
     // artifact across legs would only race the uploads against each other.
     for (const step of [bundle, publish]) {
-      expect(step).toBeDefined()
-      expect(step.if).toBe("matrix.platform == 'linux-x64'")
+      expect(step.if).toContain('linux-x64')
     }
 
     expect(bundle.run).toContain("find out/main -name '*.js.map'")
@@ -28,21 +30,29 @@ describe('release-cut source map publication', () => {
     expect(publish.with.command).toContain('orca-sourcemaps-')
   })
 
+  it('stages the bundle outside the checkout so packaging cannot absorb it', () => {
+    // Why: electron-builder's `files` is all negations, so app-builder prepends
+    // `**/*` and packs any stray workspace-root file into app.asar.
+    const bundle = buildSteps[stepIndex('Bundle main-process source maps')]
+    const publish = buildSteps[stepIndex('Publish main-process source maps')]
+
+    expect(bundle.run).toContain('"$RUNNER_TEMP/orca-sourcemaps-$TAG.zip"')
+    expect(bundle.run).not.toMatch(/zip[^\n]*\s"orca-sourcemaps-/)
+    expect(publish.with.command).toContain('runner.temp')
+  })
+
   it('fails the release when no source maps were emitted', () => {
     // Why: a silent regression of build.sourcemap would ship an undecodable
     // release rather than an obviously broken one.
-    const bundle = buildSteps().find((step) => step.name === 'Bundle main-process source maps')
+    const bundle = buildSteps[stepIndex('Bundle main-process source maps')]
     expect(bundle.run).toContain('::error::')
     expect(bundle.run).toContain('exit 1')
   })
 
-  it('bundles maps before packaging strips them', () => {
-    const names = buildSteps().map((step) => step.name)
-    expect(names.indexOf('Bundle main-process source maps')).toBeGreaterThan(
-      names.indexOf('Build app')
-    )
-    expect(names.indexOf('Bundle main-process source maps')).toBeLessThan(
-      names.indexOf('Publish release artifacts (Linux)')
-    )
+  it('bundles maps after the build and before packaging strips them', () => {
+    const bundle = stepIndex('Bundle main-process source maps')
+    expect(bundle).toBeGreaterThan(stepIndex('Build app'))
+    expect(stepIndex('Publish main-process source maps')).toBeGreaterThan(bundle)
+    expect(bundle).toBeLessThan(stepIndex('Publish release artifacts (Linux)'))
   })
 })
