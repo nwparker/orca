@@ -175,13 +175,15 @@ export function resolveDefaultBaseRefWithLocalGit(
       ...options,
       timeout: DEFAULT_BASE_REF_PROBE_TIMEOUT_MS
     })
-  // WSL process startup makes the fallback probes visible in create latency. A
-  // UNC repo carries its distro in the path, so do not require callers to repeat
-  // that hint in options (the runner derives it the same way).
+  // WSL and native Windows Git process startup make the fallback probes visible
+  // in create latency. A UNC repo carries its distro in the path, so do not
+  // require callers to repeat that hint in options (the runner derives it too).
+  const isNativeWindows = process.platform === 'win32'
   const isWslRouted =
-    Boolean(options.wslDistro?.trim()) ||
-    (process.platform === 'win32' && parseWslUncPath(options.cwd) !== null)
-  return isWslRouted
+    Boolean(options.wslDistro?.trim()) || (isNativeWindows && parseWslUncPath(options.cwd) !== null)
+  // Keep the existing POSIX execution shape; native Windows and WSL benefit
+  // from replacing several Git processes with one exact-ref batch query.
+  return isNativeWindows || isWslRouted
     ? resolveDefaultBaseRefViaExecWithBatchedProbes(exec)
     : resolveDefaultBaseRefViaExec(exec)
 }

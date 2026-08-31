@@ -144,7 +144,61 @@ describe('WSL default-base ref batching', () => {
     }
   })
 
-  it('does not batch native probes, preserving their existing execution shape', async () => {
+  it('batches native Windows probes with the same exact argv as WSL', async () => {
+    const originalPlatform = process.platform
+    Object.defineProperty(process, 'platform', { configurable: true, value: 'win32' })
+    try {
+      gitExecFileAsyncMock.mockResolvedValue({
+        stdout: 'refs/heads/main\0\0commit\0\n'
+      })
+
+      await expect(getBaseRefDefault('C:\\repo')).resolves.toBe('main')
+      expect(gitExecFileAsyncMock).toHaveBeenCalledTimes(1)
+      expect(gitExecFileAsyncMock).toHaveBeenCalledWith(batchArgs(), {
+        cwd: 'C:\\repo',
+        timeout: 15_000
+      })
+    } finally {
+      Object.defineProperty(process, 'platform', { configurable: true, value: originalPlatform })
+    }
+  })
+
+  it('falls back to serial native Windows probes when batching is unsupported', async () => {
+    const originalPlatform = process.platform
+    Object.defineProperty(process, 'platform', { configurable: true, value: 'win32' })
+    try {
+      gitExecFileAsyncMock.mockImplementation(async (argv: string[]) => {
+        if (argv[0] === 'for-each-ref') {
+          throw new Error('unsupported command')
+        }
+        if (argv[0] === 'symbolic-ref') {
+          throw new Error('origin/HEAD is unset')
+        }
+        if (argv[0] === 'rev-parse' && argv.at(-1) === 'refs/remotes/origin/main') {
+          throw new Error('missing main')
+        }
+        if (argv[0] === 'rev-parse' && argv.at(-1) === 'refs/heads/main') {
+          return { stdout: 'main-sha\n' }
+        }
+        throw new Error('missing ref')
+      })
+
+      await expect(getBaseRefDefault('C:\\repo')).resolves.toBe('main')
+      expect(gitExecFileAsyncMock.mock.calls.map(([argv]) => argv)).toEqual([
+        batchArgs(),
+        ['rev-parse', '--verify', '--quiet', 'refs/remotes/origin/main'],
+        ['rev-parse', '--verify', '--quiet', 'refs/remotes/origin/master'],
+        ['rev-parse', '--verify', '--quiet', 'refs/heads/main']
+      ])
+      for (const [, options] of gitExecFileAsyncMock.mock.calls) {
+        expect(options).toEqual({ cwd: 'C:\\repo', timeout: 15_000 })
+      }
+    } finally {
+      Object.defineProperty(process, 'platform', { configurable: true, value: originalPlatform })
+    }
+  })
+
+  it('keeps POSIX probes serial', async () => {
     gitExecFileAsyncMock.mockImplementation(async (argv: string[]) => {
       if (argv[0] === 'symbolic-ref') {
         throw new Error('origin/HEAD is unset')
