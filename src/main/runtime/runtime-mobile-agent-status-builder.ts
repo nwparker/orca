@@ -2,7 +2,7 @@ import {
   normalizeCompatibleAgentStatusEntryForOwner,
   normalizeCompatibleAgentTitleForOwner
 } from '../../shared/agent-title-owner'
-import { resolvePaneAgentOwner } from '../../shared/pane-agent-owner'
+import { resolvePaneAgentOwnerRecord } from '../../shared/pane-agent-owner'
 import type { AgentStatusEntry, AgentStatusIpcPayload } from '../../shared/agent-status-types'
 import type { RuntimeMobileSessionTerminalTab } from '../../shared/runtime-types'
 import {
@@ -82,16 +82,16 @@ export function buildRuntimeMobileAgentStatus(
     }
   }
   // Why: a retained OMP hook stays stable while wrapper foreground reads can report Pi.
-  const ownerAgent =
-    resolvePaneAgentOwner({
-      launchAgent: tab.launchAgent ?? pty?.launchAgent ?? null,
-      hookAgent: retained?.payload.agentType ?? hookRow.agentType
-    }) ??
-    pty?.foregroundAgent ??
-    null
+  const ownerRecord = resolvePaneAgentOwnerRecord({
+    launchAgent: tab.launchAgent ?? pty?.launchAgent ?? null,
+    hookAgent: retained?.payload.agentType ?? hookRow.agentType
+  })
+  const ownerAgent = ownerRecord?.agent ?? pty?.foregroundAgent ?? null
+  const ownerOptions = { ownerIsLaunch: ownerRecord?.ownerIsLaunch === true }
   const terminalTitle = normalizeCompatibleAgentTitleForOwner(
     trackerOnlyTitle ?? (pty ? getLatestPtyTitle(pty) : null) ?? tab.title,
-    ownerAgent
+    ownerAgent,
+    ownerOptions
   )
   // Why: OSC 9999 hook payload carries real state/prompt/agent; without preferring it, hook-only transitions never surfaced (#7970).
   const liveRow = retained ?? resolveRuntimeHookLiveAgentRow(hookRow.live, pty, nonAgentTitle)
@@ -111,7 +111,8 @@ export function buildRuntimeMobileAgentStatus(
         terminalTitle,
         ...providerSession
       },
-      ownerAgent
+      ownerAgent,
+      ownerOptions
     )
     // A live question outranks only the shell title that currently obscures it.
     const renewedStatus = renewRuntimeMobileAgentStatusFromPtyTitle(liveStatus, pty, {

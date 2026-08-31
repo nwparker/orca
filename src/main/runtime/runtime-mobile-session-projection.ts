@@ -3,7 +3,7 @@ import {
   normalizeCompatibleAgentTitleForOwner,
   resolveCompatibleAgentTypeForOwner
 } from '../../shared/agent-title-owner'
-import { resolvePaneAgentOwner } from '../../shared/pane-agent-owner'
+import { resolvePaneAgentOwnerRecord } from '../../shared/pane-agent-owner'
 import type { AgentStatusEntry, AgentStatusIpcPayload } from '../../shared/agent-status-types'
 import type {
   RuntimeMobileSessionClientTab,
@@ -126,31 +126,32 @@ export function projectRuntimeMobileSessionTabs(
     const launchAgent = tab.launchAgent ?? null
     const launchOwnerAgent = launchAgent ?? liveLeafPty?.launchAgent ?? pty?.launchAgent ?? null
     // Why: a retained OMP hook stays stable while wrapper foreground reads can report Pi.
+    const ownerRecord = resolvePaneAgentOwnerRecord({
+      launchAgent: launchOwnerAgent,
+      hookAgent:
+        tab.agentStatus?.agentType ??
+        hookAgentStatus?.agentType ??
+        retainedAgentStatus?.payload.agentType ??
+        null
+    })
     const ownerAgent =
-      resolvePaneAgentOwner({
-        launchAgent: launchOwnerAgent,
-        hookAgent:
-          tab.agentStatus?.agentType ??
-          hookAgentStatus?.agentType ??
-          retainedAgentStatus?.payload.agentType ??
-          null
-      }) ??
-      liveLeafPty?.foregroundAgent ??
-      pty?.foregroundAgent ??
-      null
+      ownerRecord?.agent ?? liveLeafPty?.foregroundAgent ?? pty?.foregroundAgent ?? null
+    const ownerOptions = { ownerIsLaunch: ownerRecord?.ownerIsLaunch === true }
     const title = normalizeCompatibleAgentTitleForOwner(
       trackerOnlyTitle ?? leafTitle ?? ptyTitle ?? syncedTab?.title ?? tab.title,
-      ownerAgent
+      ownerAgent,
+      ownerOptions
     )
     const liveTitleEvidence = leafTitle ?? ptyTitle
     // Why: renderer status can precede hook session identity, leaving native chat with no transcript address.
     const rendererStatusAgent =
-      resolveCompatibleAgentTypeForOwner(tab.agentStatus?.agentType, ownerAgent) ??
+      resolveCompatibleAgentTypeForOwner(tab.agentStatus?.agentType, ownerAgent, ownerOptions) ??
       ownerAgent ??
       undefined
     const hookSessionAgent = resolveCompatibleAgentTypeForOwner(
       hookAgentStatus?.providerSessionAgentType,
-      ownerAgent
+      ownerAgent,
+      ownerOptions
     )
     const hookSessionMatchesRenderer =
       !rendererStatusAgent || !hookSessionAgent || rendererStatusAgent === hookSessionAgent
@@ -169,7 +170,8 @@ export function projectRuntimeMobileSessionTabs(
               ...tab.agentStatus,
               ...(hookProviderSession ? { providerSession: hookProviderSession } : {})
             },
-            ownerAgent
+            ownerAgent,
+            ownerOptions
           )
         : null,
       statusPty,

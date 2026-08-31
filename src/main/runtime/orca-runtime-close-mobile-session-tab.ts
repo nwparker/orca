@@ -268,7 +268,7 @@ export class OrcaRuntimeWithCloseMobileSessionTab extends OrcaRuntimeWithRefuseU
           }
         }
       }
-      this.closeStructuredAgentSessionTab(worktreeId, snapshot, tab)
+      await this.closeStructuredAgentSessionTab(worktreeId, snapshot, tab)
     } else {
       if (!this.notifier?.closeSessionTab) {
         throw new Error('runtime_unavailable')

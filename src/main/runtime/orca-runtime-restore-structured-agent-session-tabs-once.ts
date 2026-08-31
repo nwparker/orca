@@ -11,6 +11,7 @@ import type {
 import { getHeadlessMobileSessionGroupId } from './mobile-session-layout-projection'
 import { DEFAULT_REPO_SEARCH_REFS_LIMIT } from './orca-runtime-postlude'
 import type { Repo } from '../../shared/repo-types'
+import type { GitAdmissionTier } from '../git/command-runner/git-exec-options'
 import {
   getLocalProjectWorktreeGitOptions,
   resolveLocalProjectRuntimeForRepo
@@ -24,10 +25,15 @@ export class OrcaRuntimeWithRestoreStructuredAgentSessionTabsOnce extends OrcaRu
   protected async restoreStructuredAgentSessionTabsOnce(): Promise<void> {
     await this.prepareStructuredAgentSessionStartupRestoration()
     const host = getStructuredAgentSessionHost()
+    const persistedVisibleIndex =
+      typeof host?.getPersistedVisibleSessionTabIndex === 'function'
+        ? host.getPersistedVisibleSessionTabIndex()
+        : { present: false, sessionIds: [] }
+    const profileIds = collectSavedStructuredAgentSessionIds(
+      this.store?.getWorkspaceSession?.(LOCAL_EXECUTION_HOST_ID) ?? null
+    )
     await host?.restoreReadableSessions(
-      collectSavedStructuredAgentSessionIds(
-        this.store?.getWorkspaceSession?.(LOCAL_EXECUTION_HOST_ID) ?? null
-      )
+      persistedVisibleIndex.present ? persistedVisibleIndex.sessionIds : profileIds
     )
     for (const worktreeId of this.getKnownWorkspaceSessionWorktreeIds()) {
       this.hydrateHeadlessMobileSessionTabsFromWorkspaceSession(worktreeId, {
@@ -44,7 +50,7 @@ export class OrcaRuntimeWithRestoreStructuredAgentSessionTabsOnce extends OrcaRu
       while (sessionId.startsWith('agent-session:')) {
         sessionId = sessionId.slice('agent-session:'.length)
       }
-      this.publishStructuredAgentSessionTab({
+      await this.publishStructuredAgentSessionTab({
         ...session,
         agent: 'codex',
         sessionId,
@@ -54,13 +60,17 @@ export class OrcaRuntimeWithRestoreStructuredAgentSessionTabsOnce extends OrcaRu
     }
   }
 
-  publishStructuredAgentSessionTab(input: {
+  async publishStructuredAgentSessionTab(input: {
     workspaceId: string
     sessionId: string
     agent: 'codex'
     activate: boolean
     notify?: boolean
-  }): void {
+  }): Promise<void> {
+    const host = getStructuredAgentSessionHost()
+    if (typeof host?.setSessionTabVisibility === 'function') {
+      await host.setSessionTabVisibility(input.sessionId, true)
+    }
     const existing = this.mobileSessionTabsByWorktree.get(input.workspaceId)
     const id = `agent-session:${input.sessionId}`
     if (existing?.tabs.some((tab) => tab.id === id)) {
@@ -179,9 +189,20 @@ export class OrcaRuntimeWithRestoreStructuredAgentSessionTabsOnce extends OrcaRu
   }
 
   protected getHostedReviewExecutionOptions(
-    repo: Repo
-  ): { localGitExecOptions: { wslDistro?: string } } | undefined {
-    const localGitOptions = this.getLocalGitExecutionOptionArgs(repo)[0] ?? {}
+    repo: Repo,
+    admissionTier?: GitAdmissionTier
+  ):
+    | {
+        localGitExecOptions: {
+          wslDistro?: string
+          admissionTier?: GitAdmissionTier
+        }
+      }
+    | undefined {
+    const localGitOptions = {
+      ...this.getLocalGitExecutionOptionArgs(repo)[0],
+      ...(admissionTier && { admissionTier })
+    }
     return Object.keys(localGitOptions).length > 0
       ? { localGitExecOptions: localGitOptions }
       : undefined

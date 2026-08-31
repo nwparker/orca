@@ -199,11 +199,16 @@ export class OrcaRuntimeWithGetWorktreePs extends OrcaRuntimeWithStructuredAgent
       stopRecoveredOwner: (record) => this.stopStructuredSessionProcess(record),
       tuiStatus: (owner) => this.structuredTuiStatus(owner),
       closeTuiOwner: (owner) => this.closeStructuredTuiOwner(owner),
-      revealNativeSession: ({ workspaceId, sessionId, agent = 'codex', adoptedTerminal }) => {
+      revealNativeSession: async ({ workspaceId, sessionId, agent = 'codex', adoptedTerminal }) => {
         if (adoptedTerminal || agent !== 'codex') {
           return
         }
-        this.publishStructuredAgentSessionTab({ workspaceId, sessionId, agent, activate: false })
+        await this.publishStructuredAgentSessionTab({
+          workspaceId,
+          sessionId,
+          agent,
+          activate: false
+        })
         this.notifier?.focusEditorTab?.(structuredAgentSessionTabId(sessionId), workspaceId)
       },
       stopFailedTuiLaunch: async (owner) => void (await this.closeStructuredTuiOwner(owner))

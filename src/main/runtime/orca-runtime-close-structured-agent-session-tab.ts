@@ -10,13 +10,18 @@ import { getMobileSessionSnapshotTabIdentityKeys } from './mobile-session-tab-me
 import type { BrowserSessionTabSelectionOptions } from './browser-tab-create-publication'
 import { getRuntimeBrowserPageRegistry } from './runtime-browser-page-registry'
 import { applyBrowserSessionTabSelection } from './browser-session-tab-selection-snapshot'
+import { getStructuredAgentSessionHost } from '../native-chat/agent-session-wire/structured-agent-session-registry'
 
 export class OrcaRuntimeWithCloseStructuredAgentSessionTab extends OrcaRuntimeWithCloseMobileSessionTab {
-  protected closeStructuredAgentSessionTab(
+  protected async closeStructuredAgentSessionTab(
     worktreeId: string,
     snapshot: RuntimeMobileSessionTabsSnapshot,
     tab: RuntimeMobileSessionAgentTab
-  ): void {
+  ): Promise<void> {
+    const host = getStructuredAgentSessionHost()
+    if (typeof host?.setSessionTabVisibility === 'function') {
+      await host.setSessionTabVisibility(tab.sessionId, false)
+    }
     const nextTabs = snapshot.tabs.filter((candidate) => candidate.id !== tab.id)
     const active = nextTabs.find((candidate) => candidate.isActive) ?? nextTabs[0] ?? null
     const nextSnapshot: RuntimeMobileSessionTabsSnapshot = {
