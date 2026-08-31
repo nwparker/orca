@@ -2019,6 +2019,36 @@ export async function createLocalWorktree(
     return { ...options, ...localWorktreeGitOptions }
   }
 
+  // Base validation may already have resolved the remote that owns a persisted
+  // base ref. Reuse that answer after the base is selected; spawning another
+  // `git remote` is especially visible on Windows and WSL.
+  const remoteTrackingBaseProbes = new Map<string, Promise<RemoteTrackingBase | null>>()
+  const resolveRemoteTrackingBaseForCreate = (
+    baseBranch: string
+  ): Promise<RemoteTrackingBase | null> => {
+    if (!runtime) {
+      return Promise.resolve(null)
+    }
+    const cached = remoteTrackingBaseProbes.get(baseBranch)
+    if (cached) {
+      return cached
+    }
+    const pending = runtime.resolveRemoteTrackingBase(
+      repo.path,
+      baseBranch,
+      ...localWorktreeGitOptionArgs
+    )
+    remoteTrackingBaseProbes.set(baseBranch, pending)
+    // A transient runtime failure should not poison a later retry in this
+    // create; preserve the existing rejection behavior while dropping it.
+    void pending.catch(() => {
+      if (remoteTrackingBaseProbes.get(baseBranch) === pending) {
+        remoteTrackingBaseProbes.delete(baseBranch)
+      }
+    })
+    return pending
+  }
+
   const requestedName = args.name
   const sanitizedName = sanitizeWorktreeName(args.name)
   const requestedDisplayName = args.displayName
@@ -2037,11 +2067,7 @@ export async function createLocalWorktree(
     resolveDefaultBaseRef: () => resolveDefaultBaseRefWithLocalGit(localGitExecOptions),
     isBaseUsable: async (baseBranchCandidate) => {
       if (runtime) {
-        const remoteTrackingBase = await runtime.resolveRemoteTrackingBase(
-          repo.path,
-          baseBranchCandidate,
-          ...localWorktreeGitOptionArgs
-        )
+        const remoteTrackingBase = await resolveRemoteTrackingBaseForCreate(baseBranchCandidate)
         if (remoteTrackingBase) {
           if (
             await runtime.hasRemoteTrackingRef(
@@ -2081,11 +2107,7 @@ export async function createLocalWorktree(
   let legacyFetchPromise: Promise<void> | null = null
 
   if (runtime) {
-    remoteTrackingBase = await runtime.resolveRemoteTrackingBase(
-      repo.path,
-      baseBranch,
-      ...localWorktreeGitOptionArgs
-    )
+    remoteTrackingBase = await resolveRemoteTrackingBaseForCreate(baseBranch)
     if (remoteTrackingBase) {
       const [hasRemoteTrackingBaseRef, hasNamedLocalBaseRef] = await Promise.all([
         runtime.hasRemoteTrackingRef(repo.path, remoteTrackingBase, ...localWorktreeGitOptionArgs),

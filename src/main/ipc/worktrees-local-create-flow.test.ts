@@ -158,6 +158,47 @@ describe('registerWorktreeHandlers', () => {
     })
   })
 
+  it('reuses the remote-tracking base probe used to validate a persisted base', async () => {
+    const remoteBase = {
+      remote: 'origin',
+      branch: 'master',
+      ref: 'refs/remotes/origin/master',
+      base: 'origin/master'
+    }
+    store.getRepo.mockReturnValue({
+      id: 'repo-1',
+      path: '/workspace/repo',
+      displayName: 'repo',
+      badgeColor: '#000',
+      addedAt: 0,
+      worktreeBaseRef: 'origin/master'
+    })
+    runtimeStub.resolveRemoteTrackingBase.mockResolvedValue(remoteBase)
+    runtimeStub.hasRemoteTrackingRef.mockResolvedValue(true)
+    listWorktreesMock.mockResolvedValue([
+      {
+        path: '/workspace/reused-base-probe',
+        head: 'abc123',
+        branch: 'refs/heads/reused-base-probe',
+        isBare: false,
+        isMainWorktree: false
+      }
+    ])
+
+    await expect(
+      handlers['worktrees:create'](null, {
+        repoId: 'repo-1',
+        name: 'reused-base-probe'
+      })
+    ).resolves.toMatchObject({ worktree: { path: '/workspace/reused-base-probe' } })
+
+    expect(runtimeStub.resolveRemoteTrackingBase).toHaveBeenCalledTimes(1)
+    expect(runtimeStub.resolveRemoteTrackingBase).toHaveBeenCalledWith(
+      '/workspace/repo',
+      'origin/master'
+    )
+  })
+
   it('prefetches the local default create base through the runtime refresh cache', async () => {
     const repo = {
       id: 'repo-1',
