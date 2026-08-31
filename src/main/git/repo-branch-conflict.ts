@@ -106,12 +106,7 @@ export async function getBranchConflictKindViaExec(
   }
 
   const remoteNames = await remoteNamesPromise
-  const hasRemoteConflict = hasRemoteBranchConflict(
-    refs,
-    remoteNames,
-    branchName,
-    allowedBaseRef
-  )
+  const hasRemoteConflict = hasRemoteBranchConflict(refs, remoteNames, branchName, allowedBaseRef)
 
   return hasRemoteConflict ? 'remote' : null
 }

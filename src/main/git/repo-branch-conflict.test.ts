@@ -128,8 +128,6 @@ describe('getBranchConflictKindViaExec', () => {
     })
 
     await expect(getBranchConflictKindViaExec(exec, 'feature/example')).resolves.toBe('remote')
-    await expect(
-      getBranchConflictKindViaExec(exec, 'main', 'origin/main')
-    ).resolves.toBeNull()
+    await expect(getBranchConflictKindViaExec(exec, 'main', 'origin/main')).resolves.toBeNull()
   })
 })

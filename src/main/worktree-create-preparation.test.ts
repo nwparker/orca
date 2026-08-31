@@ -46,16 +46,20 @@ const store = { getSettings: () => ({}) } as unknown as Store
 
 beforeEach(() => {
   mocks.mkdir.mockReset().mockResolvedValue(undefined)
-  mocks.computeWorkspaceRoot.mockReset().mockImplementation((repoPath: string) =>
-    process.platform === 'win32' && /^[A-Za-z]:[\\/]/.test(repoPath)
-      ? 'C:\\workspace'
-      : '/workspace'
-  )
-  mocks.computeWorkspaceRootAsync.mockReset().mockImplementation(async (repoPath: string) =>
-    process.platform === 'win32' && /^[A-Za-z]:[\\/]/.test(repoPath)
-      ? 'C:\\workspace'
-      : '/workspace'
-  )
+  mocks.computeWorkspaceRoot
+    .mockReset()
+    .mockImplementation((repoPath: string) =>
+      process.platform === 'win32' && /^[A-Za-z]:[\\/]/.test(repoPath)
+        ? 'C:\\workspace'
+        : '/workspace'
+    )
+  mocks.computeWorkspaceRootAsync
+    .mockReset()
+    .mockImplementation(async (repoPath: string) =>
+      process.platform === 'win32' && /^[A-Za-z]:[\\/]/.test(repoPath)
+        ? 'C:\\workspace'
+        : '/workspace'
+    )
   mocks.listWorktreeGraph.mockReset().mockResolvedValue([])
   mocks.prepareCheckout.mockReset().mockResolvedValue(undefined)
   mocks.finalize.mockReset().mockResolvedValue({})
