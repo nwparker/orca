@@ -4,11 +4,11 @@ import type { ResolvedWorktree } from './runtime-worktree-path-identity'
 import type { RuntimeStore } from './runtime-store-contract'
 
 describe('buildRuntimeWorktreePsSummaries', () => {
-  it('prefers the live resolved host over stale persisted metadata', () => {
+  it('preserves persisted host ownership over the resolved row fallback', () => {
     const worktree = {
       id: 'repo-1::/workspace/app',
       repoId: 'repo-1',
-      hostId: 'ssh:live-host',
+      hostId: 'ssh:resolved-host',
       path: '/workspace/app',
       branch: 'feature',
       isArchived: false,
@@ -20,7 +20,7 @@ describe('buildRuntimeWorktreePsSummaries', () => {
     } as unknown as ResolvedWorktree
     const store = {
       getRepos: () => [],
-      getWorktreeMeta: () => ({ hostId: 'ssh:stale-host' }),
+      getWorktreeMeta: () => ({ hostId: 'ssh:persisted-host' }),
       getAllWorktreeMeta: () => ({}),
       getFolderWorkspaces: () => [],
       getProjectGroups: () => []
@@ -32,6 +32,6 @@ describe('buildRuntimeWorktreePsSummaries', () => {
       platformByRepoId: new Map()
     }).get(worktree.id)
 
-    expect(summary?.hostId).toBe('ssh:live-host')
+    expect(summary?.hostId).toBe('ssh:persisted-host')
   })
 })
