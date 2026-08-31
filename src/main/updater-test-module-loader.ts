@@ -1,6 +1,5 @@
-import { beforeAll, expect } from 'vitest'
+import { beforeAll, TestRunner } from 'vitest'
 import type * as UpdaterModule from './updater'
-import { trackRealTimers } from './updater-test-timer-tracking'
 
 /**
  * Pays `updater.ts`'s transform cost once per file, against `hookTimeout` instead of `testTimeout`.
@@ -13,8 +12,6 @@ import { trackRealTimers } from './updater-test-timer-tracking'
  */
 export function warmUpdaterModule(): void {
   beforeAll(async () => {
-    // Why: no reset has installed the tracker yet, so a timer armed while warming would outlive it.
-    trackRealTimers()
     await import('./updater')
   })
 }
@@ -29,14 +26,16 @@ export function warmUpdaterModule(): void {
  * continuation and leaves the timeout as the only reported failure.
  */
 export async function loadUpdaterModule(): Promise<typeof UpdaterModule> {
-  const owner = expect.getState().currentTestName
+  const owner = TestRunner.getCurrentTest()
   const module = await import('./updater')
-  const current = expect.getState().currentTestName
-  if (owner !== undefined && owner !== current) {
-    throw new Error(
-      `updater import requested by "${owner}" resolved after that test ended (now running ` +
-        `"${String(current)}"). The test timed out mid-import; fix that timeout, not the assertions.`
+  if (owner !== undefined && TestRunner.getCurrentTest() !== owner) {
+    // Why: vitest has already settled the timed-out test's promise, so this throw is swallowed —
+    // warn separately or the reason the continuation was stranded reaches nobody.
+    process.emitWarning(
+      `updater import requested by "${owner.name}" resolved after that test ended. The test timed ` +
+        `out mid-import; fix that timeout, not the assertions.`
     )
+    throw new Error(`updater import for "${owner.name}" resolved after that test ended`)
   }
   return module
 }

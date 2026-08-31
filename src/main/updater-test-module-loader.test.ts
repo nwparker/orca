@@ -16,7 +16,7 @@ describe('updater module loader', () => {
   it('starts an import that outlives the test that asked for it', () => {
     vi.resetModules()
     vi.doMock('./updater', async () => {
-      await sleep(50)
+      await sleep(500)
       return { setupAutoUpdater: () => {} }
     })
 

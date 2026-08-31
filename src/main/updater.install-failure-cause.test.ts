@@ -160,14 +160,14 @@ async function reachDownloaded(): Promise<typeof UpdaterModule> {
   return updater
 }
 
+warmUpdaterModule()
+
 /**
  * On a `.deb` Linux host electron-updater's `install()` catches the failed elevation and
  * re-dispatches it through the 'error' event *synchronously* inside `quitAndInstall()`. Orca
  * recovers the app state, so the payload has to survive on the status and the span has to exit
  * Failure — otherwise the only record of why the install never ran is destroyed (#11906).
  */
-warmUpdaterModule()
-
 describe('quitAndInstall failure carries the updater cause', () => {
   beforeEach(() => {
     vi.resetModules()
