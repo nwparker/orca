@@ -1,6 +1,9 @@
 // @ts-nocheck -- mechanically split from OrcaRuntimeService; behavior is covered by AST equivalence and characterization tests.
 import { OrcaRuntimeWithCreateAgentPromptRenderGate } from './orca-runtime-create-agent-prompt-render-gate'
-import type { TerminalWaiter } from './runtime-terminal-contracts'
+import type {
+  RuntimeProviderSnapshotReadOptions,
+  TerminalWaiter
+} from './runtime-terminal-contracts'
 import {
   TUI_IDLE_VISIBLE_PROBE_SETTLE_MARGIN_MS,
   VISIBLE_TERMINAL_SNAPSHOT_TIMEOUT_MS
@@ -14,7 +17,6 @@ import type {
   RuntimeTerminalWait,
   RuntimeTerminalWaitBlockedReason
 } from '../../shared/runtime-types'
-import type { RuntimeProviderSnapshotReadOptions } from './runtime-terminal-contracts'
 import {
   buildPtyTerminalWaitBlockedResult,
   buildPtyTerminalWaitResult,
