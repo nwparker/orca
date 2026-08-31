@@ -53,14 +53,48 @@ describe('windowsParallelCheckoutGitArgs', () => {
   })
 
   it.each(['\\\\wsl.localhost\\Ubuntu\\home\\dev\\repo', '\\\\wsl$\\Ubuntu\\home\\dev\\repo'])(
-    'returns nothing for the WSL UNC path %s',
+    'keeps the default worker policy for the WSL ext4 UNC path %s',
     (cwd) => {
       expect(windowsParallelCheckoutGitArgs(cwd, 'win32')).toEqual([])
     }
   )
 
-  it('returns nothing when a Windows path is explicitly routed through WSL', () => {
-    expect(windowsParallelCheckoutGitArgs('C:\\repo', 'win32', 'Ubuntu')).toEqual([])
+  it('uses the all-worker pool for a WSL UNC path backed by DrvFS', () => {
+    expect(
+      windowsParallelCheckoutGitArgs('\\\\wsl.localhost\\Ubuntu\\mnt\\c\\repo', 'win32')
+    ).toEqual(['-c', 'checkout.workers=-1'])
+  })
+
+  it('keeps the default worker policy for an ext4 POSIX cwd routed through WSL', () => {
+    expect(windowsParallelCheckoutGitArgs('/home/dev/repo', 'win32', 'Ubuntu')).toEqual([])
+  })
+
+  it('uses the all-worker pool for an explicitly WSL-routed DrvFS path', () => {
+    expect(windowsParallelCheckoutGitArgs('/mnt/c/repo', 'win32', 'Ubuntu')).toEqual([
+      '-c',
+      'checkout.workers=-1'
+    ])
+  })
+
+  it('uses the all-worker pool when a Windows drive cwd is routed through WSL', () => {
+    // The command runner keeps the Windows spelling for its cwd while it
+    // translates that cwd to /mnt/c/... inside the selected distro.
+    expect(
+      windowsParallelCheckoutGitArgs('C:\\repo', 'win32', 'Ubuntu', {
+        nativeWindowsGit: false
+      })
+    ).toEqual(['-c', 'checkout.workers=-1'])
+  })
+
+  it('keeps the FSCache workaround on an ambiguous Windows cwd with a WSL override', () => {
+    // A linked worktree can force this C:\ path back to host Git even when a
+    // WSL distro override is present, so retain the native safety setting.
+    expect(windowsParallelCheckoutGitArgs('C:\\repo', 'win32', 'Ubuntu')).toEqual([
+      '-c',
+      'core.fscache=false',
+      '-c',
+      'checkout.workers=-1'
+    ])
   })
 
   it.each(['relative\\repo', '/home/dev/repo', '\\repo'])(
