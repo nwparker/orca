@@ -25,13 +25,14 @@ const CURSOR_SCRIPT_FILE_NAME = process.platform === 'win32' ? 'cursor-hook.cmd'
 const WINDOWS_POWERSHELL_LAUNCHER =
   /^[A-Za-z]:\/[^"]*\/System32\/WindowsPowerShell\/v1\.0\/powershell\.exe -NoProfile -EncodedCommand \S+$/
 
-// Why: on Windows one hook run is cmd.exe -> powershell.exe -> cursor-hook.cmd -> curl.exe.
-// PowerShell CLR startup alone costs ~300ms warm and seconds cold on a loaded runner, so match
-// WINDOWS_PROCESS_TEST_TIMEOUT_MS (30s), this repo's budget for a real Windows process spawn.
+// Why: on Windows one hook run is cmd.exe -> powershell.exe -> cmd.exe -> cursor-hook.cmd ->
+// curl.exe, and the package job runs ~25 files at maxWorkers 4 alongside real-Electron and
+// node-pty suites, so a cold CLR start competes for the runner. Deliberately above the product's
+// own MANAGED_HOOK_TIMEOUT_SECONDS (10s): this gates launcher correctness, not user latency.
 const HOOK_RUN_TIMEOUT_MS = 30_000
-// Why: these cases run up to 16 of those chains back to back; stay well above HOOK_RUN_TIMEOUT_MS
-// so a stuck spawn reports ETIMEDOUT (which names the process) before the case times out.
-const HOOK_CASE_TIMEOUT_MS = 120_000
+// Why: these cases run up to 16 of those chains back to back. Matches the same budget
+// windows-hook-payload-delivery.test.ts uses for the identical chain.
+const HOOK_CASE_TIMEOUT_MS = 60_000
 
 type InstalledCursorHooks = {
   hooks: Record<string, { command?: string }[]>
