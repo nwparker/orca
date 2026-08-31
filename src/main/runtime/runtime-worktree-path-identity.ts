@@ -6,7 +6,7 @@ import {
   normalizeRuntimePathForComparison
 } from '../../shared/cross-platform-path'
 import { parsePtySessionId } from '../../shared/pty-session-id-format'
-import { splitWorktreeId, worktreeIdComparisonKey } from '../../shared/worktree/id'
+import { splitWorktreeId, worktreeIdsEqual } from '../../shared/worktree/id'
 import { normalizeLocalBranchName } from './runtime-worktree-selection'
 
 export type ResolvedWorktree = Worktree & {
@@ -25,17 +25,8 @@ export function runtimePathsEqual(left: string, right: string): boolean {
   return normalizeRuntimePathForComparison(left) === normalizeRuntimePathForComparison(right)
 }
 
-/**
- * Why: runtime identity is per *workspace*, not per checkout dir. Folder projects back
- * several independent workspaces with one directory, separated only by the
- * `::workspace:<uuid>` suffix that filesystem callers must strip; stripping it here
- * instead lets one session steal a sibling's PTYs. Normalize only path spelling, so
- * Windows/WSL/SSH ids still match themselves across hosts.
- */
-export function runtimeWorktreeIdsEqual(left: string, right: string): boolean {
-  const leftKey = worktreeIdComparisonKey(left)
-  return leftKey === null ? left === right : leftKey === worktreeIdComparisonKey(right)
-}
+/** Runtime-side name for the shared workspace-identity comparison; see `worktreeIdsEqual`. */
+export const runtimeWorktreeIdsEqual = worktreeIdsEqual
 
 export function runtimeWorktreeIdentityKey(worktreeId: string): string {
   // Same suffix rule: this keys PTY refresh, sleep, and mutation-queue state per session.
