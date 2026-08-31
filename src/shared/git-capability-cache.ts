@@ -11,6 +11,8 @@ export type GitCapability =
   | 'merge-tree-write-tree'
   | 'rev-parse-path-format'
   | 'worktree-list-z'
+  /** Git for Windows 2.55 fixed stale FSCache entries during parallel checkout. */
+  | 'windows-fscache-parallel-checkout'
 
 export class GitCapabilityCache extends CapabilityProbeCache<GitCapability> {
   constructor() {

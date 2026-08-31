@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   parseWindowsLinkedGitdir,
+  getWslLinkedWorktreeGitRoute,
   prepareWslLinkedWorktreeGitRouting,
   resetWslLinkedWorktreeGitRoutingForTests,
   seedWslLinkedWorktreeGitRoutingForTests,
@@ -70,6 +71,53 @@ describe('usesHostGitForWslLinkedWorktree', () => {
     expect(usesHostGitForWslLinkedWorktree(String.raw`C:\repo\linked`, 'Ubuntu', 'linux')).toBe(
       false
     )
+  })
+})
+
+describe('getWslLinkedWorktreeGitRoute', () => {
+  it('distinguishes settled host, WSL, and unknown routes', async () => {
+    const fileSystem: WslLinkedWorktreeRoutingFileSystem = {
+      stat: vi.fn(async () => directoryMarker),
+      readFile: vi.fn(async () => '')
+    }
+    const cwd = String.raw`C:\repo`
+    expect(getWslLinkedWorktreeGitRoute(cwd, 'Ubuntu', 'win32')).toBe('unknown')
+    await prepareWslLinkedWorktreeGitRouting(cwd, 'Ubuntu', { platform: 'win32', fileSystem })
+    expect(getWslLinkedWorktreeGitRoute(cwd, 'Ubuntu', 'win32')).toBe('wsl')
+
+    seedWslLinkedWorktreeGitRoutingForTests(String.raw`C:\linked`)
+    expect(getWslLinkedWorktreeGitRoute(String.raw`C:\linked`, 'Ubuntu', 'win32')).toBe('host')
+  })
+
+  it('retries an unknown target after its worktree marker appears', async () => {
+    let markerExists = false
+    const fileSystem: WslLinkedWorktreeRoutingFileSystem = {
+      stat: vi.fn(async () => {
+        if (!markerExists) {
+          throw missingMarker()
+        }
+        return fileMarker
+      }),
+      readFile: vi.fn(async () => 'gitdir: C:/main/.git/worktrees/linked\n')
+    }
+    const cwd = String.raw`C:\new-target`
+
+    await expect(
+      prepareWslLinkedWorktreeGitRouting(cwd, 'Ubuntu', {
+        platform: 'win32',
+        fileSystem
+      })
+    ).resolves.toBe(false)
+    expect(getWslLinkedWorktreeGitRoute(cwd, 'Ubuntu', 'win32')).toBe('unknown')
+
+    markerExists = true
+    await expect(
+      prepareWslLinkedWorktreeGitRouting(cwd, 'Ubuntu', {
+        platform: 'win32',
+        fileSystem
+      })
+    ).resolves.toBe(true)
+    expect(getWslLinkedWorktreeGitRoute(cwd, 'Ubuntu', 'win32')).toBe('host')
   })
 })
 

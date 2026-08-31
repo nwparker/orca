@@ -15,7 +15,7 @@ import {
   getEffectiveHooksFromConfigMock,
   shouldRunSetupForCreateMock,
   loadHooksMock,
-  computeWorktreePathMock,
+  computeWorktreePathFromWorkspaceRootMock,
   gitExecFileAsyncMock
 } from './worktrees-test-module-mocks'
 import { handlers, mainWindow, setupWorktreeHandlers, store } from './worktrees-test-harness'
@@ -442,7 +442,7 @@ describe('registerWorktreeHandlers', () => {
     })
     listWorktreesMock.mockResolvedValue([
       {
-        path: '../worktrees/feature',
+        path: '/workspace/worktrees/feature',
         head: 'abc123',
         branch: 'feature',
         isBare: false,
@@ -455,19 +455,21 @@ describe('registerWorktreeHandlers', () => {
       name: 'feature'
     })
 
-    expect(computeWorktreePathMock).toHaveBeenCalledWith('feature', '/workspace/repo', {
-      nestWorkspaces: false,
-      workspaceDir: '../worktrees'
-    })
+    expect(computeWorktreePathFromWorkspaceRootMock).toHaveBeenCalledWith(
+      'feature',
+      '/workspace/repo',
+      '/workspace/worktrees',
+      false
+    )
     expect(addWorktreeMock).toHaveBeenCalledWith(
       '/workspace/repo',
-      '../worktrees/feature',
+      '/workspace/worktrees/feature',
       'feature',
       'origin/main',
       false
     )
     expect(store.setWorktreeMeta).toHaveBeenCalledWith(
-      'repo-1::../worktrees/feature',
+      'repo-1::/workspace/worktrees/feature',
       expect.objectContaining({
         orcaCreationWorkspaceLayout: { path: '../worktrees', nestWorkspaces: false }
       })

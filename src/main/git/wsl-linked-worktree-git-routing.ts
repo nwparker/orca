@@ -2,7 +2,7 @@ import * as fsPromises from 'node:fs/promises'
 import { win32 } from 'node:path'
 import type { Stats } from 'node:fs'
 
-type CachedRoute = { usesHostGit: boolean; expiresAt: number }
+type CachedRoute = { usesHostGit: boolean; known: boolean; expiresAt: number }
 type TransientRouteFailure = { count: number; retryAfter: number }
 
 // Bounds stale routing after delete/recreate while amortizing async parent walks on slow storage.
@@ -34,7 +34,7 @@ function normalize(path: string): string {
   return win32.resolve(path)
 }
 
-function cachedRoute(cwd: string, now: number): boolean | undefined {
+function cachedRoute(cwd: string, now: number): CachedRoute | undefined {
   const exact = routeByCwd.get(cwd)
   if (!exact) {
     return undefined
@@ -43,7 +43,7 @@ function cachedRoute(cwd: string, now: number): boolean | undefined {
     routeByCwd.delete(cwd)
     return undefined
   }
-  return exact.usesHostGit
+  return exact
 }
 
 export function parseWindowsLinkedGitdir(content: string): string | null {
@@ -71,7 +71,7 @@ const defaultFileSystem: WslLinkedWorktreeRoutingFileSystem = {
 async function shouldUseHostGit(
   cwd: string,
   fileSystem: WslLinkedWorktreeRoutingFileSystem
-): Promise<boolean> {
+): Promise<{ usesHostGit: boolean; known: boolean }> {
   let candidate = cwd
   const driveRoot = win32.parse(candidate).root
   while (true) {
@@ -79,12 +79,13 @@ async function shouldUseHostGit(
     try {
       const marker = await fileSystem.stat(markerPath)
       if (marker.isDirectory()) {
-        return false
+        return { usesHostGit: false, known: true }
       }
       if (marker.isFile()) {
-        return parseWindowsLinkedGitdir(await fileSystem.readFile(markerPath)) !== null
+        const usesHostGit = parseWindowsLinkedGitdir(await fileSystem.readFile(markerPath)) !== null
+        return { usesHostGit, known: usesHostGit }
       }
-      return false
+      return { usesHostGit: false, known: false }
     } catch (error) {
       const code = error && typeof error === 'object' ? (error as NodeJS.ErrnoException).code : null
       if (code !== 'ENOENT' && code !== 'ENOTDIR') {
@@ -92,7 +93,7 @@ async function shouldUseHostGit(
       }
     }
     if (candidate === driveRoot) {
-      return false
+      return { usesHostGit: false, known: false }
     }
     candidate = win32.dirname(candidate)
   }
@@ -111,7 +112,7 @@ function rememberRoute(cwd: string, usesHostGit: boolean, now: number): boolean 
     }
     nextRoutePruneAt = now + WSL_LINKED_WORKTREE_ROUTE_TTL_MS
   }
-  routeByCwd.set(cwd, { usesHostGit, expiresAt })
+  routeByCwd.set(cwd, { usesHostGit, known: true, expiresAt })
   return usesHostGit
 }
 
@@ -205,7 +206,7 @@ function discoverRoute(
   return new Promise((resolve) => {
     const generation = routeProbeGeneration
     let settled = false
-    const finish = (usesHostGit: boolean, cacheable: boolean): void => {
+    const finish = (usesHostGit: boolean, known: boolean, cacheable: boolean): void => {
       if (settled) {
         return
       }
@@ -215,7 +216,11 @@ function discoverRoute(
         resolve(false)
         return
       }
-      if (cacheable) {
+      // Only a positively identified route is stable enough to cache. A
+      // missing/malformed marker commonly means the worktree is being created
+      // right now; retaining that `unknown` result would suppress the host
+      // route probe during finalization and needlessly keep the FSCache flag.
+      if (cacheable && known) {
         transientFailuresByCwd.delete(cwd)
         resolve(rememberRoute(cwd, usesHostGit, now()))
       } else {
@@ -223,17 +228,20 @@ function discoverRoute(
         resolve(usesHostGit)
       }
     }
-    const timer = setTimeout(() => finish(false, false), WSL_LINKED_WORKTREE_ROUTE_PROBE_TIMEOUT_MS)
+    const timer = setTimeout(
+      () => finish(false, false, false),
+      WSL_LINKED_WORKTREE_ROUTE_PROBE_TIMEOUT_MS
+    )
     timer.unref()
     const releaseProbe = trackRouteProbe(cwd)
     void shouldUseHostGit(cwd, fileSystem).then(
-      (usesHostGit) => {
+      ({ usesHostGit, known }) => {
         releaseProbe()
-        finish(usesHostGit, true)
+        finish(usesHostGit, known, true)
       },
       () => {
         releaseProbe()
-        finish(false, false)
+        finish(false, false, false)
       }
     )
   })
@@ -256,7 +264,7 @@ export async function prepareWslLinkedWorktreeGitRouting(
   const normalizedCwd = normalize(cwd)
   const cached = cachedRoute(normalizedCwd, now())
   if (cached !== undefined) {
-    return cached
+    return cached.usesHostGit
   }
   const pending = pendingRoutes.get(normalizedCwd)
   if (pending) {
@@ -283,8 +291,23 @@ export function usesHostGitForWslLinkedWorktree(
 ): boolean {
   return (
     isWslLinkedWorktreeGitRoutingCandidate(cwd, wslDistro, platform) &&
-    cachedRoute(normalize(cwd), now()) === true
+    cachedRoute(normalize(cwd), now())?.usesHostGit === true
   )
+}
+
+export type WslLinkedWorktreeGitRoute = 'host' | 'wsl' | 'unknown' | 'not-applicable'
+
+export function getWslLinkedWorktreeGitRoute(
+  cwd: string,
+  wslDistro: string | undefined,
+  platform: NodeJS.Platform = process.platform,
+  now: () => number = Date.now
+): WslLinkedWorktreeGitRoute {
+  if (!isWslLinkedWorktreeGitRoutingCandidate(cwd, wslDistro, platform)) {
+    return 'not-applicable'
+  }
+  const route = cachedRoute(normalize(cwd), now())
+  return route?.known ? (route.usesHostGit ? 'host' : 'wsl') : 'unknown'
 }
 
 export function resetWslLinkedWorktreeGitRoutingForTests(): void {
@@ -298,9 +321,9 @@ export function resetWslLinkedWorktreeGitRoutingForTests(): void {
 }
 
 export function seedWslLinkedWorktreeGitRoutingForTests(root: string): void {
-  const normalizedRoot = normalize(root)
-  routeByCwd.set(normalizedRoot, {
+  routeByCwd.set(normalize(root), {
     usesHostGit: true,
+    known: true,
     expiresAt: Number.POSITIVE_INFINITY
   })
 }

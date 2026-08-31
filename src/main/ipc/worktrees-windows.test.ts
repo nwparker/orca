@@ -26,6 +26,7 @@ const {
   hasHooksFileMock,
   loadHooksMock,
   computeWorktreePathMock,
+  computeWorktreePathFromWorkspaceRootMock,
   ensurePathWithinWorkspaceMock,
   killAllProcessesForWorktreeMock,
   clearProviderPtyStateMock,
@@ -56,6 +57,7 @@ const {
   hasHooksFileMock: vi.fn(),
   loadHooksMock: vi.fn(),
   computeWorktreePathMock: vi.fn(),
+  computeWorktreePathFromWorkspaceRootMock: vi.fn(),
   ensurePathWithinWorkspaceMock: vi.fn(),
   killAllProcessesForWorktreeMock: vi.fn(),
   clearProviderPtyStateMock: vi.fn(),
@@ -142,6 +144,7 @@ vi.mock('./worktree-logic', async (importOriginal) => {
   return {
     ...actual,
     computeWorktreePath: computeWorktreePathMock,
+    computeWorktreePathFromWorkspaceRoot: computeWorktreePathFromWorkspaceRootMock,
     ensurePathWithinWorkspace: ensurePathWithinWorkspaceMock
   }
 })
@@ -201,6 +204,7 @@ describe('registerWorktreeHandlers – Windows path handling', () => {
     hasHooksFileMock.mockReset()
     loadHooksMock.mockReset()
     computeWorktreePathMock.mockReset()
+    computeWorktreePathFromWorkspaceRootMock.mockReset()
     ensurePathWithinWorkspaceMock.mockReset()
     killAllProcessesForWorktreeMock.mockReset()
     clearProviderPtyStateMock.mockReset()
@@ -285,6 +289,13 @@ describe('registerWorktreeHandlers – Windows path handling', () => {
     getDefaultTabsLaunchMock.mockReturnValue(undefined)
     shouldRunSetupForCreateMock.mockReturnValue(false)
     computeWorktreePathMock.mockReturnValue('C:\\workspaces\\improve-dashboard')
+    computeWorktreePathFromWorkspaceRootMock.mockImplementation(
+      (sanitizedName: string, repoPath: string, workspaceRoot: string, nestWorkspaces: boolean) =>
+        computeWorktreePathMock(sanitizedName, repoPath, {
+          workspaceDir: workspaceRoot,
+          nestWorkspaces
+        })
+    )
     ensurePathWithinWorkspaceMock.mockReturnValue('C:\\workspaces\\improve-dashboard')
     listWorktreesMock.mockResolvedValue([])
     assertWorktreeCleanForRemovalMock.mockResolvedValue(undefined)

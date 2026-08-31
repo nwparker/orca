@@ -156,7 +156,18 @@ describe('addWorktree', () => {
     )
 
     expect(gitExecFileAsyncMock).toHaveBeenCalledWith(
-      ['-c', 'core.longpaths=true', 'worktree', 'add', 'C:\\repo-feature', 'feature/test'],
+      [
+        '-c',
+        'core.longpaths=true',
+        '-c',
+        'core.fscache=false',
+        '-c',
+        'checkout.workers=-1',
+        'worktree',
+        'add',
+        'C:\\repo-feature',
+        'feature/test'
+      ],
       { cwd: 'C:\\repo', wslDistro: 'Ubuntu', timeout: WORKTREE_ADD_TIMEOUT_MS }
     )
   })
@@ -188,7 +199,7 @@ describe('addWorktree', () => {
     ])
   })
 
-  it('does not pass the Windows-only long-path option for a WSL UNC repo path', async () => {
+  it('keeps the default worker policy for a WSL ext4 repo path', async () => {
     platformSpy.mockReturnValue('win32')
     gitExecFileAsyncMock.mockResolvedValueOnce({ stdout: '' }) // worktree add
 
@@ -206,6 +217,53 @@ describe('addWorktree', () => {
     expect(gitExecFileAsyncMock).toHaveBeenCalledWith(
       ['worktree', 'add', '\\\\wsl.localhost\\Ubuntu\\home\\dev\\repo-feature', 'feature/test'],
       { cwd: repoPath, wslDistro: 'Ubuntu', timeout: WORKTREE_ADD_TIMEOUT_MS }
+    )
+  })
+
+  it('classifies checkout storage from a WSL mirror target, not the Windows repo cwd', async () => {
+    platformSpy.mockReturnValue('win32')
+    gitExecFileAsyncMock.mockResolvedValueOnce({ stdout: '' }) // worktree add
+
+    await addWorktree(
+      'C:\\repo',
+      '\\\\wsl.localhost\\Ubuntu\\home\\dev\\repo-feature',
+      'feature/test',
+      'feature/test',
+      false,
+      false,
+      { checkoutExistingBranch: true, wslDistro: 'Ubuntu' }
+    )
+
+    expect(gitExecFileAsyncMock).toHaveBeenCalledWith(
+      [
+        '-c',
+        'core.longpaths=true',
+        'worktree',
+        'add',
+        '\\\\wsl.localhost\\Ubuntu\\home\\dev\\repo-feature',
+        'feature/test'
+      ],
+      { cwd: 'C:\\repo', wslDistro: 'Ubuntu', timeout: WORKTREE_ADD_TIMEOUT_MS }
+    )
+  })
+
+  it('keeps the default worker policy for an ext4 POSIX cwd routed through WSL', async () => {
+    platformSpy.mockReturnValue('win32')
+    gitExecFileAsyncMock.mockResolvedValueOnce({ stdout: '' }) // worktree add
+
+    await addWorktree(
+      '/home/dev/repo',
+      '/home/dev/repo-feature',
+      'feature/test',
+      'feature/test',
+      false,
+      false,
+      { checkoutExistingBranch: true, wslDistro: 'Ubuntu' }
+    )
+
+    expect(gitExecFileAsyncMock).toHaveBeenCalledWith(
+      ['-c', 'core.longpaths=true', 'worktree', 'add', '/home/dev/repo-feature', 'feature/test'],
+      { cwd: '/home/dev/repo', wslDistro: 'Ubuntu', timeout: WORKTREE_ADD_TIMEOUT_MS }
     )
   })
 

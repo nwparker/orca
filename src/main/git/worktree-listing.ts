@@ -28,8 +28,9 @@ export async function listWorktreeGraph(
   repoPath: string,
   options: GitWorktreeExecOptions = {}
 ): Promise<GitWorktreeInfo[]> {
+  const { annotateSparseCheckout: _annotateSparseCheckout, ...readOptions } = options
   try {
-    const worktrees = await readTranslatedWorktreeGraph(repoPath, options)
+    const worktrees = await readTranslatedWorktreeGraph(repoPath, readOptions)
     return options.includeCreatePreparations
       ? worktrees
       : worktrees.filter((worktree) => !isWorktreeCreatePreparation(worktree))
@@ -56,12 +57,15 @@ export async function listWorktreesUnshared(
   repoPath: string,
   options: GitWorktreeExecOptions = {}
 ): Promise<GitWorktreeInfo[]> {
+  const { annotateSparseCheckout = true, ...readOptions } = options
   try {
-    const worktrees = await readTranslatedWorktreeGraph(repoPath, options)
+    const worktrees = await readTranslatedWorktreeGraph(repoPath, readOptions)
     const visibleWorktrees = options.includeCreatePreparations
       ? worktrees
       : worktrees.filter((worktree) => !isWorktreeCreatePreparation(worktree))
-    return annotateSparseCheckoutStatus(visibleWorktrees)
+    return annotateSparseCheckout
+      ? annotateSparseCheckoutStatus(visibleWorktrees)
+      : visibleWorktrees
   } catch (err) {
     if (getErrorCode(err) === 'ENOENT') {
       try {
@@ -86,14 +90,15 @@ export async function listWorktreesStrict(
   repoPath: string,
   options: GitWorktreeExecOptions = {}
 ): Promise<GitWorktreeInfo[]> {
-  const worktrees = (await readWorktreeList(repoPath, options)).map((worktree) => {
-    const translatedPath = translateWorktreePath(worktree.path, repoPath, options)
+  const { annotateSparseCheckout = true, ...readOptions } = options
+  const worktrees = (await readWorktreeList(repoPath, readOptions)).map((worktree) => {
+    const translatedPath = translateWorktreePath(worktree.path, repoPath, readOptions)
     return translatedPath === worktree.path ? worktree : { ...worktree, path: translatedPath }
   })
   const visibleWorktrees = options.includeCreatePreparations
     ? worktrees
     : worktrees.filter((worktree) => !isWorktreeCreatePreparation(worktree))
-  return annotateSparseCheckoutStatus(visibleWorktrees)
+  return annotateSparseCheckout ? annotateSparseCheckoutStatus(visibleWorktrees) : visibleWorktrees
 }
 
 async function annotateSparseCheckoutStatus(

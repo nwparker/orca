@@ -80,9 +80,9 @@ import {
   sanitizeWorktreeName,
   sanitizeWorktreeDisplayName,
   computeValidatedBranchName,
-  computeWorktreePath,
+  computeWorktreePathFromWorkspaceRoot,
   computeRemoteWorktreePath,
-  computeWorkspaceRoot,
+  computeWorkspaceRootAsync,
   ensurePathWithinWorkspace,
   getWorktreeCreationLayout,
   getWorktreePathSettings,
@@ -710,7 +710,12 @@ async function canCheckoutExistingLocalBranch(
       return false
     }
   }
-  const worktrees = await listWorktrees(repoPath, gitOptions)
+  // Branch ownership only needs Git's registration rows; sparse-checkout probes
+  // for every worktree can dominate this hot path on Windows/WSL repos.
+  const worktrees = await listWorktrees(repoPath, {
+    ...gitOptions,
+    annotateSparseCheckout: false
+  })
   return !worktrees.some((worktree) => normalizeLocalBranchName(worktree.branch) === branchName)
 }
 
@@ -2006,6 +2011,11 @@ export async function createLocalWorktree(
     settings,
     getWorktreeMirrorDistro(store, repo)
   )
+  // WSL mirror roots require a `wsl.exe` home probe. Start it before the Git
+  // preflight so that probe overlaps branch/base validation and never blocks
+  // the Electron main thread on the submit path.
+  const workspaceRootPromise = computeWorkspaceRootAsync(repo.path, worktreePathSettings)
+  void workspaceRootPromise.catch(() => {})
   const localGitExecOptions = getLocalProjectGitExecOptions(store, repo)
   const localWorktreeGitOptions = getLocalProjectWorktreeGitOptions(store, repo)
   const hasLocalWorktreeGitOptions = Object.keys(localWorktreeGitOptions).length > 0
@@ -2167,7 +2177,7 @@ export async function createLocalWorktree(
       emitCreateWorktreeProgress(mainWindow, 'fetching', args.creationId)
     }
   }
-  const workspaceRoot = computeWorkspaceRoot(repo.path, worktreePathSettings)
+  const workspaceRoot = await workspaceRootPromise
 
   // Why: this validation doesn't depend on remote refs, so it can overlap a required remote-tracking base refresh.
   const primarySetupScript = getEffectiveHooks(repo)?.scripts.setup
@@ -2322,7 +2332,12 @@ export async function createLocalWorktree(
     }
 
     worktreePath = ensurePathWithinWorkspace(
-      computeWorktreePath(effectiveSanitizedName, repo.path, worktreePathSettings),
+      computeWorktreePathFromWorkspaceRoot(
+        effectiveSanitizedName,
+        repo.path,
+        workspaceRoot,
+        worktreePathSettings.nestWorkspaces
+      ),
       workspaceRoot
     )
     if (existsSync(worktreePath)) {

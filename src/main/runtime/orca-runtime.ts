@@ -1232,8 +1232,8 @@ import { collectLayoutLeafIdsInOrder } from '../persistence/restoring-sessions/t
 import type { StatsCollector } from '../stats/collector'
 import {
   computeValidatedBranchName,
-  computeWorktreePath,
-  computeWorkspaceRoot,
+  computeWorktreePathFromWorkspaceRoot,
+  computeWorkspaceRootAsync,
   ensurePathWithinWorkspace,
   formatWorktreeRemovalError,
   getWorktreeCreationLayout,
@@ -2839,7 +2839,12 @@ async function canCheckoutExistingLocalBranch(
       return false
     }
   }
-  const worktrees = await listWorktrees(repoPath, gitOptions)
+  // Branch ownership only needs Git's registration rows; sparse-checkout probes
+  // for every worktree can dominate this hot path on Windows/WSL repos.
+  const worktrees = await listWorktrees(repoPath, {
+    ...gitOptions,
+    annotateSparseCheckout: false
+  })
   return !worktrees.some((worktree) => normalizeLocalBranchName(worktree.branch) === branchName)
 }
 
@@ -26835,12 +26840,43 @@ export class OrcaRuntimeService {
       settings,
       getWorktreeMirrorDistro(this.requireStore(), repo)
     )
+    // WSL mirror roots require a `wsl.exe` home probe. Start it before the Git
+    // preflight so root discovery overlaps branch/base validation and does not
+    // block the runtime event loop on the submit path.
+    const workspaceRootPromise = computeWorkspaceRootAsync(repo.path, worktreePathSettings)
+    // The base/branch path can fail before the root is awaited; observe a
+    // rejected probe so that early validation failures never create an
+    // unhandled-rejection warning.
+    void workspaceRootPromise.catch(() => {})
     const localGitExecOptions = getLocalProjectGitExecOptions(this.requireStore(), repo)
     const localWorktreeGitOptions = getLocalProjectWorktreeGitOptions(this.requireStore(), repo)
     const hasLocalWorktreeGitOptions = hasLocalGitOptions(localWorktreeGitOptions)
     const localWorktreeGitOptionArgs: [] | [{ wslDistro?: string }] = hasLocalWorktreeGitOptions
       ? [localWorktreeGitOptions]
       : []
+    // Base validation and the final create decision ask the same remote lookup.
+    // Share it so WSL/native Windows pay for one `git remote` process.
+    const remoteTrackingBaseByBranch = new Map<string, Promise<RemoteTrackingBase | null>>()
+    const resolveRemoteTrackingBaseForCreate = (
+      candidate: string
+    ): Promise<RemoteTrackingBase | null> => {
+      const existing = remoteTrackingBaseByBranch.get(candidate)
+      if (existing) {
+        return existing
+      }
+      const pending = this.resolveRemoteTrackingBase(
+        repo.path,
+        candidate,
+        ...localWorktreeGitOptionArgs
+      )
+      remoteTrackingBaseByBranch.set(candidate, pending)
+      void pending.catch(() => {
+        if (remoteTrackingBaseByBranch.get(candidate) === pending) {
+          remoteTrackingBaseByBranch.delete(candidate)
+        }
+      })
+      return pending
+    }
     const addProjectGitOptions = (options?: AddWorktreeOptions): AddWorktreeOptions | undefined => {
       if (!hasLocalWorktreeGitOptions) {
         return options
@@ -26866,11 +26902,7 @@ export class OrcaRuntimeService {
           ? resolveDefaultBaseRefWithLocalGit(localGitExecOptions)
           : getBaseRefDefault(repo.path),
       isBaseUsable: async (baseBranchCandidate) => {
-        const remoteTrackingBase = await this.resolveRemoteTrackingBase(
-          repo.path,
-          baseBranchCandidate,
-          ...localWorktreeGitOptionArgs
-        )
+        const remoteTrackingBase = await resolveRemoteTrackingBaseForCreate(baseBranchCandidate)
         if (remoteTrackingBase) {
           if (
             await this.hasRemoteTrackingRef(
@@ -26903,7 +26935,7 @@ export class OrcaRuntimeService {
       )
     }
 
-    const workspaceRoot = computeWorkspaceRoot(repo.path, worktreePathSettings)
+    const workspaceRoot = await workspaceRootPromise
     // Why: CLI-managed WSL worktrees live under ~/orca/workspaces inside the
     // distro filesystem through computeWorkspaceRoot. If home lookup fails,
     // still validate against the effective workspace dir.
@@ -27010,6 +27042,8 @@ export class OrcaRuntimeService {
         }
       }
 
+      // Keep the PR lookup on the first candidate: local remote-tracking refs
+      // can be stale, so GitHub remains the authority for an un-fetched branch.
       if (!checkoutExistingBranch && !selectedReviewConflictMatched) {
         let existingPR: Awaited<ReturnType<typeof getPRForBranch>> | null = null
         try {
@@ -27027,7 +27061,12 @@ export class OrcaRuntimeService {
         }
       }
       worktreePath = ensurePathWithinWorkspace(
-        computeWorktreePath(effectiveSanitizedName, repo.path, worktreePathSettings),
+        computeWorktreePathFromWorkspaceRoot(
+          effectiveSanitizedName,
+          repo.path,
+          workspaceRoot,
+          worktreePathSettings.nestWorkspaces
+        ),
         workspaceRoot
       )
       if (!(await pathExists(worktreePath))) {
@@ -27045,11 +27084,7 @@ export class OrcaRuntimeService {
         `Could not find an available worktree path for "${sanitizedName}". Pick a different worktree name.`
       )
     }
-    let remoteTrackingBase = await this.resolveRemoteTrackingBase(
-      repo.path,
-      baseBranch,
-      ...localWorktreeGitOptionArgs
-    )
+    let remoteTrackingBase = await resolveRemoteTrackingBaseForCreate(baseBranch)
     if (remoteTrackingBase) {
       const [hadRemoteTrackingBaseRef, hasNamedLocalBaseRef] = await Promise.all([
         this.hasRemoteTrackingRef(repo.path, remoteTrackingBase, ...localWorktreeGitOptionArgs),

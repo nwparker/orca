@@ -250,6 +250,7 @@ const {
   removeWorktreeMock,
   forceDeleteLocalBranchMock,
   computeWorktreePathMock,
+  computeWorktreePathFromWorkspaceRootMock,
   ensurePathWithinWorkspaceMock,
   sshGitProviders,
   sshProviderGenerations,
@@ -347,6 +348,7 @@ const {
     removeWorktreeMock: vi.fn(),
     forceDeleteLocalBranchMock: vi.fn(),
     computeWorktreePathMock: vi.fn(),
+    computeWorktreePathFromWorkspaceRootMock: vi.fn(),
     ensurePathWithinWorkspaceMock: vi.fn(),
     sshGitProviders,
     sshProviderGenerations,
@@ -539,6 +541,7 @@ vi.mock('../ipc/worktree-logic', async (importOriginal) => {
   return {
     ...actual,
     computeWorktreePath: computeWorktreePathMock,
+    computeWorktreePathFromWorkspaceRoot: computeWorktreePathFromWorkspaceRootMock,
     ensurePathWithinWorkspace: ensurePathWithinWorkspaceMock
   }
 })
@@ -807,7 +810,33 @@ function resetRuntimeTestMocks(): void {
   vi.mocked(hasHooksFile).mockReturnValue(false)
   vi.mocked(parseOrcaYaml).mockReturnValue(null)
   computeWorktreePathMock.mockReset()
+  computeWorktreePathFromWorkspaceRootMock.mockReset()
   ensurePathWithinWorkspaceMock.mockReset()
+  computeWorktreePathMock.mockImplementation(
+    (
+      sanitizedName: string,
+      repoPath: string,
+      settings: { nestWorkspaces: boolean; workspaceDir: string }
+    ) => {
+      if (settings.nestWorkspaces) {
+        const repoName =
+          repoPath
+            .split(/[\\/]/)
+            .at(-1)
+            ?.replace(/\.git$/, '') ?? 'repo'
+        return `${settings.workspaceDir}/${repoName}/${sanitizedName}`
+      }
+      return `${settings.workspaceDir}/${sanitizedName}`
+    }
+  )
+  computeWorktreePathFromWorkspaceRootMock.mockImplementation(
+    (sanitizedName: string, repoPath: string, workspaceRoot: string, nestWorkspaces: boolean) =>
+      computeWorktreePathMock(sanitizedName, repoPath, {
+        workspaceDir: workspaceRoot,
+        nestWorkspaces
+      })
+  )
+  ensurePathWithinWorkspaceMock.mockImplementation((targetPath: string) => targetPath)
   invalidateAuthorizedRootsCacheMock.mockReset()
   prepareLocalWorktreeRootForRepoMock.mockReset().mockResolvedValue(undefined)
   createHostedReviewMock.mockReset()
@@ -1093,6 +1122,23 @@ function isOriginMainBaseRefProbe(args: string[]): boolean {
       args.includes('refs/remotes/origin/main^{commit}'))
   )
 }
+
+function isBatchedDefaultBaseRefProbe(args: string[]): boolean {
+  return (
+    args[0] === 'for-each-ref' &&
+    args[1] === '--format=%(refname)%00%(symref)%00%(objecttype)%00%(*objecttype)'
+  )
+}
+
+const BATCHED_DEFAULT_BASE_REF_ARGS = [
+  'for-each-ref',
+  '--format=%(refname)%00%(symref)%00%(objecttype)%00%(*objecttype)',
+  'refs/remotes/origin/HEAD',
+  'refs/remotes/origin/main',
+  'refs/remotes/origin/master',
+  'refs/heads/main',
+  'refs/heads/master'
+]
 
 function antigravityReadyScreen(model = 'Gemini 3.5 Flash (High)'): string {
   return [
@@ -1750,6 +1796,13 @@ computeWorktreePathMock.mockImplementation(
   }
 )
 ensurePathWithinWorkspaceMock.mockImplementation((targetPath: string) => targetPath)
+computeWorktreePathFromWorkspaceRootMock.mockImplementation(
+  (sanitizedName: string, repoPath: string, workspaceRoot: string, nestWorkspaces: boolean) =>
+    computeWorktreePathMock(sanitizedName, repoPath, {
+      workspaceDir: workspaceRoot,
+      nestWorkspaces
+    })
+)
 
 describe('OrcaRuntimeService.dedupeWorktreeCreate', () => {
   it('coalesces concurrent creates that share a clientMutationId', async () => {
@@ -8435,6 +8488,12 @@ describe('OrcaRuntimeService', () => {
     const wslGitOptions = { cwd: TEST_REPO_PATH, wslDistro: 'Ubuntu' }
     let driftCounts = '1\t2\n'
     const asyncGitSpy = vi.spyOn(gitRunner, 'gitExecFileAsync').mockImplementation(async (args) => {
+      if (isBatchedDefaultBaseRefProbe(args)) {
+        return {
+          stdout: 'refs/remotes/origin/HEAD\0refs/remotes/origin/main\0commit\0\n',
+          stderr: ''
+        }
+      }
       if (args[0] === 'symbolic-ref') {
         return { stdout: 'refs/remotes/origin/main\n', stderr: '' }
       }
@@ -8467,10 +8526,10 @@ describe('OrcaRuntimeService', () => {
         behind: 2,
         recentSubjects: ['base commit 2', 'base commit 1']
       })
-      expect(asyncGitSpy).toHaveBeenCalledWith(
-        ['symbolic-ref', '--quiet', 'refs/remotes/origin/HEAD'],
-        { ...wslGitOptions, timeout: 15_000 }
-      )
+      expect(asyncGitSpy).toHaveBeenCalledWith(BATCHED_DEFAULT_BASE_REF_ARGS, {
+        ...wslGitOptions,
+        timeout: 15_000
+      })
       expect(asyncGitSpy).toHaveBeenCalledWith(['remote'], wslGitOptions)
       expect(asyncGitSpy).toHaveBeenCalledWith(
         ['rev-parse', '--path-format=absolute', '--git-common-dir'],
@@ -48428,6 +48487,12 @@ describe('OrcaRuntimeService', () => {
     }
     const runtime = new OrcaRuntimeService(runtimeStore as never)
     const gitSpy = vi.spyOn(gitRunner, 'gitExecFileAsync').mockImplementation(async (args) => {
+      if (isBatchedDefaultBaseRefProbe(args)) {
+        return {
+          stdout: 'refs/remotes/origin/HEAD\0refs/remotes/origin/main\0commit\0\n',
+          stderr: ''
+        }
+      }
       if (args[0] === 'symbolic-ref') {
         return { stdout: 'refs/remotes/origin/main\n', stderr: '' }
       }
@@ -49522,6 +49587,12 @@ describe('OrcaRuntimeService', () => {
     ensurePathWithinWorkspaceMock.mockReturnValue(createdWorktree.path)
     vi.mocked(listWorktrees).mockResolvedValue([createdWorktree])
     const gitSpy = vi.spyOn(gitRunner, 'gitExecFileAsync').mockImplementation(async (args) => {
+      if (isBatchedDefaultBaseRefProbe(args)) {
+        return {
+          stdout: 'refs/remotes/origin/HEAD\0refs/remotes/origin/main\0commit\0\n',
+          stderr: ''
+        }
+      }
       if (args[0] === 'symbolic-ref') {
         return { stdout: 'refs/remotes/origin/main\n', stderr: '' }
       }
@@ -49558,7 +49629,7 @@ describe('OrcaRuntimeService', () => {
         path: createdWorktree.path,
         branch: 'refs/heads/runtime-wsl'
       })
-      expect(gitSpy).toHaveBeenCalledWith(['symbolic-ref', '--quiet', 'refs/remotes/origin/HEAD'], {
+      expect(gitSpy).toHaveBeenCalledWith(BATCHED_DEFAULT_BASE_REF_ARGS, {
         cwd: TEST_REPO_PATH,
         timeout: 15_000,
         wslDistro: 'Ubuntu'

@@ -5,12 +5,14 @@ const {
   gitExecFileAsyncMock,
   gitExecFileSyncMock,
   translateWslOutputPathsMock,
-  moveWorktreeDirectoryToTrashMock
+  moveWorktreeDirectoryToTrashMock,
+  detectSparseCheckoutMock
 } = vi.hoisted(() => ({
   gitExecFileAsyncMock: vi.fn(),
   gitExecFileSyncMock: vi.fn(),
   translateWslOutputPathsMock: vi.fn((output: string) => output),
-  moveWorktreeDirectoryToTrashMock: vi.fn()
+  moveWorktreeDirectoryToTrashMock: vi.fn(),
+  detectSparseCheckoutMock: vi.fn()
 }))
 
 vi.mock('./runner', () => ({
@@ -24,6 +26,11 @@ vi.mock('../worktree-trash', () => ({
   moveWorktreeDirectoryToTrash: moveWorktreeDirectoryToTrashMock.mockResolvedValue(undefined),
   restoreWorktreeDirectoryFromTrash: vi.fn().mockResolvedValue(true),
   scheduleWorktreeTrashDeletion: vi.fn()
+}))
+
+vi.mock('./worktree-sparse-state', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  detectSparseCheckout: detectSparseCheckoutMock
 }))
 
 import {
@@ -43,6 +50,7 @@ registerWorktreeSuiteHooks()
 describe('listWorktrees in-flight sharing', () => {
   beforeEach(async () => {
     gitExecFileAsyncMock.mockReset()
+    detectSparseCheckoutMock.mockReset().mockResolvedValue(false)
     _resetWorktreeScanCacheForTests()
     // Why: capability discovery serializes same-host callers; warming it lets
     // these tests isolate the scan-generation overlap they are exercising.
@@ -142,6 +150,32 @@ describe('listWorktrees in-flight sharing', () => {
       ],
       [['worktree', 'list', '--porcelain', '-z'], { cwd: '/repo', timeout: 5_000 }]
     ])
+  })
+
+  it('can skip sparse-checkout probes for registration-only checks', async () => {
+    const scanOutput = 'worktree /repo\nHEAD abc123\nbranch refs/heads/main\n'
+    gitExecFileAsyncMock.mockResolvedValue({ stdout: scanOutput })
+
+    await expect(listWorktreesStrict('/repo', { annotateSparseCheckout: false })).resolves.toEqual([
+      {
+        path: '/repo',
+        head: 'abc123',
+        branch: 'refs/heads/main',
+        isBare: false,
+        isMainWorktree: true
+      }
+    ])
+    expect(detectSparseCheckoutMock).not.toHaveBeenCalled()
+    expect(gitExecFileAsyncMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps sparse-checkout probes in the default listing contract', async () => {
+    const scanOutput = 'worktree /repo\nHEAD abc123\nbranch refs/heads/main\n'
+    gitExecFileAsyncMock.mockResolvedValue({ stdout: scanOutput })
+
+    await listWorktreesStrict('/repo')
+
+    expect(detectSparseCheckoutMock).toHaveBeenCalledWith('/repo')
   })
 
   it('runs a fresh scan once the shared one has settled', async () => {

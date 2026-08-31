@@ -15,7 +15,9 @@ vi.mock('../wsl', () => ({
 
 import {
   computeWorktreePath,
+  computeWorktreePathFromWorkspaceRoot,
   computeWorktreePathAsync,
+  computeWorkspaceRootAsync,
   getWorktreePathSettings
 } from './worktree-logic'
 import {
@@ -204,6 +206,35 @@ describe('computeWorktreePath WSL layout', () => {
     await expect(computeWorktreePathAsync('feature', repo.path, pathSettings)).resolves.toBe(
       computeWorktreePath('feature', repo.path, pathSettings)
     )
+  })
+
+  it('reuses one resolved WSL root for suffix candidates without a sync home probe', async () => {
+    parseWslPathMock.mockReturnValue(null)
+    getWslHomeMock.mockImplementation(() => {
+      throw new Error('sync WSL home lookup should not run')
+    })
+    getWslHomeAsyncMock.mockResolvedValue('\\\\wsl.localhost\\Ubuntu\\home\\jin')
+
+    const settings = {
+      nestWorkspaces: false,
+      workspaceDir: 'C:\\workspaces',
+      wslMirrorDistro: 'Ubuntu'
+    }
+    const workspaceRoot = await computeWorkspaceRootAsync('C:\\Users\\jin\\repo', settings)
+
+    expect(
+      computeWorktreePathFromWorkspaceRoot('feature', 'C:\\Users\\jin\\repo', workspaceRoot, false)
+    ).toBe('\\\\wsl.localhost\\Ubuntu\\home\\jin\\orca\\workspaces\\feature')
+    expect(
+      computeWorktreePathFromWorkspaceRoot(
+        'feature-2',
+        'C:\\Users\\jin\\repo',
+        workspaceRoot,
+        false
+      )
+    ).toBe('\\\\wsl.localhost\\Ubuntu\\home\\jin\\orca\\workspaces\\feature-2')
+    expect(getWslHomeAsyncMock).toHaveBeenCalledTimes(1)
+    expect(getWslHomeMock).not.toHaveBeenCalled()
   })
 
   it('honors a Linux repo base path even when the distro home lookup fails', () => {

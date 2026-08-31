@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Repo } from '../shared/repo-types'
+import * as worktreeLogic from './ipc/worktree-logic'
 
 const { mkdirMock, authorizeExternalPathMock } = vi.hoisted(() => ({
   mkdirMock: vi.fn(),
@@ -33,6 +34,7 @@ describe('prepareLocalWorktreeRootForRepo', () => {
   beforeEach(() => {
     mkdirMock.mockReset().mockResolvedValue(undefined)
     authorizeExternalPathMock.mockReset()
+    vi.restoreAllMocks()
     store.getSettings.mockReset().mockReturnValue({
       workspaceDir: '/Users/alice/orca/workspaces',
       nestWorkspaces: false
@@ -43,6 +45,30 @@ describe('prepareLocalWorktreeRootForRepo', () => {
     await prepareLocalWorktreeRootForRepo(store as never, repo)
 
     expect(mkdirMock).toHaveBeenCalledWith('/Users/alice/orca/workspaces', { recursive: true })
+  })
+
+  it('resolves the root asynchronously without invoking the synchronous WSL probe', async () => {
+    let resolveRoot!: (root: string) => void
+    const rootReady = new Promise<string>((resolve) => {
+      resolveRoot = resolve
+    })
+    const asyncRootSpy = vi
+      .spyOn(worktreeLogic, 'computeWorkspaceRootAsync')
+      .mockReturnValue(rootReady)
+    const syncRootSpy = vi.spyOn(worktreeLogic, 'computeWorkspaceRoot').mockImplementation(() => {
+      throw new Error('synchronous workspace-root lookup must not run')
+    })
+
+    const preparation = prepareLocalWorktreeRootForRepo(store as never, repo)
+    await Promise.resolve()
+    expect(mkdirMock).not.toHaveBeenCalled()
+
+    resolveRoot('/async-workspaces')
+    await preparation
+
+    expect(asyncRootSpy).toHaveBeenCalledTimes(1)
+    expect(syncRootSpy).not.toHaveBeenCalled()
+    expect(mkdirMock).toHaveBeenCalledWith('/async-workspaces', { recursive: true })
   })
 
   it('uses repo-specific worktree base paths', async () => {

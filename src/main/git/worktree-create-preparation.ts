@@ -1,5 +1,4 @@
 import { windowsLongPathGitArgs } from '../../shared/windows-long-path-git-args'
-import { windowsParallelCheckoutGitArgs } from '../../shared/windows-parallel-checkout-git-args'
 import { resolveWorktreeAddBaseRef } from '../../shared/worktree/base-ref'
 import type { AddWorktreeOptions, AddWorktreeResult, GitWorktreeExecOptions } from './worktree'
 import {
@@ -12,6 +11,8 @@ import {
 } from './worktree'
 import { hasWorktreeBaseCommitRef } from './worktree-base-ref-probe'
 import { gitExecFileAsync } from './runner'
+import { resolveLocalWindowsParallelCheckoutGitArgs } from './windows-parallel-checkout'
+import { isWslLinkedWorktreeGitRoutingCandidate } from './wsl-linked-worktree-git-routing'
 import { runWithGitReadCacheInvalidation } from './status'
 
 function gitExecOptions(
@@ -66,6 +67,13 @@ export async function prepareWorktreeCreateCheckout(
 ): Promise<void> {
   try {
     await runWithGitReadCacheInvalidation(async () => {
+      const parallelCheckoutArgsPromise = resolveLocalWindowsParallelCheckoutGitArgs(worktreePath, {
+        ...options,
+        probeCwd: repoPath
+      })
+      // Base validation can fail before reset; observe the speculative probe so
+      // cancellation/failure never becomes an unhandled rejection.
+      void parallelCheckoutArgsPromise.catch(() => {})
       const effectiveBase = await resolveWorktreeAddBaseRef(baseBranch, (qualifiedRef) =>
         hasWorktreeBaseCommitRef(repoPath, qualifiedRef, options)
       )
@@ -83,10 +91,16 @@ export async function prepareWorktreeCreateCheckout(
           { ...gitExecOptions(repoPath, options), timeout: resolveWorktreeAddTimeoutMs() }
         )
         // Why: reset materializes files without running user post-checkout hooks before submit.
+        const checkoutArgs = isWslLinkedWorktreeGitRoutingCandidate(worktreePath, options.wslDistro)
+          ? await resolveLocalWindowsParallelCheckoutGitArgs(worktreePath, {
+              ...options,
+              probeCwd: repoPath
+            })
+          : await parallelCheckoutArgsPromise
         await gitExecFileAsync(
           [
             ...windowsLongPathGitArgs(worktreePath),
-            ...windowsParallelCheckoutGitArgs(worktreePath, process.platform, options.wslDistro),
+            ...checkoutArgs,
             'reset',
             '--hard',
             effectiveBase
@@ -192,6 +206,14 @@ export async function finalizePreparedWorktree(
   }
   try {
     return await runWithGitReadCacheInvalidation(async () => {
+      const preparedParallelCheckoutArgsPromise = resolveLocalWindowsParallelCheckoutGitArgs(
+        preparedPath,
+        {
+          ...finalizeGitOptions,
+          probeCwd: repoPath
+        }
+      )
+      void preparedParallelCheckoutArgsPromise.catch(() => {})
       const baseContext = await resolveWorktreeAddBaseContext(
         repoPath,
         baseBranch,
@@ -208,18 +230,13 @@ export async function finalizePreparedWorktree(
           gitExecOptions(preparedPath, finalizeGitOptions)
         )
       ])
-      const { stdout: targetHeadOutput } = targetHeadResult
-      const targetHead = targetHeadOutput.trim()
-      const { stdout: preparedHeadOutput } = preparedHeadResult
-      if (preparedHeadOutput.trim() !== targetHead) {
+      const targetHead = targetHeadResult.stdout.trim()
+      if (preparedHeadResult.stdout.trim() !== targetHead) {
+        const preparedParallelCheckoutArgs = await preparedParallelCheckoutArgsPromise
         await gitExecFileAsync(
           [
             ...windowsLongPathGitArgs(preparedPath),
-            ...windowsParallelCheckoutGitArgs(
-              preparedPath,
-              process.platform,
-              finalizeGitOptions.wslDistro
-            ),
+            ...preparedParallelCheckoutArgs,
             'reset',
             '--hard',
             targetHead
@@ -243,15 +260,20 @@ export async function finalizePreparedWorktree(
           gitExecOptions(repoPath, finalizeGitOptions)
         )
         moved = true
+        // Resolve after the move so a newly-created `.git` marker can select
+        // the correct WSL/host route for the final checkout.
+        const targetParallelCheckoutArgs = await resolveLocalWindowsParallelCheckoutGitArgs(
+          worktreePath,
+          {
+            ...finalizeGitOptions,
+            probeCwd: repoPath
+          }
+        )
         // Why: `-f -f` moves the locked preparation while preserving its lock reason (Git >=2.25).
         await gitExecFileAsync(
           [
             ...windowsLongPathGitArgs(worktreePath),
-            ...windowsParallelCheckoutGitArgs(
-              worktreePath,
-              process.platform,
-              finalizeGitOptions.wslDistro
-            ),
+            ...targetParallelCheckoutArgs,
             'checkout',
             '--no-track',
             '-b',

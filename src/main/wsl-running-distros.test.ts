@@ -78,7 +78,7 @@ describe('running WSL distro discovery', () => {
       ])
       expect(execFileMock.mock.calls.map(([, args]) => args)).toEqual([
         ['--list', '--running', '--quiet'],
-        ['-d', 'Ubuntu', '--exec', 'bash', '-c', 'echo $HOME']
+        ['-d', 'Ubuntu', '--exec', 'sh', '-c', 'printf "%s" "$HOME"']
       ])
     })
   })
@@ -134,7 +134,7 @@ describe('running WSL distro discovery', () => {
         ['\\\\wsl.localhost\\Ubuntu\\home\\ada']
       ])
       expect(
-        execFileMock.mock.calls.filter(([, args]) => args.includes('echo $HOME'))
+        execFileMock.mock.calls.filter(([, args]) => args.includes('printf "%s" "$HOME"'))
       ).toHaveLength(1)
     })
   })

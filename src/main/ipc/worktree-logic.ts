@@ -109,9 +109,29 @@ export function computeWorktreePath(
   settings: WorktreePathSettings
 ): string {
   const workspaceRoot = computeWorkspaceRoot(repoPath, settings)
-  const pathOps = getRuntimePathOps(repoPath, workspaceRoot)
+  return computeWorktreePathFromWorkspaceRoot(
+    sanitizedName,
+    repoPath,
+    workspaceRoot,
+    settings.nestWorkspaces
+  )
+}
 
-  if (settings.nestWorkspaces) {
+/**
+ * Build a worktree path from an already resolved workspace root.
+ *
+ * Callers that may need a WSL mirror should resolve the root once and reuse it
+ * across candidate retries; this keeps path construction pure and avoids a
+ * synchronous `wsl.exe` home probe for every candidate.
+ */
+export function computeWorktreePathFromWorkspaceRoot(
+  sanitizedName: string,
+  repoPath: string,
+  workspaceRoot: string,
+  nestWorkspaces: boolean
+): string {
+  const pathOps = getRuntimePathOps(repoPath, workspaceRoot)
+  if (nestWorkspaces) {
     const repoName = pathOps.basename(repoPath).replace(/\.git$/, '')
     return pathOps.join(workspaceRoot, repoName, sanitizedName)
   }
@@ -126,13 +146,12 @@ export async function computeWorktreePathAsync(
   settings: WorktreePathSettings
 ): Promise<string> {
   const workspaceRoot = await computeWorkspaceRootAsync(repoPath, settings)
-  const pathOps = getRuntimePathOps(repoPath, workspaceRoot)
-
-  if (settings.nestWorkspaces) {
-    const repoName = pathOps.basename(repoPath).replace(/\.git$/, '')
-    return pathOps.join(workspaceRoot, repoName, sanitizedName)
-  }
-  return pathOps.join(workspaceRoot, sanitizedName)
+  return computeWorktreePathFromWorkspaceRoot(
+    sanitizedName,
+    repoPath,
+    workspaceRoot,
+    settings.nestWorkspaces
+  )
 }
 
 /**

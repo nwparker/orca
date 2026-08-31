@@ -1,7 +1,7 @@
 import type { GitExec } from './git-handler-ops'
 import { areRelayWorktreePathsEqual, readRelayWorktreeList } from './git-handler-worktree-ops'
 import type { GitCapabilityCache } from '../shared/git-capability-cache'
-import { windowsParallelCheckoutGitArgs } from '../shared/windows-parallel-checkout-git-args'
+import { windowsParallelCheckoutGitArgsAsync } from '../shared/windows-parallel-checkout-git-args'
 
 export async function refreshLocalBaseRefForWorktreeCreateOp(
   git: GitExec,
@@ -62,15 +62,18 @@ export async function refreshLocalBaseRefForWorktreeCreateOp(
     if (checkOnly) {
       return
     }
-    await git(
-      [
-        ...windowsParallelCheckoutGitArgs(ownerWorktree.path, platform),
-        'reset',
-        '--hard',
-        remoteOid
-      ],
-      ownerWorktree.path
+    const parallelCheckoutArgs = await windowsParallelCheckoutGitArgsAsync(
+      ownerWorktree.path,
+      platform,
+      undefined,
+      {
+        ...(platform === 'win32' ? { nativeWindowsGit: true } : {}),
+        capabilities,
+        probeGitVersion: async () =>
+          (await git(['--version'], ownerWorktree.path, { timeout: 5_000 })).stdout
+      }
     )
+    await git([...parallelCheckoutArgs, 'reset', '--hard', remoteOid], ownerWorktree.path)
     return
   }
 

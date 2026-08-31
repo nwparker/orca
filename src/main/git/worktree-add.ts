@@ -4,8 +4,8 @@ import type {
   LocalBaseRefUpdateSuggestion
 } from '../../shared/worktree/base-ref-drift-types'
 import { windowsLongPathGitArgs } from '../../shared/windows-long-path-git-args'
-import { windowsParallelCheckoutGitArgs } from '../../shared/windows-parallel-checkout-git-args'
 import { gitExecFileAsync } from './runner'
+import { resolveLocalWindowsParallelCheckoutGitArgs } from './windows-parallel-checkout'
 import { runWithGitReadCacheInvalidation } from './status'
 import {
   getLocalBaseRefUpdateSuggestionForWorktreeCreate,
@@ -185,14 +185,20 @@ async function performAddWorktree(
   let localBaseRefRefresh: LocalBaseRefRefreshResult | undefined
   let localBaseRefUpdateSuggestion: LocalBaseRefUpdateSuggestion | undefined
   // Why: enable per-invocation Windows checkout tuning without changing user Git config.
-  const args = [
-    ...windowsLongPathGitArgs(repoPath),
-    ...(noCheckout
-      ? []
-      : windowsParallelCheckoutGitArgs(repoPath, process.platform, options.wslDistro)),
-    'worktree',
-    'add'
-  ]
+  // Start the capability probe before base-ref validation so the first create
+  // can overlap the inexpensive `git --version` call with other preflight work.
+  const parallelCheckoutArgsPromise = noCheckout
+    ? Promise.resolve([] as string[])
+    : resolveLocalWindowsParallelCheckoutGitArgs(worktreePath, {
+        ...options,
+        // The target determines checkout storage; probe Git from the existing
+        // repo because a new worktree target may not exist yet.
+        probeCwd: repoPath
+      })
+  // Base validation can fail before the speculative capability probe is read;
+  // keep cancellation/probe failures observed without masking the real error.
+  void parallelCheckoutArgsPromise.catch(() => {})
+  const args = [...windowsLongPathGitArgs(repoPath), 'worktree', 'add']
   let effectiveBase: string | undefined
   if (noCheckout) {
     args.push('--no-checkout')
@@ -216,6 +222,9 @@ async function performAddWorktree(
       args.push(effectiveBase)
     }
   }
+  // Keep all checkout tuning before the subcommand, after the async probe has
+  // had a chance to overlap base resolution.
+  args.splice(windowsLongPathGitArgs(repoPath).length, 0, ...(await parallelCheckoutArgsPromise))
   await gitExecFileAsync(args, {
     ...gitExecOptions(repoPath, options),
     // Why: resolve per call — hoisting this to a module const would freeze the override at import.
@@ -229,9 +238,10 @@ async function performAddWorktree(
   // The read-only push setting probe can overlap the base metadata write. The
   // eventual `--local` write remains after both operations, so config locks do
   // not race.
-  const pushAutoSetupRemoteProbe = effectiveBase && process.platform === 'win32'
-    ? readPushAutoSetupRemote(worktreePath, options)
-    : undefined
+  const pushAutoSetupRemoteProbe =
+    effectiveBase && process.platform === 'win32'
+      ? readPushAutoSetupRemote(worktreePath, options)
+      : undefined
   if (pushAutoSetupRemoteProbe) {
     // Keep a rejection observed if an unexpected persistence failure exits early.
     void pushAutoSetupRemoteProbe.catch(() => {})

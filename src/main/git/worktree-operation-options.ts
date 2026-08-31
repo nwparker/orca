@@ -19,6 +19,8 @@ export type GitWorktreeExecOptions = {
   signal?: AbortSignal
   timeout?: number
   includeCreatePreparations?: boolean
+  /** Skip per-worktree sparse-checkout probes when callers only need Git metadata. */
+  annotateSparseCheckout?: boolean
 }
 
 export type WorktreeRemovalPreflightOptions = GitWorktreeExecOptions & {

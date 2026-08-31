@@ -29,6 +29,12 @@ export type WslPathInfo = {
 
 const WSL_DIRECTORY_EXISTS_MARKER = '__ORCA_DIRECTORY_EXISTS__'
 const WSL_DIRECTORY_MISSING_MARKER = '__ORCA_DIRECTORY_MISSING__'
+// `sh` avoids user bash startup hooks on the workspace-root hot path.
+const WSL_HOME_PROBE_COMMAND = 'printf "%s" "$HOME"'
+
+function getWslHomeProbeArgs(distro: string): string[] {
+  return ['-d', distro, '--exec', 'sh', '-c', WSL_HOME_PROBE_COMMAND]
+}
 
 function getWslDirectoryProbeArgs(info: WslPathInfo): string[] {
   return [
@@ -281,7 +287,7 @@ export function getWslHome(distro: string): string | null {
   }
 
   try {
-    const home = execFileSync('wsl.exe', ['-d', distro, '--exec', 'bash', '-c', 'echo $HOME'], {
+    const home = execFileSync('wsl.exe', getWslHomeProbeArgs(distro), {
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],
       timeout: 5000
@@ -314,7 +320,7 @@ export async function getWslHomeAsync(distro: string): Promise<string | null> {
     return inflight
   }
 
-  const probe = execFileUtf8('wsl.exe', ['-d', distro, '--exec', 'bash', '-c', 'echo $HOME'])
+  const probe = execFileUtf8('wsl.exe', getWslHomeProbeArgs(distro))
     .then((output) => {
       const home = output.trim()
       if (!home || !home.startsWith('/')) {

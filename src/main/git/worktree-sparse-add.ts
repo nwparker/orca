@@ -1,6 +1,7 @@
 import { windowsLongPathGitArgs } from '../../shared/windows-long-path-git-args'
-import { windowsParallelCheckoutGitArgs } from '../../shared/windows-parallel-checkout-git-args'
 import { gitExecFileAsync } from './runner'
+import { resolveLocalWindowsParallelCheckoutGitArgs } from './windows-parallel-checkout'
+import { isWslLinkedWorktreeGitRoutingCandidate } from './wsl-linked-worktree-git-routing'
 import { addWorktree, unsetWorktreeCreationBase } from './worktree-add'
 import type {
   AddWorktreeOptions,
@@ -21,6 +22,13 @@ export async function addSparseWorktree(
 ): Promise<AddWorktreeResult> {
   let created = false
   let addResult: AddWorktreeResult = {}
+  // The no-checkout registration below does not need checkout tuning; start the
+  // capability probe now so sparse materialization can use it immediately.
+  const parallelCheckoutArgsPromise = resolveLocalWindowsParallelCheckoutGitArgs(worktreePath, {
+    ...options,
+    probeCwd: repoPath
+  })
+  void parallelCheckoutArgsPromise.catch(() => {})
   try {
     addResult = await addWorktree(
       repoPath,
@@ -35,13 +43,17 @@ export async function addSparseWorktree(
     // Why: `worktree add --no-checkout` writes no files, so these are the calls that
     // actually materialize the deep path and need the long-path escape hatch.
     const longPathArgs = windowsLongPathGitArgs(worktreePath)
-    const parallelCheckoutArgs = windowsParallelCheckoutGitArgs(
+    const parallelCheckoutArgs = isWslLinkedWorktreeGitRoutingCandidate(
       worktreePath,
-      process.platform,
       options.wslDistro
     )
+      ? await resolveLocalWindowsParallelCheckoutGitArgs(worktreePath, {
+          ...options,
+          probeCwd: repoPath
+        })
+      : await parallelCheckoutArgsPromise
     await gitExecFileAsync(
-      ['sparse-checkout', 'init', '--cone'],
+      [...longPathArgs, 'sparse-checkout', 'init', '--cone'],
       gitExecOptions(worktreePath, options)
     )
     await gitExecFileAsync(

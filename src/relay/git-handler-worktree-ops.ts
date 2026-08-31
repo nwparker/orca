@@ -1,7 +1,8 @@
 import * as path from 'node:path'
 import { resolveWorktreeAddBaseRef } from '../shared/worktree/base-ref'
 import { windowsLongPathGitArgs } from '../shared/windows-long-path-git-args'
-import { windowsParallelCheckoutGitArgs } from '../shared/windows-parallel-checkout-git-args'
+import { windowsParallelCheckoutGitArgsAsync } from '../shared/windows-parallel-checkout-git-args'
+import type { GitCapabilityCache } from '../shared/git-capability-cache'
 import type { GitExec } from './git-handler-ops'
 export { removeWorktreeOp } from './git-handler-worktree-remove'
 export { readRelayWorktreeList } from './git-handler-worktree-list'
@@ -34,7 +35,8 @@ export async function addWorktreeOp(
   git: GitExec,
   params: Record<string, unknown>,
   // Why: only the execution host's OS matters here — the client may be macOS while the SSH host is Windows.
-  platform: NodeJS.Platform = process.platform
+  platform: NodeJS.Platform = process.platform,
+  capabilities?: GitCapabilityCache
 ): Promise<void> {
   const repoPath = params.repoPath as string
   const branchName = params.branchName as string
@@ -48,6 +50,26 @@ export async function addWorktreeOp(
   if (branchName.startsWith('-') || (base && base.startsWith('-'))) {
     throw new Error('Branch name and base ref must not start with "-"')
   }
+
+  const needsParallelCheckout = checkoutExistingBranch || !noCheckout
+  const parallelCheckoutArgsPromise = needsParallelCheckout
+    ? windowsParallelCheckoutGitArgsAsync(targetDir, platform, undefined, {
+        // Relay Git always executes on the host running the relay. Do not
+        // infer a WSL route from a synthetic UNC path in client-provided
+        // params; the host platform is the execution authority here.
+        ...(platform === 'win32' ? { nativeWindowsGit: true } : {}),
+        ...(capabilities
+          ? {
+              capabilities,
+              probeGitVersion: async () =>
+                (await git(['--version'], repoPath, { timeout: 5_000 })).stdout
+            }
+          : {})
+      })
+    : Promise.resolve([] as string[])
+  // Base/ref validation can fail before argv construction; keep a speculative
+  // probe observed so an early failure never creates an unhandled rejection.
+  void parallelCheckoutArgsPromise.catch(() => {})
 
   // Why: --no-track + push.autoSetupRemote=true mirrors the local
   // addWorktree path (src/main/git/worktree.ts). Keeping the SSH path in
@@ -71,8 +93,7 @@ export async function addWorktreeOp(
 
   // Why: a Windows SSH host hits the same MAX_PATH ceiling as a local Windows checkout.
   const longPathArgs = windowsLongPathGitArgs(targetDir, platform)
-  const parallelCheckoutArgs =
-    checkoutExistingBranch || !noCheckout ? windowsParallelCheckoutGitArgs(repoPath, platform) : []
+  const parallelCheckoutArgs = await parallelCheckoutArgsPromise
   const args = checkoutExistingBranch
     ? [...longPathArgs, ...parallelCheckoutArgs, 'worktree', 'add', targetDir, branchName]
     : [

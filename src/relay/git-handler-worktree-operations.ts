@@ -151,7 +151,9 @@ export class GitHandlerWorktreeOperations extends GitHandlerOperationContext {
   }
 
   async addWorktree(params: Record<string, unknown>) {
-    return this.runWithGitReadCacheClear(() => addWorktreeOp(this.git.bind(this), params))
+    return this.runWithGitReadCacheClear(() =>
+      addWorktreeOp(this.git.bind(this), params, process.platform, this.gitCapabilities)
+    )
   }
 
   async removeWorktree(params: Record<string, unknown>) {

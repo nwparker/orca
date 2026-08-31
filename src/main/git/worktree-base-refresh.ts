@@ -1,6 +1,6 @@
 import type { LocalBaseRefRefreshResult } from '../../shared/worktree/base-ref-drift-types'
-import { windowsParallelCheckoutGitArgs } from '../../shared/windows-parallel-checkout-git-args'
 import { gitExecFileAsync, translateWslOutputPaths } from './runner'
+import { resolveLocalWindowsParallelCheckoutGitArgs } from './windows-parallel-checkout'
 import {
   evaluateLocalBaseRefRefreshability,
   getLocalBaseRefUpdateSuggestionForWorktreeCreate
@@ -46,6 +46,11 @@ export async function refreshLocalBaseRefForWorktreeCreate(
       if (!currentOwner || currentOwner.path !== evaluation.ownerWorktreePath) {
         return { ...resultBase, status: 'skipped_error' }
       }
+      const parallelCheckoutArgsPromise = resolveLocalWindowsParallelCheckoutGitArgs(
+        currentOwner.path,
+        { ...options, probeCwd: repoPath }
+      )
+      void parallelCheckoutArgsPromise.catch(() => {})
       const { stdout: status } = await gitExecFileAsync(
         ['status', '--porcelain', '--untracked-files=no'],
         gitExecOptions(currentOwner.path, options)
@@ -58,12 +63,7 @@ export async function refreshLocalBaseRefForWorktreeCreate(
         }
       }
       await gitExecFileAsync(
-        [
-          ...windowsParallelCheckoutGitArgs(currentOwner.path, process.platform, options.wslDistro),
-          'reset',
-          '--hard',
-          evaluation.remoteOid
-        ],
+        [...(await parallelCheckoutArgsPromise), 'reset', '--hard', evaluation.remoteOid],
         gitExecOptions(currentOwner.path, options)
       )
       return { ...resultBase, status: 'updated', ownerWorktreePath: currentOwner.path }

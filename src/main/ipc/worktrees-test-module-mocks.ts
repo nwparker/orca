@@ -85,6 +85,16 @@ export const computeWorktreePathMock: Mock<
     settings: { nestWorkspaces: boolean; workspaceDir: string }
   ) => string
 > = vi.fn()
+export const computeWorktreePathFromWorkspaceRootMock: Mock<
+  (
+    sanitizedName: string,
+    repoPath: string,
+    workspaceRoot: string,
+    nestWorkspaces: boolean
+  ) => string
+> = vi.fn((sanitizedName, repoPath, workspaceRoot, nestWorkspaces) =>
+  computeWorktreePathMock(sanitizedName, repoPath, { workspaceDir: workspaceRoot, nestWorkspaces })
+)
 export const ensurePathWithinWorkspaceMock: StringArgMock = vi.fn()
 export const gitExecFileAsyncMock: GitArgvMock = vi.fn()
 export const getSshGitProviderMock: StringArgMock = vi.fn()
@@ -231,6 +241,7 @@ export const setupHookEnvVarsModuleMock = (actual: Record<string, unknown>) => (
 export const worktreeLogicModuleMock = (actual: Record<string, unknown>) => ({
   ...actual,
   computeWorktreePath: computeWorktreePathMock,
+  computeWorktreePathFromWorkspaceRoot: computeWorktreePathFromWorkspaceRootMock,
   ensurePathWithinWorkspace: ensurePathWithinWorkspaceMock
 })
 

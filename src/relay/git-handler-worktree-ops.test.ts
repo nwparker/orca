@@ -188,6 +188,8 @@ describe('addWorktreeOp', () => {
       'win32'
     )
 
+    // A WSL UNC path is executed by WSL Git, not Git for Windows. Keep the
+    // native Windows checkout tuning off this route.
     expect(git.mock.calls[0][0]).toEqual([
       'worktree',
       'add',
