@@ -5,6 +5,8 @@ import { WORKTREE_CREATE_PREPARATION_DIRECTORY } from '../shared/worktree/create
 
 const mocks = vi.hoisted(() => ({
   mkdir: vi.fn(),
+  computeWorkspaceRoot: vi.fn(),
+  computeWorkspaceRootAsync: vi.fn(),
   listWorktreeGraph: vi.fn(),
   prepareCheckout: vi.fn(),
   finalize: vi.fn(),
@@ -28,10 +30,8 @@ vi.mock('./project-runtime-git-options', () => ({
   getWorktreeMirrorDistro: mocks.getWorktreeMirrorDistro
 }))
 vi.mock('./ipc/worktree-logic', () => ({
-  computeWorkspaceRoot: (repoPath: string) =>
-    process.platform === 'win32' && /^[A-Za-z]:[\\/]/.test(repoPath)
-      ? 'C:\\workspace'
-      : '/workspace',
+  computeWorkspaceRoot: mocks.computeWorkspaceRoot,
+  computeWorkspaceRootAsync: mocks.computeWorkspaceRootAsync,
   getWorktreePathSettings: mocks.getWorktreePathSettings
 }))
 
@@ -46,6 +46,16 @@ const store = { getSettings: () => ({}) } as unknown as Store
 
 beforeEach(() => {
   mocks.mkdir.mockReset().mockResolvedValue(undefined)
+  mocks.computeWorkspaceRoot.mockReset().mockImplementation((repoPath: string) =>
+    process.platform === 'win32' && /^[A-Za-z]:[\\/]/.test(repoPath)
+      ? 'C:\\workspace'
+      : '/workspace'
+  )
+  mocks.computeWorkspaceRootAsync.mockReset().mockImplementation(async (repoPath: string) =>
+    process.platform === 'win32' && /^[A-Za-z]:[\\/]/.test(repoPath)
+      ? 'C:\\workspace'
+      : '/workspace'
+  )
   mocks.listWorktreeGraph.mockReset().mockResolvedValue([])
   mocks.prepareCheckout.mockReset().mockResolvedValue(undefined)
   mocks.finalize.mockReset().mockResolvedValue({})
@@ -64,6 +74,49 @@ afterEach(async () => {
 })
 
 describe('worktree create preparation registry', () => {
+  it('resolves the workspace root asynchronously before starting preparation', async () => {
+    const resolveRoot = vi.fn<(root: string) => void>()
+    mocks.computeWorkspaceRoot.mockImplementation(() => {
+      throw new Error('synchronous workspace-root lookup must not run')
+    })
+    mocks.computeWorkspaceRootAsync.mockReturnValue(
+      new Promise<string>((resolve) => {
+        resolveRoot.mockImplementation(resolve)
+      })
+    )
+
+    const preparation = prepareWorktreeCreateForRepo(store, repo, 'origin/main')
+    await Promise.resolve()
+    expect(mocks.prepareCheckout).not.toHaveBeenCalled()
+
+    resolveRoot('/workspace')
+    await preparation
+
+    expect(mocks.computeWorkspaceRoot).not.toHaveBeenCalled()
+    expect(mocks.computeWorkspaceRootAsync).toHaveBeenCalledWith(
+      repo.path,
+      expect.objectContaining({ workspaceDir: '/workspace', nestWorkspaces: false })
+    )
+    expect(mocks.prepareCheckout).toHaveBeenCalledTimes(1)
+  })
+
+  it('rechecks the preparation registry after concurrent root lookups resolve', async () => {
+    let resolveRoot!: (root: string) => void
+    mocks.computeWorkspaceRootAsync.mockReturnValue(
+      new Promise<string>((resolve) => {
+        resolveRoot = resolve
+      })
+    )
+
+    const first = prepareWorktreeCreateForRepo(store, repo, 'origin/main')
+    const second = prepareWorktreeCreateForRepo(store, repo, 'origin/main')
+    resolveRoot('/workspace')
+
+    await Promise.all([first, second])
+
+    expect(mocks.prepareCheckout).toHaveBeenCalledTimes(1)
+  })
+
   it('namespaces native Windows preparation directories for long paths', async () => {
     const originalPlatform = process.platform
     Object.defineProperty(process, 'platform', { configurable: true, value: 'win32' })
@@ -120,6 +173,21 @@ describe('worktree create preparation registry', () => {
         worktreePath: '/workspace/final',
         branch: 'feature/test',
         baseBranch: 'origin/release'
+      })
+    ).resolves.toBeNull()
+    expect(mocks.finalize).not.toHaveBeenCalled()
+  })
+
+  it('does not claim a preparation when the effective workspace root changes', async () => {
+    await prepareWorktreeCreateForRepo(store, repo, 'origin/main')
+
+    await expect(
+      consumePreparedWorktreeCreate({
+        repoPath: repo.path,
+        workspaceRoot: '/other-workspace',
+        worktreePath: '/other-workspace/final',
+        branch: 'feature/test',
+        baseBranch: 'origin/main'
       })
     ).resolves.toBeNull()
     expect(mocks.finalize).not.toHaveBeenCalled()

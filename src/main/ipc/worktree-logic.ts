@@ -135,7 +135,13 @@ export async function computeWorktreePathAsync(
   return pathOps.join(workspaceRoot, sanitizedName)
 }
 
-async function computeWorkspaceRootAsync(
+/**
+ * Resolve the workspace root without blocking the Electron main thread.
+ *
+ * WSL home discovery shells out to `wsl.exe`; callers on an interaction path
+ * should use this variant rather than the legacy synchronous resolver.
+ */
+export async function computeWorkspaceRootAsync(
   repoPath: string,
   settings: { workspaceDir: string; wslMirrorDistro?: string }
 ): Promise<string> {

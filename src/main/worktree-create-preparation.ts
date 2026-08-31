@@ -24,7 +24,7 @@ import {
   getLocalProjectWorktreeGitOptions,
   getWorktreeMirrorDistro
 } from './project-runtime-git-options'
-import { computeWorkspaceRoot, getWorktreePathSettings } from './ipc/worktree-logic'
+import { computeWorkspaceRootAsync, getWorktreePathSettings } from './ipc/worktree-logic'
 import { toHostFilesystemPath } from './host-tree-removal'
 
 export const WORKTREE_CREATE_PREPARATION_TTL_MS = 5 * 60_000
@@ -157,19 +157,22 @@ async function cleanupStalePreparations(
   }
 }
 
-export function prepareWorktreeCreateForRepo(
+export async function prepareWorktreeCreateForRepo(
   store: Store,
   repo: Repo,
   baseBranch: string
 ): Promise<void> {
   if (repo.connectionId || isFolderRepo(repo)) {
-    return Promise.resolve()
+    return
   }
   const options = getLocalProjectWorktreeGitOptions(store, repo)
-  const workspaceRoot = computeWorkspaceRoot(
-    repo.path,
-    getWorktreePathSettings(repo, store.getSettings(), getWorktreeMirrorDistro(store, repo))
+  const workspaceRootSettings = getWorktreePathSettings(
+    repo,
+    store.getSettings(),
+    getWorktreeMirrorDistro(store, repo)
   )
+  const workspaceRoot = await computeWorkspaceRootAsync(repo.path, workspaceRootSettings)
+  // Root/runtime are part of the key, so a settings change while probing cannot claim this prep.
   const key = preparationKey(repo.path, workspaceRoot, baseBranch, options)
   const existing = preparations.get(key)
   if (existing) {
