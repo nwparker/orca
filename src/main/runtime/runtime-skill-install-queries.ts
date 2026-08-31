@@ -135,15 +135,19 @@ export class RuntimeSkillInstallQueries extends RuntimeSkillInstallCommands {
     }
     await this.host.skillTransactionRecovery
     const runtimeId = this.host.getRuntimeId()
-    const installs = await listManagedSkillInstalls(join(this.userDataPath(), 'skill-installs'), {
-      observeReceipt: async (receipt) =>
-        receipt.wslDistro
-          ? new WslSkillInstallFilesystem(receipt.wslDistro, [
-              dirname(receipt.canonicalPath)
-            ]).observeSkill(receipt.canonicalPath, receipt.fileModes)
-          : nativeSkillInstallFilesystem.observeSkill(receipt.canonicalPath, receipt.fileModes)
-    })
-    const worktrees = await this.host.listResolvedWorktrees()
+    // Why Promise.all: the receipt walk and the worktree resolve are independent, and the
+    // resolve can take a full scan round-trip on an SSH fleet.
+    const [installs, worktrees] = await Promise.all([
+      listManagedSkillInstalls(join(this.userDataPath(), 'skill-installs'), {
+        observeReceipt: async (receipt) =>
+          receipt.wslDistro
+            ? new WslSkillInstallFilesystem(receipt.wslDistro, [
+                dirname(receipt.canonicalPath)
+              ]).observeSkill(receipt.canonicalPath, receipt.fileModes)
+            : nativeSkillInstallFilesystem.observeSkill(receipt.canonicalPath, receipt.fileModes)
+      }),
+      this.host.listResolvedWorktrees()
+    ])
     const folders = this.host.listFolderWorkspaces()
     return installs.flatMap((install): ManagedSkillInstall[] => {
       if (install.scope === 'global') {

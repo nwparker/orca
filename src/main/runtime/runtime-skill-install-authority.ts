@@ -42,9 +42,13 @@ export async function resolveSkillSshTarget(
     if (!executionHost || executionHost.kind === 'local') {
       return null
     }
+    // Why null and not a throw: base treated any non-ssh host as "not an SSH install" and
+    // fell through to the local path; a runtime-owned repo must not hard-error here.
     if (executionHost.kind !== 'ssh') {
-      throw new Error('skill-install-workspace-host-unavailable')
+      return null
     }
+    // Why the resolved inventory and not showManagedWorktree: a worktree id can collide across
+    // hosts, and only this list carries the hostId needed to pick the SSH-owned row.
     const worktrees = (await host.listResolvedWorktrees()).filter(
       (candidate) =>
         candidate.id === destination.worktreeId &&
@@ -75,8 +79,10 @@ export async function resolveSkillSshTarget(
   if (!folder || !executionHost || executionHost.kind === 'local') {
     return null
   }
+  // Why null: base gated this branch on `folder.connectionId`, so any non-ssh host simply
+  // was not an SSH install and fell through to the local path.
   if (executionHost.kind !== 'ssh') {
-    throw new Error('skill-install-workspace-host-unavailable')
+    return null
   }
   return {
     provider: () => requireSsh(executionHost.targetId),
@@ -139,8 +145,10 @@ export function createSkillInstallAuthority(
       if (hostIds.size === 1 && !hostIds.has(LOCAL_EXECUTION_HOST_ID)) {
         throw new Error('skill-install-ssh-dispatch-required')
       }
-      const worktree = await host.showManagedWorktree(`id:${id}`).catch(() => null)
-      if (!worktree || worktree.id !== id) {
+      // Why no catch: swallowing here reports a transient git/IO failure as a missing
+      // workspace and loses the real cause.
+      const worktree = await host.showManagedWorktree(`id:${id}`)
+      if (worktree.id !== id) {
         return null
       }
       const projectRuntime = host.resolveProjectRuntimeForWorktree?.(id)
