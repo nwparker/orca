@@ -19,7 +19,7 @@ import {
   isRipgrepUnavailableExit,
   killSpawnedRipgrepProcess
 } from '../../shared/ripgrep-process-availability'
-import type { ChildProcess } from 'node:child_process'
+import type { ChildProcessHandle } from '../../shared/child-process/process-spec'
 import { wslAwareSpawn } from '../git/runner'
 import type { ResolvedRuntimeFileWorktree } from './runtime-file-watcher-leases'
 import { joinWorktreeRelativePath, normalizeRuntimeRelativePath } from './runtime-relative-paths'
@@ -62,7 +62,7 @@ export class RuntimeFileCommandsWithSearchLocalRuntimeFiles extends RuntimeFileC
       let resolved = false
       let processErrorObserved = false
       let unavailableExitObserved = false
-      let child: ChildProcess | null = null
+      let child: ChildProcessHandle | null = null
       const transformAbsPath = wslInfo
         ? (p: string): string => toWindowsWslPath(p, wslInfo.distro)
         : undefined

@@ -1,5 +1,5 @@
 // @ts-nocheck -- mechanically split class members.
-import type { ChildProcess } from 'node:child_process'
+import type { ChildProcessHandle } from '../../shared/child-process/process-spec'
 import type { TerminalFileGrant } from './runtime-file-commands-mobile-file-list-limit'
 import {
   MOBILE_FILE_PATH_SEARCH_CACHE_ENTRIES,
@@ -8,7 +8,7 @@ import {
 import { RuntimeMobileFilePathSearchCache } from './runtime-mobile-file-path-search'
 
 export class RuntimeFileCommandsWithActiveRuntimeTextSearches {
-  protected activeRuntimeTextSearches = new Map<string, ChildProcess>()
+  protected activeRuntimeTextSearches = new Map<string, ChildProcessHandle>()
 
   protected terminalFileGrants = new Map<string, TerminalFileGrant>()
 
