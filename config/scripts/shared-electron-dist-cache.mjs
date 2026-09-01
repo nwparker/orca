@@ -93,17 +93,12 @@ export function shareElectronDistFromCache(entry, stagePath, options) {
 export function publishSharedElectronDist(distPath, entry, options = {}) {
   const { version, platformPath } = options
   const uuid = options.uuid ?? randomUUID
-  if (existsSync(entry.entryPath)) {
-    // Without an identity to check against, "unusable" is unknowable -- never discard on a guess.
-    if (!version || !platformPath || isUsableElectronDist(entry.entryPath, version, platformPath)) {
-      return false
-    }
-    // Left in place, an entry that fails validation makes every sibling worktree re-download
-    // forever. Renaming it out of the way first keeps any in-flight clone reading a whole tree.
-    if (!discardElectronDistEntry(entry.entryPath, uuid)) {
-      return false
-    }
+  const canValidate = Boolean(version) && Boolean(platformPath)
+  // Without an identity to check against, "unusable" is unknowable -- never discard on a guess.
+  if (existsSync(entry.entryPath) && (!canValidate || isUsable(entry, version, platformPath))) {
+    return false
   }
+
   const stagePath = `${entry.entryPath}.staging-${process.pid}-${uuid()}`
   try {
     mkdirSync(entry.cacheRoot, { recursive: true })
@@ -111,23 +106,72 @@ export function publishSharedElectronDist(distPath, entry, options = {}) {
     // Before publishing, not after: an entry is visible the instant the rename lands, and under
     // hardlink sharing this is the only thing standing between a stray write and every worktree.
     ;(options.protect ?? makeTreeReadOnly)(stagePath)
-    renameSync(stagePath, entry.entryPath)
-    return true
   } catch {
     rmSync(stagePath, { recursive: true, force: true })
     return false
   }
+
+  return swapInElectronDistEntry(entry, stagePath, {
+    canValidate,
+    version,
+    platformPath,
+    uuid,
+    rename: options.rename ?? renameSync
+  })
 }
 
-function discardElectronDistEntry(entryPath, uuid) {
-  const quarantinePath = `${entryPath}.unusable-${process.pid}-${uuid()}`
-  try {
-    renameSync(entryPath, quarantinePath)
-  } catch {
-    return false // Another worktree is already replacing it.
+/**
+ * Replace the entry with a staged tree, re-checking first.
+ *
+ * Sharing the tree above takes seconds, and a sibling worktree can publish a perfectly good entry
+ * in that time. Re-validating here, immediately before the destructive rename, keeps us from
+ * discarding that entry -- and restoring the quarantine on a failed swap keeps a losing publisher
+ * from leaving the cache empty.
+ */
+function swapInElectronDistEntry(entry, stagePath, options) {
+  const { canValidate, version, platformPath, uuid, rename } = options
+  let quarantinePath = null
+  if (existsSync(entry.entryPath)) {
+    // Same rule as before staging: an entry we cannot judge, or one that is good, is never
+    // displaced. Both mean another worktree got there first, so keep theirs.
+    if (!canValidate || isUsable(entry, version, platformPath)) {
+      rmSync(stagePath, { recursive: true, force: true })
+      return false
+    }
+    quarantinePath = `${entry.entryPath}.unusable-${process.pid}-${uuid()}`
+    try {
+      renameSync(entry.entryPath, quarantinePath)
+    } catch {
+      rmSync(stagePath, { recursive: true, force: true })
+      return false // Another worktree is already replacing it.
+    }
   }
-  rmSync(quarantinePath, { recursive: true, force: true })
+
+  try {
+    rename(stagePath, entry.entryPath)
+  } catch {
+    rmSync(stagePath, { recursive: true, force: true })
+    if (quarantinePath !== null) {
+      // Put it back rather than leave no entry at all; a bad entry still beats an empty cache,
+      // because the next publisher re-validates and replaces it.
+      try {
+        renameSync(quarantinePath, entry.entryPath)
+        return false
+      } catch {
+        rmSync(quarantinePath, { recursive: true, force: true })
+      }
+    }
+    return false
+  }
+
+  if (quarantinePath !== null) {
+    rmSync(quarantinePath, { recursive: true, force: true })
+  }
   return true
+}
+
+function isUsable(entry, version, platformPath) {
+  return isUsableElectronDist(entry.entryPath, version, platformPath)
 }
 
 export function isUsableElectronDist(distPath, version, platformPath) {

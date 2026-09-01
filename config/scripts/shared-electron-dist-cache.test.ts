@@ -197,6 +197,47 @@ describe('publishSharedElectronDist', () => {
     expect(readdirSync(entry.cacheRoot)).toEqual([path.basename(entry.entryPath)])
   })
 
+  it('keeps a good entry a sibling published while this one was still sharing', () => {
+    const root = makeRoot()
+    const entry = makeEntry(root)
+    mkdirSync(entry.cacheRoot, { recursive: true })
+    writeDist(entry.entryPath, '40.0.0') // Unusable, so this worktree intends to replace it.
+    const share = (_source: string, destination: string) => {
+      writeDist(destination)
+      // A sibling replaces the bad entry with a good one while this share is still running.
+      rmSync(entry.entryPath, { recursive: true, force: true })
+      writeDist(entry.entryPath)
+      writeFileSync(path.join(entry.entryPath, 'marker'), 'sibling')
+    }
+    expect(
+      publishSharedElectronDist(writeDist(path.join(root, 'dist')), entry, { share, ...identity })
+    ).toBe(false)
+    expect(existsSync(path.join(entry.entryPath, 'marker'))).toBe(true)
+    expect(readdirSync(entry.cacheRoot)).toEqual([path.basename(entry.entryPath)])
+  })
+
+  it('restores the quarantined entry rather than leaving the cache empty', () => {
+    const root = makeRoot()
+    const entry = makeEntry(root)
+    mkdirSync(entry.cacheRoot, { recursive: true })
+    writeDist(entry.entryPath, '40.0.0')
+    writeFileSync(path.join(entry.entryPath, 'marker'), 'stale')
+    const share = (_source: string, destination: string) => writeDist(destination)
+    // The swap itself fails; a bad entry still beats no entry, since the next publisher replaces it.
+    const failingRename = () => {
+      throw new Error('rename failed')
+    }
+    expect(
+      publishSharedElectronDist(writeDist(path.join(root, 'dist')), entry, {
+        share,
+        rename: failingRename,
+        ...identity
+      })
+    ).toBe(false)
+    expect(existsSync(path.join(entry.entryPath, 'marker'))).toBe(true)
+    expect(readdirSync(entry.cacheRoot)).toEqual([path.basename(entry.entryPath)])
+  })
+
   it('replaces an entry that fails validation instead of stranding every worktree', () => {
     const root = makeRoot()
     const entry = makeEntry(root)

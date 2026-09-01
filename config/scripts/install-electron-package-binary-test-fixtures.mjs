@@ -10,6 +10,7 @@ const sourceScriptPath = fileURLToPath(
 )
 /** Matches the fake package version and the platform/arch runInstallScript installs for. */
 export const sharedEntryName = '41.5.0-linux-x64'
+export const sharedEntryNameFor = (version) => `${version}-linux-x64`
 
 export function mkTempProject() {
   const projectDir = mkdtempSync(join(tmpdir(), 'orca-install-electron-'))
@@ -33,13 +34,13 @@ export function runInstallScript(projectDir, extraEnv = {}) {
   })
 }
 
-export function writeFakeElectronPackage(projectDir, { lazyRequireMarker = null } = {}) {
+export function writeFakeElectronPackage(
+  projectDir,
+  { lazyRequireMarker = null, version = '41.5.0' } = {}
+) {
   const electronDir = join(projectDir, 'node_modules', 'electron')
   mkdirSync(electronDir, { recursive: true })
-  writeFileSync(
-    join(electronDir, 'package.json'),
-    JSON.stringify({ name: 'electron', version: '41.5.0' })
-  )
+  writeFileSync(join(electronDir, 'package.json'), JSON.stringify({ name: 'electron', version }))
   writeFileSync(join(electronDir, 'checksums.json'), '{}')
   writeFileSync(
     join(electronDir, 'index.js'),
@@ -115,7 +116,7 @@ exports.downloadArtifact = async function downloadArtifact(details) {
   )
 }
 
-export function writeFakeExtractor(projectDir, { createExecutable }) {
+export function writeFakeExtractor(projectDir, { createExecutable, version = '41.5.0' }) {
   writeFileSync(
     join(projectDir, 'fake-extractor.cjs'),
     `
@@ -128,7 +129,7 @@ if (${JSON.stringify(createExecutable)}) {
   writeFileSync(join(extractDir, 'electron'), '')
   writeFileSync(join(extractDir, 'electron.exe'), '')
   writeFileSync(join(extractDir, 'electron.d.ts'), 'replacement types')
-  writeFileSync(join(extractDir, 'version'), 'v41.5.0')
+  writeFileSync(join(extractDir, 'version'), ${JSON.stringify(`v${version}`)})
   if (process.platform !== 'win32') {
     symlinkSync('version', join(extractDir, 'version-link'))
   }

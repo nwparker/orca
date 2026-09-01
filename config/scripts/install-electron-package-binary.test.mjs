@@ -19,6 +19,7 @@ import {
   runInstallScript,
   sharedCacheRoot,
   sharedEntryName,
+  sharedEntryNameFor,
   writeFakeElectronDist,
   writeFakeElectronGet,
   writeFakeElectronPackage,
@@ -564,6 +565,41 @@ describe('install-electron-package-binary', () => {
       expect(statSync(join(entryPath, 'electron')).mode & 0o222).toBe(0)
       expect(statSync(join(entryPath, 'electron')).ino).toBe(
         statSync(join(distDir, 'electron')).ino
+      )
+    } finally {
+      rmSync(projectDir, { recursive: true, force: true })
+    }
+  })
+
+  it('gives an Electron upgrade its own cache entry and leaves the old one for other branches', () => {
+    const projectDir = mkTempProject()
+
+    try {
+      initGitRepo(projectDir)
+      writeFakeElectronPackage(projectDir)
+      writeFakeElectronGet(projectDir)
+      writeFakeExtractor(projectDir, { createExecutable: true })
+      expect(runInstallScript(projectDir, { CI: '' }).status).toBe(0)
+      expect(readSharedDistMarker(projectDir)).toBe(sharedEntryNameFor('41.5.0'))
+
+      // Upgrade the pinned Electron, exactly as a branch bumping the dependency would.
+      writeFakeElectronPackage(projectDir, { version: '42.0.0' })
+      writeFakeExtractor(projectDir, { createExecutable: true, version: '42.0.0' })
+      const upgraded = runInstallScript(projectDir, { CI: '' })
+      const cacheRoot = sharedCacheRoot(projectDir)
+
+      expect(upgraded.status, upgraded.stderr).toBe(0)
+      expect(readFileSync(join(projectDir, 'node_modules/electron/dist/version'), 'utf8')).toBe(
+        'v42.0.0'
+      )
+      expect(readSharedDistMarker(projectDir)).toBe(sharedEntryNameFor('42.0.0'))
+      // Why the old entry stays: sibling worktrees on the previous branch still share it.
+      expect(readdirSync(cacheRoot).sort()).toEqual([
+        sharedEntryNameFor('41.5.0'),
+        sharedEntryNameFor('42.0.0')
+      ])
+      expect(readFileSync(join(cacheRoot, sharedEntryNameFor('41.5.0'), 'version'), 'utf8')).toBe(
+        'v41.5.0'
       )
     } finally {
       rmSync(projectDir, { recursive: true, force: true })
