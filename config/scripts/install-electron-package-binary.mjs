@@ -15,6 +15,7 @@ import { spawnSync } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { platform as osPlatform, tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { getElectronPlatformPath } from './electron-platform-path.mjs'
 import {
   shareElectronDistFromCache,
   hasAdoptedSharedElectronDist,
@@ -520,20 +521,4 @@ function getElectronTargetPlatform() {
 
 function getElectronTargetArch() {
   return process.env.ELECTRON_INSTALL_ARCH || process.env.npm_config_arch || process.arch
-}
-
-function getElectronPlatformPath(targetPlatform) {
-  switch (targetPlatform) {
-    case 'mas':
-    case 'darwin':
-      return 'Electron.app/Contents/MacOS/Electron'
-    case 'freebsd':
-    case 'openbsd':
-    case 'linux':
-      return 'electron'
-    case 'win32':
-      return 'electron.exe'
-    default:
-      throw new Error(`Electron builds are not available on platform: ${targetPlatform}`)
-  }
 }
