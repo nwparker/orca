@@ -3237,6 +3237,9 @@
           "TerminalQuickCommandsSubmenu": {
             "3ccc7981bb": "Host unavailable",
             "54f29b7c0d": "Loading host…"
+          },
+          "reattachFailure": {
+            "outputStreamRestoring": "Reconnecting this terminal — its output stream is being re-established."
           }
         }
       },
