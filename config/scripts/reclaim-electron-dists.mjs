@@ -138,7 +138,7 @@ for (const worktree of listWorktrees(repoRoot)) {
     }
   } catch (error) {
     // A worktree that fails is left exactly as it was; it still has its own working dist.
-    console.warn(`skip  ${worktree}  (${error instanceof Error ? error.message : error})`)
+    console.warn(`skip  ${worktree}  (${error instanceof Error ? error.message : String(error)})`)
     skipped += 1
   }
 }
