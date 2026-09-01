@@ -1,11 +1,12 @@
 import type { Repo } from '../../shared/repo-types'
 import type { CreateWorktreeArgs } from '../../shared/worktree/create-types'
 import type { getPRForBranch } from '../github/client'
-import type { getWorktreePathSettings } from '../ipc/worktree-logic'
 import {
   computeWorktreePath,
   ensurePathWithinWorkspace,
-  sanitizeWorktreeName
+  resolveWorktreeCreateDisplayNameRequest,
+  sanitizeWorktreeName,
+  type getWorktreePathSettings
 } from '../ipc/worktree-logic'
 import { getBranchConflictKind } from '../git/repo'
 import {
@@ -29,7 +30,6 @@ import {
   getSelectedHostedReviewForBranch,
   resolveCreateBranchName
 } from './runtime-worktree-create-git'
-import { resolveWorktreeCreateDisplayNameRequest } from '../ipc/worktree-logic'
 import { runtimePathExists } from './runtime-worktree-filesystem'
 import type { RuntimeStore } from './runtime-store-contract'
 import type { HostedReviewExecutionOptions } from '../source-control/hosted-review-git-options'
