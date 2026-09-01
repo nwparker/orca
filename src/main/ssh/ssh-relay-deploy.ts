@@ -733,13 +733,22 @@ function missingNativeDepsFromProbe(output: string): RelayNativeDepName[] {
   return RELAY_NATIVE_DEP_NAMES.filter((name) => reported.includes(name))
 }
 
+/**
+ * Three-state so a host that never answered is never mistaken for one that answered "missing".
+ * See docs/reference/ssh-execution-boundary.md: loss of contact is not evidence.
+ */
+type NativeDepsProbeVerdict = {
+  verdict: 'available' | 'missing' | 'unverifiable'
+  missing: RelayNativeDepName[]
+}
+
 async function probeRequiredNativeDeps(
   conn: SshConnection,
   remoteDir: string,
   hostPlatform: RemoteHostPlatform,
   nodePath: string,
   signal?: AbortSignal
-): Promise<{ available: boolean; missing: RelayNativeDepName[] }> {
+): Promise<NativeDepsProbeVerdict> {
   const escapedNode = shellEscape(nodePath)
   const probeJs = nativeDepsProbeJs('ORCA-NATIVE-DEPS-OK')
   try {
@@ -757,11 +766,22 @@ async function probeRequiredNativeDeps(
           `(${escapedNode} -e ${shellEscape(probeJs)} 2>/dev/null || echo MISSING)`
         )
     const probe = await execHostCommand(conn, hostPlatform, command, { signal })
-    const available = probe.includes('ORCA-NATIVE-DEPS-OK')
-    return { available, missing: available ? [] : missingNativeDepsFromProbe(probe) }
-  } catch {
+    return probe.includes('ORCA-NATIVE-DEPS-OK')
+      ? { verdict: 'available', missing: [] }
+      : { verdict: 'missing', missing: missingNativeDepsFromProbe(probe) }
+  } catch (error) {
     signal?.throwIfAborted()
-    return { available: false, missing: [...RELAY_NATIVE_DEP_NAMES] }
+    // Why: the probe shell always exits 0 and prints MISSING for a real load failure, so a throw
+    // only ever means the host never answered — a timed-out `require()` on a wedged dlopen, or a
+    // torn exec channel. Reading that as "every native dep is missing" sent a healthy install
+    // through an eight-minute npm install + rebuild that could not help, then round-tripped until
+    // the 15-minute deploy budget expired (#14830).
+    console.warn(
+      `[ssh-relay] Native-deps probe did not answer at ${remoteDir}: ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    )
+    return { verdict: 'unverifiable', missing: [] }
   }
 }
 
@@ -810,7 +830,8 @@ async function repairInstalledNativeDeps(
     lockResult === 'busy' || lockResult === 'error'
       ? await acquireRelayLaunchGcFence(conn, remoteDir, hostPlatform, signal)
       : undefined
-  if (initialProbe.available) {
+  // Why: only a probe that actually answered "missing" may authorize rewriting node_modules.
+  if (initialProbe.verdict !== 'missing') {
     // Why: even a healthy reconnect stays fenced until launch liveness is observable, or cross-version GC can rename after this probe.
     if (lockResult !== 'acquired') {
       return { ownsInstallLock: false, gcClaimToken }
@@ -847,7 +868,7 @@ async function repairInstalledNativeDeps(
     // Why: older complete relay dirs predate @parcel/watcher; re-probe under the lock so only one reconnect mutates the dir.
     const probe = await probeRequiredNativeDeps(conn, remoteDir, hostPlatform, nodePath, signal)
     let repairNamespace: RelayInstallNamespace | undefined
-    if (!probe.available) {
+    if (probe.verdict === 'missing') {
       // Why: only stamp ownership once the locked recheck proves this connection is the one about to write.
       repairNamespace = await createRelayLaunchNamespace(
         conn,

@@ -102,7 +102,6 @@ export class SshChannelMultiplexer {
   private disposed = false
   private disposeReason: 'shutdown' | 'connection_lost' | null = null
   private decoderReadPaused = false
-  private writerSaturated = false
 
   // Track the oldest unacked outgoing message timestamp
   private unackedTimestamps = new Map<number, number>()
@@ -655,7 +654,6 @@ export class SshChannelMultiplexer {
   }
 
   private handleWriterSaturationChange(saturated: boolean): void {
-    this.writerSaturated = saturated
     if (!saturated && !this.disposed) {
       this.rebaseHealthClocks(Date.now())
     }

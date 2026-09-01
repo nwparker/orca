@@ -71,7 +71,6 @@ type MuxInternals = {
   disposeHandlers: unknown[]
   lastReceivedAt: number
   unackedTimestamps: Map<number, number>
-  writerSaturated: boolean
 }
 
 function getMuxInternals(instance: SshChannelMultiplexer): MuxInternals {
@@ -376,7 +375,8 @@ describe('SshChannelMultiplexer', () => {
       mux = new SshChannelMultiplexer(saturatedTransport)
 
       vi.advanceTimersByTime(5_000)
-      expect(getMuxInternals(mux).writerSaturated).toBe(true)
+      // The writer parked after its first frame: that is the saturation this test is about.
+      expect(written).toHaveLength(1)
       // Why: backpressure on our uplink is not evidence of death. The relay's own keepalive is,
       // and only that inbound traffic may keep the link alive — suppressing the check on
       // saturation alone wedged a half-open link forever (see the saturation-wedge suite).
@@ -390,7 +390,6 @@ describe('SshChannelMultiplexer', () => {
       drain()
       const resumedAt = Date.now()
       const internals = getMuxInternals(mux)
-      expect(internals.writerSaturated).toBe(false)
       expect(internals.lastReceivedAt).toBe(resumedAt)
       expect(new Set(internals.unackedTimestamps.values())).toEqual(new Set([resumedAt]))
 
