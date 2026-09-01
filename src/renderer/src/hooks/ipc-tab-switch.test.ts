@@ -212,6 +212,124 @@ describe('handleSwitchTerminalTab', () => {
     expect(store.setActiveTab).toHaveBeenCalledWith('term-2')
   })
 
+  it('falls back when hydration exposes only two of three active-group terminals', () => {
+    const store = makeStore('terminal')
+    store.activeTabId = 'term-2'
+    store.tabsByWorktree = {
+      'wt-1': [{ id: 'term-1' }, { id: 'term-2' }, { id: 'term-3' }]
+    }
+    store.groupsByWorktree = {
+      'wt-1': [
+        {
+          id: 'group-1',
+          activeTabId: 'tab-1',
+          tabOrder: ['tab-1', 'tab-2', 'tab-3']
+        }
+      ]
+    }
+    store.unifiedTabsByWorktree = {
+      'wt-1': [
+        { id: 'tab-1', entityId: 'term-1', groupId: 'group-1', contentType: 'terminal' },
+        { id: 'tab-2', entityId: 'term-2', groupId: 'group-1', contentType: 'terminal' },
+        { id: 'tab-3', entityId: 'term-3', groupId: 'group-1', contentType: 'terminal' }
+      ]
+    }
+    getStateMock.mockReturnValue(store)
+    // The active-group projection is briefly missing tab-3 while unified state
+    // already knows that all three rows belong to this group.
+    getActiveTabNavOrderMock.mockReturnValue([
+      { type: 'terminal', id: 'term-1', tabId: 'tab-1' },
+      { type: 'terminal', id: 'term-2', tabId: 'tab-2' }
+    ])
+
+    expect(handleSwitchTerminalTab(1)).toBe(true)
+    expect(store.setActiveTab).toHaveBeenCalledWith('term-3')
+    expect(store.activateTab).toHaveBeenCalledWith('tab-3')
+  })
+
+  it('activates the resolved split copy when duplicate terminal entities are cycled', () => {
+    const store = makeStore('terminal')
+    // Start on the distinct entity so the successor is the second copy, not the
+    // first occurrence that legacy entity-id activation would choose.
+    store.activeTabId = 'term-other'
+    getStateMock.mockReturnValue(store)
+    getActiveTabNavOrderMock.mockReturnValue([
+      { type: 'terminal', id: 'term-shared', tabId: 'tab-left' },
+      { type: 'terminal', id: 'term-other', tabId: 'tab-other' },
+      { type: 'terminal', id: 'term-shared', tabId: 'tab-right' }
+    ])
+
+    expect(handleSwitchTerminalTab(1)).toBe(true)
+    expect(store.setActiveTab).toHaveBeenCalledWith('term-shared')
+    expect(store.activateTab).toHaveBeenCalledWith('tab-right')
+    expect(store.setActiveTabType).toHaveBeenCalledWith('terminal')
+  })
+
+  it('cycles between split copies that share one terminal entity', () => {
+    const store = makeStore('terminal')
+    store.activeTabId = 'term-shared'
+    store.groupsByWorktree = {
+      'wt-1': [{ id: 'group-1', activeTabId: 'tab-right' }]
+    }
+    getStateMock.mockReturnValue(store)
+    getActiveTabNavOrderMock.mockReturnValue([
+      { type: 'terminal', id: 'term-shared', tabId: 'tab-left' },
+      { type: 'terminal', id: 'term-shared', tabId: 'tab-right' }
+    ])
+
+    expect(handleSwitchTerminalTab(1)).toBe(true)
+    expect(store.setActiveTab).toHaveBeenCalledWith('term-shared')
+    expect(store.activateTab).toHaveBeenCalledWith('tab-left')
+    expect(store.setActiveTabType).toHaveBeenCalledWith('terminal')
+  })
+
+  it('does not swallow a switch when legacy and unified active ids disagree during hydration', () => {
+    const store = makeStore('terminal')
+    store.activeTabId = 'term-other'
+    store.groupsByWorktree = {
+      'wt-1': [{ id: 'group-1', activeTabId: 'tab-shared' }]
+    }
+    getStateMock.mockReturnValue(store)
+    getActiveTabNavOrderMock.mockReturnValue([
+      { type: 'terminal', id: 'term-shared', tabId: 'tab-shared' },
+      { type: 'terminal', id: 'term-other', tabId: 'tab-other' }
+    ])
+
+    expect(handleSwitchTerminalTab(1)).toBe(true)
+    expect(store.setActiveTab).toHaveBeenCalledWith('term-shared')
+    expect(store.activateTab).toHaveBeenCalledWith('tab-shared')
+    expect(store.setActiveTabType).toHaveBeenCalledWith('terminal')
+  })
+
+  it('keeps the active-group split copy when the worktree fallback fills a hydration gap', () => {
+    const store = makeStore('terminal')
+    store.activeTabId = 'term-other'
+    store.tabsByWorktree = {
+      'wt-1': [{ id: 'term-other' }, { id: 'term-shared' }]
+    }
+    store.groupsByWorktree = {
+      'wt-1': [
+        { id: 'group-1', activeTabId: 'tab-other', tabOrder: ['tab-other', 'tab-left'] },
+        { id: 'group-2', activeTabId: 'tab-right', tabOrder: ['tab-right'] }
+      ]
+    }
+    store.unifiedTabsByWorktree = {
+      'wt-1': [
+        { id: 'tab-other', entityId: 'term-other', groupId: 'group-1', contentType: 'terminal' },
+        { id: 'tab-left', entityId: 'term-shared', groupId: 'group-1', contentType: 'terminal' },
+        { id: 'tab-right', entityId: 'term-shared', groupId: 'group-2', contentType: 'terminal' }
+      ]
+    }
+    getStateMock.mockReturnValue(store)
+    // The active group has not projected its rows yet; this is the state the fallback handles.
+    getActiveTabNavOrderMock.mockReturnValue([])
+
+    expect(handleSwitchTerminalTab(1)).toBe(true)
+    expect(store.setActiveTab).toHaveBeenCalledWith('term-shared')
+    expect(store.activateTab).toHaveBeenCalledWith('tab-left')
+    expect(store.setActiveTabType).toHaveBeenCalledWith('terminal')
+  })
+
   it('keeps a genuine one-terminal split group a no-op', () => {
     const store = makeStore('terminal')
     store.activeTabId = 'term-1'

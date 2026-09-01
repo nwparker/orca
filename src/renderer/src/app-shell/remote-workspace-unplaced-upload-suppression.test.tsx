@@ -361,6 +361,24 @@ describe('uploads from a client that could not place the host tabs', () => {
     persistence.unmount()
   })
 
+  it('marks every current authority offline when the upload response omits it', async () => {
+    seedStore(true)
+    authorizeUploadsAtRevision(3)
+    uploads.mockResolvedValueOnce([])
+    const persistence = renderHook(() => useAppSessionPersistence())
+
+    await touchSessionAndSettle('missing-upload-result')
+    await flushMicrotasks()
+
+    expect(useAppStore.getState().remoteWorkspaceSyncStatusByTargetId[TARGET_ID]).toMatchObject({
+      phase: 'offline',
+      direction: 'push',
+      revision: 3,
+      hostObservationToken: 'observation-3'
+    })
+    persistence.unmount()
+  })
+
   it('keeps a later same-lineage upload after the earlier result advances the revision', async () => {
     seedStore(true)
     authorizeUploadsAtRevision(7)

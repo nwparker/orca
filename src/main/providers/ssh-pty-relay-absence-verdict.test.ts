@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   SSH_PTY_IDENTITY_MISMATCH_ERROR,
   SSH_SESSION_EXPIRED_ERROR,
+  SSH_SOURCE_RESTORE_REQUIRED_ERROR,
   isSshPtyAbsentFromRelayError
 } from './ssh-pty-errors'
 import { SshPtyProvider } from './ssh-pty-provider'
@@ -37,11 +38,8 @@ describe('SSH PTY relay absence verdict', () => {
     )
 
     expect(isSshPtyAbsentFromRelayError(rejection)).toBe(false)
-    // Byte-identical to the pre-change message: only the class is new, so the toast humanizer,
-    // both spawn-execute lease paths, and the renderer's substring checks are untouched.
-    expect((rejection as Error).message).toBe(
-      `${SSH_SESSION_EXPIRED_ERROR}: pty-1 ${SSH_PTY_IDENTITY_MISMATCH_ERROR}`
-    )
+    expect((rejection as Error).message).toBe(`${SSH_PTY_IDENTITY_MISMATCH_ERROR}: pty-1`)
+    expect((rejection as Error).message).not.toContain(SSH_SESSION_EXPIRED_ERROR)
   })
 
   // Loss of contact never observes the process: each of these must stay `unverifiable`.
@@ -73,6 +71,7 @@ describe('SSH PTY relay absence verdict', () => {
     )
 
     expect(isSshPtyAbsentFromRelayError(rejection)).toBe(false)
-    expect((rejection as Error).message).toContain(SSH_SESSION_EXPIRED_ERROR)
+    expect((rejection as Error).message).toBe(`${SSH_SOURCE_RESTORE_REQUIRED_ERROR}: pty-1`)
+    expect((rejection as Error).message).not.toContain(SSH_SESSION_EXPIRED_ERROR)
   })
 })

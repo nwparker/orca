@@ -9,6 +9,8 @@ import type { DispatcherClientWriter, SinkWriteSettlement } from './dispatcher-c
 
 export type RequestContext = {
   clientId: number
+  /** Transport incarnation of the client id; changes when the primary socket is replaced. */
+  transportGeneration?: number
   isStale: () => boolean
   signal?: AbortSignal
   sessionIdentity?: RelayClientSessionIdentity

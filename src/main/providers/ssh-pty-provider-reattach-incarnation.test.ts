@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { SSH_SESSION_EXPIRED_ERROR } from './ssh-pty-errors'
+import { SSH_SOURCE_RESTORE_REQUIRED_ERROR } from './ssh-pty-errors'
 import { SshPtyProvider } from './ssh-pty-provider'
 
 describe('SSH PTY provider session reattach incarnation', () => {
@@ -30,7 +30,7 @@ describe('SSH PTY provider session reattach incarnation', () => {
     )
   })
 
-  it('fails closed when generic reattach requires source restoration', async () => {
+  it('fails closed after bounded generic reattach restore retries', async () => {
     const mux = {
       request: vi.fn().mockResolvedValue({
         incarnationId: 'incarnation-reattached',
@@ -45,7 +45,8 @@ describe('SSH PTY provider session reattach incarnation', () => {
     const provider = new SshPtyProvider('conn-1', mux as never)
 
     await expect(provider.spawn({ cols: 80, rows: 24, sessionId: 'pty-old' })).rejects.toThrow(
-      `${SSH_SESSION_EXPIRED_ERROR}: pty-old`
+      `${SSH_SOURCE_RESTORE_REQUIRED_ERROR}: pty-old`
     )
+    expect(mux.request).toHaveBeenCalledTimes(3)
   })
 })

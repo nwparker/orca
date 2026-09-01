@@ -7,6 +7,7 @@ import {
 import { isTerminalSessionStateSaveFailure } from '../../../../shared/terminal-session-state-save-failure'
 import { appendPaneTerminalError, clearPaneTerminalError } from './terminal-error-accumulation'
 import { stripSshReconnectOwnedErrorLines } from './TerminalErrorToast'
+import { describeReattachFailure } from './pty-connection/reattach-failure-classification'
 import { updateTerminalRemoteRuntimeRecoveryUiState } from './terminal-remote-runtime-recovery-ui-state'
 import type { PtyTransportRecoveryState } from './pty-transport-types'
 import type { TerminalPaneFoundation } from './use-terminal-pane-foundation'
@@ -102,7 +103,21 @@ export function useTerminalPaneTitleState(controller: TerminalPaneFoundation) {
     }
   })
   const onPtyErrorClearedRef = useRef((paneId: number, message?: string) => {
-    setTerminalErrorsByPaneId((current) => clearPaneTerminalError(current, paneId, message))
+    setTerminalErrorsByPaneId((current) => {
+      const clearedOriginal = clearPaneTerminalError(current, paneId, message)
+      if (message === undefined || clearedOriginal !== current) {
+        return clearedOriginal
+      }
+      const described = describeReattachFailure(message)
+      const clearedDescription = clearPaneTerminalError(clearedOriginal, paneId, described)
+      if (clearedDescription !== clearedOriginal) {
+        return clearedDescription
+      }
+      const stripped = stripSshReconnectOwnedErrorLines(message)
+      return stripped === null
+        ? clearedDescription
+        : clearPaneTerminalError(clearedDescription, paneId, stripped)
+    })
   })
   const dismissTerminalError = useCallback(() => {
     const paneId = managerRef.current?.getActivePane()?.id ?? null

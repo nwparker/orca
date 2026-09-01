@@ -47,7 +47,7 @@ function shellQuote(value: string): string {
 function fixtureCommand(): string {
   const command = [process.execPath, fixturePath]
   return process.platform === 'win32'
-    ? command.map((value) => `"${value.replaceAll('"', '""')}"`).join(' ')
+    ? `& ${command.map((value) => `"${value.replaceAll('"', '""')}"`).join(' ')}`
     : command.map(shellQuote).join(' ')
 }
 

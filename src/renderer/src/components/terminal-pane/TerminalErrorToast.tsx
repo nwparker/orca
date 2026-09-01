@@ -30,6 +30,7 @@ const LEGACY_TERMINAL_HOST_GONE_PATTERN =
 // remote shell died — the copy says only that this pane lost its session. Same lastIndex hazard as above.
 const UNREATTACHABLE_SESSION_SOURCES = [
   'SSH_SESSION_EXPIRED:[ \\t]*\\S*(?:[ \\t]+SSH_PTY_IDENTITY_MISMATCH)?',
+  'SSH_PTY_IDENTITY_MISMATCH(?::[ \\t]*\\S*)?',
   'PTY "[^"\\r\\n]*" not found(?: \\(identity mismatch\\))?'
 ]
 const UNREATTACHABLE_SESSION_PATTERNS = UNREATTACHABLE_SESSION_SOURCES.map(

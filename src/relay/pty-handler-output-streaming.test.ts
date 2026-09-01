@@ -130,6 +130,58 @@ describe('PtyHandler', () => {
     }
   })
 
+  it.each([
+    { label: 'already paused', outputBytes: 2 * 1024 * 1024, pauseCount: 1, resumeCount: 1 },
+    { label: 'blocked after detach', outputBytes: 1_024, pauseCount: 0, resumeCount: 0 }
+  ])('drops producer backlog when the last client detaches ($label)', async (scenario) => {
+    let onData: ((data: string) => void) | undefined
+    const pause = vi.fn()
+    const resume = vi.fn()
+    mockPtySpawn.mockReturnValueOnce({
+      ...mockPtyInstance,
+      pause,
+      resume,
+      onData: vi.fn((callback: (data: string) => void) => {
+        onData = callback
+      })
+    })
+    const liveDispatcher = new RelayDispatcher(
+      (_data, onSettled) => {
+        onSettled({ ok: true })
+        return true
+      },
+      { supportsWriteCallback: true }
+    )
+    const liveHandler = new PtyHandler(liveDispatcher, undefined, 'detach-test-mint-epoch')
+    try {
+      liveDispatcher.feed(
+        encodeJsonRpcFrame({ jsonrpc: '2.0', id: 1, method: 'pty.spawn', params: {} }, 1, 0)
+      )
+      await vi.advanceTimersByTimeAsync(0)
+      expect(onData).toBeTypeOf('function')
+      liveHandler.setSourcePublication({
+        accepts: () => true,
+        publish: () => false
+      } as unknown as RelayPtySourcePublication)
+
+      onData?.('x'.repeat(scenario.outputBytes))
+      const flow = pendingFlowState(liveHandler)
+      expect(flow.pendingOutputByPty.size).toBe(1)
+      expect(flow.pendingProducerBytesByPty.size).toBe(1)
+
+      liveDispatcher.invalidateClient('peer-closed')
+      await vi.advanceTimersByTimeAsync(8)
+
+      expect(pause).toHaveBeenCalledTimes(scenario.pauseCount)
+      expect(resume).toHaveBeenCalledTimes(scenario.resumeCount)
+      expect(flow.pendingOutputByPty.size).toBe(0)
+      expect(flow.pendingProducerBytesByPty.size).toBe(0)
+    } finally {
+      await liveHandler.dispose({ waitForPhysicalExit: false }).catch(() => {})
+      liveDispatcher.dispose()
+    }
+  })
+
   it('forwards data from PTY to dispatcher notifications', async () => {
     let dataCallback: ((data: string) => void) | undefined
     mockPtySpawn.mockReturnValue({

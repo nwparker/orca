@@ -20,6 +20,10 @@ import type {
   RuntimeTerminalSend
 } from '../../../../shared/runtime-types'
 import { TERMINAL_CREATE_IDEMPOTENCY_RUNTIME_CAPABILITY } from '../../../../shared/protocol-version'
+import {
+  SSH_SESSION_EXPIRED_ERROR,
+  isSshPtyIdentityMismatchMessage
+} from '../../../../shared/ssh-pty-failure-tokens'
 import { agentResumeHostAuthorityCapability } from '../../runtime/agent-resume-host-authority-capability'
 import {
   isTerminalInputTooLargeWithDeferredMeasurement,
@@ -116,8 +120,6 @@ type RemoteAgentSessionLaunchResult =
   | RuntimeEnsureAgentSessionResult
   | RuntimeCreateAgentSessionResult
   | { terminal: RuntimeTerminalCreate; disposition?: undefined }
-const SSH_SESSION_EXPIRED_ERROR = 'SSH_SESSION_EXPIRED'
-
 function isRemoteTerminalStaleMessage(message: string): boolean {
   return message.includes('terminal_handle_stale')
 }
@@ -1600,7 +1602,7 @@ export function createRemoteRuntimePtyTransport(
       retireRemoteTerminalId()
       return
     }
-    if (message.includes(SSH_SESSION_EXPIRED_ERROR)) {
+    if (message.includes(SSH_SESSION_EXPIRED_ERROR) && !isSshPtyIdentityMismatchMessage(message)) {
       // Why: only the HUB may replace its expired SSH pane; a paired viewer must never fall back to client-local SSH.
       recoverExpiredHostPane()
       return

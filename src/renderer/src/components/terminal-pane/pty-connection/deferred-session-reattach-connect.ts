@@ -1,10 +1,13 @@
 import { warnTerminalLifecycleAnomaly } from '../terminal-lifecycle-diagnostics'
 import { recordPtyConnectDiagnostic } from './pty-connect-limits'
-import { isSshSessionExpiredError } from './ssh-session-connect'
 import { isRemoteRuntimePtyId } from './paired-parked-terminal-restore'
 import { toProcessExitStartup } from './process-exit-startup'
 import { recoverUnverifiableDirectSshReattach } from './direct-ssh-reattach-recovery'
 import type { ConnectPanePtySession } from './connect-pane-pty-session'
+import {
+  describeReattachFailure,
+  isProvenSshSessionGoneError
+} from './reattach-failure-classification'
 
 export function startDeferredSessionReattach(
   session: ConnectPanePtySession,
@@ -25,14 +28,14 @@ export function startDeferredSessionReattach(
   const coldRestoreStartup = session.buildColdRestoreAgentResumeStartup()
   const outputCallbacks = session.captureTransportOutputCallbacks(
     (message) => {
-      if (isSshSessionExpiredError(message)) {
+      if (isProvenSshSessionGoneError(message)) {
         expiredReattachError = true
         return
       }
       if (!session.isCapturedDirectSshReattachCurrent(deferredReattachSessionId)) {
         return
       }
-      session.reportError(message)
+      session.reportError(describeReattachFailure(message))
     },
     toProcessExitStartup(coldRestoreStartup ?? session.paneStartup)
   )
@@ -145,7 +148,7 @@ export function startDeferredSessionReattach(
         ptyId: deferredReattachSessionId,
         reason: message
       })
-      if (session.connectionId && isSshSessionExpiredError(err)) {
+      if (session.connectionId && isProvenSshSessionGoneError(err)) {
         session.clearExitedPanePtyLayoutBinding(deferredReattachSessionId)
         session.deps.clearTabPtyId(session.deps.tabId, deferredReattachSessionId)
         session.startFreshColdRestoreAgentResume(coldRestoreStartup, {
@@ -153,7 +156,7 @@ export function startDeferredSessionReattach(
         })
         return
       }
-      session.reportError(message)
+      session.reportError(describeReattachFailure(err))
       if (session.connectionId) {
         recoverUnverifiableDirectSshReattach(session, deferredReattachSessionId)
         return

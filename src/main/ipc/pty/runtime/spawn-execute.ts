@@ -222,6 +222,7 @@ export async function executeRuntimePtySpawn(ctx: RuntimePtySpawnState): Promise
       isSshPtyIdentityMismatchError(spawnError) || isSshPtyIdentityMismatchError(rawMessage)
     const isExpiredSshSession =
       Boolean(args.connectionId) &&
+      !isIdentityMismatch &&
       (spawnError.message.includes(SSH_SESSION_EXPIRED_ERROR) ||
         rawMessage.includes(SSH_SESSION_EXPIRED_ERROR))
     const exitedBeforeSpawnReply =
@@ -238,17 +239,15 @@ export async function executeRuntimePtySpawn(ctx: RuntimePtySpawnState): Promise
       }
     }
     if (args.connectionId && ctx.effectiveSessionRelayId !== undefined && isExpiredSshSession) {
-      if (ctx.effectiveSessionAppId !== undefined && !isIdentityMismatch) {
+      if (ctx.effectiveSessionAppId !== undefined) {
         clearProviderPtyState(ctx.effectiveSessionAppId)
         deletePtyOwnership(ctx.effectiveSessionAppId)
       }
-      if (!isIdentityMismatch) {
-        ctx.deps.store?.markSshRemotePtyLease(
-          args.connectionId,
-          ctx.effectiveSessionRelayId,
-          'expired'
-        )
-      }
+      ctx.deps.store?.markSshRemotePtyLease(
+        args.connectionId,
+        ctx.effectiveSessionRelayId,
+        'expired'
+      )
     }
     if (ctx.isNewDaemonSession && ctx.sessionId !== undefined) {
       clearProviderPtyState(ctx.sessionId)

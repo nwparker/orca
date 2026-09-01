@@ -39,7 +39,7 @@ import {
   useParkedTerminalWatcherSynchronization
 } from './use-parked-terminal-watcher-synchronization'
 import {
-  getTerminalPaneSplitMountLeaseTabIds,
+  getTerminalPaneSplitMountLeaseTargets,
   subscribeTerminalPaneSplitMountLeases
 } from './terminal-pane-split-request-routing'
 
@@ -103,10 +103,10 @@ export function useTerminalTabColdParking(args: {
   const terminalSshParkingEnabled = useAppStore(
     (state) => state.settings?.terminalSshViewParking !== false
   )
-  const terminalPaneSplitMountLeaseTabIds = useSyncExternalStore(
+  const terminalPaneSplitMountLeaseTargets = useSyncExternalStore(
     subscribeTerminalPaneSplitMountLeases,
-    getTerminalPaneSplitMountLeaseTabIds,
-    getTerminalPaneSplitMountLeaseTabIds
+    getTerminalPaneSplitMountLeaseTargets,
+    getTerminalPaneSplitMountLeaseTargets
   )
   const pairedRuntimeParkingEnvironmentIds = useAppStore(
     selectPairedRuntimeParkingEnvironmentIdsFromState
@@ -321,7 +321,11 @@ export function useTerminalTabColdParking(args: {
         // requires every tab restorable, so the memo is empty for them).
         !evictionExemptTerminalTabIds.has(terminalTab.id) &&
         // Why: CLI splits against a parked tab replay as soon as its exact pane remounts.
-        !terminalPaneSplitMountLeaseTabIds.has(terminalTab.id) &&
+        !terminalPaneSplitMountLeaseTargets.some(
+          (target) =>
+            target.tabId === terminalTab.id &&
+            (target.worktreeId === undefined || target.worktreeId === worktreeId)
+        ) &&
         // Why: the hidden-measuring startup probe needs mounted panes; gate
         // here too so the reveal lands in the same render that starts it.
         !shouldMeasureHiddenWorktree
@@ -351,7 +355,7 @@ export function useTerminalTabColdParking(args: {
     shouldMeasureHiddenWorktree,
     sleepingRecordOwnedTabIds,
     terminalTabs,
-    terminalPaneSplitMountLeaseTabIds,
+    terminalPaneSplitMountLeaseTargets,
     worktreeId
   ])
 

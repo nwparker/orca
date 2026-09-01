@@ -103,67 +103,87 @@ export function createSsh2Module(): Ssh2ModuleMock {
     connect(config?: unknown) {
       connectAttempts += 1
       this.lastConnectConfig = config
-      // Why the callback form: ssh2 calls hostVerifier(key, verify) and only accepts synchronously
-      // when the return is not undefined. A mock that passed one argument and ignored the result
-      // would pass against a verifier that never decides — which is the regression host key
-      // verification exists to prevent.
+      // Why the callback form: ssh2 calls hostVerifier(key, verify) and waits when the return is
+      // undefined. A mock that schedules ready before a delayed callback runs would accept a key
+      // that the verifier denied — the regression host-key verification exists to prevent.
       const hostVerifier = (
         config as
-          | { hostVerifier?: (key: Buffer, verify: (ok: boolean) => void) => undefined }
+          | {
+              hostVerifier?: (key: Buffer, verify: (ok: boolean) => void) => boolean | undefined
+            }
           | undefined
       )?.hostVerifier
       const presentedHostKey = ssh2Mock.presentedHostKey ?? VALID_ED25519_HOST_KEY
       ssh2Mock.lastHostKeyAccepted = undefined
-      hostVerifier?.(presentedHostKey, (ok) => {
-        ssh2Mock.lastHostKeyAccepted = ok
-      })
-      if (ssh2Mock.lastHostKeyAccepted === false) {
-        // ssh2 aborts the handshake when the verifier denies; a mock that carried on to 'ready'
-        // would let a rejected host key look like a successful connect.
+      const scheduleConnection = (): void => {
+        if (ssh2Mock.lastHostKeyAccepted === false) {
+          // ssh2 aborts the handshake when the verifier denies; a mock that carried on to 'ready'
+          // would let a rejected host key look like a successful connect.
+          this.connectTimer = setTimeout(() => {
+            this.connectTimer = null
+            this.emit('error', new Error('All configured authentication methods failed'))
+          }, 0)
+          return
+        }
         this.connectTimer = setTimeout(() => {
           this.connectTimer = null
-          this.emit('error', new Error('All configured authentication methods failed'))
+          const next = ssh2Mock.connectSequence.shift()
+          if (next instanceof Error) {
+            this.emit('error', next)
+            return
+          }
+          if (next === 'ready') {
+            this.emit('ready')
+            return
+          }
+          if (ssh2Mock.connectBehavior === 'pending') {
+            const configValue = this.lastConnectConfig
+            const readyTimeout =
+              configValue &&
+              typeof configValue === 'object' &&
+              'readyTimeout' in configValue &&
+              typeof configValue.readyTimeout === 'number'
+                ? configValue.readyTimeout
+                : undefined
+            if (readyTimeout && readyTimeout > 0) {
+              this.handshakeTimer = setTimeout(() => {
+                this.handshakeTimer = null
+                this.emit('error', new Error('Timed out while waiting for handshake'))
+              }, readyTimeout)
+            }
+            return
+          }
+          if (ssh2Mock.connectBehavior === 'error') {
+            const err = new Error(ssh2Mock.connectErrorMessage) as NodeJS.ErrnoException
+            if (ssh2Mock.connectErrorCode) {
+              err.code = ssh2Mock.connectErrorCode
+            }
+            this.emit('error', err)
+          } else {
+            this.emit('ready')
+          }
         }, 0)
+      }
+
+      if (!hostVerifier) {
+        scheduleConnection()
         return
       }
-      this.connectTimer = setTimeout(() => {
-        this.connectTimer = null
-        const next = ssh2Mock.connectSequence.shift()
-        if (next instanceof Error) {
-          this.emit('error', next)
+
+      let verificationSettled = false
+      const settleVerification = (accepted: boolean): void => {
+        if (verificationSettled) {
           return
         }
-        if (next === 'ready') {
-          this.emit('ready')
-          return
-        }
-        if (ssh2Mock.connectBehavior === 'pending') {
-          const configValue = this.lastConnectConfig
-          const readyTimeout =
-            configValue &&
-            typeof configValue === 'object' &&
-            'readyTimeout' in configValue &&
-            typeof configValue.readyTimeout === 'number'
-              ? configValue.readyTimeout
-              : undefined
-          if (readyTimeout && readyTimeout > 0) {
-            this.handshakeTimer = setTimeout(() => {
-              this.handshakeTimer = null
-              this.emit('error', new Error('Timed out while waiting for handshake'))
-            }, readyTimeout)
-          }
-          return
-        }
-        if (ssh2Mock.connectBehavior === 'error') {
-          const err = new Error(ssh2Mock.connectErrorMessage) as NodeJS.ErrnoException
-          if (ssh2Mock.connectErrorCode) {
-            err.code = ssh2Mock.connectErrorCode
-          }
-          this.emit('error', err)
-        } else {
-          this.emit('ready')
-        }
-      }, 0)
+        verificationSettled = true
+        ssh2Mock.lastHostKeyAccepted = accepted
+        scheduleConnection()
+      }
+      // ssh2 accepts a synchronous boolean or waits for the callback when the return is undefined.
+      const verifierResult = hostVerifier(presentedHostKey, settleVerification)
+      if (verifierResult !== undefined) {
+        settleVerification(verifierResult)
+      }
     }
     end() {
       this.clearPendingTimers()

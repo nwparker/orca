@@ -244,6 +244,7 @@ test('CLI splits an exact cold-parked tab without stealing the active tab or foc
   expect(mountedBefore).not.toContain(targetTabId)
 
   const splitPromise = runParkedSplitCli(userDataDir, sourceTerminal.handle)
+  const settledSplit = splitPromise.catch((error: unknown) => error)
   let mountedDuringSplit: string[] = []
   await expect
     .poll(
@@ -256,7 +257,11 @@ test('CLI splits an exact cold-parked tab without stealing the active tab or foc
       { timeout: HISTORICAL_SPLIT_TIMEOUT_MS, message: 'CLI did not remount its parked target' }
     )
     .toBe(true)
-  const splitRun = await splitPromise
+  const settled = await settledSplit
+  if (settled instanceof Error) {
+    throw settled
+  }
+  const splitRun = settled
 
   expect(mountedDuringSplit.filter((tabId) => !mountedBefore.includes(tabId))).toEqual([
     targetTabId

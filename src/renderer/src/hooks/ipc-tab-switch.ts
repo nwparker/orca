@@ -214,10 +214,7 @@ function shouldUseWorktreeTerminalFallback(
   activeGroupTerminalTabs: readonly TypeCyclableTab[],
   worktreeTerminalTabs: readonly TypeCyclableTab[]
 ): boolean {
-  if (
-    activeGroupTerminalTabs.length >= 2 ||
-    worktreeTerminalTabs.length <= activeGroupTerminalTabs.length
-  ) {
+  if (worktreeTerminalTabs.length <= activeGroupTerminalTabs.length) {
     return false
   }
   const groups = store.groupsByWorktree?.[worktreeId] ?? []
@@ -349,9 +346,17 @@ export function handleSwitchTerminalTab(direction: number): boolean {
     store.activeFileId,
     store.activeBrowserTabId
   )
+  const activeGroupId = store.activeGroupIdByWorktree?.[worktreeId]
+  const activeGroupTabId = activeGroupId
+    ? (store.groupsByWorktree?.[worktreeId] ?? []).find((group) => group.id === activeGroupId)
+        ?.activeTabId
+    : null
   // Why: when an editor/browser tab is active, jump to the first terminal on
   // forward navigation instead of skipping to index 1.
-  const idx = terminalTabs.findIndex((t) => t.id === currentId)
+  const exactIndex = activeGroupTabId
+    ? terminalTabs.findIndex((tab) => tab.tabId === activeGroupTabId && tab.id === currentId)
+    : -1
+  const idx = exactIndex >= 0 ? exactIndex : terminalTabs.findIndex((tab) => tab.id === currentId)
   // Why: only no-op when the sole terminal is already focused. With one terminal
   // and an editor/browser active, the chord must still jump to that terminal -
   // that is the whole point of the shortcut. The single-terminal-already-active
@@ -365,10 +370,14 @@ export function handleSwitchTerminalTab(direction: number): boolean {
   // tab (e.g. single-terminal with that terminal focused but via a different
   // code path). Redundant setActiveTab calls trigger unnecessary subscriber
   // work in components that react to active-tab changes.
-  if (next.id === store.activeTabId && store.activeTabType === 'terminal') {
+  const nextIsActive = next.tabId
+    ? next.tabId === activeGroupTabId && next.id === currentId
+    : next.id === store.activeTabId
+  if (nextIsActive && store.activeTabType === 'terminal') {
     return false
   }
-  store.setActiveTab(next.id)
-  store.setActiveTabType('terminal')
+  // Preserve the resolved unified tab id when split copies share one terminal
+  // entity; the legacy entity setter alone can focus the first copy.
+  activateCyclableTab(store, next)
   return true
 }

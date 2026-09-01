@@ -7,6 +7,7 @@ import {
   _resetTerminalPaneSplitRequestRoutingForTests,
   cancelQueuedTerminalPaneSplitRequests,
   dispatchTerminalPaneSplitRequest,
+  getTerminalPaneSplitMountLeaseTargets,
   hasTerminalPaneSplitMountLease,
   queueTerminalPaneSplitRequest,
   registerTerminalPaneSplitRequestHandler,
@@ -47,7 +48,7 @@ describe('parked terminal split request routing', () => {
     unregister()
   })
 
-  it('replays a parked-tab request as soon as that exact pane lifecycle registers', () => {
+  it('replays a parked-tab request after registrations for the mount settle', async () => {
     const request = splitRequest('tab-parked', 91)
     const splitPane = vi.fn()
     queueTerminalPaneSplitRequest(request)
@@ -65,6 +66,7 @@ describe('parked terminal split request routing', () => {
         splitPane(sourcePaneId, detail.direction)
       }
     )
+    await Promise.resolve()
 
     expect(splitPane).toHaveBeenCalledOnce()
     expect(splitPane).toHaveBeenCalledWith(7, 'vertical')
@@ -132,6 +134,91 @@ describe('parked terminal split request routing', () => {
       second
     )
     expect(second).toHaveBeenCalledWith(expect.objectContaining({ worktreeId: 'repo::/two' }))
+    expect(getTerminalPaneSplitMountLeaseTargets()).toEqual([
+      { tabId: 'tab-shared', worktreeId: 'repo::/one' },
+      { tabId: 'tab-shared', worktreeId: 'repo::/two' }
+    ])
+    unregisterFirst()
+    unregisterSecond()
+  })
+
+  it('does not broadcast an unscoped live request to colliding worktree handlers', () => {
+    const first = vi.fn()
+    const second = vi.fn()
+    const unregisterFirst = registerTerminalPaneSplitRequestHandler(
+      'tab-shared',
+      'repo::/one',
+      first
+    )
+    const unregisterSecond = registerTerminalPaneSplitRequestHandler(
+      'tab-shared',
+      'repo::/two',
+      second
+    )
+
+    dispatchTerminalPaneSplitRequest(splitRequest('tab-shared'))
+
+    expect(first).not.toHaveBeenCalled()
+    expect(second).not.toHaveBeenCalled()
+    unregisterFirst()
+    unregisterSecond()
+  })
+
+  it('does not let an unscoped handler consume a queued request with scoped collisions', () => {
+    queueTerminalPaneSplitRequest({ ...splitRequest('tab-shared'), worktreeId: 'repo::/one' })
+    queueTerminalPaneSplitRequest({ ...splitRequest('tab-shared'), worktreeId: 'repo::/two' })
+    const handler = vi.fn()
+
+    const unregister = registerTerminalPaneSplitRequestHandler('tab-shared', undefined, handler)
+
+    expect(handler).not.toHaveBeenCalled()
+    expect(takeQueuedTerminalPaneSplitRequests('tab-shared', 'repo::/one')).toHaveLength(1)
+    unregister()
+  })
+
+  it('replays a withheld unscoped request when the collision becomes unambiguous', async () => {
+    const first = vi.fn()
+    const second = vi.fn()
+    const unregisterFirst = registerTerminalPaneSplitRequestHandler(
+      'tab-shared',
+      'repo::/one',
+      first
+    )
+    const unregisterSecond = registerTerminalPaneSplitRequestHandler(
+      'tab-shared',
+      'repo::/two',
+      second
+    )
+    queueTerminalPaneSplitRequest(splitRequest('tab-shared'))
+
+    expect(first).not.toHaveBeenCalled()
+    expect(second).not.toHaveBeenCalled()
+    unregisterFirst()
+    await Promise.resolve()
+
+    expect(second).toHaveBeenCalledOnce()
+    unregisterSecond()
+  })
+
+  it('does not replay an unscoped request before colliding handlers finish registering', async () => {
+    queueTerminalPaneSplitRequest(splitRequest('tab-shared'))
+    const first = vi.fn()
+    const second = vi.fn()
+
+    const unregisterFirst = registerTerminalPaneSplitRequestHandler(
+      'tab-shared',
+      'repo::/one',
+      first
+    )
+    const unregisterSecond = registerTerminalPaneSplitRequestHandler(
+      'tab-shared',
+      'repo::/two',
+      second
+    )
+    await Promise.resolve()
+
+    expect(first).not.toHaveBeenCalled()
+    expect(second).not.toHaveBeenCalled()
     unregisterFirst()
     unregisterSecond()
   })

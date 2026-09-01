@@ -29,6 +29,15 @@ describe('isNativePtyException', () => {
     new Error('node-pty metadata invariant failed'),
     Object.assign(new Error('database write failed'), { code: 'EAGAIN' }),
     Object.assign(new Error('socket write failed'), { code: 'EPIPE' }),
+    // A synchronous listener failure inherits node-pty's event-dispatch frame;
+    // the native frame must be the throw site's first frame, not merely present.
+    Object.assign(new Error('downstream write failed'), {
+      code: 'EPIPE',
+      stack:
+        'Error: downstream write failed\n' +
+        '    at daemon-terminal-admission.ts:1:1\n' +
+        '    at node-pty/lib/eventEmitter2.js:41:22'
+    }),
     new TypeError('logic bug'),
     'EAGAIN'
   ])('does not suppress unrelated or malformed failures', (error) => {

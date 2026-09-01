@@ -175,6 +175,38 @@ describe('createRemoteRuntimePtyTransport', () => {
     expect(transport.isConnected()).toBe(false)
   })
 
+  it('does not replace a host pane after an SSH identity mismatch', async () => {
+    const onError = vi.fn()
+    resolvedPaneHandle = 'terminal-live'
+    const { createRemoteRuntimePtyTransport } = await import('./remote-runtime-pty-transport')
+    const transport = createRemoteRuntimePtyTransport('hub-env', {
+      worktreeId: 'wt-1',
+      tabId: 'web-terminal-host-tab-1',
+      leafId: 'pane:1'
+    })
+    transport.attach({
+      existingPtyId: 'remote:hub-env@@terminal-live',
+      callbacks: { onError }
+    })
+    await vi.waitFor(() => expect(subscriptionSendBinary).toHaveBeenCalled())
+
+    const message = 'SSH_SESSION_EXPIRED: pty-1 SSH_PTY_IDENTITY_MISMATCH'
+    subscriptionCallbacks?.onResponse({
+      ok: true,
+      result: {
+        type: 'error',
+        streamId: latestSubscribePayload().streamId,
+        message
+      }
+    })
+
+    expect(runtimeCall).not.toHaveBeenCalledWith(
+      expect.objectContaining({ method: 'terminal.recoverPane' })
+    )
+    expect(onError).toHaveBeenCalledWith(message)
+    expect(transport.getPtyId()).toBe('remote:hub-env@@terminal-live')
+  })
+
   it('ignores stale stream end after reattaching a newer remote terminal', async () => {
     const { createRemoteRuntimePtyTransport } = await import('./remote-runtime-pty-transport')
     const onPtyExit = vi.fn()

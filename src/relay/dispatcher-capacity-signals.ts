@@ -46,6 +46,11 @@ export abstract class RelayDispatcherCapacitySignals extends RelayDispatcherClie
     return !this.disposed && this.clients.has(clientId)
   }
 
+  /** Whether any live transport can consume PTY output. */
+  hasAttachedClients(): boolean {
+    return this.activeClients().length > 0
+  }
+
   canAdmitControlFrame(clientId: number, estimatedBytes: number): boolean {
     const client = this.clients.get(clientId)
     if (this.disposed || !client || client.closed) {

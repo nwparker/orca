@@ -135,14 +135,19 @@ export function useAppSessionPersistence(): void {
                 expectedHostObservationTokensByTargetId
               })
               const resultState = useAppStore.getState()
-              const currentAuthorityByTargetId = new Map(
-                currentAuthorities.map((authority) => [authority.targetId, authority])
+              const resultByTargetId = new Map(
+                (results ?? []).map(({ targetId, result }) => [targetId, result])
               )
-              for (const { targetId, result } of results ?? []) {
-                const authority = currentAuthorityByTargetId.get(targetId)
-                if (authority && remoteWorkspaceUploadAuthorityIsCurrent(resultState, authority)) {
-                  applyRemoteWorkspacePushStatus(resultState, targetId, result, authority)
+              for (const authority of currentAuthorities) {
+                if (!remoteWorkspaceUploadAuthorityIsCurrent(resultState, authority)) {
+                  continue
                 }
+                applyRemoteWorkspacePushStatus(
+                  resultState,
+                  authority.targetId,
+                  resultByTargetId.get(authority.targetId),
+                  authority
+                )
               }
             } catch (err) {
               const errorState = useAppStore.getState()

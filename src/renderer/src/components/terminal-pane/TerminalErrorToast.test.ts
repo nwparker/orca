@@ -126,6 +126,13 @@ describe('humanizeTerminalError', () => {
     expect(humanized).not.toContain('SSH_PTY_IDENTITY_MISMATCH')
   })
 
+  it('replaces a standalone SSH identity-mismatch marker and relay id', () => {
+    const humanized = humanizeTerminalError('SSH_PTY_IDENTITY_MISMATCH: orca:2f1c@@pty-7')
+    expect(humanized).not.toContain('SSH_PTY_IDENTITY_MISMATCH')
+    expect(humanized).not.toContain('orca:2f1c@@pty-7')
+    expect(humanized).toContain('Open a new terminal to continue')
+  })
+
   it('replaces a raw relay PTY-not-found string and its quoted id', () => {
     const humanized = humanizeTerminalError(
       'Error invoking remote method \'pty:spawn\': Error: PTY "orca:2f1c@@pty-7" not found'

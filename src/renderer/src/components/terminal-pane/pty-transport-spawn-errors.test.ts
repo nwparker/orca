@@ -192,6 +192,40 @@ describe('createIpcPtyTransport', () => {
     })
   })
 
+  it.each([
+    'SSH_PTY_IDENTITY_MISMATCH: pty-3',
+    'SSH_SESSION_EXPIRED: pty-3 SSH_PTY_IDENTITY_MISMATCH'
+  ])('does not expire a live PTY after identity mismatch: %s', async (message) => {
+    const { createIpcPtyTransport } = await import('./pty-transport')
+    const spawnMock = vi.fn().mockRejectedValue(new Error(message))
+    ;(globalThis as { window: typeof window }).window = {
+      ...originalWindow,
+      api: {
+        ...originalWindow?.api,
+        pty: {
+          ...originalWindow?.api?.pty,
+          spawn: spawnMock,
+          write: vi.fn(),
+          resize: vi.fn(),
+          kill: vi.fn(),
+          onData: vi.fn(() => () => {}),
+          onReplay: vi.fn(() => () => {}),
+          onExit: vi.fn(() => () => {})
+        }
+      }
+    } as unknown as typeof window
+
+    const onError = vi.fn()
+    const result = await createIpcPtyTransport({ connectionId: 'ssh-1' }).connect({
+      url: '',
+      sessionId: 'ssh:ssh-1@@pty-3',
+      callbacks: { onError }
+    })
+
+    expect(result).toBeUndefined()
+    expect(onError).toHaveBeenCalledWith(message)
+  })
+
   it('surfaces terminal session state save failures without the Electron IPC wrapper', async () => {
     const { createIpcPtyTransport } = await import('./pty-transport')
     const wrappedMessage = `Error invoking remote method 'pty:spawn': Error: ${createTerminalSessionStateSaveFailureMessage()}`

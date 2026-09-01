@@ -142,6 +142,7 @@ export async function executePtyIpcSpawn(ctx: PtyIpcSpawnState): Promise<void> {
       isSshPtyIdentityMismatchError(spawnError) || isSshPtyIdentityMismatchError(rawMessage)
     const isExpiredSshSession =
       Boolean(args.connectionId) &&
+      !isIdentityMismatch &&
       (spawnError.message.includes(SSH_SESSION_EXPIRED_ERROR) ||
         rawMessage.includes(SSH_SESSION_EXPIRED_ERROR))
     const exitedBeforeSpawnReply =
@@ -159,17 +160,15 @@ export async function executePtyIpcSpawn(ctx: PtyIpcSpawnState): Promise<void> {
     }
     if (args.connectionId && ctx.effectiveSessionRelayId !== undefined && isExpiredSshSession) {
       // Why: expired remote reattach = relay already dropped the PTY; clear the lease so writes can't restore the stale binding.
-      if (ctx.effectiveSessionAppId !== undefined && !isIdentityMismatch) {
+      if (ctx.effectiveSessionAppId !== undefined) {
         clearProviderPtyState(ctx.effectiveSessionAppId)
         deletePtyOwnership(ctx.effectiveSessionAppId)
       }
-      if (!isIdentityMismatch) {
-        ctx.deps.store?.markSshRemotePtyLease(
-          args.connectionId,
-          ctx.effectiveSessionRelayId,
-          'expired'
-        )
-      }
+      ctx.deps.store?.markSshRemotePtyLease(
+        args.connectionId,
+        ctx.effectiveSessionRelayId,
+        'expired'
+      )
     }
     // Why: provider state buildPtyHostEnv materialized for this minted id leaks if spawn failed.
     if (ctx.isMintedSessionId && ctx.effectiveSessionId !== undefined) {

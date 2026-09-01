@@ -79,7 +79,10 @@ import {
   TERMINAL_TAB_PARK_FLIP_WINDOW_MS
 } from './terminal-park-verdict-flip-telemetry'
 import { BACKGROUND_WORKTREE_MEASURE_WINDOW_MS } from '../terminal/background-terminal-worktree-visibility'
-import { queueTerminalPaneSplitRequest } from './terminal-pane-split-request-routing'
+import {
+  _resetTerminalPaneSplitRequestRoutingForTests,
+  queueTerminalPaneSplitRequest
+} from './terminal-pane-split-request-routing'
 import { useTerminalTabColdParking } from './use-terminal-tab-cold-parking'
 
 const WORKTREE_ID = 'wt-1'
@@ -107,9 +110,11 @@ describe('useTerminalTabColdParking measure-clock contract', () => {
     vi.useFakeTimers()
     vi.setSystemTime(1_000_000)
     mocks.coldParkSelectCalls = 0
+    _resetTerminalPaneSplitRequestRoutingForTests()
   })
 
   afterEach(() => {
+    _resetTerminalPaneSplitRequestRoutingForTests()
     vi.useRealTimers()
     mocks.exemptTabIds = new Set()
     mocks.exemptSelectCalls = 0
@@ -364,6 +369,24 @@ describe('useTerminalTabColdParking measure-clock contract', () => {
     act(() => {
       vi.advanceTimersByTime(BACKGROUND_WORKTREE_MEASURE_WINDOW_MS)
     })
+    expect(result.current).toEqual(new Set(['tab-1', 'tab-2']))
+  })
+
+  it('does not unpark a same-id tab leased by another worktree', () => {
+    const args = { ...hookArgs(false), coldParkTerminalPanes: true }
+    const { result } = renderHook(() => useTerminalTabColdParking(args))
+    expect(result.current).toEqual(new Set(['tab-1', 'tab-2']))
+
+    act(() => {
+      queueTerminalPaneSplitRequest({
+        tabId: 'tab-1',
+        worktreeId: 'other-worktree',
+        paneRuntimeId: 9,
+        direction: 'vertical'
+      })
+    })
+
+    // Lease identity is worktree-scoped; the active worktree's same-id tab stays parked.
     expect(result.current).toEqual(new Set(['tab-1', 'tab-2']))
   })
 

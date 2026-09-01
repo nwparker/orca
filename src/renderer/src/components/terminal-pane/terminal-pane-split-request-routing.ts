@@ -11,15 +11,29 @@ type SplitMountLease = {
   worktreeId?: string
 }
 
+export type TerminalPaneSplitMountLeaseTarget = {
+  tabId: string
+  worktreeId?: string
+}
+
 const queuedRequests: SplitTerminalPaneDetail[] = []
 const splitMountLeasesByTarget = new Map<string, SplitMountLease>()
 const splitMountLeaseListeners = new Set<() => void>()
-let splitMountLeaseTabIds: ReadonlySet<string> = new Set()
+type SplitRequestHandlerRegistration = {
+  worktreeId: string | undefined
+  handler: (detail: SplitTerminalPaneDetail) => void
+}
+const splitRequestHandlersByTab = new Map<string, Set<SplitRequestHandlerRegistration>>()
+const pendingLegacyQueueFlushTabIds = new Set<string>()
+let splitMountLeaseTargets: readonly TerminalPaneSplitMountLeaseTarget[] = []
+let routingGeneration = 0
 
 function notifySplitMountLeaseChange(): void {
-  splitMountLeaseTabIds = new Set(
-    [...splitMountLeasesByTarget.values()].map((lease) => lease.tabId)
-  )
+  const leases = [...splitMountLeasesByTarget.values()]
+  splitMountLeaseTargets = leases.map(({ tabId, worktreeId }) => ({
+    tabId,
+    ...(worktreeId !== undefined ? { worktreeId } : {})
+  }))
   for (const listener of splitMountLeaseListeners) {
     listener()
   }
@@ -102,15 +116,23 @@ export function queueTerminalPaneSplitRequest(detail: SplitTerminalPaneDetail): 
   acquireSplitMountLease(detail.tabId, detail.worktreeId)
 }
 
-export function takeQueuedTerminalPaneSplitRequests(
+function takeQueuedSplitRequests(
   tabId: string,
-  worktreeId?: string
+  worktreeId: string | undefined,
+  scope: 'all' | 'scoped' | 'unscoped'
 ): SplitTerminalPaneDetail[] {
   const requests: SplitTerminalPaneDetail[] = []
+  const registeredHandlers = splitRequestHandlersByTab.get(tabId)
+  const unscopedRouteIsUnambiguous =
+    registeredHandlers === undefined || registeredHandlers.size === 1
   for (let index = queuedRequests.length - 1; index >= 0; index -= 1) {
     const request = queuedRequests[index]
     if (
       request.tabId !== tabId ||
+      (scope === 'scoped' && request.worktreeId === undefined) ||
+      (scope === 'unscoped' && request.worktreeId !== undefined) ||
+      (request.worktreeId === undefined && !unscopedRouteIsUnambiguous) ||
+      (worktreeId === undefined && request.worktreeId !== undefined) ||
       (worktreeId !== undefined &&
         request.worktreeId !== undefined &&
         request.worktreeId !== worktreeId)
@@ -121,6 +143,43 @@ export function takeQueuedTerminalPaneSplitRequests(
     queuedRequests.splice(index, 1)
   }
   return requests
+}
+
+export function takeQueuedTerminalPaneSplitRequests(
+  tabId: string,
+  worktreeId?: string
+): SplitTerminalPaneDetail[] {
+  return takeQueuedSplitRequests(tabId, worktreeId, 'all')
+}
+
+function scheduleLegacyQueuedRequestFlush(tabId: string): void {
+  if (
+    pendingLegacyQueueFlushTabIds.has(tabId) ||
+    !queuedRequests.some((request) => request.tabId === tabId && request.worktreeId === undefined)
+  ) {
+    return
+  }
+  pendingLegacyQueueFlushTabIds.add(tabId)
+  const generation = routingGeneration
+  queueMicrotask(() => {
+    if (generation !== routingGeneration) {
+      return
+    }
+    pendingLegacyQueueFlushTabIds.delete(tabId)
+    const registrations = splitRequestHandlersByTab.get(tabId)
+    if (registrations?.size !== 1) {
+      return
+    }
+    const registration = registrations.values().next().value as
+      | SplitRequestHandlerRegistration
+      | undefined
+    if (!registration) {
+      return
+    }
+    for (const detail of takeQueuedSplitRequests(tabId, registration.worktreeId, 'unscoped')) {
+      registration.handler(detail)
+    }
+  })
 }
 
 export function cancelQueuedTerminalPaneSplitRequests(tabId: string, worktreeId?: string): void {
@@ -140,8 +199,9 @@ export function subscribeTerminalPaneSplitMountLeases(listener: () => void): () 
   return () => splitMountLeaseListeners.delete(listener)
 }
 
-export function getTerminalPaneSplitMountLeaseTabIds(): ReadonlySet<string> {
-  return splitMountLeaseTabIds
+/** Stable lease targets retain worktree identity for per-worktree parking decisions. */
+export function getTerminalPaneSplitMountLeaseTargets(): readonly TerminalPaneSplitMountLeaseTarget[] {
+  return splitMountLeaseTargets
 }
 
 export function dispatchTerminalPaneSplitRequest(detail: SplitTerminalPaneDetail): void {
@@ -155,20 +215,43 @@ export function registerTerminalPaneSplitRequestHandler(
   worktreeId: string | undefined,
   handler: (detail: SplitTerminalPaneDetail) => void
 ): () => void {
+  const registration: SplitRequestHandlerRegistration = { worktreeId, handler }
+  const registrations = splitRequestHandlersByTab.get(tabId) ?? new Set()
+  registrations.add(registration)
+  splitRequestHandlersByTab.set(tabId, registrations)
   const listener = (event: Event): void => {
     const detail = (event as CustomEvent<SplitTerminalPaneDetail>).detail
-    if (
-      detail?.tabId === tabId &&
-      (detail.worktreeId === undefined || detail.worktreeId === worktreeId)
-    ) {
+    if (detail?.tabId !== tabId) {
+      return
+    }
+    if (detail.worktreeId === undefined) {
+      // Legacy requests omit worktree identity; once duplicate tabs are mounted, broadcasting
+      // would split whichever copy happened to register first (or all copies at once).
+      if (registrations.size === 1) {
+        handler(detail)
+      }
+      return
+    }
+    if (detail.worktreeId === worktreeId) {
       handler(detail)
     }
   }
   window.addEventListener(SPLIT_TERMINAL_PANE_EVENT, listener)
-  for (const detail of takeQueuedTerminalPaneSplitRequests(tabId, worktreeId)) {
+  for (const detail of takeQueuedSplitRequests(tabId, worktreeId, 'scoped')) {
     handler(detail)
   }
-  return () => window.removeEventListener(SPLIT_TERMINAL_PANE_EVENT, listener)
+  scheduleLegacyQueuedRequestFlush(tabId)
+  return () => {
+    window.removeEventListener(SPLIT_TERMINAL_PANE_EVENT, listener)
+    registrations.delete(registration)
+    if (registrations.size === 0) {
+      splitRequestHandlersByTab.delete(tabId)
+      return
+    }
+    if (registrations.size === 1) {
+      scheduleLegacyQueuedRequestFlush(tabId)
+    }
+  }
 }
 
 export function resolveTerminalPaneSplitSourceId(
@@ -181,11 +264,14 @@ export function resolveTerminalPaneSplitSourceId(
 }
 
 export function _resetTerminalPaneSplitRequestRoutingForTests(): void {
+  routingGeneration += 1
   queuedRequests.splice(0)
   for (const lease of splitMountLeasesByTarget.values()) {
     clearTimeout(lease.timer)
   }
   splitMountLeasesByTarget.clear()
   splitMountLeaseListeners.clear()
-  splitMountLeaseTabIds = new Set()
+  splitRequestHandlersByTab.clear()
+  pendingLegacyQueueFlushTabIds.clear()
+  splitMountLeaseTargets = []
 }

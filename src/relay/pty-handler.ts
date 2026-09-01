@@ -504,34 +504,29 @@ export class PtyHandler {
       this.dispatcher.onClientDetached?.(() => this.releaseUndeliverableOutput()) ?? null
   }
 
-  /**
-   * A departed client must not wedge the shell it was watching.
-   *
-   * Output backpressure pauses the pty itself, and it only resumes once pending bytes drain below
-   * the low watermark - which needs a client to drain to. When the transport dies mid-stream there
-   * is none, so the pty stays paused, the shell blocks on a pty nobody reads, and the bytes are
-   * never produced at all. Measured: a shell mid-burst stopped at ~SEQ-100 and the reattach replay
-   * held only 1..120, so the outage was not merely undelivered, it was never recorded.
-   *
-   * The pending queue is per-client delivery state and is unbounded, which is exactly why pausing
-   * was the safe move. With no client it is also undeliverable, so it is dropped rather than
-   * carried: `buffered` is the reattach replay source and is capacity-bounded, so draining into it
-   * keeps memory flat while preserving what a returning client needs.
-   */
+  /** Drop per-client backlog so a disconnected consumer cannot leave its PTY paused. */
   private releaseUndeliverableOutput(): void {
     if (this.dispatcher.hasAttachedClients?.() !== false) {
       return
     }
     for (const id of Array.from(this.pausedOutputPtys)) {
-      const managed = this.ptys.get(id)
-      if (!managed || managed.disposed) {
-        continue
-      }
-      this.pendingOutputByPty.delete(id)
-      this.consumerPausedOutputPtys.delete(id)
-      this.pausedOutputPtys.delete(id)
+      this.releaseUndeliverablePtyOutput(id)
+    }
+  }
+
+  private releaseUndeliverablePtyOutput(id: string): boolean {
+    if (this.dispatcher.hasAttachedClients?.() !== false) {
+      return false
+    }
+    this.deletePendingOutput(id)
+    this.consumerPausedOutputPtys.delete(id)
+    const wasPaused = this.pausedOutputPtys.delete(id)
+    const managed = this.ptys.get(id)
+    if (wasPaused && managed && !managed.disposed) {
       managed.pty.resume()
     }
+    this.publishPendingExit(id)
+    return true
   }
 
   setConsumerDeliveryPaused(id: string, paused: boolean): void {
@@ -1236,6 +1231,9 @@ export class PtyHandler {
       (!sourceOnlyEmission && chunkChars <= 0) ||
       (pending.transformed && chunkChars !== pending.data.length)
     ) {
+      if (this.releaseUndeliverablePtyOutput(id)) {
+        return true
+      }
       this.restorePendingOutputAfterFlush(id, queue, capturedQueueBytes, queueWasCaptured)
       this.pausePtyOutput(id)
       return false
@@ -1260,6 +1258,9 @@ export class PtyHandler {
     pending.sourceChunk = sourceChunk
     const published = this.publishPtyOutput(id, sourceChunk, pending.interactive === true)
     if (!published) {
+      if (this.releaseUndeliverablePtyOutput(id)) {
+        return true
+      }
       this.restorePendingOutputAfterFlush(id, queue, capturedQueueBytes, queueWasCaptured)
       this.pausePtyOutput(id)
       return false

@@ -3,11 +3,7 @@ import { useAppStore } from '@/store'
 import { isRuntimeOwnedSshTargetId } from '../../../../../shared/execution-host'
 import { resolveSshPaneConnectGate } from '../ssh-pane-connect-gate'
 
-import {
-  isSshSessionExpiredError,
-  waitForUserInitiatedSshConnect,
-  waitForSshConnection
-} from './ssh-session-connect'
+import { waitForUserInitiatedSshConnect, waitForSshConnection } from './ssh-session-connect'
 import { isRemoteRuntimePtyId } from './paired-parked-terminal-restore'
 import { toProcessExitStartup } from './process-exit-startup'
 
@@ -15,6 +11,10 @@ import type { ConnectPanePtySession } from './connect-pane-pty-session'
 
 import { runDeferredSessionReattachChoice } from './deferred-session-reattach-choice'
 import { recoverUnverifiableDirectSshReattach } from './direct-ssh-reattach-recovery'
+import {
+  describeReattachFailure,
+  isProvenSshSessionGoneError
+} from './reattach-failure-classification'
 
 export function runDeferredSessionAttach(session: ConnectPanePtySession): void {
   const isCurrentPaneTransport = (): boolean =>
@@ -153,7 +153,7 @@ export function runDeferredSessionAttach(session: ConnectPanePtySession): void {
           session.clearHiddenOutputRestoreState()
           const outputCallbacks = session.captureTransportOutputCallbacks(
             (message) => {
-              if (isSshSessionExpiredError(message)) {
+              if (isProvenSshSessionGoneError(message)) {
                 expiredReattachError = true
                 return
               }
@@ -163,7 +163,7 @@ export function runDeferredSessionAttach(session: ConnectPanePtySession): void {
               ) {
                 return
               }
-              session.reportError(message)
+              session.reportError(describeReattachFailure(message))
             },
             toProcessExitStartup(coldRestoreStartup ?? session.paneStartup)
           )
@@ -287,7 +287,7 @@ export function runDeferredSessionAttach(session: ConnectPanePtySession): void {
               if (session.rejectObsoleteDirectSshReattach(pendingSessionId)) {
                 return
               }
-              if (isSshSessionExpiredError(err)) {
+              if (isProvenSshSessionGoneError(err)) {
                 useAppStore.getState().removeDeferredSshSessionId(session.deps.tabId)
                 session.clearExitedPanePtyLayoutBinding(pendingSessionId)
                 session.deps.clearTabPtyId(session.deps.tabId, pendingSessionId)
@@ -296,7 +296,7 @@ export function runDeferredSessionAttach(session: ConnectPanePtySession): void {
                 })
                 return
               }
-              session.reportError(err instanceof Error ? err.message : String(err))
+              session.reportError(describeReattachFailure(err))
               recoverUnverifiableDirectSshReattach(session, pendingSessionId)
             })
           session.armDirectSshPaneRetryTimeout(

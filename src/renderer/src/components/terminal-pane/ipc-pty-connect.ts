@@ -1,4 +1,8 @@
 import { isRuntimeOwnedSshTargetId } from '../../../../shared/execution-host'
+import {
+  SSH_SESSION_EXPIRED_ERROR,
+  isSshPtyIdentityMismatchMessage
+} from '../../../../shared/ssh-pty-failure-tokens'
 import { extractIpcErrorMessage } from '@/lib/ipc-error'
 import { ensurePtyDispatcher } from './pty-dispatcher'
 import {
@@ -15,7 +19,6 @@ import type { IpcPtySessionHandlers } from './ipc-pty-session-handlers'
 import { spawnIpcPty } from './ipc-pty-spawn-request'
 import type { IpcPtyTransportOptions, PtyConnectResult, PtyTransport } from './pty-transport-types'
 
-const SSH_SESSION_EXPIRED_ERROR = 'SSH_SESSION_EXPIRED'
 const SSH_PTY_CONNECTION_MISMATCH_MARKER = 'belongs to SSH connection'
 
 type PtyConnectOptions = Parameters<PtyTransport['connect']>[0]
@@ -183,6 +186,7 @@ function handleConnectError(
   if (
     connectionId &&
     options.sessionId &&
+    !isSshPtyIdentityMismatchMessage(message) &&
     (message.includes(SSH_SESSION_EXPIRED_ERROR) ||
       message.includes(SSH_PTY_CONNECTION_MISMATCH_MARKER))
   ) {

@@ -1,5 +1,9 @@
-export const SSH_SESSION_EXPIRED_ERROR = 'SSH_SESSION_EXPIRED'
-export const SSH_PTY_IDENTITY_MISMATCH_ERROR = 'SSH_PTY_IDENTITY_MISMATCH'
+export {
+  SSH_PTY_IDENTITY_MISMATCH_ERROR,
+  SSH_SESSION_EXPIRED_ERROR,
+  SSH_SOURCE_RESTORE_REQUIRED_ERROR
+} from '../../shared/ssh-pty-failure-tokens'
+import { isSshPtyIdentityMismatchMessage } from '../../shared/ssh-pty-failure-tokens'
 
 export function isSshPtyNotFoundError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error)
@@ -7,8 +11,7 @@ export function isSshPtyNotFoundError(error: unknown): boolean {
 }
 
 export function isSshPtyIdentityMismatchError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error)
-  return message.includes(SSH_PTY_IDENTITY_MISMATCH_ERROR) || /identity mismatch/i.test(message)
+  return isSshPtyIdentityMismatchMessage(error instanceof Error ? error.message : String(error))
 }
 
 /**
