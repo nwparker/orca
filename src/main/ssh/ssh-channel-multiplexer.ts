@@ -587,7 +587,12 @@ export class SshChannelMultiplexer {
 
       this.sendKeepAlive()
 
-      if (this.disposed || resumedAfterWake || this.decoderReadPaused || this.writerSaturated) {
+      // Why: a saturated writer used to suppress this check outright, which wedged a half-open
+      // link forever — no drain, so no frame ever left, and the writer's single-outstanding
+      // liveness guard silenced the one probe that could have noticed. The relay sends its own
+      // keepalive every KEEPALIVE_SEND_MS, so a slow-but-alive peer still refreshes
+      // lastReceivedAt; only a link that delivers nothing inbound is declared lost.
+      if (this.disposed || resumedAfterWake || this.decoderReadPaused) {
         return
       }
 

@@ -354,9 +354,10 @@ describe('SshChannelMultiplexer', () => {
       expect(mux.isDisposed()).toBe(true)
     })
 
-    it('suppresses false death while locally saturated and rebases both clocks on drain', () => {
+    it('survives local saturation while the peer keeps talking, and rebases both clocks on drain', () => {
       mux.dispose()
       let drain = (): void => {}
+      let feed: (chunk: Buffer) => void = () => {}
       const written: Buffer[] = []
       const saturatedTransport: MultiplexerTransport = {
         write: (data) => {
@@ -367,14 +368,22 @@ describe('SshChannelMultiplexer', () => {
         onDrain: (callback) => {
           drain = callback
         },
-        onData: vi.fn(),
+        onData: (callback) => {
+          feed = callback
+        },
         onClose: vi.fn()
       }
       mux = new SshChannelMultiplexer(saturatedTransport)
 
       vi.advanceTimersByTime(5_000)
       expect(getMuxInternals(mux).writerSaturated).toBe(true)
-      vi.advanceTimersByTime(25_000)
+      // Why: backpressure on our uplink is not evidence of death. The relay's own keepalive is,
+      // and only that inbound traffic may keep the link alive — suppressing the check on
+      // saturation alone wedged a half-open link forever (see the saturation-wedge suite).
+      for (let tick = 0; tick < 5; tick++) {
+        feed(encodeKeepAliveFrame(0, 0))
+        vi.advanceTimersByTime(5_000)
+      }
       expect(mux.isDisposed()).toBe(false)
       expect(written).toHaveLength(1)
 
