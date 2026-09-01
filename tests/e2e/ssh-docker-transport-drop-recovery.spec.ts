@@ -179,7 +179,11 @@ test.describe('SSH transport drop recovery', () => {
       expect(baselineRssKb, 'relay process not found').toBeGreaterThan(0)
 
       // ~48 MB of output with nobody attached: far past any sane replay window.
-      await execInTerminal(orcaPage, ptyId, 'yes ORCA_FLOOD_LINE | head -c 48000000; echo FLOODED')
+      await execInTerminal(
+        orcaPage,
+        ptyId,
+        `yes "$(printf 'ORCA_%s' FLOOD_LINE)" | head -c 48000000; echo FLOODED`
+      )
       await waitForTerminalOutput(orcaPage, 'ORCA_FLOOD_LINE', 30_000, 20_000)
       const dropped = dropDockerSshRelayTransport(target)
       expect(dropped).toBeGreaterThan(0)

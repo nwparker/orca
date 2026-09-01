@@ -3,6 +3,7 @@ import {
   SSH_SOURCE_RESTORE_REQUIRED_ERROR,
   isSshPtyIdentityMismatchMessage
 } from '../../../../../shared/ssh-pty-failure-tokens'
+import { translate } from '@/i18n/i18n'
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -23,6 +24,9 @@ export function isProvenSshSessionGoneError(error: unknown): boolean {
 export function describeReattachFailure(error: unknown): string {
   const message = messageOf(error)
   return message.includes(SSH_SOURCE_RESTORE_REQUIRED_ERROR)
-    ? 'Reconnecting this terminal — its output stream is being re-established.'
+    ? translate(
+        'auto.components.terminal.pane.reattachFailure.outputStreamRestoring',
+        'Reconnecting this terminal — its output stream is being re-established.'
+      )
     : message
 }

@@ -69,7 +69,8 @@ export class RelayPtySourcePublication {
     context: RequestContext | undefined,
     recovery?: PtySourceRecoveryRequest
   ): false | 'opened' | 'rotated' | 'existing' | PtySourceRecoveryResult {
-    if (!context?.onResponseSettled) {
+    // A superseded request must not retire or rotate the delivery opened by its replacement.
+    if (!context?.onResponseSettled || context.isStale()) {
       this.sender.releaseRotationFence(this.deliveries.get(id))
       return false
     }

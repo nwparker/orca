@@ -244,7 +244,9 @@ test('CLI splits an exact cold-parked tab without stealing the active tab or foc
   expect(mountedBefore).not.toContain(targetTabId)
 
   const splitPromise = runParkedSplitCli(userDataDir, sourceTerminal.handle)
-  const settledSplit = splitPromise.catch((error: unknown) => error)
+  const settledSplit = splitPromise.catch((error: unknown): Error =>
+    error instanceof Error ? error : new Error(String(error))
+  )
   let mountedDuringSplit: string[] = []
   await expect
     .poll(

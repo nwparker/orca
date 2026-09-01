@@ -130,6 +130,73 @@ it('rejects an SSH reattach whose matching exit shares the attach reply batch', 
   })
 })
 
+it('waits for source-delivery cancellation when a reattach exit races spawn', async () => {
+  let finishCancel!: (value: {
+    canceled: boolean
+    sentEndSu: number
+    creditedEndSu: number
+  }) => void
+  const cancelResult = new Promise<{
+    canceled: boolean
+    sentEndSu: number
+    creditedEndSu: number
+  }>((resolve) => {
+    finishCancel = resolve
+  })
+  const mux = {
+    request: vi.fn(),
+    notify: vi.fn(),
+    onNotification: vi.fn(),
+    dispose: vi.fn(),
+    isDisposed: vi.fn().mockReturnValue(false)
+  }
+  const provider = new SshPtyProvider('conn-1', mux as never)
+  mux.request.mockImplementation(async (method: string, _params, options) => {
+    if (method === 'pty.attach') {
+      const result = {
+        incarnationId: 'incarnation-existing',
+        sourceActivation: sourceActivation('incarnation-existing')
+      }
+      options?.beforeResolve?.(result)
+      const notify = mux.onNotification.mock.calls[0]?.[0]
+      notify?.('pty.exit', {
+        id: 'pty-existing',
+        code: 0,
+        incarnationId: 'incarnation-existing'
+      })
+      return result
+    }
+    if (method === 'pty.cancelDelivery') {
+      return cancelResult
+    }
+    return undefined
+  })
+
+  const spawn = provider.spawn({ cols: 80, rows: 24, sessionId: 'ssh:conn-1@@pty-existing' })
+  await vi.waitFor(() =>
+    expect(mux.request).toHaveBeenCalledWith('pty.cancelDelivery', {
+      id: 'pty-existing',
+      clientGeneration: 2,
+      ownerGeneration: 3,
+      deliveryToken: 'token:incarnation-existing'
+    })
+  )
+  let settled = false
+  void spawn.then(
+    () => {
+      settled = true
+    },
+    () => {
+      settled = true
+    }
+  )
+  await Promise.resolve()
+  expect(settled).toBe(false)
+
+  finishCancel({ canceled: true, sentEndSu: 0, creditedEndSu: 0 })
+  await expect(spawn).rejects.toThrow('agent_session_exited_during_start')
+})
+
 it('returns a provisional source activation lease to reconnect authority', async () => {
   const mux = {
     request: vi.fn(),

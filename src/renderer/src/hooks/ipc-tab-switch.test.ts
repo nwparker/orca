@@ -184,6 +184,22 @@ describe('handleSwitchTerminalTab', () => {
     expect(store.setActiveTabType).not.toHaveBeenCalled()
   })
 
+  it('jumps to the sole terminal when a non-terminal legacy id collides', () => {
+    const store = makeStore('editor')
+    // A stale editor id can equal a terminal entity id during hydration; the
+    // active tab type still determines whether this is a genuine no-op.
+    store.activeFileId = 'term-1'
+    getStateMock.mockReturnValue(store)
+    getActiveTabNavOrderMock.mockReturnValue([
+      { type: 'editor', id: 'term-1' },
+      { type: 'terminal', id: 'term-1' }
+    ])
+
+    expect(handleSwitchTerminalTab(1)).toBe(true)
+    expect(store.setActiveTab).toHaveBeenCalledWith('term-1')
+    expect(store.setActiveTabType).toHaveBeenCalledWith('terminal')
+  })
+
   it('falls back to the worktree terminal order when the active group is still empty', () => {
     const store = makeStore('terminal')
     store.activeTabId = 'term-1'

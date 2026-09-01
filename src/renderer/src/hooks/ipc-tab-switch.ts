@@ -369,7 +369,7 @@ export function handleSwitchTerminalTab(direction: number): boolean {
   // and an editor/browser active, the chord must still jump to that terminal -
   // that is the whole point of the shortcut. The single-terminal-already-active
   // case is the only true no-op.
-  if (terminalTabs.length === 1 && idx === 0) {
+  if (store.activeTabType === 'terminal' && terminalTabs.length === 1 && idx === 0) {
     return false
   }
   const currentIndex = idx === -1 && direction > 0 ? -1 : idx === -1 ? 0 : idx

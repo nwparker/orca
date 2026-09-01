@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   RelayDispatcher,
   type RelayClientSessionIdentity,
@@ -56,7 +56,7 @@ describe('PTY source activation across a transport change', () => {
       })
     )
     await flushRequests()
-    return { publication, settlements }
+    return { adapter, publication, settlements }
   }
 
   function contextOn(
@@ -99,5 +99,30 @@ describe('PTY source activation across a transport change', () => {
     expect(publication.activate('pty-1', 'incarnation-1', contextOn(undefined, settlements))).toBe(
       'existing'
     )
+  })
+
+  it('ignores a stale activation before it can cancel the replacement delivery', async () => {
+    const { publication, adapter, settlements } = await createHarness()
+    expect(publication.activate('pty-1', 'incarnation-1', contextOn(1, settlements))).toBe('opened')
+    settlements[0]({ ok: true })
+    const cancelDelivery = vi.spyOn(adapter, 'cancelDelivery')
+    const staleSettlements: ((result: SinkWriteSettlement) => void)[] = []
+    const staleContext: RequestContext = {
+      ...contextOn(0, staleSettlements),
+      isStale: () => true
+    }
+
+    expect(
+      publication.activate('pty-1', 'incarnation-2', staleContext, {
+        status: 'checkpoint',
+        clientGeneration: 999,
+        ownerGeneration: 999,
+        ptyIncarnation: 'stale-incarnation',
+        deliveryToken: 'stale-token',
+        acceptedSourceEndSu: 0
+      })
+    ).toBe(false)
+    expect(cancelDelivery).not.toHaveBeenCalled()
+    expect(staleSettlements).toHaveLength(0)
   })
 })

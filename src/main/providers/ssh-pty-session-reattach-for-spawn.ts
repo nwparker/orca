@@ -41,7 +41,12 @@ export async function reattachSshPtySessionForSpawn(
     const { sourceActivationLease: _lease, sourceRecovery: _recovery, ...spawnResult } = result
     return spawnResult
   } catch (error) {
-    result?.sourceActivationLease?.rollback()
+    // Await cancellation so a failed spawn cannot leave the provisional delivery live.
+    try {
+      await result?.sourceActivationLease?.rollback()
+    } catch {
+      // Preserve the original reattach failure; rollback is best-effort cleanup.
+    }
     throw error
   }
 }

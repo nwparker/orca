@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
 import { SSH_SESSION_EXPIRED_ERROR, SSH_SOURCE_RESTORE_REQUIRED_ERROR } from './ssh-pty-errors'
-import { reattachSshPtySession } from './ssh-pty-session-reattach'
+import { reattachSshPtySession, requestSshPtyAttach } from './ssh-pty-session-reattach'
+import { reattachSshPtySessionForSpawn } from './ssh-pty-session-reattach-for-spawn'
 import { SshPtyProvider } from './ssh-pty-provider'
+import { SshPtySpawnExitRaceTracker } from './ssh-pty-spawn-exit-race'
 
 const restoreRequired = {
   incarnationId: 'incarnation-live',
@@ -85,6 +87,124 @@ describe('SSH PTY session reattach restore retry', () => {
     expect(request).toHaveBeenCalledOnce()
     expect(rollback).toHaveBeenCalledOnce()
     expect(result.sourceRecovery).toMatchObject({ status: 'restoreRequired' })
+  })
+
+  it('waits for provisional delivery rollback before returning a restore failure', async () => {
+    let finishRollback!: (result: boolean) => void
+    const finalRollback = new Promise<boolean>((resolve) => {
+      finishRollback = resolve
+    })
+    let rollbackCalls = 0
+    const rollback = vi.fn(() => {
+      rollbackCalls += 1
+      // The first two restore attempts are retried by reattach; the third lease is
+      // returned to the spawn wrapper, which must await its cancellation.
+      return rollbackCalls < 3 ? Promise.resolve(true) : finalRollback
+    })
+    const attachResult = {
+      incarnationId: 'incarnation-live',
+      sourceRecovery: { status: 'restoreRequired', reason: 'checkpointUnavailable' },
+      sourceActivation: {
+        status: 'pending',
+        clientGeneration: 1,
+        ownerGeneration: 1,
+        ptyIncarnation: 'incarnation-live',
+        deliveryToken: 'token-1',
+        checkpointSourceEndSu: 0,
+        recoveryEndSu: 0
+      }
+    }
+    const request = vi.fn(
+      (
+        _method: string,
+        _params: Record<string, unknown>,
+        options?: { beforeResolve?: (value: unknown) => void }
+      ) => {
+        // SshChannelMultiplexer installs the provisional lease before resolving the response.
+        options?.beforeResolve?.(attachResult)
+        return Promise.resolve(attachResult)
+      }
+    )
+    const spawn = reattachSshPtySessionForSpawn({
+      mux: { request } as never,
+      connectionId: 'conn-1',
+      sessionId: 'pty-live',
+      options: { cols: 80, rows: 24, sessionId: 'pty-live' },
+      exitRaceTracker: new SshPtySpawnExitRaceTracker(),
+      acceptLivePty: vi.fn(),
+      installSourceActivation: vi.fn().mockReturnValue({ commit: vi.fn(), rollback })
+    })
+
+    await vi.waitFor(() => expect(rollback).toHaveBeenCalledTimes(3))
+    let settled = false
+    void spawn.then(
+      () => {
+        settled = true
+      },
+      () => {
+        settled = true
+      }
+    )
+    await Promise.resolve()
+    expect(settled).toBe(false)
+
+    finishRollback(true)
+    await expect(spawn).rejects.toThrow(`${SSH_SOURCE_RESTORE_REQUIRED_ERROR}: pty-live`)
+  })
+
+  it('waits for rollback when attach rejects after installing a provisional lease', async () => {
+    let finishRollback!: (result: boolean) => void
+    const rollbackResult = new Promise<boolean>((resolve) => {
+      finishRollback = resolve
+    })
+    const attachResult = {
+      incarnationId: 'incarnation-live',
+      sourceActivation: {
+        status: 'pending' as const,
+        clientGeneration: 1,
+        ownerGeneration: 1,
+        ptyIncarnation: 'incarnation-live',
+        deliveryToken: 'token-1',
+        checkpointSourceEndSu: 0,
+        recoveryEndSu: 0
+      }
+    }
+    const rollback = vi.fn(() => rollbackResult)
+    const request = vi.fn(
+      (
+        _method: string,
+        _params: Record<string, unknown>,
+        options?: { beforeResolve?: (value: unknown) => void }
+      ) => {
+        options?.beforeResolve?.(attachResult)
+        return Promise.reject(new Error('attach transport lost'))
+      }
+    )
+    const attach = requestSshPtyAttach({
+      mux: { request } as never,
+      relayPtyId: 'pty-live',
+      params: { id: 'pty-live' },
+      installSourceActivation: vi.fn().mockReturnValue({
+        commit: vi.fn(),
+        rollback
+      })
+    })
+
+    await vi.waitFor(() => expect(rollback).toHaveBeenCalledOnce())
+    let settled = false
+    void attach.then(
+      () => {
+        settled = true
+      },
+      () => {
+        settled = true
+      }
+    )
+    await Promise.resolve()
+    expect(settled).toBe(false)
+
+    finishRollback(true)
+    await expect(attach).rejects.toThrow('attach transport lost')
   })
 
   it('uses a distinct live-source verdict after bounded restore retries', async () => {

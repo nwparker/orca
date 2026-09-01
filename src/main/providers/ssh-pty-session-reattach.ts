@@ -107,7 +107,13 @@ export async function requestSshPtyAttach(args: {
       ...(activationLease ? { sourceActivationLease: activationLease } : {})
     }
   } catch (error) {
-    activationLease?.rollback()
+    // A response can install a provisional delivery before the request settles. Wait for its
+    // cancellation before exposing the failure so a retry cannot overlap the old lease.
+    try {
+      await activationLease?.rollback()
+    } catch {
+      // Preserve the original attach error; cancellation is best-effort cleanup.
+    }
     throw error
   }
 }
@@ -288,7 +294,12 @@ export async function reattachSshPtySessionWithExitFence(
     }
     return result
   } catch (error) {
-    result?.sourceActivationLease?.rollback()
+    // Do not reject the spawn while a provisional delivery is still being canceled.
+    try {
+      await result?.sourceActivationLease?.rollback()
+    } catch {
+      // Preserve the original exit/reattach error; cleanup remains best-effort.
+    }
     throw error
   } finally {
     args.exitRaceTracker.finish(operation)
