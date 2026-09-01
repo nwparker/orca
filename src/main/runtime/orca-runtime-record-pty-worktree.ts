@@ -33,7 +33,6 @@ export class OrcaRuntimeWithRecordPtyWorktree extends OrcaRuntimeWithRefreshRepo
       >
     > = {}
   ): RuntimePtyWorktreeRecord {
-    this.retiredMobileSessionPtyIds.delete(ptyId)
     let pty = this.ptysById.get(ptyId)
     if (!pty) {
       const titleObservedAt = state.title ? this.nextTitleObservationSequence() : null

@@ -144,7 +144,27 @@ export function buildHeadlessMobileSessionTabGroups(
 ): RuntimeMobileSessionTabGroup[] {
   // Why: order across terminals and browsers in their actual array order so a
   // tab opened after a browser tab lands to its right, not regrouped before it.
-  const tabOrder = collectHeadlessTopLevelTabOrder(tabs)
+  const arrivalOrder = collectHeadlessTopLevelTabOrder(tabs)
+  // Why: tabOrder is the user-visible order and must survive a republish. A
+  // materialized idle surface can move to the end of the incoming array, so
+  // retain stored positions and append only genuinely new ids.
+  const liveTopLevelIds = new Set(arrivalOrder)
+  const tabOrder: string[] = []
+  const placed = new Set<string>()
+  for (const group of existingGroups ?? []) {
+    for (const tabId of group.tabOrder) {
+      if (liveTopLevelIds.has(tabId) && !placed.has(tabId)) {
+        tabOrder.push(tabId)
+        placed.add(tabId)
+      }
+    }
+  }
+  for (const tabId of arrivalOrder) {
+    if (!placed.has(tabId)) {
+      tabOrder.push(tabId)
+      placed.add(tabId)
+    }
+  }
   const topLevelOf = (tab: RuntimeMobileSessionSnapshotTab): string =>
     tab.type === 'terminal' ? tab.parentTabId : tab.id
   const activeTopLevelId =

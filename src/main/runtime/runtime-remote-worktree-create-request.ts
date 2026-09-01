@@ -28,6 +28,7 @@ export async function requestRuntimeRemoteWorktree(
       repoId: repo.id,
       name: args.name,
       ...(args.displayName ? { displayName: args.displayName } : {}),
+      ...(args.displayNameKind ? { displayNameKind: args.displayNameKind } : {}),
       ...(args.baseBranch ? { baseBranch: args.baseBranch } : {}),
       ...(args.compareBaseRef ? { compareBaseRef: args.compareBaseRef } : {}),
       ...(args.branchNameOverride ? { branchNameOverride: args.branchNameOverride } : {}),

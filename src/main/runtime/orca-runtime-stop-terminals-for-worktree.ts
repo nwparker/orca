@@ -6,7 +6,7 @@ import {
 } from './runtime-worktree-path-identity'
 import { teardownRpcDeadline } from './worktree-teardown'
 import type { RuntimeWorktreeTerminalSleepResult } from '../../shared/runtime-types'
-import { waitForWorktreeTerminalMutation } from './worktree-terminal-mutation-wait'
+import type { WorktreeTerminalMutationKind } from './worktree-terminal-mutation-lock'
 
 export class OrcaRuntimeWithStopTerminalsForWorktree extends OrcaRuntimeWithResolveTerminalSplitSourceAuthority {
   async stopTerminalsForWorktree(
@@ -123,7 +123,7 @@ export class OrcaRuntimeWithStopTerminalsForWorktree extends OrcaRuntimeWithReso
     if (!worktreeId) {
       return () => {}
     }
-    const release = await this.acquireWorktreeTerminalMutation(worktreeId)
+    const release = await this.acquireWorktreeTerminalMutation(worktreeId, 'shared')
     const key = runtimeWorktreeIdentityKey(worktreeId)
     const sleepState = this.terminalSleepStateByWorktreeId.get(key)
     if (sleepState?.phase === 'sleeping' || sleepState?.phase === 'partial') {
@@ -140,45 +140,29 @@ export class OrcaRuntimeWithStopTerminalsForWorktree extends OrcaRuntimeWithReso
     return release
   }
 
+  protected async runWorktreeTerminalMutation<T>(
+    worktreeId: string,
+    operation: () => Promise<T>
+  ): Promise<T> {
+    // Why exclusive: adoption reconciles this worktree's terminal records, so
+    // it must not interleave with a spawn registering a pty or with a sleep.
+    const release = await this.acquireWorktreeTerminalMutation(worktreeId, 'exclusive')
+    try {
+      return await operation()
+    } finally {
+      release()
+    }
+  }
+
   protected async acquireWorktreeTerminalMutation(
     worktreeId: string,
+    kind: WorktreeTerminalMutationKind,
     deadline?: number
   ): Promise<() => void> {
-    const key = runtimeWorktreeIdentityKey(worktreeId)
-    const previous = this.terminalMutationTailByWorktreeId.get(key) ?? Promise.resolve()
-    let releaseCurrent = (): void => {}
-    const current = new Promise<void>((resolve) => {
-      releaseCurrent = resolve
-    })
-    const tail = previous.catch(() => {}).then(() => current)
-    this.terminalMutationTailByWorktreeId.set(key, tail)
-    try {
-      await waitForWorktreeTerminalMutation(
-        previous.catch(() => {}),
-        deadline
-      )
-    } catch (error) {
-      // Why: resolve this abandoned queue node now so it can never acquire later and stop a terminal after the caller timed out.
-      releaseCurrent()
-      void tail.finally(() => {
-        if (this.terminalMutationTailByWorktreeId.get(key) === tail) {
-          this.terminalMutationTailByWorktreeId.delete(key)
-        }
-      })
-      throw error
-    }
-    let released = false
-    return () => {
-      if (released) {
-        return
-      }
-      released = true
-      releaseCurrent()
-      void tail.finally(() => {
-        if (this.terminalMutationTailByWorktreeId.get(key) === tail) {
-          this.terminalMutationTailByWorktreeId.delete(key)
-        }
-      })
-    }
+    return await this.terminalMutationLock.acquire(
+      runtimeWorktreeIdentityKey(worktreeId),
+      kind,
+      deadline
+    )
   }
 }

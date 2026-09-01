@@ -4,6 +4,12 @@ import type {
   RuntimeMobileSessionTerminalTab,
   RuntimeSessionTabCloseReason
 } from '../../shared/runtime-types'
+import type { RuntimePtyTabCloseAuthority } from './runtime-terminal-state-records'
+import {
+  adjudicateAbsentMobileSessionTabClose,
+  resolveMobileSessionLifecycleCloseContext,
+  type MobileSessionLifecycleCloseHost
+} from './mobile-session-lifecycle-close-adjudication'
 import type { MobileSessionTabCloseOutcome } from './mobile-session-tab-close-outcome'
 import {
   committedMobileSessionTabClose,
@@ -25,6 +31,7 @@ export class OrcaRuntimeWithCloseMobileSessionTab extends OrcaRuntimeWithRefuseU
       expectedTerminalHandle?: string
       clientNavigationId?: string
       localPtyTeardownOwnedExternally?: boolean
+      expectedPtyCloseAuthority?: RuntimePtyTabCloseAuthority
     } = {}
   ): Promise<MobileSessionTabCloseOutcome> {
     const graphEpoch = options.clientNavigationId ? this.captureReadyGraphEpoch() : null
@@ -54,16 +61,36 @@ export class OrcaRuntimeWithCloseMobileSessionTab extends OrcaRuntimeWithRefuseU
         snapshotRepublished: Boolean(snapshot)
       })
     }
-    const tab =
-      snapshot?.tabs.find((candidate) => candidate.id === tabId) ??
-      snapshot?.tabs.find(
-        (candidate) => candidate.type === 'terminal' && candidate.parentTabId === tabId
-      ) ??
-      snapshot?.tabs.find(
-        (candidate) => candidate.type === 'browser' && candidate.browserWorkspaceId === tabId
-      )
+    const ptyCloseAuthority = options.expectedPtyCloseAuthority
+      ? this.resolvePtyTabCloseSurfaceAuthority(options.expectedPtyCloseAuthority)
+      : null
+    const tab = options.expectedPtyCloseAuthority
+      ? ptyCloseAuthority?.surface.tab
+      : (snapshot?.tabs.find((candidate) => candidate.id === tabId) ??
+        snapshot?.tabs.find(
+          (candidate) => candidate.type === 'terminal' && candidate.parentTabId === tabId
+        ) ??
+        snapshot?.tabs.find(
+          (candidate) => candidate.type === 'browser' && candidate.browserWorkspaceId === tabId
+        ))
+    const lifecycleClose = resolveMobileSessionLifecycleCloseContext({
+      host: this.getMobileSessionLifecycleCloseHost(),
+      worktreeId,
+      tabId,
+      tab,
+      authorityTab: ptyCloseAuthority?.surface.tab,
+      snapshot,
+      observedPtyIds
+    })
     if (!snapshot || !tab) {
-      throw new Error('tab_not_found')
+      return adjudicateAbsentMobileSessionTabClose({
+        host: this.getMobileSessionLifecycleCloseHost(),
+        context: lifecycleClose,
+        worktreeId,
+        snapshot,
+        reason: options.reason,
+        addressedByPtyCloseAuthority: options.expectedPtyCloseAuthority !== undefined
+      })
     }
     if (options.expectedTerminalHandle !== undefined) {
       const terminalIncarnationMatches =
@@ -108,27 +135,8 @@ export class OrcaRuntimeWithCloseMobileSessionTab extends OrcaRuntimeWithRefuseU
       // echoing client re-syncs and re-attaches. A reasonless close keeps
       // legacy behavior — old clients send user closes without the field.
       if (options.reason !== undefined && options.reason !== 'user') {
-        const parentLeaves = snapshot.tabs.filter(
-          (candidate): candidate is RuntimeMobileSessionTerminalTab =>
-            candidate.type === 'terminal' && candidate.parentTabId === tab.parentTabId
-        )
-        // Why: exited PTYs keep a disconnected record in ptysById for status
-        // reads (and a still-synced leaf retains its record), so record
-        // presence is not liveness — only `connected` counts, or a genuinely
-        // dead tab never retires and the echo loops forever.
-        const leafHasConnectedPty = (leaf: RuntimeMobileSessionTerminalTab): boolean => {
-          const snapshotPtyIds = [
-            leaf.ptyId,
-            leaf.parentLayout?.ptyIdsByLeafId?.[leaf.leafId]
-          ].filter((ptyId): ptyId is string => Boolean(ptyId))
-          // Why: daemon discovery can prove the PTY live before its pane binding
-          // reconnects; missing metadata is never authority to retire it.
-          return (
-            this.findPtyForMobileTerminalTab(worktreeId, leaf)?.connected === true ||
-            snapshotPtyIds.some((ptyId) => observedPtyIds?.has(ptyId) === true)
-          )
-        }
-        if (parentLeaves.some(leafHasConnectedPty)) {
+        const leafHasConnectedPty = lifecycleClose.leafHasConnectedPty
+        if (lifecycleClose.parentLeaves.some(leafHasConnectedPty)) {
           // Why: when the echo addresses a dead leaf under a live sibling we
           // still refuse (every reachable close path below destroys the whole
           // parent, live sibling included) but skip the republish — re-adding
@@ -157,10 +165,13 @@ export class OrcaRuntimeWithCloseMobileSessionTab extends OrcaRuntimeWithRefuseU
       // renderer's live pin guard and durable close transaction.
       if (closingWholeParent && !this.tabs.has(tab.parentTabId)) {
         this.closeHeadlessMobileTerminalTab(worktreeId, snapshot, tab, {
-          killPtys: options.reason === undefined || options.reason === 'user'
+          allowMissingPersistedTab: Boolean(ptyCloseAuthority),
+          killPtys:
+            options.localPtyTeardownOwnedExternally !== true &&
+            (options.reason === undefined || options.reason === 'user'),
+          ...(ptyCloseAuthority ? { authorizedPty: ptyCloseAuthority.pty } : {})
         })
         this.notifyRendererOfHeadlessTerminalClose(tab.parentTabId)
-        this.store?.flushOrThrow?.()
         return finishCommittedClose()
       }
       if (closingWholeParent && this.notifier?.closeTerminalTab) {
@@ -193,13 +204,16 @@ export class OrcaRuntimeWithCloseMobileSessionTab extends OrcaRuntimeWithRefuseU
           remainingTab &&
           this.isRuntimeOwnedHeadlessMobileTab(worktreeId, remainingTab)
         ) {
+          const remainingPtyCloseAuthority = options.expectedPtyCloseAuthority
+            ? this.resolvePtyTabCloseSurfaceAuthority(options.expectedPtyCloseAuthority)
+            : null
           // Why: after relay recovery the renderer can acknowledge a tab it no longer mirrors; the HUB must still retire its SSH-owned surface.
           this.closeHeadlessMobileTerminalTab(worktreeId, remainingSnapshot, remainingTab, {
             // Why: the renderer may already have durably removed the tab before acknowledging.
-            allowMissingPersistedTab: true
+            allowMissingPersistedTab: true,
+            ...(remainingPtyCloseAuthority ? { authorizedPty: remainingPtyCloseAuthority.pty } : {})
           })
           this.notifyRendererOfHeadlessTerminalClose(tab.parentTabId)
-          this.store?.flushOrThrow?.()
         }
         this.clearRuntimeSessionOwnershipForMobileTab(worktreeId, snapshot, tab.parentTabId)
         return finishCommittedClose()
@@ -207,14 +221,22 @@ export class OrcaRuntimeWithCloseMobileSessionTab extends OrcaRuntimeWithRefuseU
       // Why: notifier implementations without the acknowledged relay may expose
       // only raw pane close. Runtime-owned parents still need de-persist + kill.
       if (closingWholeParent && this.isRuntimeOwnedHeadlessMobileTab(worktreeId, tab)) {
-        this.closeHeadlessMobileTerminalTab(worktreeId, snapshot, tab)
+        this.closeHeadlessMobileTerminalTab(
+          worktreeId,
+          snapshot,
+          tab,
+          ptyCloseAuthority ? { authorizedPty: ptyCloseAuthority.pty } : {}
+        )
         this.notifyRendererOfHeadlessTerminalClose(tab.parentTabId)
-        this.store?.flushOrThrow?.()
         return finishCommittedClose()
       }
       if (!this.notifier?.closeTerminal) {
-        this.closeHeadlessMobileTerminalTab(worktreeId, snapshot, tab)
-        this.store?.flushOrThrow?.()
+        this.closeHeadlessMobileTerminalTab(
+          worktreeId,
+          snapshot,
+          tab,
+          ptyCloseAuthority ? { authorizedPty: ptyCloseAuthority.pty } : {}
+        )
         return finishCommittedClose()
       }
       if (tab.id === tabId) {
@@ -276,5 +298,16 @@ export class OrcaRuntimeWithCloseMobileSessionTab extends OrcaRuntimeWithRefuseU
       await this.notifier.closeSessionTab(tab.id, worktreeId)
     }
     return finishCommittedClose()
+  }
+
+  protected getMobileSessionLifecycleCloseHost(): MobileSessionLifecycleCloseHost {
+    return {
+      tabs: this.tabs,
+      leaves: this.leaves,
+      ptysById: this.ptysById,
+      findPtyForMobileTerminalTab: (worktreeId, tab) =>
+        this.findPtyForMobileTerminalTab(worktreeId, tab),
+      republishSnapshot: (worktreeId) => this.republishMobileSessionTabsSnapshot(worktreeId)
+    }
   }
 }

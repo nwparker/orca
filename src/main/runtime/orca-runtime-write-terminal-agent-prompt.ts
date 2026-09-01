@@ -4,17 +4,14 @@ import type { RuntimeTerminalWriteOptions } from './runtime-terminal-writer'
 import {
   assertAgentPromptRequestActive,
   waitForAgentPromptDelay,
-  waitForAgentPromptPromise,
-  yieldBetweenTerminalInputChunks
+  waitForAgentPromptPromise
 } from './orca-runtime-core'
 import { agentSessionPtyWriteGate } from './agent-session-pty-write-gate'
 import {
-  AGENT_PROMPT_BRACKETED_PASTE_END,
   AGENT_PROMPT_SUBMIT,
   getAgentPromptSubmitDelayMs,
   getTerminalPasteIngestMs
 } from '../../shared/agent-prompt-injection'
-import { iterateTerminalInputChunks } from '../../shared/terminal-input'
 import type { AgentPromptWaitTextCache } from './agent-prompt-submission-verification'
 import {
   resolveAgentPromptEffectTimeoutMs,
@@ -38,54 +35,24 @@ export class OrcaRuntimeWithWriteTerminalAgentPrompt extends OrcaRuntimeWithReso
     const pasteByteLength = Buffer.byteLength(pastePayload, 'utf8')
     const pasteIngestMs = getTerminalPasteIngestMs(writeHostPlatform, pasteByteLength)
     const renderGate = this.createAgentPromptRenderGate(ptyId, pasteIngestMs)
-    let wrotePasteBytes = false
-    let completedPaste = false
     try {
-      const chunks = iterateTerminalInputChunks(pastePayload)
-      let chunk = chunks.next()
-      let firstChunk = true
-      while (!chunk.done) {
-        const nextChunk = chunks.next()
-        assertAgentPromptRequestActive(options.signal)
-        this.assertAgentPromptGeneration(ptyId, generation)
-        if (!firstChunk) {
-          agentSessionPtyWriteGate.assertReadmitted(ptyId, admitted)
-        }
-        firstChunk = false
-        await options.beforeWrite?.(ptyId)
-        assertAgentPromptRequestActive(options.signal)
-        this.assertAgentPromptGeneration(ptyId, generation)
-        this.assertAgentPromptPermissionSafe(
-          permissionBaseline,
-          this.getAgentPromptActivity(handle, ptyId)
-        )
-        agentSessionPtyWriteGate.assertReadmitted(ptyId, admitted)
-        if (nextChunk.done) {
-          renderGate?.arm()
-        }
-        if (!this.ptyController?.write(ptyId, chunk.value)) {
-          throw new Error('terminal_not_writable')
-        }
-        wrotePasteBytes = true
-        chunk = nextChunk
-        if (!chunk.done) {
-          await yieldBetweenTerminalInputChunks()
-        }
+      assertAgentPromptRequestActive(options.signal)
+      this.assertAgentPromptGeneration(ptyId, generation)
+      await options.beforeWrite?.(ptyId)
+      assertAgentPromptRequestActive(options.signal)
+      this.assertAgentPromptGeneration(ptyId, generation)
+      this.assertAgentPromptPermissionSafe(
+        permissionBaseline,
+        this.getAgentPromptActivity(handle, ptyId)
+      )
+      agentSessionPtyWriteGate.assertReadmitted(ptyId, admitted)
+      // Keep the bracketed paste frame in one PTY write; Claude's composer can drop the
+      // beginning when a large frame is split into independently processed chunks.
+      renderGate?.arm()
+      if (!this.ptyController?.write(ptyId, pastePayload)) {
+        throw new Error('terminal_not_writable')
       }
-      completedPaste = true
     } catch (error) {
-      if (
-        wrotePasteBytes &&
-        !completedPaste &&
-        this.getPtyLifecycleGeneration(ptyId) === generation
-      ) {
-        try {
-          agentSessionPtyWriteGate.assertReadmitted(ptyId, admitted)
-          this.ptyController?.write(ptyId, AGENT_PROMPT_BRACKETED_PASTE_END)
-        } catch {
-          // The original refusal is the actionable error.
-        }
-      }
       renderGate?.dispose()
       throw error
     }

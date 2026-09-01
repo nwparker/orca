@@ -1,9 +1,18 @@
 /* eslint-disable unicorn/no-useless-spread */
 // @ts-nocheck -- mechanically split from OrcaRuntimeService; behavior is covered by AST equivalence and characterization tests.
 import { OrcaRuntimeWithCreateRuntimeOwnedMobileSessionTerminal } from './orca-runtime-create-runtime-owned-mobile-session-terminal'
-import type { RuntimeMobileSessionCreateTerminalResult } from '../../shared/runtime-types'
+import type {
+  RuntimeMobileSessionCreateTerminalResult,
+  RuntimeMobileSessionTerminalClientTab
+} from '../../shared/runtime-types'
 import { MOBILE_TERMINAL_SURFACE_TIMEOUT_MS } from './orca-runtime-core'
-import { parsePaneKey } from '../../shared/stable-pane-id'
+import { makePaneKey, parsePaneKey } from '../../shared/stable-pane-id'
+import { resolveTerminalSessionWorktreeId } from './runtime-worktree-path-identity'
+import { worktreeIdsEqual } from '../../shared/worktree/id'
+import type {
+  RuntimePtyTabCloseAuthority,
+  RuntimePtyWorktreeRecord
+} from './runtime-terminal-state-records'
 
 export class OrcaRuntimeWithWaitForMobileTerminalSurface extends OrcaRuntimeWithCreateRuntimeOwnedMobileSessionTerminal {
   protected waitForMobileTerminalSurface(
@@ -85,15 +94,78 @@ export class OrcaRuntimeWithWaitForMobileTerminalSurface extends OrcaRuntimeWith
     ptyId: string
   ): RuntimeMobileSessionCreateTerminalResult | null {
     const snapshot = this.mobileSessionTabsByWorktree.get(worktreeId)
-    const tab = snapshot?.tabs.find(
-      (candidate) =>
+    if (!snapshot) {
+      return null
+    }
+    const result = this.toMobileSessionTabsResult(snapshot)
+    const tabs = result.tabs.filter(
+      (candidate): candidate is RuntimeMobileSessionTerminalClientTab =>
         candidate.type === 'terminal' &&
         (candidate.ptyId === ptyId ||
           candidate.parentLayout?.ptyIdsByLeafId?.[candidate.leafId] === ptyId)
     )
-    return tab?.type === 'terminal'
-      ? this.findMobileTerminalSurface(worktreeId, tab.parentTabId)
+    if (tabs.length === 0 || new Set(tabs.map((tab) => tab.parentTabId)).size !== 1) {
+      return null
+    }
+    return {
+      tab: tabs[0]!,
+      publicationEpoch: result.publicationEpoch,
+      snapshotVersion: result.snapshotVersion
+    }
+  }
+
+  protected resolvePtyTabCloseSurfaceAuthority(
+    authority: RuntimePtyTabCloseAuthority
+  ): { pty: RuntimePtyWorktreeRecord; surface: RuntimeMobileSessionCreateTerminalResult } | null {
+    const live = this.getLivePtyForHandle(authority.handle)
+    if (
+      !live ||
+      live.pty.ptyId !== authority.ptyId ||
+      live.pty.worktreeId !== authority.worktreeId ||
+      live.record.worktreeId !== authority.worktreeId ||
+      live.pty.incarnationId !== authority.incarnationId
+    ) {
+      return null
+    }
+    const surface = this.findMobileTerminalSurfaceForPty(authority.worktreeId, authority.ptyId)
+    if (!surface) {
+      return null
+    }
+    const session = this.getWorkspaceSessionForWorktree(authority.worktreeId)
+    const sessionWorktreeId = session
+      ? resolveTerminalSessionWorktreeId(session, authority.worktreeId)
       : null
+    const persistedTab = sessionWorktreeId
+      ? session?.tabsByWorktree[sessionWorktreeId]?.find(
+          (tab) => tab.id === surface.tab.parentTabId
+        )
+      : undefined
+    if (persistedTab && !worktreeIdsEqual(persistedTab.worktreeId, authority.worktreeId)) {
+      return null
+    }
+    const paneKey = makePaneKey(surface.tab.parentTabId, surface.tab.leafId)
+    const persistedPtyId =
+      session?.terminalLayoutsByTabId?.[surface.tab.parentTabId]?.ptyIdsByLeafId?.[
+        surface.tab.leafId
+      ] ?? null
+    const persistedIncarnationId = session?.terminalPtyIncarnationsByPaneKey?.[paneKey] ?? null
+    if (
+      (persistedPtyId && persistedPtyId !== authority.ptyId) ||
+      (persistedIncarnationId && persistedIncarnationId !== authority.incarnationId)
+    ) {
+      return null
+    }
+    if (
+      !this.resolveTerminalSplitSourceAuthority(
+        authority.worktreeId,
+        surface.tab.parentTabId,
+        surface.tab.leafId,
+        authority.ptyId
+      )
+    ) {
+      return null
+    }
+    return { pty: live.pty, surface }
   }
 
   // Why: publish an in-flight mobile create main-side from the live PTY so it can't stall on graph sync and destroy the session (#7587).

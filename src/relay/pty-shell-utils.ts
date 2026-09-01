@@ -10,7 +10,11 @@ import {
   recognizeAgentProcessFromCommandLine
 } from '../shared/agent-process-recognition'
 import { getFirstCommandToken } from '../shared/command-token-scanner'
-import { getProcessTableSnapshot, type ProcessTableRow } from '../shared/process-table-snapshot'
+import {
+  getProcessTableSnapshot,
+  scoreForegroundCandidateRow,
+  type ProcessTableRow
+} from '../shared/process-table-snapshot'
 import {
   resolveOuterWrapperForegroundProcess,
   shouldInspectOuterWrapperForegroundProcess
@@ -216,62 +220,59 @@ function collectDescendants(
   return descendants
 }
 
-function candidateScore(row: ProcessTableRow & { depth: number }): number {
-  return (row.stat.includes('+') ? 10_000 : 0) + row.depth
-}
-
-function processCommandToken(command: string): string {
-  return getFirstCommandToken(command)
-}
-
-function candidateMatchesFallbackWrapper(
-  candidate: ProcessTableRow,
-  fallbackProcess: string
-): boolean {
-  return isExpectedAgentProcess(processCommandToken(candidate.command), fallbackProcess)
-}
-
 async function getRecognizedForegroundDescendant(
   pid: number,
   fallbackProcess?: string | null
 ): Promise<string | null> {
   try {
     const rows = await getProcessTableSnapshot()
-    const root = rows.find((row) => row.pid === pid)
-    const candidates = collectDescendants(rows, pid).sort(
-      (a, b) => candidateScore(b) - candidateScore(a)
-    )
-    // Why: SSH relays do not have the daemon's async wrapper cache. Inspect the
-    // remote process tree so node/python agent entrypoints become real agents.
-    const foregroundIsKnown =
-      root?.stat.includes('+') === true ||
-      candidates.some((candidate) => candidate.stat.includes('+'))
-    const foregroundCandidates = foregroundIsKnown
-      ? candidates.filter((candidate) => candidate.stat.includes('+'))
-      : candidates
-    const inspectionCandidates =
-      fallbackProcess && isAgentForegroundWrapperProcess(fallbackProcess)
-        ? foregroundCandidates.filter((candidate) =>
-            candidateMatchesFallbackWrapper(candidate, fallbackProcess)
-          )
-        : foregroundCandidates
-    if (
-      fallbackProcess &&
-      isAgentForegroundWrapperProcess(fallbackProcess) &&
-      inspectionCandidates.length !== 1
-    ) {
-      return null
-    }
-    for (const candidate of inspectionCandidates) {
-      const recognized = recognizeAgentProcessFromCommandLine(candidate.command)
-      if (recognized) {
-        // Why: return the outer wrapper (omp) rather than the deeper wrapped child
-        // (pi) of a shell→omp→pi tree — see resolveOuterWrapperForegroundProcess.
-        return resolveOuterWrapperForegroundProcess(recognized, candidate, candidates)
-      }
-    }
+    return getForegroundProcessNameFromProcessTable(rows, pid, fallbackProcess)
   } catch {
     // Fall through to node-pty's process name or the root command name.
+  }
+  return null
+}
+
+// Why: returns null (never the fallback) so `getForegroundProcessName` keeps
+// owning the fallback ladder — its wrapper branch answers with the RECOGNIZED
+// process name, which is normalized where node-pty's raw name is not.
+function getForegroundProcessNameFromProcessTable(
+  rows: ProcessTableRow[],
+  pid: number,
+  fallbackProcess?: string | null
+): string | null {
+  const root = rows.find((row) => row.pid === pid)
+  const candidates = collectDescendants(rows, pid).sort(
+    (a, b) => scoreForegroundCandidateRow(b) - scoreForegroundCandidateRow(a)
+  )
+  // Why: SSH relays do not have the daemon's async wrapper cache. Inspect the
+  // remote process tree so node/python agent entrypoints become real agents.
+  const foregroundIsKnown =
+    root?.stat.includes('+') === true ||
+    candidates.some((candidate) => candidate.stat.includes('+'))
+  const foregroundCandidates = foregroundIsKnown
+    ? candidates.filter((candidate) => candidate.stat.includes('+'))
+    : candidates
+  const inspectionCandidates =
+    fallbackProcess && isAgentForegroundWrapperProcess(fallbackProcess)
+      ? foregroundCandidates.filter((candidate) =>
+          isExpectedAgentProcess(getFirstCommandToken(candidate.command), fallbackProcess)
+        )
+      : foregroundCandidates
+  if (
+    fallbackProcess &&
+    isAgentForegroundWrapperProcess(fallbackProcess) &&
+    inspectionCandidates.length !== 1
+  ) {
+    return null
+  }
+  for (const candidate of inspectionCandidates) {
+    const recognized = recognizeAgentProcessFromCommandLine(candidate.command)
+    if (recognized) {
+      // Why: return the outer wrapper (omp) rather than the deeper wrapped child
+      // (pi) of a shell→omp→pi tree — see resolveOuterWrapperForegroundProcess.
+      return resolveOuterWrapperForegroundProcess(recognized, candidate, candidates)
+    }
   }
   return null
 }
@@ -332,9 +333,6 @@ export async function getForegroundProcessName(
   }
 }
 
-/**
- * List available shell profiles from /etc/shells (or known fallbacks).
- */
 export function listShellProfiles(): { name: string; path: string }[] {
   const profiles: { name: string; path: string }[] = []
   const seen = new Set<string>()

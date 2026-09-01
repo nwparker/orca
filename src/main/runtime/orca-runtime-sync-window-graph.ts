@@ -3,11 +3,23 @@
 import { OrcaRuntimeWithAttachWindow } from './orca-runtime-attach-window'
 import type {
   RuntimeRendererSyncWindowGraph,
+  RuntimeSyncedTab,
   RuntimeSyncWindowGraph,
   RuntimeSyncWindowGraphResult
 } from '../../shared/runtime-types'
 import { HEADLESS_RUNTIME_WINDOW_ID } from '../../shared/runtime-types'
 import type { RuntimeLeafRecord } from './runtime-terminal-state-records'
+
+/** The runtime indexes graph tabs by bare id, so duplicate ids cannot be routed safely. */
+function assertUniqueRuntimeGraphTabIds(tabs: readonly RuntimeSyncedTab[]): void {
+  const seen = new Set<string>()
+  for (const tab of tabs) {
+    if (seen.has(tab.tabId)) {
+      throw new Error('duplicate_runtime_tab_id')
+    }
+    seen.add(tab.tabId)
+  }
+}
 
 export class OrcaRuntimeWithSyncWindowGraph extends OrcaRuntimeWithAttachWindow {
   shouldRelayTerminalBrowserOpens(): boolean {
@@ -18,6 +30,10 @@ export class OrcaRuntimeWithSyncWindowGraph extends OrcaRuntimeWithAttachWindow 
     windowId: number,
     graph: RuntimeSyncWindowGraph | RuntimeRendererSyncWindowGraph
   ): RuntimeSyncWindowGraphResult {
+    // `tabs` and several downstream indexes are keyed only by tab id. Reject
+    // malformed persisted/mirrored graphs before authority or graph state is
+    // changed; choosing a winner would route PTYs to the wrong worktree.
+    assertUniqueRuntimeGraphTabIds(graph.tabs)
     if (
       windowId !== HEADLESS_RUNTIME_WINDOW_ID &&
       this.authoritativeWindowId === HEADLESS_RUNTIME_WINDOW_ID &&

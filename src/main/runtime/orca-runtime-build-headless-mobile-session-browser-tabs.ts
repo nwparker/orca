@@ -11,6 +11,7 @@ import { closeTerminalTabInWorkspaceSession } from '../../shared/workspace-sessi
 import { advanceTerminalTopologyRevision } from './workspace-session-terminal-membership-authority'
 import type { PtyControllerInventory } from './runtime-pty-controller-contract'
 import { FLOATING_TERMINAL_WORKTREE_ID } from '../../shared/constants'
+import { rollbackWorkspaceSessionAfterFailedAsyncWrite } from './workspace-session-failed-write-rollback'
 
 export class OrcaRuntimeWithBuildHeadlessMobileSessionBrowserTabs extends OrcaRuntimeWithPersistTerminalSurfaceRetirements {
   // Why: headless serve backs browser panes with offscreen WebContents that live
@@ -77,13 +78,13 @@ export class OrcaRuntimeWithBuildHeadlessMobileSessionBrowserTabs extends OrcaRu
     return tab ? { color: tab.color, isPinned: tab.isPinned } : null
   }
 
-  protected removePersistedHeadlessTerminalTab(
+  protected commitHeadlessTerminalTabRetirement(
     worktreeId: string,
     parentTabId: string,
     options: { allowMissing?: boolean } = {}
   ): string[] {
     const session = this.getWorkspaceSessionForWorktree(worktreeId)
-    if (!session || !this.store?.setWorkspaceSession) {
+    if (!session || !this.store?.setWorkspaceSession || !this.store.flushOrThrow) {
       throw new Error('workspace_session_unavailable')
     }
     const result = closeTerminalTabInWorkspaceSession(session, worktreeId, parentTabId)
@@ -91,15 +92,27 @@ export class OrcaRuntimeWithBuildHeadlessMobileSessionBrowserTabs extends OrcaRu
       throw new Error('terminal_tab_pinned')
     }
     if (!result.closed) {
-      if (options.allowMissing) {
-        return []
+      if (!options.allowMissing) {
+        throw new Error('tab_not_found')
       }
-      throw new Error('tab_not_found')
     }
-    this.setWorkspaceSessionForWorktree(
-      worktreeId,
-      advanceTerminalTopologyRevision(result.session, worktreeId)
-    )
+    const persisted = result.closed
+      ? advanceTerminalTopologyRevision(result.session, worktreeId)
+      : session
+    this.setWorkspaceSessionForWorktree(worktreeId, persisted)
+    const staged = this.getWorkspaceSessionForWorktree(worktreeId)
+    try {
+      this.store.flushOrThrow()
+    } catch (error) {
+      const current = this.getWorkspaceSessionForWorktree(worktreeId)
+      if (staged && current) {
+        const rolledBack = rollbackWorkspaceSessionAfterFailedAsyncWrite(session, staged, current)
+        if (rolledBack !== current) {
+          this.setWorkspaceSessionForWorktree(worktreeId, rolledBack)
+        }
+      }
+      throw error
+    }
     return result.ptyIdsToKill
   }
 
@@ -177,7 +190,13 @@ export class OrcaRuntimeWithBuildHeadlessMobileSessionBrowserTabs extends OrcaRu
   protected async refreshMobileSessionPtyInventory(
     targetWorktreeId: string | null = null
   ): Promise<PtyControllerInventory | null> {
+    // Targeted mobile polls must not queue behind an aggregate census that may
+    // be waiting on an unrelated SSH provider.
+    if (targetWorktreeId !== null && targetWorktreeId !== FLOATING_TERMINAL_WORKTREE_ID) {
+      return this.performMobileSessionPtyRecordsRefresh(targetWorktreeId)
+    }
     if (targetWorktreeId !== FLOATING_TERMINAL_WORKTREE_ID) {
+      // Fleet-wide refreshes share one aggregate controller inventory.
       const pending = this.pendingMobileSessionPtyAggregateInventoryRefresh
       if (pending) {
         return pending

@@ -3,17 +3,24 @@ import { OrcaRuntimeWithResolveKnownWorkspaceFileTarget } from './orca-runtime-r
 import type { PtyIncarnationId } from '../../shared/pty-incarnation'
 
 export class OrcaRuntimeWithInvalidateAllHandlesForPty extends OrcaRuntimeWithResolveKnownWorkspaceFileTarget {
-  protected invalidateAllHandlesForPty(ptyId: string): void {
+  protected invalidateAllHandlesForPty(ptyId: string, preserveHandle?: string): Set<string> {
     const incarnationHandle = this.handleByPtyIncarnation.get(ptyId)?.handle
     const preallocatedHandle = this.handleByPtyId.get(ptyId)
-    this.invalidatePtyIncarnationHandle(ptyId)
-    this.handleByPtyId.delete(ptyId)
     const invalidated = new Set<string>()
-    if (preallocatedHandle && preallocatedHandle !== incarnationHandle) {
+    if (incarnationHandle && incarnationHandle !== preserveHandle) {
+      this.handleByPtyIncarnation.delete(ptyId)
+      invalidated.add(incarnationHandle)
+    } else if (incarnationHandle) {
+      // The retained handle no longer describes the old incarnation. Keep its direct alias,
+      // when requested, but discard the incarnation-specific leaf record.
+      this.handleByPtyIncarnation.delete(ptyId)
+    }
+    if (preallocatedHandle && preallocatedHandle !== preserveHandle) {
+      this.handleByPtyId.delete(ptyId)
       invalidated.add(preallocatedHandle)
     }
     for (const [handle, record] of this.handles) {
-      if (record.ptyId === ptyId) {
+      if (record.ptyId === ptyId && handle !== preserveHandle) {
         invalidated.add(handle)
       }
     }
@@ -23,10 +30,18 @@ export class OrcaRuntimeWithInvalidateAllHandlesForPty extends OrcaRuntimeWithRe
       this.rejectWaitersForHandle(handle, 'terminal_handle_stale')
     }
     for (const [leafKey, handle] of this.handleByLeafKey) {
-      if (invalidated.has(handle)) {
+      if (invalidated.has(handle) || (preserveHandle !== undefined && handle === preserveHandle)) {
         this.handleByLeafKey.delete(leafKey)
       }
     }
+    if (preserveHandle !== undefined) {
+      // The direct alias is the only identity retained across an incarnation
+      // change. Renderer records point at the predecessor pane generation and
+      // must be rebuilt by graph sync (or issuePtyHandle) before use.
+      this.handles.delete(preserveHandle)
+      this.syntheticTerminalHandles.delete(preserveHandle)
+    }
+    return invalidated
   }
 
   protected replaceSyntheticTerminalHandlesForRestoredPty(
@@ -100,9 +115,25 @@ export class OrcaRuntimeWithInvalidateAllHandlesForPty extends OrcaRuntimeWithRe
     incarnationId?: PtyIncarnationId,
     options: { awaitsRegistration?: boolean } = {}
   ): void {
+    const existingPty = this.ptysById.get(ptyId)
+    if (
+      existingPty &&
+      incarnationId !== undefined &&
+      existingPty.incarnationId !== null &&
+      existingPty.incarnationId !== incarnationId
+    ) {
+      // Providers announce a child before the commit binds its pane. Fence the
+      // predecessor now so a reused id cannot route through its old handle in
+      // that gap.
+      this.rememberPtyHandleReplacementFence(
+        ptyId,
+        incarnationId,
+        this.invalidateAllHandlesForPty(ptyId),
+        true
+      )
+    }
     this.ptyLivenessVerdictByPtyId.delete(ptyId)
     this.stopRequestedPtyIds.delete(ptyId)
-    this.retiredMobileSessionPtyIds.delete(ptyId)
     if (options.awaitsRegistration !== false) {
       // Why: surface absence cannot distinguish an in-flight admission from a completed headless lifecycle.
       this.pendingPtyRegistrationIncarnations.set(ptyId, incarnationId ?? null)

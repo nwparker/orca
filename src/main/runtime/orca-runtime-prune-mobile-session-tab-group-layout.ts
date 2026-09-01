@@ -2,10 +2,14 @@
 import { OrcaRuntimeWithScheduleMobileSessionTabsChanged } from './orca-runtime-schedule-mobile-session-tabs-changed'
 import type { TabGroupLayoutNode } from '../../shared/tab-types'
 import type {
+  RuntimeMobileSessionSnapshotTab,
+  RuntimeMobileSessionTabGroup,
   RuntimeMobileSessionTabsResult,
   RuntimeMobileSessionTabsSnapshot,
   RuntimeMobileSessionTerminalTab
 } from '../../shared/runtime-types'
+import { mergeMobileSessionTabGroups } from './mobile-session-tab-merge'
+import { buildHeadlessMobileSessionTabGroups } from './mobile-session-layout-projection'
 import { projectRuntimeMobileSessionTabs } from './runtime-mobile-session-projection'
 import type { RuntimeMobileSessionProjectionHost } from './runtime-mobile-session-projection-contract'
 import type { RuntimePtyWorktreeRecord } from './runtime-terminal-state-records'
@@ -38,6 +42,33 @@ export class OrcaRuntimeWithPruneMobileSessionTabGroupLayout extends OrcaRuntime
       return { ...layout, first, second }
     }
     return first ?? second
+  }
+
+  // Instance seams over the tab-group projections so callers (and tests) can
+  // reach them through the runtime the way the rest of this surface is reached.
+  protected mergeMobileSessionTabGroups(
+    worktreeId: string,
+    groups: readonly RuntimeMobileSessionTabGroup[],
+    terminalTabs: readonly RuntimeMobileSessionTerminalTab[],
+    activeTab: RuntimeMobileSessionTerminalTab | null
+  ): RuntimeMobileSessionTabGroup[] {
+    return mergeMobileSessionTabGroups(worktreeId, groups, terminalTabs, activeTab)
+  }
+
+  protected buildHeadlessMobileSessionTabGroups(
+    worktreeId: string,
+    tabs: readonly RuntimeMobileSessionSnapshotTab[],
+    activeTab: RuntimeMobileSessionSnapshotTab | null,
+    existingGroups?: readonly RuntimeMobileSessionTabGroup[],
+    newTabAssignment?: { tabId: string; groupId: string }
+  ): RuntimeMobileSessionTabGroup[] {
+    return buildHeadlessMobileSessionTabGroups(
+      worktreeId,
+      tabs,
+      activeTab,
+      existingGroups,
+      newTabAssignment
+    )
   }
 
   /** Transforms an internal mobile session tab snapshot into a sanitized client payload, resolving launch-agent ownership and normalizing titles. */
@@ -131,6 +162,12 @@ export class OrcaRuntimeWithPruneMobileSessionTabGroupLayout extends OrcaRuntime
       }
     }
     return null
+  }
+
+  protected getMobileTerminalLeafPtyIds(tab: RuntimeMobileSessionTerminalTab): string[] {
+    return [tab.ptyId, tab.parentLayout?.ptyIdsByLeafId?.[tab.leafId]].filter(
+      (ptyId): ptyId is string => typeof ptyId === 'string' && ptyId.length > 0
+    )
   }
 
   protected getMobileTerminalPaneKey(tab: RuntimeMobileSessionTerminalTab): string {

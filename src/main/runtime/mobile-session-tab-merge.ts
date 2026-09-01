@@ -89,9 +89,25 @@ export function mergeMobileSessionTabGroups(
   const activeGroupId =
     (activeParentId ? ownerGroupId.get(activeParentId) : undefined) ?? nextGroups[0]!.id
   const retainedOrder = new Map<string, string[]>(nextGroups.map((group) => [group.id, []]))
+  // Why: tabOrder is the canonical user-visible order, so it must survive a republish.
+  // A materialized idle surface can move to the end of terminalTabs; retaining the
+  // stored order prevents activation from rotating the tab bar.
+  const placed = new Set<string>()
+  for (const group of nextGroups) {
+    for (const tabId of group.tabOrder) {
+      if (liveTabIds.has(tabId) && !placed.has(tabId)) {
+        retainedOrder.get(group.id)?.push(tabId)
+        placed.add(tabId)
+      }
+    }
+  }
   for (const tabId of parentTabOrder) {
+    if (placed.has(tabId)) {
+      continue
+    }
     const groupId = ownerGroupId.get(tabId) ?? activeGroupId
     retainedOrder.get(groupId)?.push(tabId)
+    placed.add(tabId)
   }
   return nextGroups
     .map((group) => {

@@ -206,6 +206,7 @@ export class OrcaRuntimeWithCreateTerminal extends OrcaRuntimeWithTerminalCreate
         this.registerPty(result.id, workspace.id, workspace.connectionId, {
           tabId,
           leafId,
+          terminalHandle: preAllocatedHandle,
           ...(result.incarnationId ? { incarnationId: result.incarnationId } : {})
         })
         if (launchOpts.structuredAgentSessionId) {

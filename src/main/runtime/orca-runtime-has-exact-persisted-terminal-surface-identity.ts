@@ -129,7 +129,7 @@ export class OrcaRuntimeWithHasExactPersistedTerminalSurfaceIdentity extends Orc
     inventory: LegacyWorkerRecoveryInventory,
     activation: { activeTabId?: string; activeGroupId?: string }
   ): Promise<void> {
-    await this.adoptTerminalOrphansFromInventory(
+    await this.adoptTerminalOrphansFromInventoryUnderMutation(
       {
         worktree: `id:${candidate.worktreeId}`,
         expectedTopologyRevision: this.getTerminalTopologyRevision(candidate.worktreeId),

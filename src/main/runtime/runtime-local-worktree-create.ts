@@ -137,6 +137,7 @@ export async function createRuntimeLocalManagedWorktree<T>(args: {
     branchName: candidate.branchName,
     effectiveRequestedName: candidate.effectiveRequestedName,
     requestedDisplayName: candidate.requestedDisplayName,
+    displayNameKind: candidate.displayNameKind,
     effectiveSanitizedName: candidate.effectiveSanitizedName,
     effectiveCreatedWithAgent: args.createdWithAgent,
     localWorktreeGitOptions: worktreeGitOptions,

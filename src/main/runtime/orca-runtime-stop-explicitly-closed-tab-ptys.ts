@@ -4,6 +4,7 @@ import { EXPLICIT_TERMINAL_CLOSE_STOP_TIMEOUT_MS } from './orca-runtime-core'
 import { SSH_PROVIDER_UNREGISTERED_REASON } from '../../shared/pty-liveness-verdict'
 import type { RuntimeTerminalClose } from '../../shared/runtime-types'
 import { countTerminalLayoutLeaves } from './headless-terminal-split-layout'
+import type { RuntimePtyTabCloseAuthority } from './runtime-terminal-state-records'
 
 export class OrcaRuntimeWithStopExplicitlyClosedTabPtys extends OrcaRuntimeWithFocusTerminal {
   protected async stopExplicitlyClosedTabPtys(
@@ -78,11 +79,22 @@ export class OrcaRuntimeWithStopExplicitlyClosedTabPtys extends OrcaRuntimeWithF
     const pty = this.getLivePtyForHandle(handle)
     this.claudeAgentTeams.removeTeamForLeaderHandle(handle)
     if (pty) {
+      const closeAuthority: RuntimePtyTabCloseAuthority = {
+        handle,
+        ptyId: pty.pty.ptyId,
+        incarnationId: pty.pty.incarnationId,
+        worktreeId: pty.pty.worktreeId
+      }
+      const ptyCloseAuthority = this.resolvePtyTabCloseSurfaceAuthority(closeAuthority)
+      const spawnSurface = pty.pty.tabId
+        ? this.findMobileTerminalSurface(pty.pty.worktreeId, pty.pty.tabId)
+        : null
       // Why: PTY exit can immediately replace a ready SSH publication with a pending one, so capture its durable HUB surface before killing it.
       const surface =
-        (pty.pty.tabId
-          ? this.findMobileTerminalSurface(pty.pty.worktreeId, pty.pty.tabId)
-          : null) ?? this.findMobileTerminalSurfaceForPty(pty.pty.worktreeId, pty.pty.ptyId)
+        ptyCloseAuthority?.surface ??
+        (spawnSurface && this.getMobileTerminalLeafPtyIds(spawnSurface.tab).length === 0
+          ? spawnSurface
+          : null)
       const tabId = surface?.tab.parentTabId ?? pty.pty.tabId ?? pty.record.tabId
       // Why: relay recovery can leave stale renderer leaves; the persisted HUB layout defines whether closing this PTY closes the whole surface.
       const siblingCount = surface?.tab.parentLayout
@@ -101,6 +113,29 @@ export class OrcaRuntimeWithStopExplicitlyClosedTabPtys extends OrcaRuntimeWithF
           this.notifier.closeTerminal?.(tabId)
         }
         const ptyKilled = await this.stopExplicitlyClosedTabPtys(ptyIdsToKill, pty.pty.ptyId)
+        return this.describeTerminalClose(handle, tabId, pty.pty.ptyId, ptyKilled)
+      }
+      if (
+        siblingCount <= 1 &&
+        surface &&
+        ptyCloseAuthority &&
+        !this.tabs.has(surface.tab.parentTabId)
+      ) {
+        try {
+          await this.closeMobileSessionTab(`id:${pty.pty.worktreeId}`, tabId, {
+            reason: 'user',
+            localPtyTeardownOwnedExternally: true,
+            expectedPtyCloseAuthority: closeAuthority
+          })
+        } catch (error) {
+          if (!(error instanceof Error) || error.message !== 'workspace_session_unavailable') {
+            throw error
+          }
+          const ptyKilled = await this.stopExplicitlyClosedTabPtys([pty.pty.ptyId], pty.pty.ptyId)
+          this.notifier?.closeTerminal(tabId)
+          return this.describeTerminalClose(handle, tabId, pty.pty.ptyId, ptyKilled)
+        }
+        const ptyKilled = await this.stopExplicitlyClosedTabPtys([pty.pty.ptyId], pty.pty.ptyId)
         return this.describeTerminalClose(handle, tabId, pty.pty.ptyId, ptyKilled)
       }
       if (siblingCount <= 1 && !surface && pty.pty.tabId && this.notifier?.closeTerminalTab) {
@@ -154,13 +189,24 @@ export class OrcaRuntimeWithStopExplicitlyClosedTabPtys extends OrcaRuntimeWithF
   async closeTerminalTab(handle: string): Promise<RuntimeTerminalClose> {
     const pty = this.getLivePtyForHandle(handle)
     if (pty) {
-      const tabId = pty.pty.tabId
+      const closeAuthority: RuntimePtyTabCloseAuthority = {
+        handle,
+        ptyId: pty.pty.ptyId,
+        incarnationId: pty.pty.incarnationId,
+        worktreeId: pty.pty.worktreeId
+      }
+      const tabId =
+        this.resolvePtyTabCloseSurfaceAuthority(closeAuthority)?.surface.tab.parentTabId ??
+        pty.pty.tabId
       if (!tabId) {
         return this.closeTerminal(handle)
       }
       // Why: a handle-addressed CLI/automation close is an explicit intent, so
       // it must stay destructive under the non-user close adjudication gate.
-      await this.closeMobileSessionTab(`id:${pty.pty.worktreeId}`, tabId, { reason: 'user' })
+      await this.closeMobileSessionTab(`id:${pty.pty.worktreeId}`, tabId, {
+        reason: 'user',
+        expectedPtyCloseAuthority: closeAuthority
+      })
       this.claudeAgentTeams.removeTeamForLeaderHandle(handle)
       return { handle, tabId, closeMode: 'tab', ptyKilled: false }
     }

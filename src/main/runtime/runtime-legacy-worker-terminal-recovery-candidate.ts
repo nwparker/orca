@@ -36,48 +36,56 @@ export async function reconcileLegacyWorkerCandidate(args: {
     args.pendingResolutions.push({ candidate, resolution: 'exited' })
     return
   }
-  const preAdoptionInventory = await ports.refreshInventory(
-    resolvedWorktrees,
-    workspace.scope.connectionId
-  )
-  if (!preAdoptionInventory) {
-    args.deferredDispatchIds.add(candidate.dispatchId)
-    return
-  }
-  if (!preAdoptionInventory.livePtyIds.has(candidate.ptyId)) {
-    args.pendingResolutions.push({ candidate, resolution: 'exited' })
-    return
-  }
-  const preAdoptionIdentity = preAdoptionInventory.terminalIdentityByPtyId.get(candidate.ptyId)
-  if (!preAdoptionIdentity) {
-    args.deferredDispatchIds.add(candidate.dispatchId)
-    return
-  }
-  if (
-    preAdoptionIdentity.handle !== candidate.terminalHandle ||
-    preAdoptionIdentity.incarnationId !== candidate.incarnationId
-  ) {
-    args.pendingResolutions.push({ candidate, resolution: 'exited' })
-    return
-  }
-  const exactSurfaceAlreadyPublished =
-    ports.hasExactPersistedSurface(candidate) && ports.hasExactSurface(candidate)
-  if (!exactSurfaceAlreadyPublished) {
-    try {
-      await ports.adopt(
-        candidate,
-        workspace.scope,
-        preAdoptionInventory,
-        ports.getActivation(candidate.worktreeId)
+  let adoptionStatus: 'ready' | 'unverifiable' | 'exited'
+  try {
+    adoptionStatus = await ports.runMutation(candidate.worktreeId, async () => {
+      const preAdoptionInventory = await ports.refreshInventory(
+        resolvedWorktrees,
+        workspace.scope.connectionId
       )
-    } catch (error) {
-      console.warn('[orchestration] legacy worker terminal adoption deferred', {
-        dispatchId: candidate.dispatchId,
-        error
-      })
-      args.deferredDispatchIds.add(candidate.dispatchId)
-      return
-    }
+      if (!preAdoptionInventory) {
+        return 'unverifiable'
+      }
+      if (!preAdoptionInventory.livePtyIds.has(candidate.ptyId)) {
+        return 'exited'
+      }
+      const preAdoptionIdentity = preAdoptionInventory.terminalIdentityByPtyId.get(candidate.ptyId)
+      if (!preAdoptionIdentity) {
+        return 'unverifiable'
+      }
+      if (
+        preAdoptionIdentity.handle !== candidate.terminalHandle ||
+        preAdoptionIdentity.incarnationId !== candidate.incarnationId
+      ) {
+        return 'exited'
+      }
+      const exactSurfaceAlreadyPublished =
+        ports.hasExactPersistedSurface(candidate) && ports.hasExactSurface(candidate)
+      if (!exactSurfaceAlreadyPublished) {
+        await ports.adopt(
+          candidate,
+          workspace.scope,
+          preAdoptionInventory,
+          ports.getActivation(candidate.worktreeId)
+        )
+      }
+      return 'ready'
+    })
+  } catch (error) {
+    console.warn('[orchestration] legacy worker terminal adoption deferred', {
+      dispatchId: candidate.dispatchId,
+      error
+    })
+    args.deferredDispatchIds.add(candidate.dispatchId)
+    return
+  }
+  if (adoptionStatus === 'unverifiable') {
+    args.deferredDispatchIds.add(candidate.dispatchId)
+    return
+  }
+  if (adoptionStatus === 'exited') {
+    args.pendingResolutions.push({ candidate, resolution: 'exited' })
+    return
   }
   const rendererEpoch = ports.getRendererEpoch()
   let rendererMaterialized =

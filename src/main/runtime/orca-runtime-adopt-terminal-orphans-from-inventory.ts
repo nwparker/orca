@@ -14,7 +14,7 @@ import { getRepoIdFromWorktreeId } from '../../shared/worktree/id'
 import type { PtyLivenessVerdict } from '../../shared/pty-liveness-verdict'
 
 export class OrcaRuntimeWithAdoptTerminalOrphansFromInventory extends OrcaRuntimeWithSubscribeToTerminalResize {
-  protected async adoptTerminalOrphansFromInventory(
+  protected async adoptTerminalOrphansFromInventoryUnderMutation(
     request: RuntimeTerminalOrphanAdoptionRequest,
     workspace: TerminalWorkspaceLaunchScope,
     inventory: PtyControllerInventory

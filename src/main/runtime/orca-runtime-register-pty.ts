@@ -15,6 +15,8 @@ export class OrcaRuntimeWithRegisterPty extends OrcaRuntimeWithInvalidateAllHand
       tabId: string
       leafId: string
       incarnationId?: PtyIncarnationId
+      /** Handle allocated for the replacement incarnation, when one is known. */
+      terminalHandle?: string
       agentLaunchAuthority?: { launchToken: string; launchAgent: TuiAgent }
       providerReattachLaunchIdentity?: {
         incarnationId: PtyIncarnationId
@@ -24,6 +26,42 @@ export class OrcaRuntimeWithRegisterPty extends OrcaRuntimeWithInvalidateAllHand
     isWsl?: boolean
   ): void {
     this.assertPtyDidNotExitBeforeRegistration(ptyId, binding?.incarnationId)
+    const existingPty = this.ptysById.get(ptyId)
+    const replacementHandle = binding?.terminalHandle?.trim()
+    const pendingReplacement = this.pendingPtyHandleReplacementFences.get(ptyId)
+    const pendingReplacementMatches =
+      pendingReplacement !== undefined &&
+      pendingReplacement.pendingRegistration &&
+      binding?.incarnationId !== undefined &&
+      pendingReplacement.incarnationId === binding.incarnationId
+    const incarnationChanged =
+      existingPty !== undefined &&
+      binding?.incarnationId !== undefined &&
+      existingPty.incarnationId !== null &&
+      existingPty.incarnationId !== binding.incarnationId
+    if (incarnationChanged || pendingReplacementMatches) {
+      // A reconnect can register a replacement before inventory reports its exported handle.
+      // Drop every alias for the predecessor; a newly preallocated handle is retained only when
+      // the caller can prove it is the replacement's handle.
+      const directHandle = this.handleByPtyId.get(ptyId)
+      const canPreserveReplacementHandle =
+        replacementHandle !== undefined &&
+        replacementHandle.startsWith('term_') &&
+        directHandle === replacementHandle &&
+        !pendingReplacement?.staleHandles.has(replacementHandle)
+      const invalidated = this.invalidateAllHandlesForPty(
+        ptyId,
+        canPreserveReplacementHandle ? replacementHandle : undefined
+      )
+      if (binding?.incarnationId) {
+        this.rememberPtyHandleReplacementFence(
+          ptyId,
+          binding.incarnationId,
+          invalidated,
+          pendingReplacementMatches
+        )
+      }
+    }
     this.ptyLivenessVerdictByPtyId.delete(ptyId)
     this.terminalViewSubscribers.markSpawnPublished(ptyId)
     // Why: record the renderer pane identity at spawn time so a stalled graph
@@ -78,6 +116,12 @@ export class OrcaRuntimeWithRegisterPty extends OrcaRuntimeWithInvalidateAllHand
       pendingIncarnation === binding.incarnationId
     ) {
       this.pendingPtyRegistrationIncarnations.delete(ptyId)
+    }
+    if (pendingReplacement !== undefined) {
+      const currentFence = this.pendingPtyHandleReplacementFences.get(ptyId)
+      if (currentFence && (pendingReplacementMatches || !binding?.incarnationId)) {
+        currentFence.pendingRegistration = false
+      }
     }
     // Why: the renderer's own PTY spawn is the reliable signal that the pending
     // mobile create's tab is live; publish its surface main-side (#7587).

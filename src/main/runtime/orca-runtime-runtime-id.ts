@@ -23,6 +23,7 @@ import {
 import { RendererPublicationThrottle } from '../window/renderer-publication-throttle'
 import { ClientHostedPageReconciliationWindow } from './client-hosted-page-reconciliation-window'
 import { ClientSessionTabSelectionStore } from './client-session-tab-selection'
+import { WorktreeTerminalMutationLock } from './worktree-terminal-mutation-lock'
 import { RemoteRuntimeTerminalCreateIdempotency } from './remote-runtime-terminal-create-idempotency'
 import type { PtyIncarnationId } from '../../shared/pty-incarnation'
 import type { MobileSessionTabsNotifyCoalescer } from './mobile-session-tabs-notify-coalescer'
@@ -142,7 +143,7 @@ export class OrcaRuntimeWithRuntimeId {
     Promise<RuntimeWorktreeTerminalSleepResult>
   >()
 
-  protected terminalMutationTailByWorktreeId = new Map<string, Promise<void>>()
+  protected readonly terminalMutationLock = new WorktreeTerminalMutationLock()
 
   protected terminalSleepStateByWorktreeId = new Map<
     string,
@@ -232,8 +233,6 @@ export class OrcaRuntimeWithRuntimeId {
   // ptyId keeps active TUI redraws independent of the total open terminal count.
   protected leavesByPtyId = new Map<string, RuntimeLeafRecord[]>()
 
-  protected readonly retiredMobileSessionPtyIds = new Set<string>()
-
   protected handles = new Map<string, TerminalHandleRecord>()
 
   protected handleByLeafKey = new Map<string, string>()
@@ -241,6 +240,17 @@ export class OrcaRuntimeWithRuntimeId {
   protected handleByPtyId = new Map<string, string>()
 
   protected handleByPtyIncarnation = new Map<string, PtyIncarnationHandleRecord>()
+
+  // A provider announces a replacement before the spawn commit can bind its
+  // pane. Keep the predecessor aliases fenced during that hand-off window.
+  protected pendingPtyHandleReplacementFences = new Map<
+    string,
+    {
+      incarnationId: PtyIncarnationId
+      staleHandles: Set<string>
+      pendingRegistration: boolean
+    }
+  >()
 
   // Why: pointer state is process-local; one harmless replay after restart avoids a wire or schema change.
   protected readonly lastPointedMessageSequenceByHandle = new Map<string, number>()

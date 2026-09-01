@@ -1,4 +1,5 @@
 import type { Repo } from '../../shared/repo-types'
+import type { CreateWorktreeArgs } from '../../shared/worktree/create-types'
 import type { getPRForBranch } from '../github/client'
 import type { getWorktreePathSettings } from '../ipc/worktree-logic'
 import {
@@ -28,6 +29,7 @@ import {
   getSelectedHostedReviewForBranch,
   resolveCreateBranchName
 } from './runtime-worktree-create-git'
+import { resolveWorktreeCreateDisplayNameRequest } from '../ipc/worktree-logic'
 import { runtimePathExists } from './runtime-worktree-filesystem'
 import type { RuntimeStore } from './runtime-store-contract'
 import type { HostedReviewExecutionOptions } from '../source-control/hosted-review-git-options'
@@ -35,6 +37,7 @@ import type { HostedReviewExecutionOptions } from '../source-control/hosted-revi
 export type RuntimeLocalWorktreeCreateCandidate = {
   effectiveRequestedName: string
   requestedDisplayName?: string
+  displayNameKind: CreateWorktreeArgs['displayNameKind']
   effectiveSanitizedName: string
   branchName: string
   checkoutExistingBranch: boolean
@@ -193,9 +196,17 @@ export async function resolveRuntimeLocalWorktreeCreateCandidate(args: {
       `Could not find an available worktree path for "${sanitizedName}". Pick a different worktree name.`
     )
   }
+  const displayNameRequest = resolveWorktreeCreateDisplayNameRequest(
+    args.request.displayName,
+    args.request.displayNameKind,
+    args.request.name,
+    args.request.cliProvenance?.kind === 'created-by-cli',
+    args.request.nameWasGenerated === true
+  )
   return {
     effectiveRequestedName,
-    requestedDisplayName: args.request.displayName?.trim() || undefined,
+    requestedDisplayName: displayNameRequest.value,
+    displayNameKind: displayNameRequest.kind,
     effectiveSanitizedName,
     branchName,
     checkoutExistingBranch,

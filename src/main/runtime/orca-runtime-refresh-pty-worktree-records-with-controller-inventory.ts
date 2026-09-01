@@ -28,13 +28,15 @@ import {
 import { parseAppSshPtyId } from '../../shared/ssh-pty-id'
 import { NO_OBSERVING_PROVIDER_REASON } from '../../shared/pty-liveness-verdict'
 import { buildControllerTerminalIdentities } from './orca-runtime-build-controller-terminal-identities'
+import { retireOrchestrationAuthorityAbsentFromInventory } from './runtime-restored-orchestration-authority-sweep'
 
 export class OrcaRuntimeWithRefreshPtyWorktreeRecordsWithControllerInventory extends OrcaRuntimeWithRefreshPtyWorktreeRecordsFromController {
   protected async refreshPtyWorktreeRecordsWithControllerInventory(
     resolvedWorktrees: ResolvedWorktree[],
     targetWorktreeId: string | null = null,
     deadline?: number,
-    connectionId?: string | null
+    connectionId?: string | null,
+    retryStale = false
   ): Promise<PtyControllerInventory | null> {
     if (targetWorktreeId === FLOATING_TERMINAL_WORKTREE_ID) {
       const targetedLiveness = this.refreshFloatingWorkspacePtyLiveness()
@@ -94,6 +96,18 @@ export class OrcaRuntimeWithRefreshPtyWorktreeRecordsWithControllerInventory ext
             inventoryGeneration &&
           this.ptyControllerAggregateInventoryGeneration <= inventoryGeneration
     if (!isCurrentInventory) {
+      // A fleet census that began after this targeted poll must not turn a
+      // user-driven open into an empty result. Re-query the owning provider;
+      // the second generation is then fenced against both operations.
+      if (targetWorktreeId !== null && !retryStale) {
+        return this.refreshPtyWorktreeRecordsWithControllerInventory(
+          resolvedWorktrees,
+          targetWorktreeId,
+          deadline,
+          connectionId,
+          true
+        )
+      }
       return null
     }
     const sessions = sessionsResult.value.processes
@@ -280,24 +294,11 @@ export class OrcaRuntimeWithRefreshPtyWorktreeRecordsWithControllerInventory ext
       }
     }
     // Why: runs after the hasPty rescue so a still-addressable pane keeps its receipt.
-    // A provider that failed to list is absent from `sessions`, and dropping authority on
-    // that silence would retire an orchestration handle the relay can still reach.
-    for (const [ptyId, receipt] of this.restoredOrchestrationAuthorityByPtyId) {
-      const receiptHostId =
-        receipt.hostScope.kind === 'ssh'
-          ? toSshExecutionHostId(receipt.hostScope.targetId)
-          : LOCAL_EXECUTION_HOST_ID
-      const inScope =
-        queriedHostIds.has(receiptHostId) &&
-        (connectionId === undefined ||
-          (connectionId === null && receipt.hostScope.kind !== 'ssh') ||
-          (typeof connectionId === 'string' &&
-            receipt.hostScope.kind === 'ssh' &&
-            receipt.hostScope.targetId === connectionId))
-      if (inScope && !allLivePtyIds.has(ptyId)) {
-        this.restoredOrchestrationAuthorityByPtyId.delete(ptyId)
-      }
-    }
+    retireOrchestrationAuthorityAbsentFromInventory(this.restoredOrchestrationAuthorityByPtyId, {
+      queriedHostIds,
+      allLivePtyIds,
+      connectionId
+    })
     this.pruneDisconnectedPtyRecords()
     return {
       livePtyIds: targetWorktreeId ? selectedLivePtyIds : allLivePtyIds,

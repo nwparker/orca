@@ -2,6 +2,11 @@ import type { BaseRefSearchResult, Repo } from '../../shared/repo-types'
 import type { RuntimeRepoSearchRefs } from '../../shared/runtime-types'
 import { isFolderRepo } from '../../shared/repo-kind'
 import {
+  clampRepoSearchRefsLimit,
+  getRepoSearchRefsProbeLimit,
+  isRepoSearchRefsRequestLimit
+} from '../../shared/repo-search-limits'
+import {
   buildSearchBaseRefsArgv,
   getBaseRefDefault,
   getRemoteCount,
@@ -24,20 +29,25 @@ export class RuntimeRepositoryRefQueries {
   constructor(private readonly deps: RuntimeRepositoryRefQueryDependencies) {}
 
   async search(repoSelector: string, query: string, limit: number): Promise<RuntimeRepoSearchRefs> {
-    if (!Number.isInteger(limit) || limit <= 0) {
+    if (!isRepoSearchRefsRequestLimit(limit)) {
       throw new Error('invalid_limit')
     }
+    const effectiveLimit = clampRepoSearchRefsLimit(limit)
+    const probeLimit = getRepoSearchRefsProbeLimit(effectiveLimit)
     const repo = await this.deps.resolveRepo(repoSelector)
     if (isFolderRepo(repo)) {
       return { refs: [], truncated: false }
     }
     const refDetails = repo.connectionId
-      ? await this.searchRemote(repo, query, limit + 1)
-      : await searchBaseRefDetails(repo.path, query, limit + 1)
+      ? await this.searchRemote(repo, query, probeLimit)
+      : await searchBaseRefDetails(repo.path, query, probeLimit)
     return {
-      refs: refDetails.slice(0, limit).map((entry) => entry.refName),
-      refDetails: refDetails.slice(0, limit),
-      truncated: refDetails.length > limit
+      refs: refDetails.slice(0, effectiveLimit).map((entry) => entry.refName),
+      refDetails: refDetails.slice(0, effectiveLimit),
+      // An oversized request is intentionally reported as truncated even when
+      // this repo has fewer refs: the execution cap prevented fulfilling the
+      // requested page size.
+      truncated: limit > effectiveLimit || refDetails.length > effectiveLimit
     }
   }
 

@@ -47,6 +47,8 @@ export type LegacyWorkerRecoveryPorts = {
     worktrees: ResolvedWorktree[],
     connectionId: string | null
   ) => Promise<LegacyWorkerRecoveryInventory | null>
+  /** Serializes the pre-adoption liveness probe and the adoption itself against other terminal mutations. */
+  runMutation: <T>(worktreeId: string, operation: () => Promise<T>) => Promise<T>
   getActivation: (worktreeId: string) => { activeTabId?: string; activeGroupId?: string }
   hasExactPersistedSurface: (candidate: LegacyWorkerRecoveryCandidate) => boolean
   hasExactSurface: (candidate: LegacyWorkerRecoveryCandidate) => boolean

@@ -78,6 +78,13 @@ export type RuntimePtyWorktreeRecord = RuntimeTerminalTailState & {
   lastOutputAt: number | null
 }
 
+export type RuntimePtyTabCloseAuthority = {
+  handle: string
+  ptyId: string
+  incarnationId: PtyIncarnationId | null
+  worktreeId: string
+}
+
 export type RuntimePtyTitleTrackerEntry = {
   tracker: TerminalTitleTracker
   applyingChunk: boolean

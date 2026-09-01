@@ -183,7 +183,7 @@ export class OrcaRuntimeWithResolveWorktreeSelector extends OrcaRuntimeWithResol
     if (!parsed?.repoId || !parsed.worktreePath) {
       return null
     }
-    const repo = this.store?.getRepos().find((entry) => entry.id === parsed.repoId)
+    const repo = this.store?.getRepos?.()?.find((entry) => entry.id === parsed.repoId)
     const git = {
       path: parsed.worktreePath,
       head: '',

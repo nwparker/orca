@@ -6,6 +6,7 @@ import { getRuntimeFileTargetExecutionHostId } from './orca-runtime-files'
 import { findRuntimeWorkspaceFileOwner } from '../../shared/runtime-workspace-file-owner'
 import type { RuntimeMobileSessionTabsResult } from '../../shared/runtime-types'
 import { randomUUID } from 'node:crypto'
+import type { PtyIncarnationId } from '../../shared/pty-incarnation'
 
 export class OrcaRuntimeWithResolveKnownWorkspaceFileTarget extends OrcaRuntimeWithPersistHeadlessTerminalTitle {
   protected async resolveKnownWorkspaceFileTarget(
@@ -126,7 +127,39 @@ export class OrcaRuntimeWithResolveKnownWorkspaceFileTarget extends OrcaRuntimeW
     return `term_${randomUUID()}`
   }
 
+  protected rememberPtyHandleReplacementFence(
+    ptyId: string,
+    incarnationId: PtyIncarnationId,
+    staleHandles: Iterable<string>,
+    pendingRegistration: boolean
+  ): void {
+    const previous = this.pendingPtyHandleReplacementFences.get(ptyId)
+    const merged = new Set(previous?.staleHandles)
+    for (const handle of staleHandles) {
+      merged.add(handle)
+    }
+    // A PTY normally has one direct and one renderer alias. Keep a small bound
+    // in case a malformed provider emits an unbounded alias stream.
+    while (merged.size > 16) {
+      const oldest = merged.values().next().value
+      if (typeof oldest !== 'string') {
+        break
+      }
+      merged.delete(oldest)
+    }
+    this.pendingPtyHandleReplacementFences.set(ptyId, {
+      incarnationId,
+      staleHandles: merged,
+      pendingRegistration
+    })
+  }
+
   registerPreAllocatedHandleForPty(ptyId: string, handle: string): void {
+    if (this.pendingPtyHandleReplacementFences.get(ptyId)?.staleHandles.has(handle)) {
+      // The provider can replay the old env handle after announcing a new
+      // incarnation. Never let that predecessor alias be reintroduced.
+      return
+    }
     const retained = this.handleByPtyIncarnation.get(ptyId)
     if (retained?.handle === handle) {
       this.handleByPtyIncarnation.delete(ptyId)

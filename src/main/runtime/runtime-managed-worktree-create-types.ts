@@ -1,4 +1,5 @@
 import type { AgentLaunchPreferences } from '../../shared/agent-session-host-authority'
+import type { CreateWorktreeArgs } from '../../shared/worktree/create-types'
 import type {
   AutomationWorkspaceProvenance,
   CliWorkspaceProvenance,
@@ -35,6 +36,7 @@ export type RuntimeManagedWorktreeCreateArgs = {
   linkedTaskSourceContext?: TaskSourceContext | null
   comment?: string
   displayName?: string
+  displayNameKind?: CreateWorktreeArgs['displayNameKind']
   telemetrySource?: WorkspaceCreateTelemetrySource
   workspaceStatus?: string
   manualOrder?: number

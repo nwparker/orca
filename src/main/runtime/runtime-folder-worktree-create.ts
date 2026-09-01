@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { getProjectHostSetupWorktreeMeta } from '../../shared/project-host-setup-lookup'
+import { resolveWorktreeCreateDisplayNameRequest } from '../ipc/worktree-logic'
 import type { RuntimeTerminalCreate } from '../../shared/runtime-types'
 import type { CreateWorktreeResult } from '../../shared/worktree/create-types'
 import type { Repo } from '../../shared/repo-types'
@@ -57,10 +58,21 @@ export async function createRuntimeFolderWorktree(args: {
   const settings = deps.store.getSettings()
   const instanceId = randomUUID()
   const worktreeId = getRuntimeFolderWorkspaceInstanceId(repo, instanceId)
+  const displayNameRequest = resolveWorktreeCreateDisplayNameRequest(
+    request.displayName,
+    request.displayNameKind,
+    request.name,
+    request.cliProvenance?.kind === 'created-by-cli',
+    request.nameWasGenerated === true
+  )
+  const resolvedFolderDisplayName = displayNameRequest.value
   const meta = deps.store.setWorktreeMeta(worktreeId, {
     instanceId,
     ...getProjectHostSetupWorktreeMeta(deps.store.getProjectHostSetups?.() ?? [], repo),
-    displayName: request.displayName?.trim() || request.name,
+    displayName: resolvedFolderDisplayName ?? request.name,
+    ...(displayNameRequest.kind === 'user' && resolvedFolderDisplayName
+      ? { displayNameIsPinned: true }
+      : {}),
     lastActivityAt: now,
     createdAt: now,
     orcaCreatedAt: now,

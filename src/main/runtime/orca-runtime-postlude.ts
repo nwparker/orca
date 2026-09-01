@@ -1,5 +1,6 @@
 // @ts-nocheck -- mechanically split from OrcaRuntimeService; behavior is covered by AST equivalence and characterization tests.
 import { RESOLVED_WORKTREE_REPO_TIMEOUT_MS } from './repo-worktree-row-resolution'
+import { REPO_SEARCH_REFS_DEFAULT_LIMIT } from '../../shared/repo-search-limits'
 
 export const WAIT_BLOCKED_CHECK_MIN_INTERVAL_MS = 50
 
@@ -17,7 +18,7 @@ export const VISIBLE_TERMINAL_SNAPSHOT_RETRY_MS = 1_000
 
 export const TUI_IDLE_VISIBLE_PROBE_SETTLE_MARGIN_MS = 10
 
-export const DEFAULT_REPO_SEARCH_REFS_LIMIT = 25
+export const DEFAULT_REPO_SEARCH_REFS_LIMIT = REPO_SEARCH_REFS_DEFAULT_LIMIT
 
 export const DEFAULT_TERMINAL_LIST_LIMIT = 200
 

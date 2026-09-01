@@ -3,9 +3,11 @@ import { OrcaRuntimeWithCloseMobileSessionTab } from './orca-runtime-close-mobil
 import type {
   RuntimeMobileSessionAgentTab,
   RuntimeMobileSessionBrowserTab,
+  RuntimeMobileSessionRetiredTerminalSurface,
   RuntimeMobileSessionTabsSnapshot,
   RuntimeMobileSessionTerminalTab
 } from '../../shared/runtime-types'
+import type { RuntimePtyWorktreeRecord } from './runtime-terminal-state-records'
 import { getMobileSessionSnapshotTabIdentityKeys } from './mobile-session-tab-merge'
 import type { BrowserSessionTabSelectionOptions } from './browser-tab-create-publication'
 import { getRuntimeBrowserPageRegistry } from './runtime-browser-page-registry'
@@ -64,6 +66,33 @@ export class OrcaRuntimeWithCloseStructuredAgentSessionTab extends OrcaRuntimeWi
       return null
     }
     return this.handleByPtyId.get(pty.ptyId) ?? this.findHandleForPtyRecord(pty.ptyId)
+  }
+
+  protected getMobileSessionTerminalRetirementProof(
+    worktreeId: string,
+    tab: RuntimeMobileSessionTerminalTab,
+    authorizedPty?: RuntimePtyWorktreeRecord
+  ): RuntimeMobileSessionRetiredTerminalSurface | null {
+    const pty = this.findPtyForMobileTerminalTab(worktreeId, tab) ?? authorizedPty ?? null
+    if (!pty || !this.getMobileTerminalLeafPtyIds(tab).includes(pty.ptyId)) {
+      return null
+    }
+    const terminal = this.handleByPtyId.get(pty.ptyId) ?? this.findHandleForPtyRecord(pty.ptyId)
+    if (!terminal) {
+      return null
+    }
+    const incarnationId =
+      pty.incarnationId ??
+      this.getWorkspaceSessionForWorktree(worktreeId)?.terminalPtyIncarnationsByPaneKey?.[
+        this.getMobileTerminalPaneKey(tab)
+      ]
+    return {
+      parentTabId: tab.parentTabId,
+      leafId: tab.leafId,
+      ptyId: pty.ptyId,
+      terminal,
+      ...(incarnationId ? { incarnationId } : {})
+    }
   }
 
   protected notifyRendererOfHeadlessTerminalClose(parentTabId: string): void {

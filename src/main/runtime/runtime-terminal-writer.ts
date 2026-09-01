@@ -1,8 +1,4 @@
-import {
-  AGENT_PROMPT_BRACKETED_PASTE_END,
-  AGENT_PROMPT_SUBMIT,
-  getAgentPromptSubmitDelayMs
-} from '../../shared/agent-prompt-injection'
+import { getAgentPromptSubmitDelayMs } from '../../shared/agent-prompt-injection'
 import { iterateTerminalInputChunks } from '../../shared/terminal-input'
 import {
   agentSessionPtyWriteGate,
@@ -109,54 +105,6 @@ export class RuntimeTerminalWriter {
       if (!chunk.done) {
         await yieldBetweenTerminalInputChunks()
       }
-    }
-  }
-
-  async writeAgentPrompt(
-    ptyId: string,
-    pastePayload: string,
-    options: RuntimeTerminalWriteOptions = {}
-  ): Promise<void> {
-    let wrotePasteBytes = false
-    let completedPaste = false
-    try {
-      const chunks = iterateTerminalInputChunks(pastePayload)
-      let chunk = chunks.next()
-      while (!chunk.done) {
-        await options.beforeWrite?.(ptyId)
-        if (!this.write(ptyId, chunk.value)) {
-          throw new Error('terminal_not_writable')
-        }
-        wrotePasteBytes = true
-        chunk = chunks.next()
-        if (!chunk.done) {
-          await yieldBetweenTerminalInputChunks()
-        }
-      }
-      completedPaste = true
-    } catch (error) {
-      if (wrotePasteBytes && !completedPaste) {
-        this.write(ptyId, AGENT_PROMPT_BRACKETED_PASTE_END)
-      }
-      throw error
-    }
-    await waitForTerminalWriteDelay(
-      getAgentPromptSubmitDelayMs(
-        this.getWriteHostPlatform(ptyId),
-        Buffer.byteLength(pastePayload, 'utf8')
-      ),
-      options.signal
-    )
-    try {
-      await options.beforeWrite?.(ptyId)
-    } catch (error) {
-      if (options.suffixFailureError) {
-        throw new Error(options.suffixFailureError)
-      }
-      throw error
-    }
-    if (!this.write(ptyId, AGENT_PROMPT_SUBMIT)) {
-      throw new Error(options.suffixFailureError ?? 'terminal_not_writable')
     }
   }
 }

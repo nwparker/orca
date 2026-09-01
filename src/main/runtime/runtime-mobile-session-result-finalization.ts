@@ -39,6 +39,19 @@ export function finalizeRuntimeMobileSessionTabsResult(
     activeTabType: active?.type ?? null,
     ...(tabGroups ? { tabGroups } : {}),
     ...(snapshot.tabGroupLayout !== undefined ? { tabGroupLayout } : {}),
+    ...(snapshot.retiredTerminalSurfaces
+      ? {
+          retiredTerminalSurfaces: snapshot.retiredTerminalSurfaces.filter(
+            (retired) =>
+              !snapshot.tabs.some(
+                (tab) =>
+                  tab.type === 'terminal' &&
+                  tab.parentTabId === retired.parentTabId &&
+                  tab.leafId === retired.leafId
+              )
+          )
+        }
+      : {}),
     tabs: normalizedTabs
   }
 }

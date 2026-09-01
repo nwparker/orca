@@ -6,6 +6,7 @@ import { LOCAL_EXECUTION_HOST_ID } from '../../shared/execution-host'
 import type { WorkspaceSessionState } from '../../shared/workspace-session-state-types'
 import { retireTerminalSurfaceFromPersistence } from './mobile-session-terminal-persistence-retirement'
 import { retireTerminalSurfacesFromSnapshot } from './mobile-session-terminal-retirement'
+import { rollbackWorkspaceSessionAfterFailedAsyncWrite } from './workspace-session-failed-write-rollback'
 import { getRepoIdFromWorktreeId } from '../../shared/worktree/id'
 
 export class OrcaRuntimeWithPersistTerminalSurfaceRetirements extends OrcaRuntimeWithTouchMobileSessionTabsForWorktree {
@@ -32,6 +33,8 @@ export class OrcaRuntimeWithPersistTerminalSurfaceRetirements extends OrcaRuntim
     const accepted: RetiredTerminalSurface[] = []
     const unpersisted: RetiredTerminalSurface[] = []
     const pendingWrites: { hostId: ExecutionHostId; session: WorkspaceSessionState }[] = []
+    const originalSessions = new Map<ExecutionHostId, WorkspaceSessionState>()
+    const stagedSessions = new Map<ExecutionHostId, WorkspaceSessionState>()
     for (const [hostId, surfaces] of surfacesByHostId) {
       const session = this.store?.getWorkspaceSession?.(hostId)
       if (!session) {
@@ -43,6 +46,7 @@ export class OrcaRuntimeWithPersistTerminalSurfaceRetirements extends OrcaRuntim
       if (!this.store?.setWorkspaceSession || !this.store.flushOrThrow) {
         return null
       }
+      originalSessions.set(hostId, session)
       let nextSession = session
       const acceptedForHost: RetiredTerminalSurface[] = []
       for (const surface of surfaces) {
@@ -62,9 +66,30 @@ export class OrcaRuntimeWithPersistTerminalSurfaceRetirements extends OrcaRuntim
       try {
         for (const write of pendingWrites) {
           this.store?.setWorkspaceSession?.(write.session, write.hostId)
+          const staged = this.store?.getWorkspaceSession?.(write.hostId)
+          if (staged) {
+            stagedSessions.set(write.hostId, staged)
+          }
         }
         this.store?.flushOrThrow?.()
       } catch (error) {
+        // setWorkspaceSession mutates the in-memory partition before the flush. Restore only
+        // fields still equal to our staged write so concurrent renderer updates survive.
+        for (const [hostId, original] of originalSessions) {
+          const staged = stagedSessions.get(hostId)
+          const current = this.store?.getWorkspaceSession?.(hostId)
+          if (!staged || !current) {
+            continue
+          }
+          const rolledBack = rollbackWorkspaceSessionAfterFailedAsyncWrite(
+            original,
+            staged,
+            current
+          )
+          if (rolledBack !== current) {
+            this.store?.setWorkspaceSession?.(rolledBack, hostId)
+          }
+        }
         console.error('[runtime] failed to persist terminal retirement:', error)
         return null
       }
@@ -77,6 +102,8 @@ export class OrcaRuntimeWithPersistTerminalSurfaceRetirements extends OrcaRuntim
     incarnationId: string,
     exactSurfaces: readonly Pick<RetiredTerminalSurface, 'worktreeId' | 'parentTabId' | 'leafId'>[]
   ): void {
+    const terminalHandle =
+      this.handleByPtyId.get(ptyId) ?? this.findHandleForPtyRecord(ptyId) ?? undefined
     const retiredSurfaceByKey = new Map<string, RetiredTerminalSurface>()
     for (const surface of exactSurfaces) {
       retiredSurfaceByKey.set(`${surface.worktreeId}\0${surface.parentTabId}\0${surface.leafId}`, {
@@ -122,9 +149,6 @@ export class OrcaRuntimeWithPersistTerminalSurfaceRetirements extends OrcaRuntim
     if (publishableRetiredSurfaces.length === 0) {
       return
     }
-    for (const surface of publishableRetiredSurfaces) {
-      this.retiredMobileSessionPtyIds.add(surface.ptyId)
-    }
     for (const [worktreeId, snapshot] of this.mobileSessionTabsByWorktree) {
       const retired = retireTerminalSurfacesFromSnapshot({
         snapshot,
@@ -133,7 +157,20 @@ export class OrcaRuntimeWithPersistTerminalSurfaceRetirements extends OrcaRuntim
           (surface) => surface.worktreeId === worktreeId
         ),
         // Why: discovery is broad by PTY id, but publication may remove only surfaces whose durable retirement was accepted.
-        exactOnly: true
+        exactOnly: true,
+        ...(terminalHandle
+          ? {
+              retirementProofs: publishableRetiredSurfaces
+                .filter((surface) => surface.worktreeId === worktreeId)
+                .map((surface) => ({
+                  parentTabId: surface.parentTabId,
+                  leafId: surface.leafId,
+                  ptyId: surface.ptyId,
+                  terminal: terminalHandle,
+                  incarnationId
+                }))
+            }
+          : {})
       })
       if (retired) {
         this.mobileSessionTabsByWorktree.set(worktreeId, retired.snapshot)

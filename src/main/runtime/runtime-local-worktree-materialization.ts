@@ -3,13 +3,14 @@ import { getRepoExecutionHostId } from '../../shared/execution-host'
 import { getProjectHostSetupWorktreeMeta } from '../../shared/project-host-setup-lookup'
 import type { GitWorktreeInfo, GitPushTarget, Worktree } from '../../shared/worktree/types'
 import type { Repo } from '../../shared/repo-types'
+import type { CreateWorktreeArgs } from '../../shared/worktree/create-types'
 import type { TuiAgent } from '../../shared/tui-agent'
 import { resolveWorktreeIncludePaths } from '../git/worktree-include-file'
 import { formatWorktreeIncludeCopyWarning } from '../ipc/worktree-include-copy-budget'
 import {
   getWorktreeCreationLayout,
   mergeWorktree,
-  shouldSetDisplayName
+  resolveWorktreeCreateDisplayNameMeta
 } from '../ipc/worktree-logic'
 import {
   createWorktreeCopiedPaths,
@@ -35,6 +36,7 @@ export async function materializeRuntimeLocalWorktree<T>(args: {
   branchName: string
   effectiveRequestedName: string
   requestedDisplayName?: string
+  displayNameKind: CreateWorktreeArgs['displayNameKind']
   effectiveSanitizedName: string
   effectiveCreatedWithAgent?: TuiAgent
   localWorktreeGitOptions: { wslDistro?: string }
@@ -54,6 +56,7 @@ export async function materializeRuntimeLocalWorktree<T>(args: {
     branchName,
     effectiveRequestedName,
     requestedDisplayName,
+    displayNameKind,
     effectiveSanitizedName,
     effectiveCreatedWithAgent,
     localWorktreeGitOptions
@@ -61,11 +64,12 @@ export async function materializeRuntimeLocalWorktree<T>(args: {
   const worktreeId = `${repo.id}::${created.path}`
   const now = Date.now()
   const metadataBaseRef = request.compareBaseRef ?? remoteTrackingBase?.ref ?? baseBranch
-  const displayNameMeta = requestedDisplayName
-    ? { displayName: requestedDisplayName }
-    : shouldSetDisplayName(effectiveRequestedName, branchName, effectiveSanitizedName)
-      ? { displayName: effectiveRequestedName }
-      : {}
+  const displayNameMeta = resolveWorktreeCreateDisplayNameMeta(
+    requestedDisplayName,
+    branchName,
+    displayNameKind,
+    { requestedName: effectiveRequestedName, sanitizedName: effectiveSanitizedName }
+  )
   const meta = store.setWorktreeMeta(worktreeId, {
     instanceId: randomUUID(),
     ...getProjectHostSetupWorktreeMeta(store.getProjectHostSetups?.() ?? [], repo),

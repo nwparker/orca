@@ -147,6 +147,7 @@ export class OrcaRuntimeWithPreservedBranchCleanup extends OrcaRuntimeWithTermin
         undefined,
         connectionId
       ),
+    runMutation: (worktreeId, operation) => this.runWorktreeTerminalMutation(worktreeId, operation),
     getActivation: (worktreeId) => this.getLegacyWorkerRecoveryActivation(worktreeId),
     hasExactPersistedSurface: (candidate) =>
       this.hasExactPersistedTerminalSurfaceIdentity(candidate),

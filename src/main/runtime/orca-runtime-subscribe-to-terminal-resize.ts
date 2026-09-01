@@ -180,18 +180,20 @@ export class OrcaRuntimeWithSubscribeToTerminalResize extends OrcaRuntimeWithApp
       throw new Error('terminal_orphan_claims_required')
     }
     const workspace = await this.resolveTerminalWorkspaceLaunchScope(request.worktree)
-    const resolvedWorkspace = workspace.folderWorkspace
-      ? this.folderWorkspaceToResolvedWorktree(workspace.folderWorkspace)
-      : await this.resolveWorktreeSelector(`id:${workspace.id}`)
-    const inventory = await this.refreshPtyWorktreeRecordsWithControllerInventory(
-      [resolvedWorkspace],
-      workspace.id,
-      undefined,
-      workspace.connectionId ?? null
-    )
-    if (!inventory) {
-      throw new Error('terminal_liveness_unavailable')
-    }
-    return this.adoptTerminalOrphansFromInventory(request, workspace, inventory)
+    return this.runWorktreeTerminalMutation(workspace.id, async () => {
+      const resolvedWorkspace = workspace.folderWorkspace
+        ? this.folderWorkspaceToResolvedWorktree(workspace.folderWorkspace)
+        : await this.resolveWorktreeSelector(`id:${workspace.id}`)
+      const inventory = await this.refreshPtyWorktreeRecordsWithControllerInventory(
+        [resolvedWorkspace],
+        workspace.id,
+        undefined,
+        workspace.connectionId ?? null
+      )
+      if (!inventory) {
+        throw new Error('terminal_liveness_unavailable')
+      }
+      return this.adoptTerminalOrphansFromInventoryUnderMutation(request, workspace, inventory)
+    })
   }
 }

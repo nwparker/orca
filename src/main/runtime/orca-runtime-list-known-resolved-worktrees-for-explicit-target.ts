@@ -33,7 +33,9 @@ export class OrcaRuntimeWithListKnownResolvedWorktreesForExplicitTarget extends 
     }
     const target = splitWorktreeIdForFilesystem(targetWorktreeId)
     if (!target?.repoId || !target.worktreePath) {
-      return []
+      // Folder workspace keys have no repo/path tuple, but the converted row
+      // is already authoritative for this explicit target.
+      return [targetWorktree]
     }
     const worktreeIds = new Set(
       Object.keys(this.store.getAllWorktreeMeta()).filter((worktreeId) => {

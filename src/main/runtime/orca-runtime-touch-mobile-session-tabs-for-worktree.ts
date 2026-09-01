@@ -67,44 +67,12 @@ export class OrcaRuntimeWithTouchMobileSessionTabsForWorktree extends OrcaRuntim
     leafId: string,
     candidatePtyId: string | null | undefined
   ): boolean {
-    const session = this.getWorkspaceSessionForWorktree(worktreeId)
+    // Why `?? undefined`: the absence of a session is what licenses membership,
+    // so a partition miss must read as absent and not as a distinct null value.
+    const session = this.getWorkspaceSessionForWorktree(worktreeId) ?? undefined
     const repoId = getRepoIdFromWorktreeId(worktreeId)
-    const pty = candidatePtyId ? this.ptysById.get(candidatePtyId) : undefined
-    const pane = parsePaneKey(pty?.paneKey ?? '')
-    const hasExactLiveBinding = Boolean(
-      pty?.connected &&
-      pty.worktreeId === worktreeId &&
-      pty.tabId === parentTabId &&
-      pane?.leafId === leafId
-    )
-    if (candidatePtyId && this.retiredMobileSessionPtyIds.has(candidatePtyId)) {
-      return false
-    }
-    if (session && this.pendingMobileTerminalCreatesByKey.has(`${worktreeId}::${parentTabId}`)) {
-      return true
-    }
-    if (session) {
-      const persistedTabs = session.tabsByWorktree?.[worktreeId] ?? []
-      const persistedParent = persistedTabs.find((tab) => tab.id === parentTabId)
-      const persistedPtyIds = new Set(
-        persistedParent
-          ? [
-              persistedParent.ptyId,
-              ...Object.values(session.terminalLayoutsByTabId?.[parentTabId]?.ptyIdsByLeafId ?? {})
-            ].filter((ptyId): ptyId is string => typeof ptyId === 'string')
-          : []
-      )
-      if (
-        persistedParent &&
-        candidatePtyId &&
-        !persistedPtyIds.has(candidatePtyId) &&
-        !hasExactLiveBinding
-      ) {
-        return false
-      }
-    }
     if (
-      !hasHostAuthoritativeTerminalMembership(session ?? undefined, worktreeId) &&
+      !hasHostAuthoritativeTerminalMembership(session, worktreeId) &&
       (session !== undefined || !this.terminalTopologyRevisionByRepoId.has(repoId))
     ) {
       return true
@@ -115,7 +83,14 @@ export class OrcaRuntimeWithTouchMobileSessionTabsForWorktree extends OrcaRuntim
     if (!candidatePtyId) {
       return false
     }
-    return hasExactLiveBinding
+    const pty = this.ptysById.get(candidatePtyId)
+    const pane = parsePaneKey(pty?.paneKey ?? '')
+    return Boolean(
+      pty?.connected &&
+      pty.worktreeId === worktreeId &&
+      pty.tabId === parentTabId &&
+      pane?.leafId === leafId
+    )
   }
 
   protected reconcileMobileSessionRetirementFences(
