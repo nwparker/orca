@@ -222,7 +222,9 @@ describe('handleSwitchTerminalTab', () => {
       'wt-1': [
         {
           id: 'group-1',
-          activeTabId: 'tab-1',
+          // Keep the unified pointer aligned with the legacy entity while the
+          // third row is still missing from the visible projection.
+          activeTabId: 'tab-2',
           tabOrder: ['tab-1', 'tab-2', 'tab-3']
         }
       ]
@@ -283,21 +285,41 @@ describe('handleSwitchTerminalTab', () => {
     expect(store.setActiveTabType).toHaveBeenCalledWith('terminal')
   })
 
-  it('does not swallow a switch when legacy and unified active ids disagree during hydration', () => {
+  it('cycles from the unified active terminal when the legacy id is stale', () => {
     const store = makeStore('terminal')
-    store.activeTabId = 'term-other'
+    store.activeTabId = 'term-a'
     store.groupsByWorktree = {
-      'wt-1': [{ id: 'group-1', activeTabId: 'tab-shared' }]
+      'wt-1': [{ id: 'group-1', activeTabId: 'tab-b' }]
     }
     getStateMock.mockReturnValue(store)
     getActiveTabNavOrderMock.mockReturnValue([
-      { type: 'terminal', id: 'term-shared', tabId: 'tab-shared' },
-      { type: 'terminal', id: 'term-other', tabId: 'tab-other' }
+      { type: 'terminal', id: 'term-a', tabId: 'tab-a' },
+      { type: 'terminal', id: 'term-b', tabId: 'tab-b' },
+      { type: 'terminal', id: 'term-c', tabId: 'tab-c' }
     ])
 
     expect(handleSwitchTerminalTab(1)).toBe(true)
-    expect(store.setActiveTab).toHaveBeenCalledWith('term-shared')
-    expect(store.activateTab).toHaveBeenCalledWith('tab-shared')
+    expect(store.setActiveTab).toHaveBeenCalledWith('term-c')
+    expect(store.activateTab).toHaveBeenCalledWith('tab-c')
+    expect(store.setActiveTabType).toHaveBeenCalledWith('terminal')
+  })
+
+  it('cycles backward from the unified active terminal when the legacy id is stale', () => {
+    const store = makeStore('terminal')
+    store.activeTabId = 'term-a'
+    store.groupsByWorktree = {
+      'wt-1': [{ id: 'group-1', activeTabId: 'tab-b' }]
+    }
+    getStateMock.mockReturnValue(store)
+    getActiveTabNavOrderMock.mockReturnValue([
+      { type: 'terminal', id: 'term-a', tabId: 'tab-a' },
+      { type: 'terminal', id: 'term-b', tabId: 'tab-b' },
+      { type: 'terminal', id: 'term-c', tabId: 'tab-c' }
+    ])
+
+    expect(handleSwitchTerminalTab(-1)).toBe(true)
+    expect(store.setActiveTab).toHaveBeenCalledWith('term-a')
+    expect(store.activateTab).toHaveBeenCalledWith('tab-a')
     expect(store.setActiveTabType).toHaveBeenCalledWith('terminal')
   })
 

@@ -351,12 +351,20 @@ export function handleSwitchTerminalTab(direction: number): boolean {
     ? (store.groupsByWorktree?.[worktreeId] ?? []).find((group) => group.id === activeGroupId)
         ?.activeTabId
     : null
-  // Why: when an editor/browser tab is active, jump to the first terminal on
-  // forward navigation instead of skipping to index 1.
-  const exactIndex = activeGroupTabId
-    ? terminalTabs.findIndex((tab) => tab.tabId === activeGroupTabId && tab.id === currentId)
-    : -1
-  const idx = exactIndex >= 0 ? exactIndex : terminalTabs.findIndex((tab) => tab.id === currentId)
+  // The unified group pointer is authoritative while a terminal is active. Legacy
+  // entity state can lag one update behind it during activation/hydration, so do
+  // not let that stale id move the cycle from a different row.
+  const unifiedActiveIndex =
+    store.activeTabType === 'terminal' && activeGroupTabId
+      ? terminalTabs.findIndex((tab) => tab.tabId === activeGroupTabId)
+      : -1
+  // When the group pointer is unavailable (legacy layout or an incomplete
+  // projection), retain the entity-id fallback. Non-terminal tabs intentionally
+  // start at the edge of the terminal list in the requested direction.
+  const idx =
+    unifiedActiveIndex >= 0
+      ? unifiedActiveIndex
+      : terminalTabs.findIndex((tab) => tab.id === currentId)
   // Why: only no-op when the sole terminal is already focused. With one terminal
   // and an editor/browser active, the chord must still jump to that terminal -
   // that is the whole point of the shortcut. The single-terminal-already-active
@@ -370,9 +378,10 @@ export function handleSwitchTerminalTab(direction: number): boolean {
   // tab (e.g. single-terminal with that terminal focused but via a different
   // code path). Redundant setActiveTab calls trigger unnecessary subscriber
   // work in components that react to active-tab changes.
-  const nextIsActive = next.tabId
-    ? next.tabId === activeGroupTabId && next.id === currentId
-    : next.id === store.activeTabId
+  const nextIsActive =
+    store.activeTabType === 'terminal' && unifiedActiveIndex >= 0
+      ? next.tabId === activeGroupTabId
+      : next.id === currentId
   if (nextIsActive && store.activeTabType === 'terminal') {
     return false
   }
