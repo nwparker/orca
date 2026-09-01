@@ -1,12 +1,11 @@
 import { toRelaySshPtyId } from './ssh-pty-id'
 import { SSH_SOURCE_RESTORE_REQUIRED_ERROR } from './ssh-pty-errors'
-import type { PtySpawnResult } from './types'
+import type { PtySpawnOptions, PtySpawnResult } from './types'
 import {
   reattachSshPtySessionWithExitFence,
   type SshPtyReattachResult
 } from './ssh-pty-session-reattach'
 import type { SshPtySpawnExitRaceTracker } from './ssh-pty-spawn-exit-race'
-import type { PtySpawnOptions } from './types'
 import type { SshChannelMultiplexer } from '../ssh/ssh-channel-multiplexer'
 import type { PtySourceReceivingActivation } from '../../shared/pty-source-receiving-activation'
 import type { SshPtyReceivingActivationLease } from './ssh-pty-notification-routing'

@@ -10,11 +10,11 @@ import {
 import {
   cleanupDockerSshRelayTarget,
   enableDockerSshRelayTargetShellTitle,
+  execDockerSshRelayTargetCommand,
   startDockerSshRelayTarget,
   type DockerSshRelayTarget
 } from './helpers/docker-ssh-relay-target'
 import { connectDockerSshRelayTarget } from './helpers/docker-ssh-relay-connection'
-import { execDockerSshRelayTargetCommand } from './helpers/docker-ssh-relay-target'
 import {
   clearDockerSshRelayFaults,
   dropDockerSshRelayTransport
