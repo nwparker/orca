@@ -89,6 +89,27 @@ describe('SSH PTY session reattach restore retry', () => {
     expect(result.sourceRecovery).toMatchObject({ status: 'restoreRequired' })
   })
 
+  it('honors spawn cancellation before a restore retry', async () => {
+    const abort = new AbortController()
+    const request = vi.fn(
+      (_method: string, _params: Record<string, unknown>, options?: { signal?: AbortSignal }) => {
+        expect(options?.signal).toBe(abort.signal)
+        abort.abort()
+        return Promise.resolve(restoreRequired)
+      }
+    )
+
+    await expect(
+      reattachSshPtySession({
+        mux: { request } as never,
+        connectionId: 'conn-1',
+        sessionId: 'pty-live',
+        options: { cols: 80, rows: 24, sessionId: 'pty-live', signal: abort.signal }
+      })
+    ).rejects.toMatchObject({ name: 'AbortError' })
+    expect(request).toHaveBeenCalledOnce()
+  })
+
   it('waits for provisional delivery rollback before returning a restore failure', async () => {
     let finishRollback!: (result: boolean) => void
     const finalRollback = new Promise<boolean>((resolve) => {

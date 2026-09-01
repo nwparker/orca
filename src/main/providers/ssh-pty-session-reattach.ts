@@ -77,6 +77,7 @@ export async function requestSshPtyAttach(args: {
   mux: SshChannelMultiplexer
   relayPtyId: string
   params: Record<string, unknown>
+  signal?: AbortSignal
   timeoutMs?: number
   commitSourceActivation?: boolean
   installSourceActivation?: (
@@ -93,6 +94,7 @@ export async function requestSshPtyAttach(args: {
   }
   try {
     const rawResult = await args.mux.request('pty.attach', args.params, {
+      ...(args.signal === undefined ? {} : { signal: args.signal }),
       ...(args.timeoutMs === undefined ? {} : { timeoutMs: args.timeoutMs }),
       beforeResolve: (value) => installFromResult(parseSshPtyAttachResult(value))
     })
@@ -199,9 +201,11 @@ export async function reattachSshPtySession(args: {
     const expectedTabId = args.options.tabId ?? args.options.env?.ORCA_TAB_ID
     let attachResult: SshPtyAttachResult
     for (let attempt = 1; ; attempt += 1) {
+      args.options.signal?.throwIfAborted()
       attachResult = await requestSshPtyAttach({
         mux: args.mux,
         relayPtyId: relaySessionId,
+        signal: args.options.signal,
         params: {
           id: relaySessionId,
           cols: args.options.cols,
@@ -224,10 +228,13 @@ export async function reattachSshPtySession(args: {
       }
       // A restore-required result proves the PTY is live; only the source delivery was retired.
       // Roll back any provisional activation before opening the replacement delivery.
-      if (
-        attachResult.sourceActivationLease &&
-        !(await attachResult.sourceActivationLease.rollback())
-      ) {
+      const staleDeliveryCanceled = attachResult.sourceActivationLease
+        ? await attachResult.sourceActivationLease.rollback()
+        : true
+      // A canceled spawn must not spend another attach round-trip after its provisional delivery
+      // is cleaned up; the mux also observes this signal for the in-flight request.
+      args.options.signal?.throwIfAborted()
+      if (!staleDeliveryCanceled) {
         console.warn(
           `[ssh-pty] pty.attach for ${args.sessionId} could not confirm stale delivery cancellation; failing closed`
         )
