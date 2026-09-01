@@ -5,7 +5,7 @@ import {
   type RequestContext,
   type SinkWriteSettlement
 } from './dispatcher'
-import { encodeJsonRpcFrame } from './protocol'
+import { encodeJsonRpcFrame, MessageType } from './protocol'
 import { RelayPtySourcePublication } from './relay-pty-source-publication'
 import { SshPtyConsumerSessionAdapter } from './ssh-pty-consumer-session-adapter'
 
@@ -18,6 +18,15 @@ const endpointIdentity: RelayClientSessionIdentity = {
 
 function requestFrame(id: number, method: string, params: Record<string, unknown>): Buffer {
   return encodeJsonRpcFrame({ jsonrpc: '2.0', id, method, params }, id, 0)
+}
+
+function responseResult(buffer: Buffer): Record<string, unknown> | null {
+  if (buffer[0] !== MessageType.Regular) {
+    return null
+  }
+  const length = buffer.readUInt32BE(9)
+  const message = JSON.parse(buffer.subarray(13, 13 + length).toString('utf8'))
+  return message.id === undefined ? null : (message.result ?? null)
 }
 
 async function flushRequests(): Promise<void> {
@@ -34,8 +43,10 @@ describe('PTY source activation across a transport change', () => {
 
   async function createHarness() {
     const settlements: ((result: SinkWriteSettlement) => void)[] = []
+    const writes: Buffer[] = []
     dispatcher = new RelayDispatcher(
-      (_data, onSettled) => {
+      (data, onSettled) => {
+        writes.push(Buffer.from(data))
         onSettled({ ok: true })
         return true
       },
@@ -56,7 +67,7 @@ describe('PTY source activation across a transport change', () => {
       })
     )
     await flushRequests()
-    return { adapter, publication, settlements }
+    return { adapter, publication, settlements, writes }
   }
 
   function contextOn(
@@ -124,5 +135,87 @@ describe('PTY source activation across a transport change', () => {
     ).toBe(false)
     expect(cancelDelivery).not.toHaveBeenCalled()
     expect(staleSettlements).toHaveLength(0)
+  })
+
+  it('does not release a replacement fence from a stale activation', async () => {
+    const { publication, settlements, writes } = await createHarness()
+    expect(publication.activate('pty-1', 'incarnation-1', contextOn(0, settlements))).toBe('opened')
+    settlements[0]({ ok: true })
+    const activation = publication.receivingActivation('pty-1', 1)!
+    const ownerGrant = writes.map(responseResult).find((result) => result?.ownerLease)!
+
+    // The old transport arms its rotation fence while waiting for a checkpoint-safe send.
+    await expect(publication.waitForPendingSend('pty-1')).resolves.toBe(true)
+
+    const replacementWrites: Buffer[] = []
+    const replacementClientId = dispatcher!.attachClient(
+      (data, onSettled) => {
+        replacementWrites.push(Buffer.from(data))
+        onSettled({ ok: true })
+        return true
+      },
+      { supportsWriteCallback: true },
+      endpointIdentity
+    )
+    dispatcher!.feedClient(
+      replacementClientId,
+      requestFrame(2, 'pty.openClient', {
+        protocolVersion: 1,
+        clientInstanceId: 'client-1',
+        requestedRole: 'session-owner',
+        resume: {
+          ownerGeneration: ownerGrant.ownerGeneration,
+          ownerLease: ownerGrant.ownerLease
+        },
+        capabilities: { outputFlowControl: { versions: [1], requestedWindowSu: 4 } }
+      })
+    )
+    await flushRequests()
+
+    const replacementSettlements: ((result: SinkWriteSettlement) => void)[] = []
+    const recovery = {
+      status: 'checkpoint' as const,
+      clientGeneration: activation.clientGeneration,
+      ownerGeneration: activation.ownerGeneration,
+      ptyIncarnation: activation.ptyIncarnation,
+      deliveryToken: activation.deliveryToken,
+      acceptedSourceEndSu: 0
+    }
+    expect(
+      publication.activate(
+        'pty-1',
+        'incarnation-1',
+        {
+          ...contextOn(0, replacementSettlements),
+          clientId: replacementClientId
+        },
+        recovery
+      )
+    ).toMatchObject({ status: 'pending' })
+    replacementSettlements[0]({ ok: true })
+
+    // Arm the replacement fence, then let the old, now-stale activation resume.
+    await expect(publication.waitForPendingSend('pty-1')).resolves.toBe(true)
+    expect(
+      publication.activate(
+        'pty-1',
+        'incarnation-1',
+        {
+          ...contextOn(0, []),
+          isStale: () => true
+        },
+        recovery
+      )
+    ).toBe(false)
+    expect(publication.publish('pty-1', { data: 'replacement-output' }, false)).toBe(false)
+
+    // Release the replacement fence through its owning transport so this test leaves no parked work.
+    expect(
+      publication.activate('pty-1', 'incarnation-1', {
+        ...contextOn(0, []),
+        clientId: replacementClientId
+      })
+    ).toBe('existing')
+    expect(replacementWrites.length).toBeGreaterThan(0)
   })
 })

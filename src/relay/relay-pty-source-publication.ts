@@ -8,6 +8,7 @@ import {
   createPtySourceReceivingActivation,
   pendingPtySourceRecoveryResult,
   registerPtySourceActivationSettlement,
+  releaseOwnedPtySourceRotationFence,
   samePtySourceRecoveryRequest
 } from './relay-pty-source-activation'
 import {
@@ -69,13 +70,14 @@ export class RelayPtySourcePublication {
     context: RequestContext | undefined,
     recovery?: PtySourceRecoveryRequest
   ): false | 'opened' | 'rotated' | 'existing' | PtySourceRecoveryResult {
-    // A superseded request must not retire or rotate the delivery opened by its replacement.
+    let current = this.deliveries.get(id)
+    // A superseded request must not retire or rotate the delivery opened by its replacement, so it
+    // may only release a fence on a delivery it still owns.
     if (!context?.onResponseSettled || context.isStale()) {
-      this.sender.releaseRotationFence(this.deliveries.get(id))
+      releaseOwnedPtySourceRotationFence(current, context, this.sender)
       return false
     }
     const mode = this.session.deliveryMode(context.clientId)
-    let current = this.deliveries.get(id)
     if (mode === 'unadmitted' || mode === 'subscriber') {
       this.sender.releaseRotationFence(current)
       return false
@@ -94,7 +96,7 @@ export class RelayPtySourcePublication {
       sameClientTransport(current, context) &&
       !current.restoreRequired &&
       current.sourceExitState !== 'pending' &&
-      this.deliveryClosedUnderRecord(current)
+      ptySourceDeliveryClosed(this.session, current.identity)
     ) {
       // Why: a canceled delivery can never resume as 'existing'; retire it so re-attach opens fresh.
       this.sender.wakeSendWaiters(current)
@@ -292,10 +294,6 @@ export class RelayPtySourcePublication {
   dispose = (): void => {
     this.legacyExits.clear()
     this.sender.dispose()
-  }
-
-  private deliveryClosedUnderRecord(record: RelayPtySourceDeliveryRecord): boolean {
-    return ptySourceDeliveryClosed(this.session, record.identity)
   }
 
   private registerActivationSettlement(

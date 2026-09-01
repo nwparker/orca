@@ -105,8 +105,9 @@ test.describe('SSH transport drop recovery', () => {
 
       // A marker, not a prompt: a prompt reappears on its own, so it cannot tell restored
       // scrollback from a shell that simply started again.
-      const marker = `DROP_MARKER_${Date.now()}`
-      await execInTerminal(orcaPage, ptyId, `echo ${marker}`)
+      const markerSuffix = Date.now()
+      const marker = `DROP_MARKER_${markerSuffix}`
+      await execInTerminal(orcaPage, ptyId, `printf 'DROP_MARKER_%s\\n' ${markerSuffix}`)
       await waitForTerminalOutput(orcaPage, marker, 30_000)
 
       const dropped = dropDockerSshRelayTransport(target)
@@ -129,11 +130,12 @@ test.describe('SSH transport drop recovery', () => {
 
       // And it must still be wired to a shell that answers — a pane can repaint and still be dead,
       // which is the failure mode a content-only assertion misses.
-      const afterMarker = `DROP_AFTER_${Date.now()}`
+      const afterMarkerSuffix = Date.now()
+      const afterMarker = `DROP_AFTER_${afterMarkerSuffix}`
       await execInTerminal(
         orcaPage,
         await waitForActivePanePtyId(orcaPage, 60_000),
-        `echo ${afterMarker}`
+        `printf 'DROP_AFTER_%s\\n' ${afterMarkerSuffix}`
       )
       await waitForTerminalOutput(orcaPage, afterMarker, 60_000)
     } finally {
@@ -205,11 +207,12 @@ test.describe('SSH transport drop recovery', () => {
       ).toBeLessThan(200_000)
 
       // And the session must still be usable, not merely alive.
-      const marker = `FLOOD_AFTER_${Date.now()}`
+      const markerSuffix = Date.now()
+      const marker = `FLOOD_AFTER_${markerSuffix}`
       await execInTerminal(
         orcaPage,
         await waitForActivePanePtyId(orcaPage, 240_000),
-        `echo ${marker}`
+        `printf 'FLOOD_AFTER_%s\\n' ${markerSuffix}`
       )
       await waitForTerminalOutput(orcaPage, marker, 60_000, 20_000)
     } finally {

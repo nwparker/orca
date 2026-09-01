@@ -6,6 +6,7 @@ import type {
 import type { PtySourceReceivingActivation } from '../shared/pty-source-receiving-activation'
 import type { PtySourceDeliveryIdentity } from '../shared/pty-source-credit-contract'
 import type { RequestContext } from './dispatcher'
+import { sameClientTransport } from './relay-pty-source-delivery-record'
 import type {
   RelayPtySourceDeliveryRecord,
   RelayPtySourceSendScheduler
@@ -102,4 +103,15 @@ export function samePtySourceRecoveryRequest(
     received.ptyIncarnation === expected.ptyIncarnation &&
     received.acceptedSourceEndSu === expected.acceptedSourceEndSu
   )
+}
+
+/** Release a rotation fence only when the activation still owns its transport. */
+export function releaseOwnedPtySourceRotationFence(
+  record: RelayPtySourceDeliveryRecord | undefined,
+  context: RequestContext | undefined,
+  sender: RelayPtySourceSendScheduler
+): void {
+  if (context && record && sameClientTransport(record, context)) {
+    sender.releaseRotationFence(record)
+  }
 }
