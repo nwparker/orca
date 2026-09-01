@@ -240,7 +240,7 @@ export class RelayPtySourcePublication {
     }
     if (!output.sourceAccepted && !appendPtySourceOutput(this.session, record, output)) {
       this.counters.appendDenied++
-      if (this.deliveryClosedUnderRecord(record)) {
+      if (ptySourceDeliveryClosed(this.session, record.identity)) {
         this.sender.wakeSendWaiters(record)
         this.deliveries.delete(id)
         // Why: deferred — publish() can run inside flushPendingOutput's captured-queue drain,
