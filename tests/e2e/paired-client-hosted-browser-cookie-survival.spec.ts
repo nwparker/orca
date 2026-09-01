@@ -7,6 +7,10 @@ import {
   launchPairedElectronClient,
   type PairedElectronClient
 } from './helpers/paired-electron-client'
+import {
+  refreshAuthorityRuntimeId,
+  waitForRelaunchedRuntime
+} from './helpers/client-hosted-runtime-relaunch'
 
 const COOKIE_NAME = 'sta4150'
 const COOKIE_VALUE = 'survivor'
@@ -253,42 +257,6 @@ async function readClientSessionCookie(
     },
     { name: COOKIE_NAME, partition, url }
   )
-}
-
-/** Re-reads the runtime's per-process id from the live connection, not the cached status. */
-async function refreshAuthorityRuntimeId(client: PairedElectronClient): Promise<string | null> {
-  return client.page
-    .evaluate(async (environmentId) => {
-      await window.api.runtimeEnvironments.connect({ selector: environmentId })
-      await window.__store?.getState().refreshRuntimeEnvironmentStatus(environmentId)
-      return (
-        window.__store?.getState().runtimeStatusByEnvironmentId.get(environmentId)?.status
-          ?.runtimeId ?? null
-      )
-    }, client.environmentId)
-    .catch(() => null)
-}
-
-/**
- * Waits until the client is talking to a genuinely new runtime process. A changed
- * `runtimeId` is the point of the test: it is the per-process value the partition scheme
- * deliberately stopped hashing, so the cookie must survive precisely while it changes.
- */
-async function waitForRelaunchedRuntime(
-  client: PairedElectronClient,
-  previousRuntimeId: string
-): Promise<string> {
-  await expect
-    .poll(() => refreshAuthorityRuntimeId(client), {
-      timeout: 180_000,
-      message: 'paired client never reconnected to a relaunched runtime process'
-    })
-    .toEqual(expect.not.stringMatching(`^${previousRuntimeId}$`))
-  const runtimeId = await refreshAuthorityRuntimeId(client)
-  if (!runtimeId) {
-    throw new Error('Paired client lost the runtime id after reconnecting')
-  }
-  return runtimeId
 }
 
 test('keeps client-hosted browser cookies across a paired runtime restart', async ({
