@@ -1,6 +1,7 @@
 import { ipcRenderer } from 'electron'
 import type { PersistedUIState } from '../../shared/persisted-ui-state-types'
 import type { KeybindingActionId } from '../../shared/keybindings'
+import type { PreloadApi } from '../api-types'
 
 export const uiStateAndMenuCommandsApi = {
   get: () => ipcRenderer.invoke('ui:get'),
@@ -164,4 +165,4 @@ export const uiStateAndMenuCommandsApi = {
   replyTabCreate: (reply: { requestId: string; browserPageId?: string; error?: string }): void => {
     ipcRenderer.send('browser:tabCreateReply', reply)
   }
-}
+} satisfies Partial<PreloadApi['ui']>
