@@ -359,12 +359,15 @@ export function handleSwitchTerminalTab(direction: number): boolean {
       ? terminalTabs.findIndex((tab) => tab.tabId === activeGroupTabId)
       : -1
   // When the group pointer is unavailable (legacy layout or an incomplete
-  // projection), retain the entity-id fallback. Non-terminal tabs intentionally
-  // start at the edge of the terminal list in the requested direction.
+  // projection), retain the entity-id fallback only for a terminal focus.
+  // Non-terminal ids can collide with terminal entities during hydration and
+  // must start at the edge of the terminal list in the requested direction.
   const idx =
     unifiedActiveIndex >= 0
       ? unifiedActiveIndex
-      : terminalTabs.findIndex((tab) => tab.id === currentId)
+      : store.activeTabType === 'terminal'
+        ? terminalTabs.findIndex((tab) => tab.id === currentId)
+        : -1
   // Why: only no-op when the sole terminal is already focused. With one terminal
   // and an editor/browser active, the chord must still jump to that terminal -
   // that is the whole point of the shortcut. The single-terminal-already-active

@@ -200,6 +200,24 @@ describe('handleSwitchTerminalTab', () => {
     expect(store.setActiveTabType).toHaveBeenCalledWith('terminal')
   })
 
+  it('starts at the edge when a non-terminal id collides with a terminal', () => {
+    const store = makeStore('editor')
+    // During hydration an editor's backing id can temporarily equal a terminal
+    // entity id; that stale editor id must not become the cycle cursor.
+    store.activeFileId = 'term-2'
+    getStateMock.mockReturnValue(store)
+    getActiveTabNavOrderMock.mockReturnValue([
+      { type: 'terminal', id: 'term-1' },
+      { type: 'terminal', id: 'term-2' },
+      { type: 'terminal', id: 'term-3' },
+      { type: 'editor', id: 'term-2' }
+    ])
+
+    expect(handleSwitchTerminalTab(1)).toBe(true)
+    expect(store.setActiveTab).toHaveBeenCalledWith('term-1')
+    expect(store.setActiveTabType).toHaveBeenCalledWith('terminal')
+  })
+
   it('falls back to the worktree terminal order when the active group is still empty', () => {
     const store = makeStore('terminal')
     store.activeTabId = 'term-1'
