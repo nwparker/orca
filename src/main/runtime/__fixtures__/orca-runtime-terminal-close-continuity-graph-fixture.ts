@@ -1,5 +1,5 @@
-import type { WorkspaceSessionState } from '../../shared/workspace-session-state-types'
-import type { OrcaRuntimeService } from './orca-runtime'
+import type { WorkspaceSessionState } from '../../../shared/workspace-session-state-types'
+import type { OrcaRuntimeService } from '../orca-runtime'
 import {
   CANARY_LEAF_ID,
   CANARY_TAB_ID,
@@ -13,7 +13,7 @@ import {
   canarySyncedLeaf,
   canarySyncedTab
 } from './orca-runtime-terminal-close-continuity-state-fixture'
-import { makePaneKey } from '../../shared/stable-pane-id'
+import { makePaneKey } from '../../../shared/stable-pane-id'
 
 export type CloseContinuityGraphOptions = {
   ptyId: string
