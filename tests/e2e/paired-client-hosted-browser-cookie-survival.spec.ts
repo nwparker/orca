@@ -7,16 +7,6 @@ import {
   launchPairedElectronClient,
   type PairedElectronClient
 } from './helpers/paired-electron-client'
-import {
-  openClientHostedFixturePage,
-  selectPairedWorktreeGroup,
-  waitForPairedWorktreeId
-} from './helpers/client-hosted-browser-fixture'
-import { readRestartRendererState } from './helpers/orca-restart'
-import {
-  refreshAuthorityRuntimeId,
-  waitForRelaunchedRuntime
-} from './helpers/client-hosted-runtime-relaunch'
 
 const COOKIE_NAME = 'sta4150'
 const COOKIE_VALUE = 'survivor'
@@ -79,31 +69,156 @@ async function startCookieFixture(): Promise<CookieFixture> {
   }
 }
 
+type MirroredBrowserPage = {
+  localPageId: string
+  placementKind: 'client' | 'server' | null
+  remotePageId: string
+}
+
+async function findPairedWorktreeId(page: Page, repoPath: string): Promise<string | null> {
+  return page.evaluate(
+    (path) =>
+      window.__store
+        ?.getState()
+        .allWorktrees()
+        .find((worktree) => worktree.path === path)?.id ?? null,
+    repoPath
+  )
+}
+
+async function waitForPairedWorktreeId(page: Page, repoPath: string): Promise<string> {
+  await expect
+    .poll(() => findPairedWorktreeId(page, repoPath), {
+      timeout: 120_000,
+      message: 'paired client never received the host worktree'
+    })
+    .not.toBeNull()
+  const worktreeId = await findPairedWorktreeId(page, repoPath)
+  if (!worktreeId) {
+    throw new Error('Paired worktree disappeared after discovery')
+  }
+  return worktreeId
+}
+
+async function selectPairedWorktreeGroup(
+  page: Page,
+  environmentId: string,
+  worktreeId: string
+): Promise<void> {
+  await expect
+    .poll(
+      () =>
+        page.evaluate(
+          ({ environmentId, worktreeId }) => {
+            const state = window.__store?.getState()
+            state?.setActiveWorktree(worktreeId, `runtime:${environmentId}`)
+            return state?.activeGroupIdByWorktree[worktreeId] ?? null
+          },
+          { environmentId, worktreeId }
+        ),
+      {
+        timeout: 120_000,
+        message: 'paired client never activated a tab group for the worktree'
+      }
+    )
+    .not.toBeNull()
+}
+
+async function createProductBrowserPage(page: Page, url: string): Promise<void> {
+  await page.evaluate(async (url) => {
+    const state = window.__store?.getState()
+    if (!state?.activeWorktreeId) {
+      throw new Error('Paired client has no active worktree')
+    }
+    const groupId = state.activeGroupIdByWorktree[state.activeWorktreeId]
+    if (!groupId) {
+      throw new Error('Paired client has no active tab group')
+    }
+    state.setBrowserDefaultUrl(url)
+    await state.openNewBrowserTabInActiveWorkspace(groupId)
+  }, url)
+}
+
+async function findMirroredBrowserPage(
+  page: Page,
+  worktreeId: string,
+  url: string
+): Promise<MirroredBrowserPage | null> {
+  return page.evaluate(
+    ({ url, worktreeId }) => {
+      const state = window.__store?.getState()
+      for (const workspace of state?.browserTabsByWorktree[worktreeId] ?? []) {
+        for (const browserPage of state?.browserPagesByWorkspace[workspace.id] ?? []) {
+          if (!browserPage.url.startsWith(url)) {
+            continue
+          }
+          const handle = state?.remoteBrowserPageHandlesByPageId[browserPage.id]
+          return {
+            localPageId: browserPage.id,
+            placementKind: handle?.placement?.kind ?? null,
+            remotePageId: handle?.remotePageId ?? browserPage.id
+          }
+        }
+      }
+      return null
+    },
+    { url, worktreeId }
+  )
+}
+
+async function openClientHostedFixturePage(
+  client: PairedElectronClient,
+  worktreeId: string,
+  url: string
+): Promise<MirroredBrowserPage> {
+  await createProductBrowserPage(client.page, url)
+  await expect
+    .poll(() => findMirroredBrowserPage(client.page, worktreeId, url), {
+      timeout: 60_000,
+      message: `paired client never materialized ${url}`
+    })
+    .not.toBeNull()
+  const mirrored = await findMirroredBrowserPage(client.page, worktreeId, url)
+  if (!mirrored) {
+    throw new Error(`Mirrored browser page disappeared for ${url}`)
+  }
+  expect(mirrored.placementKind, 'fixture page must be hosted on the viewing desktop').toBe(
+    'client'
+  )
+  await client.page.evaluate(
+    ({ browserPageId, worktreeId }) => {
+      window.__store?.getState().focusBrowserTabInWorktree(worktreeId, browserPageId, {
+        surfacePane: true
+      })
+    },
+    { browserPageId: mirrored.localPageId, worktreeId }
+  )
+  return mirrored
+}
+
 async function readClientWebview(
   page: Page,
   url: string
 ): Promise<{ marker: string | null; partition: string | null } | null> {
-  return readRestartRendererState(() =>
-    page.evaluate(async (prefix) => {
-      for (const candidate of document.querySelectorAll('webview')) {
-        const webview = candidate as Electron.WebviewTag
-        try {
-          if (!webview.getURL().startsWith(prefix)) {
-            continue
-          }
-          return {
-            marker: (await webview.executeJavaScript(
-              'document.querySelector("#marker")?.textContent ?? null'
-            )) as string | null,
-            partition: webview.getAttribute('partition')
-          }
-        } catch {
-          // The guest may still be attaching.
+  return page.evaluate(async (prefix) => {
+    for (const candidate of document.querySelectorAll('webview')) {
+      const webview = candidate as Electron.WebviewTag
+      try {
+        if (!webview.getURL().startsWith(prefix)) {
+          continue
         }
+        return {
+          marker: (await webview.executeJavaScript(
+            'document.querySelector("#marker")?.textContent ?? null'
+          )) as string | null,
+          partition: webview.getAttribute('partition')
+        }
+      } catch {
+        // The guest may still be attaching.
       }
-      return null
-    }, url)
-  )
+    }
+    return null
+  }, url)
 }
 
 async function waitForRenderedClientWebview(
@@ -138,6 +253,42 @@ async function readClientSessionCookie(
     },
     { name: COOKIE_NAME, partition, url }
   )
+}
+
+/** Re-reads the runtime's per-process id from the live connection, not the cached status. */
+async function refreshAuthorityRuntimeId(client: PairedElectronClient): Promise<string | null> {
+  return client.page
+    .evaluate(async (environmentId) => {
+      await window.api.runtimeEnvironments.connect({ selector: environmentId })
+      await window.__store?.getState().refreshRuntimeEnvironmentStatus(environmentId)
+      return (
+        window.__store?.getState().runtimeStatusByEnvironmentId.get(environmentId)?.status
+          ?.runtimeId ?? null
+      )
+    }, client.environmentId)
+    .catch(() => null)
+}
+
+/**
+ * Waits until the client is talking to a genuinely new runtime process. A changed
+ * `runtimeId` is the point of the test: it is the per-process value the partition scheme
+ * deliberately stopped hashing, so the cookie must survive precisely while it changes.
+ */
+async function waitForRelaunchedRuntime(
+  client: PairedElectronClient,
+  previousRuntimeId: string
+): Promise<string> {
+  await expect
+    .poll(() => refreshAuthorityRuntimeId(client), {
+      timeout: 180_000,
+      message: 'paired client never reconnected to a relaunched runtime process'
+    })
+    .toEqual(expect.not.stringMatching(`^${previousRuntimeId}$`))
+  const runtimeId = await refreshAuthorityRuntimeId(client)
+  if (!runtimeId) {
+    throw new Error('Paired client lost the runtime id after reconnecting')
+  }
+  return runtimeId
 }
 
 test('keeps client-hosted browser cookies across a paired runtime restart', async ({
