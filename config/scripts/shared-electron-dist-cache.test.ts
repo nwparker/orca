@@ -163,7 +163,8 @@ describe('publishSharedElectronDist', () => {
     expect(publishSharedElectronDist(dist, entry, { share, protect, ...identity })).toBe(true)
     expect(protectedPaths).toHaveLength(1)
     expect(statSync(path.join(entry.entryPath, 'version')).mode & 0o222).toBe(0)
-    expect(statSync(entry.entryPath).mode & 0o755).toBe(0o755)
+    // Entry directories stay removable, which is what the install transaction actually needs.
+    expect(() => rmSync(entry.entryPath, { recursive: true })).not.toThrow()
   })
 
   it('never overwrites an entry another worktree already published', () => {
@@ -273,12 +274,17 @@ describe('shareElectronDistFromCache', () => {
     const entry = makeEntry(root)
     mkdirSync(entry.cacheRoot, { recursive: true })
     writeDist(entry.entryPath)
-    // A destination whose parent does not exist is the cheapest real failure to force.
-    const stagePath = path.join(root, 'missing-parent', 'stage')
+    // Injected rather than provoked: what counts as an unshareable destination differs per
+    // mechanism, and a byte-copy fallback here would defeat the point of the cache.
+    const stagePath = path.join(root, 'stage')
+    const share = () => {
+      throw new Error('no shareable storage')
+    }
     expect(
       shareElectronDistFromCache(entry, stagePath, {
         version: VERSION,
-        platformPath: PLATFORM_PATH
+        platformPath: PLATFORM_PATH,
+        share
       })
     ).toBe(false)
     expect(existsSync(stagePath)).toBe(false)

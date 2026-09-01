@@ -40,10 +40,24 @@ function makeTree(): { root: string; source: string } {
 }
 
 describe('shareTree', () => {
-  it('clones on macOS and keeps relative symlinks unresolved', () => {
+  // Mechanism selection is asserted with stubs, because the real mechanisms only exist on the host
+  // that owns them: /bin/cp -c is macOS-only and `cp --reflink` is GNU-only.
+  it('prefers the strongest isolation each platform offers', () => {
+    const stub = () =>
+      vi.fn((_source: string, target: string) => mkdirSync(target, { recursive: true }))
+    const stubs = { clone: stub(), reflink: stub(), hardlink: stub() }
+    const { root, source } = makeTree()
+    expect(shareTree(source, path.join(root, 'a'), { platform: 'darwin', ...stubs })).toBe('clone')
+    expect(shareTree(source, path.join(root, 'b'), { platform: 'linux', ...stubs })).toBe('reflink')
+    expect(shareTree(source, path.join(root, 'c'), { platform: 'win32', ...stubs })).toBe(
+      'hardlink'
+    )
+  })
+
+  it('keeps relative symlinks unresolved on whatever this host supports', () => {
     const { root, source } = makeTree()
     const destination = path.join(root, 'shared')
-    expect(shareTree(source, destination, { platform: 'darwin' })).toBe('clone')
+    expect(shareTree(source, destination)).toBeTruthy()
     expect(readFileSync(path.join(destination, 'nested', 'file'), 'utf8')).toBe('contents')
     expect(readlinkSync(path.join(destination, 'relative-link'))).toBe(path.join('nested', 'file'))
   })
@@ -116,8 +130,9 @@ describe('makeTreeReadOnly', () => {
     const { source } = makeTree()
     makeTreeReadOnly(source)
     expect(statSync(path.join(source, 'nested', 'file')).mode & 0o222).toBe(0)
-    expect(statSync(source).mode & 0o755).toBe(0o755)
-    // Why this matters: the install transaction renames dist aside and removes it.
+    // Asserted as behavior, not mode bits: Windows maps chmod onto the read-only attribute alone,
+    // so a directory there never reports 0o755. What has to hold everywhere is that the install
+    // transaction can still rename dist aside and remove it.
     expect(() => rmSync(path.join(source, 'nested'), { recursive: true })).not.toThrow()
   })
 
@@ -130,13 +145,18 @@ describe('makeTreeReadOnly', () => {
     expect(readFileSync(path.join(source, 'nested', 'file'), 'utf8')).toBe('contents')
   })
 
-  it('keeps the executable bit, which Electron needs to launch', () => {
-    const { source } = makeTree()
-    const executable = path.join(source, 'electron')
-    writeFileSync(executable, 'binary', { mode: 0o755 })
-    makeTreeReadOnly(source)
-    expect(statSync(executable).mode & 0o111).toBe(0o111)
-  })
+  it.runIf(process.platform !== 'win32')(
+    'keeps the executable bit, which Electron needs to launch',
+    () => {
+      const { source } = makeTree()
+      const executable = path.join(source, 'electron')
+      writeFileSync(executable, 'binary', { mode: 0o755 })
+      makeTreeReadOnly(source)
+      // Verified on real ext4: 0o555. Windows has no execute bit -- the read-only attribute does
+      // not gate execution there, confirmed by running a read-only hardlinked .exe on NTFS.
+      expect(statSync(executable).mode & 0o111).toBe(0o111)
+    }
+  )
 })
 
 describe('copyPrivateTree', () => {
@@ -165,9 +185,12 @@ describe('copyPrivateTree', () => {
     expect(readlinkSync(path.join(destination, 'relative-link'))).toBe(path.join('nested', 'file'))
   })
 
-  it('reports the clone when the filesystem supports it', () => {
+  it('reports the private mechanism it used', () => {
     const { root, source } = makeTree()
-    expect(copyPrivateTree(source, path.join(root, 'private'), { platform: 'darwin' })).toEqual({
+    const clone = vi.fn((_source: string, target: string) => mkdirSync(target, { recursive: true }))
+    expect(
+      copyPrivateTree(source, path.join(root, 'private'), { platform: 'darwin', clone })
+    ).toEqual({
       mechanism: 'clone',
       copyError: null
     })
