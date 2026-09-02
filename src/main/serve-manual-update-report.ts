@@ -6,7 +6,10 @@ import type {
   ServeManualUpdateMethod,
   ServeManualUpdateReport
 } from '../shared/remote-server-update'
-import { getLinuxRootPackageType } from './linux-update-package-type'
+import {
+  getLinuxRootPackageType,
+  isExternallyManagedLinuxInstall
+} from './linux-update-package-type'
 import {
   fetchNewerReleaseTagsWithReadiness,
   getReleaseTagUrl,
@@ -44,6 +47,12 @@ let checkTimer: ReturnType<typeof setTimeout> | null = null
  * Nothing else is consulted, so an install that proves nothing reports `unknown`.
  */
 export function detectServeUpdateMethod(): ServeManualUpdateMethod {
+  // Why: repackagers (AUR, Nix, container rebuilds) inherit Orca's `package-type` marker verbatim,
+  // so a `deb` marker on a host with no dpkg/apt describes the artifact, not the system that owns
+  // the install (#18100). Reporting `deb` there would advise a download it could never apply.
+  if (isExternallyManagedLinuxInstall()) {
+    return 'externally-managed'
+  }
   const packageType = getLinuxRootPackageType()
   if (packageType) {
     return packageType

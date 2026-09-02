@@ -11,7 +11,14 @@ export type RemoteServerUpdateInstallMode =
  * How a headless `orca serve` host receives new versions. Detected from the running install —
  * `unknown` is reported rather than guessed when nothing proves the method.
  */
-export type ServeManualUpdateMethod = 'deb' | 'rpm' | 'appimage' | 'extracted-appimage' | 'unknown'
+export type ServeManualUpdateMethod =
+  | 'deb'
+  | 'rpm'
+  | 'appimage'
+  | 'extracted-appimage'
+  /** A repackaged root install whose host has no package manager that could apply Orca's package. */
+  | 'externally-managed'
+  | 'unknown'
 
 /**
  * Outcome of the host's own release check. `pending` means no check has completed yet,

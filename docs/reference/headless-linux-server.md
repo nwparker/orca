@@ -469,9 +469,13 @@ updateDocs: ...
 `orca status --json` carries the same contract under
 `result.runtime.remoteUpdateSupport.manualUpdate`, so a monitoring job can read
 `check` and `latestVersion` instead of scraping the releases API. `check` is
-`pending` before the first check completes and `unavailable` when the feed could
-not be reached or the newest release is still publishing — neither means the
-server is current. A paired desktop client sees the same fields on the runtime
+`pending` before the first check completes, `unavailable` when the feed could
+not be reached or the newest release is still publishing, and `disabled` when the
+operator opted out — none of the three means the server is current.
+`updateMethod` reports `externally-managed` when a repackaged install (AUR, Nix,
+a container rebuild) carries Orca's `package-type` marker but the host has no
+package manager that could apply an Orca package; the steps then point at the
+package manager that installed Orca rather than the release page. A paired desktop client sees the same fields on the runtime
 status it already polls.
 
 Orca prints those commands and never runs them. The service runs unprivileged

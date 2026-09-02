@@ -5,11 +5,13 @@ const {
   buildServeManualUpdateStepsMock,
   fetchNewerReleaseTagsWithReadinessMock,
   getLinuxRootPackageTypeMock,
+  isExternallyManagedLinuxInstallMock,
   recordUpdaterLifecycleMock
 } = vi.hoisted(() => ({
   appMock: { isPackaged: true, getVersion: vi.fn(() => '1.4.159') },
   fetchNewerReleaseTagsWithReadinessMock: vi.fn(),
   getLinuxRootPackageTypeMock: vi.fn<() => 'deb' | 'rpm' | null>(() => null),
+  isExternallyManagedLinuxInstallMock: vi.fn<() => boolean>(() => false),
   recordUpdaterLifecycleMock: vi.fn(),
   buildServeManualUpdateStepsMock: vi.fn((input: { method: string; latestVersion: string }) => [
     `install ${input.method} ${input.latestVersion}`
@@ -19,7 +21,8 @@ const {
 vi.mock('electron', () => ({ app: appMock }))
 vi.mock('@electron-toolkit/utils', () => ({ is: { dev: false } }))
 vi.mock('./linux-update-package-type', () => ({
-  getLinuxRootPackageType: getLinuxRootPackageTypeMock
+  getLinuxRootPackageType: getLinuxRootPackageTypeMock,
+  isExternallyManagedLinuxInstall: isExternallyManagedLinuxInstallMock
 }))
 vi.mock('./updater-prerelease-feed', () => ({
   fetchNewerReleaseTagsWithReadiness: fetchNewerReleaseTagsWithReadinessMock,
@@ -53,6 +56,7 @@ describe('serve manual update report', () => {
     appMock.isPackaged = true
     appMock.getVersion.mockReturnValue('1.4.159')
     getLinuxRootPackageTypeMock.mockReset().mockReturnValue(null)
+    isExternallyManagedLinuxInstallMock.mockReset().mockReturnValue(false)
     recordUpdaterLifecycleMock.mockReset()
     buildServeManualUpdateStepsMock.mockClear()
     fetchNewerReleaseTagsWithReadinessMock
@@ -79,6 +83,12 @@ describe('serve manual update report', () => {
   it('detects the install method from evidence the install carries', () => {
     getLinuxRootPackageTypeMock.mockReturnValue('deb')
     expect(detectServeUpdateMethod()).toBe('deb')
+
+    // Why: the same marker on a host with no matching package manager describes the artifact Orca
+    // was built as, not the system that owns the install.
+    isExternallyManagedLinuxInstallMock.mockReturnValue(true)
+    expect(detectServeUpdateMethod()).toBe('externally-managed')
+    isExternallyManagedLinuxInstallMock.mockReturnValue(false)
 
     getLinuxRootPackageTypeMock.mockReturnValue(null)
     process.env.APPIMAGE = '/opt/orca/orca-linux.AppImage'

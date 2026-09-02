@@ -17,7 +17,7 @@ const { buildServeManualUpdateSteps, getServeUpgradeDocUrl, SERVE_UPGRADE_DOC_UR
 const RELEASE_URL = 'https://github.com/stablyai/orca/releases/tag/v1.4.200'
 
 function stepsFor(overrides: {
-  method: 'deb' | 'rpm' | 'appimage' | 'extracted-appimage' | 'unknown'
+  method: 'deb' | 'rpm' | 'appimage' | 'extracted-appimage' | 'externally-managed' | 'unknown'
   appImagePath?: string | null
   latestVersion?: string
   platform?: NodeJS.Platform
@@ -114,6 +114,15 @@ describe('buildServeManualUpdateSteps', () => {
     expect(getServeUpgradeDocUrl('linux')).toBe(SERVE_UPGRADE_DOC_URL)
     expect(getServeUpgradeDocUrl('win32')).toBe('https://www.onorca.dev/docs/remote-servers')
     expect(getServeUpgradeDocUrl('darwin')).toBe('https://www.onorca.dev/docs/remote-servers')
+  })
+
+  it('sends a repackaged install to its own package manager, not the release page', () => {
+    const steps = stepsFor({ method: 'externally-managed' })
+
+    expect(steps.join('\n')).not.toContain(RELEASE_URL)
+    expect(steps[0]).toContain('1.4.200')
+    expect(steps[1]).toContain('Update through whichever package manager installed Orca')
+    expect(buildLinuxPackageInstallCommandMock).not.toHaveBeenCalled()
   })
 
   it('never emits a step Orca could run for the operator', () => {

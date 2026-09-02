@@ -112,6 +112,15 @@ export function buildServeManualUpdateSteps(input: {
   if (input.method === 'appimage' && input.appImagePath && path.isAbsolute(input.appImagePath)) {
     return buildAppImageSteps(input.appImagePath, input.releaseUrl, documentationUrl, restart)
   }
+  if (input.method === 'externally-managed') {
+    // Why: a GitHub download is useless here — no package manager on this host could apply it.
+    // The distribution or repackager that installed Orca owns the upgrade.
+    return [
+      `Orca ${input.latestVersion} is published, but this install came from a repackager or distribution rather than an Orca release artifact.`,
+      'Update through whichever package manager installed Orca; a package downloaded from the Orca release page cannot be applied on this host.',
+      restart
+    ]
+  }
   return [
     `Download the release for this machine's architecture from ${input.releaseUrl}`,
     documentedProcedureStep(documentationUrl),
