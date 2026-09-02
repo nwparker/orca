@@ -405,7 +405,9 @@ depend on an interactive shell profile.
 `orca serve` never updates itself. In headless mode Orca wires up no auto-updater
 at all — the built-in updater only runs in the desktop GUI, and no paired mobile
 or web client can trigger it remotely. Upgrading is always a deliberate step:
-replace the AppImage and restart the service.
+replace the AppImage and restart the service. Orca does report when a newer
+release exists and exactly what to run — see
+[Find out an upgrade is due](#find-out-an-upgrade-is-due).
 
 Two facts make the persisted-state transition predictable:
 
@@ -441,9 +443,45 @@ and the stop; Orca does not yet provide an atomic census-and-stop fence.
 
 Rolling back is the case that needs care — see [Roll back](#roll-back).
 
+### Find out an upgrade is due
+
+The server will not update itself, but it does tell you when it is behind. It
+checks the release feed once a day and reports the result through `orca status`:
+
+```console
+$ orca status
+...
+appVersion: 1.4.159
+updateAutomatic: false
+updateInstallMode: unsupported-headless-serve
+updateReason: manual-service-update-required
+updateMethod: appimage
+updateCheck: update-available
+updateLatestVersion: 1.4.200
+updateRelease: https://github.com/stablyai/orca/releases/tag/v1.4.200
+updateSteps:
+  1. Download the Linux AppImage for this machine's architecture from https://github.com/stablyai/orca/releases/tag/v1.4.200 to /opt/orca/orca-linux.AppImage.new
+  2. /usr/bin/sudo /usr/bin/mv -- '/opt/orca/orca-linux.AppImage.new' '/opt/orca/orca-linux.AppImage'
+  3. Restart the service unit that runs `orca serve`. ...
+updateDocs: ...
+```
+
+`orca status --json` carries the same contract under
+`result.runtime.remoteUpdateSupport.manualUpdate`, so a monitoring job can read
+`check` and `latestVersion` instead of scraping the releases API. `check` is
+`pending` before the first check completes and `unavailable` when the feed could
+not be reached or the newest release is still publishing — neither means the
+server is current. A paired desktop client sees the same fields on the runtime
+status it already polls.
+
+Orca prints those commands and never runs them. The service runs unprivileged
+with no authentication agent available, so the privileged install and the
+restart stay the operator's action.
+
 ### Record the version you deploy
 
-The bundled CLI launcher prints the Orca build with `orca-ide --version`. For an
+The bundled CLI launcher prints the Orca build with `orca-ide --version`, and
+`orca status` reports the same build as `appVersion`. For an
 extracted deployment, that launcher is
 `squashfs-root/resources/bin/orca-ide`; deb/rpm installs and CLI registration put
 it on `PATH`. Do not use `orca-linux.AppImage --version` for this audit because
