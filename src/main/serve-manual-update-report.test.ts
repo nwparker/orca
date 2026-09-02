@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const {
   appMock,
+  buildServeManualUpdateStepsMock,
   fetchNewerReleaseTagsWithReadinessMock,
   getLinuxRootPackageTypeMock,
   recordUpdaterLifecycleMock
@@ -9,7 +10,10 @@ const {
   appMock: { isPackaged: true, getVersion: vi.fn(() => '1.4.159') },
   fetchNewerReleaseTagsWithReadinessMock: vi.fn(),
   getLinuxRootPackageTypeMock: vi.fn<() => 'deb' | 'rpm' | null>(() => null),
-  recordUpdaterLifecycleMock: vi.fn()
+  recordUpdaterLifecycleMock: vi.fn(),
+  buildServeManualUpdateStepsMock: vi.fn((input: { method: string; latestVersion: string }) => [
+    `install ${input.method} ${input.latestVersion}`
+  ])
 }))
 
 vi.mock('electron', () => ({ app: appMock }))
@@ -26,15 +30,14 @@ vi.mock('./updater-lifecycle-diagnostics', () => ({
   recordUpdaterLifecycle: recordUpdaterLifecycleMock
 }))
 vi.mock('./serve-manual-update-steps', () => ({
-  SERVE_UPGRADE_DOC_URL: 'https://docs.example/upgrade',
-  buildServeManualUpdateSteps: (input: { method: string; latestVersion: string }) => [
-    `install ${input.method} ${input.latestVersion}`
-  ]
+  getServeUpgradeDocUrl: () => 'https://docs.example/upgrade',
+  buildServeManualUpdateSteps: buildServeManualUpdateStepsMock
 }))
 
 const {
   detectServeUpdateMethod,
   getServeManualUpdateReport,
+  SERVE_DISABLE_UPDATE_CHECK_ENV,
   startServeManualUpdateReporting,
   stopServeManualUpdateReporting
 } = await import('./serve-manual-update-report')
@@ -51,12 +54,14 @@ describe('serve manual update report', () => {
     appMock.getVersion.mockReturnValue('1.4.159')
     getLinuxRootPackageTypeMock.mockReset().mockReturnValue(null)
     recordUpdaterLifecycleMock.mockReset()
+    buildServeManualUpdateStepsMock.mockClear()
     fetchNewerReleaseTagsWithReadinessMock
       .mockReset()
       .mockResolvedValue({ tags: ['v1.4.200'], state: 'ready' })
     setPlatform('linux')
     delete process.env.APPIMAGE
     delete process.env.APPDIR
+    delete process.env[SERVE_DISABLE_UPDATE_CHECK_ENV]
   })
 
   afterEach(() => {
@@ -64,6 +69,7 @@ describe('serve manual update report', () => {
     setPlatform(originalPlatform)
     delete process.env.APPIMAGE
     delete process.env.APPDIR
+    delete process.env[SERVE_DISABLE_UPDATE_CHECK_ENV]
   })
 
   it('reports nothing until a host starts the contract', () => {
@@ -89,7 +95,10 @@ describe('serve manual update report', () => {
   it('names the newer version and the exact steps once a check succeeds', async () => {
     getLinuxRootPackageTypeMock.mockReturnValue('deb')
 
-    await startServeManualUpdateReporting({ intervalMs: 60_000 })
+    await startServeManualUpdateReporting({
+      installMode: 'unsupported-headless-serve',
+      intervalMs: 60_000
+    })
 
     expect(getServeManualUpdateReport()).toEqual({
       method: 'deb',
@@ -103,9 +112,15 @@ describe('serve manual update report', () => {
   })
 
   it('logs an available update once per version, not once per check', async () => {
-    await startServeManualUpdateReporting({ intervalMs: 60_000 })
+    await startServeManualUpdateReporting({
+      installMode: 'unsupported-headless-serve',
+      intervalMs: 60_000
+    })
     stopServeManualUpdateReporting()
-    await startServeManualUpdateReporting({ intervalMs: 60_000 })
+    await startServeManualUpdateReporting({
+      installMode: 'unsupported-headless-serve',
+      intervalMs: 60_000
+    })
 
     const announcements = recordUpdaterLifecycleMock.mock.calls.filter(
       ([event]) => event === 'headless_serve_update_available'
@@ -120,7 +135,10 @@ describe('serve manual update report', () => {
   it('reports `current` with no steps when nothing newer is published', async () => {
     fetchNewerReleaseTagsWithReadinessMock.mockResolvedValue({ tags: [], state: 'no-newer' })
 
-    await startServeManualUpdateReporting({ intervalMs: 60_000 })
+    await startServeManualUpdateReporting({
+      installMode: 'unsupported-headless-serve',
+      intervalMs: 60_000
+    })
 
     expect(getServeManualUpdateReport()).toMatchObject({
       check: 'current',
@@ -136,7 +154,10 @@ describe('serve manual update report', () => {
   ])('never advertises a version it could not prove (%s)', async (_label, feedResult) => {
     fetchNewerReleaseTagsWithReadinessMock.mockResolvedValue(feedResult)
 
-    await startServeManualUpdateReporting({ intervalMs: 60_000 })
+    await startServeManualUpdateReporting({
+      installMode: 'unsupported-headless-serve',
+      intervalMs: 60_000
+    })
 
     expect(getServeManualUpdateReport()).toMatchObject({
       check: 'unavailable',
@@ -148,16 +169,64 @@ describe('serve manual update report', () => {
   it('reports the method but skips the release check on an unpackaged host', async () => {
     appMock.isPackaged = false
 
-    await startServeManualUpdateReporting({ intervalMs: 60_000 })
+    await startServeManualUpdateReporting({
+      installMode: 'unsupported-headless-serve',
+      intervalMs: 60_000
+    })
 
     expect(fetchNewerReleaseTagsWithReadinessMock).not.toHaveBeenCalled()
     expect(getServeManualUpdateReport()).toMatchObject({ check: 'unavailable', steps: [] })
   })
 
+  it.each(['interactive', 'supervised-headless-serve'] as const)(
+    'makes no network call and publishes nothing on a %s host',
+    async (installMode) => {
+      await startServeManualUpdateReporting({ installMode, intervalMs: 60_000 })
+
+      expect(fetchNewerReleaseTagsWithReadinessMock).not.toHaveBeenCalled()
+      expect(recordUpdaterLifecycleMock).not.toHaveBeenCalled()
+      expect(getServeManualUpdateReport()).toBeNull()
+    }
+  )
+
+  it('makes no outbound call when the operator opts out', async () => {
+    process.env[SERVE_DISABLE_UPDATE_CHECK_ENV] = '1'
+    getLinuxRootPackageTypeMock.mockReturnValue('deb')
+
+    await startServeManualUpdateReporting({
+      installMode: 'unsupported-headless-serve',
+      intervalMs: 60_000
+    })
+
+    expect(fetchNewerReleaseTagsWithReadinessMock).not.toHaveBeenCalled()
+    expect(getServeManualUpdateReport()).toMatchObject({
+      method: 'deb',
+      check: 'disabled',
+      latestVersion: null,
+      steps: []
+    })
+  })
+
+  it('builds the steps once per tag, not once per status poll', async () => {
+    await startServeManualUpdateReporting({
+      installMode: 'unsupported-headless-serve',
+      intervalMs: 60_000
+    })
+
+    const first = getServeManualUpdateReport()
+    const second = getServeManualUpdateReport()
+
+    expect(buildServeManualUpdateStepsMock).toHaveBeenCalledTimes(1)
+    expect(second?.steps).toBe(first?.steps)
+  })
+
   it('follows the running version for the prerelease channel', async () => {
     appMock.getVersion.mockReturnValue('1.4.159-rc.1')
 
-    await startServeManualUpdateReporting({ intervalMs: 60_000 })
+    await startServeManualUpdateReporting({
+      installMode: 'unsupported-headless-serve',
+      intervalMs: 60_000
+    })
 
     expect(fetchNewerReleaseTagsWithReadinessMock).toHaveBeenCalledWith('1.4.159-rc.1', 1, {
       includePrerelease: true

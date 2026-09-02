@@ -478,6 +478,16 @@ Orca prints those commands and never runs them. The service runs unprivileged
 with no authentication agent available, so the privileged install and the
 restart stay the operator's action.
 
+The check is a single outbound request to the GitHub releases feed plus a small
+number of probes confirming the newest release is fully published, once every 24
+hours. It never downloads a build. On an air-gapped or egress-audited host, set
+`ORCA_SERVE_DISABLE_UPDATE_CHECK=1` to switch it off. Add it as one more
+`Environment=` line in the `[Service]` section of the `orca-serve.service` unit
+built in [Systemd Service](#systemd-service), beside the `DISPLAY` and
+`LIBGL_ALWAYS_SOFTWARE` entries already there — do not create a second unit
+file. `orca status` then reports `updateCheck: disabled` and still names the
+install method, so the contract stays readable with no network traffic at all.
+
 ### Record the version you deploy
 
 The bundled CLI launcher prints the Orca build with `orca-ide --version`, and

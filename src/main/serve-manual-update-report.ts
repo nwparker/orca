@@ -1,6 +1,7 @@
 import { app } from 'electron'
 import { is } from '@electron-toolkit/utils'
 import type {
+  RemoteServerUpdateInstallMode,
   ServeManualUpdateCheckState,
   ServeManualUpdateMethod,
   ServeManualUpdateReport
@@ -14,7 +15,14 @@ import {
 import { isPrereleaseVersion } from './updater-fallback'
 import { recordUpdaterLifecycle } from './updater-lifecycle-diagnostics'
 import { AUTO_UPDATE_CHECK_INTERVAL_MS } from './updater/updater-state'
-import { SERVE_UPGRADE_DOC_URL, buildServeManualUpdateSteps } from './serve-manual-update-steps'
+import { buildServeManualUpdateSteps, getServeUpgradeDocUrl } from './serve-manual-update-steps'
+
+/**
+ * Opts a host out of the daily release check. Named for exactly what it disables: an air-gapped or
+ * egress-audited server makes no outbound call, and `check: 'disabled'` says so rather than
+ * masquerading as a check that failed.
+ */
+export const SERVE_DISABLE_UPDATE_CHECK_ENV = 'ORCA_SERVE_DISABLE_UPDATE_CHECK'
 
 type ReportState = {
   method: ServeManualUpdateMethod
@@ -23,6 +31,8 @@ type ReportState = {
   latestVersion: string | null
   latestTag: string | null
   lastAnnouncedVersion: string | null
+  /** Memoized on the tag: `status.get` is client-polled and step building stats the filesystem. */
+  cachedSteps: { tag: string; steps: string[] } | null
 }
 
 let reportState: ReportState | null = null
@@ -58,24 +68,28 @@ export function getServeManualUpdateReport(): ServeManualUpdateReport | null {
   if (!reportState) {
     return null
   }
-  const releaseUrl = reportState.latestTag ? getReleaseTagUrl(reportState.latestTag) : null
-  const steps =
-    reportState.latestVersion && releaseUrl
-      ? buildServeManualUpdateSteps({
-          method: reportState.method,
-          latestVersion: reportState.latestVersion,
-          releaseUrl,
-          appImagePath: reportState.appImagePath
-        })
-      : []
+  const { latestTag, latestVersion } = reportState
+  const releaseUrl = latestTag ? getReleaseTagUrl(latestTag) : null
+  if (latestTag && latestVersion && releaseUrl && reportState.cachedSteps?.tag !== latestTag) {
+    reportState.cachedSteps = {
+      tag: latestTag,
+      steps: buildServeManualUpdateSteps({
+        method: reportState.method,
+        latestVersion,
+        releaseUrl,
+        appImagePath: reportState.appImagePath
+      })
+    }
+  }
+  const cached = latestTag ? reportState.cachedSteps : null
   return {
     method: reportState.method,
     check: reportState.check,
     currentVersion: app.getVersion(),
-    latestVersion: reportState.latestVersion,
+    latestVersion,
     releaseUrl,
-    steps,
-    documentationUrl: SERVE_UPGRADE_DOC_URL
+    steps: cached?.tag === latestTag ? cached.steps : [],
+    documentationUrl: getServeUpgradeDocUrl()
   }
 }
 
@@ -95,6 +109,7 @@ async function runServeUpdateCheck(): Promise<void> {
     state.check = 'current'
     state.latestVersion = null
     state.latestTag = null
+    state.cachedSteps = null
     return
   }
   const tag = result.state === 'ready' ? (result.tags[0] ?? null) : null
@@ -141,10 +156,14 @@ async function runCheckThenSchedule(intervalMs: number): Promise<void> {
  * then poll the release feed on the same daily cadence the desktop updater uses. This never
  * downloads, installs, or restarts anything — it only makes the gap observable.
  */
-export function startServeManualUpdateReporting(
-  options: { intervalMs?: number } = {}
-): Promise<void> {
-  if (reportState) {
+export function startServeManualUpdateReporting(options: {
+  installMode: RemoteServerUpdateInstallMode
+  intervalMs?: number
+}): Promise<void> {
+  // Why: only the mode whose status branch publishes this report may pay for the check. A
+  // supervised or interactive host would otherwise fetch the feed and log advice pointing at a
+  // status surface that never carries it.
+  if (reportState || options.installMode !== 'unsupported-headless-serve') {
     return Promise.resolve()
   }
   reportState = {
@@ -153,7 +172,12 @@ export function startServeManualUpdateReporting(
     check: 'pending',
     latestVersion: null,
     latestTag: null,
-    lastAnnouncedVersion: null
+    lastAnnouncedVersion: null,
+    cachedSteps: null
+  }
+  if (process.env[SERVE_DISABLE_UPDATE_CHECK_ENV]) {
+    reportState.check = 'disabled'
+    return Promise.resolve()
   }
   if (!app.isPackaged || is.dev) {
     // Why: an unpackaged host has no release to compare against; report the method and stop.

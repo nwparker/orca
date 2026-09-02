@@ -14,11 +14,16 @@ export type RemoteServerUpdateInstallMode =
 export type ServeManualUpdateMethod = 'deb' | 'rpm' | 'appimage' | 'extracted-appimage' | 'unknown'
 
 /**
- * Outcome of the host's own release check. `pending` means no check has completed yet and
- * `unavailable` means the last one could not reach a fully published release — neither is
- * evidence that the host is current.
+ * Outcome of the host's own release check. `pending` means no check has completed yet,
+ * `unavailable` means the last one could not reach a fully published release, and `disabled` means
+ * the operator opted out — none of the three is evidence that the host is current.
  */
-export type ServeManualUpdateCheckState = 'pending' | 'current' | 'update-available' | 'unavailable'
+export type ServeManualUpdateCheckState =
+  | 'pending'
+  | 'current'
+  | 'update-available'
+  | 'unavailable'
+  | 'disabled'
 
 /**
  * The operator-facing update contract for a host that cannot update itself.

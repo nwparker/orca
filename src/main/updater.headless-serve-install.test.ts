@@ -549,7 +549,10 @@ describe('headless serve update install handoff', () => {
         reason: 'manual-service-update-required'
       })
 
-      await startServeManualUpdateReporting({ intervalMs: 60_000 })
+      await startServeManualUpdateReporting({
+        installMode: 'unsupported-headless-serve',
+        intervalMs: 60_000
+      })
       const support = getRemoteServerUpdateSupport()
 
       expect(support.reason).toBe('manual-service-update-required')

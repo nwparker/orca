@@ -11,7 +11,7 @@ vi.mock('./linux-package-install-command', () => ({
   quoteForPosixShell: (value: string) => `'${value.split("'").join(`'"'"'`)}'`
 }))
 
-const { buildServeManualUpdateSteps, SERVE_UPGRADE_DOC_URL } =
+const { buildServeManualUpdateSteps, getServeUpgradeDocUrl, SERVE_UPGRADE_DOC_URL } =
   await import('./serve-manual-update-steps')
 
 const RELEASE_URL = 'https://github.com/stablyai/orca/releases/tag/v1.4.200'
@@ -20,12 +20,14 @@ function stepsFor(overrides: {
   method: 'deb' | 'rpm' | 'appimage' | 'extracted-appimage' | 'unknown'
   appImagePath?: string | null
   latestVersion?: string
+  platform?: NodeJS.Platform
 }): string[] {
   return buildServeManualUpdateSteps({
     method: overrides.method,
     latestVersion: overrides.latestVersion ?? '1.4.200',
     releaseUrl: RELEASE_URL,
-    appImagePath: overrides.appImagePath ?? null
+    appImagePath: overrides.appImagePath ?? null,
+    platform: overrides.platform ?? 'linux'
   })
 }
 
@@ -91,6 +93,27 @@ describe('buildServeManualUpdateSteps', () => {
       expect(steps[0]).toContain(RELEASE_URL)
       expect(steps[1]).toContain(SERVE_UPGRADE_DOC_URL)
     }
+  })
+
+  it('keeps systemd vocabulary and the Linux guide off a non-Linux serve host', () => {
+    expect(stepsFor({ method: 'unknown', platform: 'linux' }).join('\n')).toContain(
+      'Restart the service unit that runs `orca serve`'
+    )
+
+    const windowsSteps = stepsFor({ method: 'unknown', platform: 'win32' }).join('\n')
+    expect(windowsSteps).toContain('Windows service or scheduled task')
+    expect(windowsSteps).not.toContain('service unit')
+    expect(windowsSteps).not.toContain('headless-linux-server')
+
+    const macSteps = stepsFor({ method: 'unknown', platform: 'darwin' }).join('\n')
+    expect(macSteps).toContain('launchd job or supervisor')
+    expect(macSteps).not.toContain('headless-linux-server')
+  })
+
+  it('links the Linux guide only on Linux', () => {
+    expect(getServeUpgradeDocUrl('linux')).toBe(SERVE_UPGRADE_DOC_URL)
+    expect(getServeUpgradeDocUrl('win32')).toBe('https://www.onorca.dev/docs/remote-servers')
+    expect(getServeUpgradeDocUrl('darwin')).toBe('https://www.onorca.dev/docs/remote-servers')
   })
 
   it('never emits a step Orca could run for the operator', () => {

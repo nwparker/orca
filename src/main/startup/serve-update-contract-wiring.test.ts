@@ -17,7 +17,7 @@ describe('serve update contract wiring', () => {
 
   it('records the serve install mode before any client can read status', () => {
     const installModeIndex = runtimeSource.indexOf(
-      'setUpdateInstallMode(resolveUpdateInstallMode(true))',
+      'setUpdateInstallMode(serveInstallMode)',
       serveLaunchIndex
     )
     const rpcStartIndex = runtimeSource.indexOf('await runtimeRpc.start()', serveLaunchIndex)
@@ -30,11 +30,22 @@ describe('serve update contract wiring', () => {
 
   it('starts the release check after readiness so stdout stays the readiness API', () => {
     const readinessIndex = runtimeSource.indexOf('await printServeReady(serveOptions)')
-    const reportIndex = runtimeSource.indexOf('startServeManualUpdateReporting()', serveLaunchIndex)
+    const reportIndex = runtimeSource.indexOf(
+      'startServeManualUpdateReporting({ installMode: serveInstallMode })',
+      serveLaunchIndex
+    )
 
     expect(readinessIndex).toBeGreaterThan(serveLaunchIndex)
     expect(reportIndex).toBeGreaterThan(readinessIndex)
     expect(reportIndex).toBeLessThan(desktopLaunchIndex)
+  })
+
+  // Why: the reporter is only consulted inside the unsupported-headless-serve status branch, so an
+  // ungated start would fetch the release feed and log update advice on a supervised host whose own
+  // status surface never carries it.
+  it('pays for the release check only on the mode that publishes the contract', () => {
+    expect(runtimeSource).toContain('const serveInstallMode = resolveUpdateInstallMode(true)')
+    expect(runtimeSource).not.toContain('startServeManualUpdateReporting()')
   })
 
   it('never gives serve an install or restart path', () => {

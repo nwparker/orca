@@ -124,7 +124,8 @@ async function launchServeMode(
 ): Promise<void> {
   // Why: serve opens no window, so nothing else records the install mode; set it before the RPC
   // transport starts or the first status.get describes a desktop install with a broken updater.
-  setUpdateInstallMode(resolveUpdateInstallMode(true))
+  const serveInstallMode = resolveUpdateInstallMode(true)
+  setUpdateInstallMode(serveInstallMode)
   // Why: give managed WSL launchers a brief chance to migrate before headless PTYs go live, without slow repairs withholding all RPC readiness.
   logStartupMilestone('wsl-cli-barrier-start')
   await state.managedWslCliStartupBarrierReady
@@ -205,7 +206,8 @@ async function launchServeMode(
   scheduleAllPendingHistoryTreeRemovals()
   await printServeReady(serveOptions)
   // Why: after readiness, because stdout is the serve readiness API and this check is network-bound.
-  void startServeManualUpdateReporting()
+  // Gated on the mode so only a host that actually publishes the contract pays for the egress.
+  void startServeManualUpdateReporting({ installMode: serveInstallMode })
 }
 
 async function launchDesktopMode(
