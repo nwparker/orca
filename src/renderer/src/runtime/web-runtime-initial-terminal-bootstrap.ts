@@ -13,14 +13,24 @@
  * per environment lets a per-environment teardown release only its own in-flight keys — clearing
  * every environment's latch would release a sibling environment's pending create and let a new
  * subscription for it seed a duplicate, which is this very bug through another door.
+ *
+ * `creating` blocks every other closure while the create RPC is in flight. `awaiting-mirror` is a
+ * create that resolved without the mirror yet holding a row for the worktree: the host may have the
+ * tab and the frame simply has not landed, so the latch stays held — releasing here is what let the
+ * next empty frame seed a duplicate. The next frame the mirror accepts for that worktree is its
+ * answer either way (a row now exists and the predicate declines on its own, or the host genuinely
+ * has no terminal and a retry is right), so that frame releases it. Without that release a create
+ * whose frame never lands would suppress every later auto-seed until environment teardown.
  */
-const inFlightWorktreesByEnvironment = new Map<string, Set<string>>()
+type InitialTerminalBootstrapPhase = 'creating' | 'awaiting-mirror'
+
+const phaseByWorktreeByEnvironment = new Map<string, Map<string, InitialTerminalBootstrapPhase>>()
 
 export function isWebRuntimeInitialTerminalBootstrapInFlight(
   environmentId: string,
   worktreeId: string
 ): boolean {
-  return inFlightWorktreesByEnvironment.get(environmentId)?.has(worktreeId) ?? false
+  return phaseByWorktreeByEnvironment.get(environmentId)?.has(worktreeId) ?? false
 }
 
 /** Claims the bootstrap for this environment's worktree; false when another closure already holds it. */
@@ -28,40 +38,64 @@ export function beginWebRuntimeInitialTerminalBootstrap(
   environmentId: string,
   worktreeId: string
 ): boolean {
-  const worktrees = inFlightWorktreesByEnvironment.get(environmentId)
-  if (worktrees?.has(worktreeId)) {
+  const phases = phaseByWorktreeByEnvironment.get(environmentId)
+  if (phases?.has(worktreeId)) {
     return false
   }
-  if (worktrees) {
-    worktrees.add(worktreeId)
+  if (phases) {
+    phases.set(worktreeId, 'creating')
   } else {
-    inFlightWorktreesByEnvironment.set(environmentId, new Set([worktreeId]))
+    phaseByWorktreeByEnvironment.set(environmentId, new Map([[worktreeId, 'creating']]))
   }
   return true
+}
+
+/** The create resolved but no mirrored row exists yet; hold until the mirror answers. */
+export function markWebRuntimeInitialTerminalBootstrapAwaitingMirror(
+  environmentId: string,
+  worktreeId: string
+): void {
+  const phases = phaseByWorktreeByEnvironment.get(environmentId)
+  if (phases?.has(worktreeId)) {
+    phases.set(worktreeId, 'awaiting-mirror')
+  }
 }
 
 export function endWebRuntimeInitialTerminalBootstrap(
   environmentId: string,
   worktreeId: string
 ): void {
-  const worktrees = inFlightWorktreesByEnvironment.get(environmentId)
-  if (!worktrees) {
+  const phases = phaseByWorktreeByEnvironment.get(environmentId)
+  if (!phases) {
     return
   }
-  worktrees.delete(worktreeId)
-  if (worktrees.size === 0) {
-    inFlightWorktreesByEnvironment.delete(environmentId)
+  phases.delete(worktreeId)
+  if (phases.size === 0) {
+    phaseByWorktreeByEnvironment.delete(environmentId)
+  }
+}
+
+/**
+ * Release a bootstrap that was only waiting on the mirror. A create still in flight keeps its claim:
+ * releasing it on a frame is exactly the re-armed-closure race this latch exists to close.
+ */
+export function releaseWebRuntimeInitialTerminalBootstrapOnMirrorFrame(
+  environmentId: string,
+  worktreeId: string
+): void {
+  if (phaseByWorktreeByEnvironment.get(environmentId)?.get(worktreeId) === 'awaiting-mirror') {
+    endWebRuntimeInitialTerminalBootstrap(environmentId, worktreeId)
   }
 }
 
 export function clearWebRuntimeInitialTerminalBootstrapsForEnvironment(
   environmentId: string
 ): void {
-  inFlightWorktreesByEnvironment.delete(environmentId)
+  phaseByWorktreeByEnvironment.delete(environmentId)
 }
 
 export function clearAllWebRuntimeInitialTerminalBootstraps(): void {
-  inFlightWorktreesByEnvironment.clear()
+  phaseByWorktreeByEnvironment.clear()
 }
 
 export function resetWebRuntimeInitialTerminalBootstrapForTests(): void {

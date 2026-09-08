@@ -18,7 +18,9 @@ import {
 import {
   beginWebRuntimeInitialTerminalBootstrap,
   endWebRuntimeInitialTerminalBootstrap,
-  isWebRuntimeInitialTerminalBootstrapInFlight
+  isWebRuntimeInitialTerminalBootstrapInFlight,
+  markWebRuntimeInitialTerminalBootstrapAwaitingMirror,
+  releaseWebRuntimeInitialTerminalBootstrapOnMirrorFrame
 } from './web-runtime-initial-terminal-bootstrap'
 
 const OTHER_ENV = 'web-env-2'
@@ -201,6 +203,24 @@ describe('applyWebSessionTabsSnapshot', () => {
         hasPersistedTerminalState: false
       })
     ).toBe(false)
+  })
+
+  // Why: a mirror frame is the host's answer, but only for a create that already resolved. Releasing
+  // a still-pending create on a frame is the re-armed-closure race this latch exists to close.
+  it('releases an awaiting-mirror bootstrap on a mirror frame but never a pending create', () => {
+    expect(beginWebRuntimeInitialTerminalBootstrap(ENV, WT)).toBe(true)
+    releaseWebRuntimeInitialTerminalBootstrapOnMirrorFrame(ENV, WT)
+    expect(isWebRuntimeInitialTerminalBootstrapInFlight(ENV, WT)).toBe(true)
+
+    markWebRuntimeInitialTerminalBootstrapAwaitingMirror(ENV, WT)
+    expect(isWebRuntimeInitialTerminalBootstrapInFlight(ENV, WT)).toBe(true)
+    releaseWebRuntimeInitialTerminalBootstrapOnMirrorFrame(ENV, WT)
+    expect(isWebRuntimeInitialTerminalBootstrapInFlight(ENV, WT)).toBe(false)
+  })
+
+  it('does not park a bootstrap that was never claimed', () => {
+    markWebRuntimeInitialTerminalBootstrapAwaitingMirror(ENV, WT)
+    expect(isWebRuntimeInitialTerminalBootstrapInFlight(ENV, WT)).toBe(false)
   })
 
   // Why: the second half of STA-6173. One focus re-runs the subscription effect (environment,

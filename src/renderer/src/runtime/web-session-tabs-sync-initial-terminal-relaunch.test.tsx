@@ -209,8 +209,8 @@ describe('useWebSessionTabsSync initial-terminal bootstrap across an effect re-r
   // then would let the next effect re-run seed a second terminal even though the first create
   // succeeded. The latch is held until a row exists, so the re-run declines.
   it('does not seed again after a create that resolved without mirroring a row', async () => {
-    // The create resolves but writes no tabsByWorktree row (host has not published the tab yet).
-    mocks.createTerminal.mockResolvedValue(undefined)
+    // The create succeeds but writes no tabsByWorktree row (host has not published the tab yet).
+    mocks.createTerminal.mockResolvedValue({ status: 'created' })
 
     const hook = renderHook(() => useWebSessionTabsSync())
     await act(settle)
@@ -251,6 +251,34 @@ describe('useWebSessionTabsSync initial-terminal bootstrap across an effect re-r
     await act(settle)
 
     await publish(findActiveSubscription(1), { type: 'snapshot', ...emptyActiveSnapshot(2) })
+    expect(mocks.createTerminal).toHaveBeenCalledTimes(2)
+    hook.unmount()
+  })
+
+  // Readiness review: the inverse hazard of the test above. A create that succeeds but whose frame
+  // never lands (host accepted, the mirror never got a row) must not hold the latch until environment
+  // teardown. The frame right after the settle is the mirror's answer and may not seed (pre-mirror
+  // window); the one after it decides on real state — no row, host affirms empty — and retries.
+  it('retries after a successful create that never mirrored a row, once the mirror has answered', async () => {
+    mocks.createTerminal.mockResolvedValue({ status: 'created' })
+
+    const hook = renderHook(() => useWebSessionTabsSync())
+    await act(settle)
+
+    await publish(findActiveSubscription(0), { type: 'snapshot', ...emptyActiveSnapshot(1) })
+    expect(mocks.createTerminal).toHaveBeenCalledTimes(1)
+    expect(useAppStore.getState().tabsByWorktree[WORKTREE]).toBeUndefined()
+
+    // The mirror's answer: still empty. Releases the parked bootstrap; must not itself seed.
+    await publish(findActiveSubscription(0), { type: 'snapshot', ...emptyActiveSnapshot(2) })
+    expect(mocks.createTerminal).toHaveBeenCalledTimes(1)
+
+    // A later focus installs a fresh closure; with the latch released, its empty frame may retry.
+    act(() => {
+      useAppStore.setState({ runtimeStatusByEnvironmentId: runtimeStatusMap(2) })
+    })
+    await act(settle)
+    await publish(findActiveSubscription(1), { type: 'snapshot', ...emptyActiveSnapshot(3) })
     expect(mocks.createTerminal).toHaveBeenCalledTimes(2)
     hook.unmount()
   })
