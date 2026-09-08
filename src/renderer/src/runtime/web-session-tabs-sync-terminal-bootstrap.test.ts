@@ -6,6 +6,7 @@ import {
   shouldRespawnWebRuntimeTerminalAfterWake,
   shouldSyncRuntimeSessionTabs
 } from './web-session-tabs-sync'
+import { UNPUBLISHED_WORKTREE_PUBLICATION_EPOCH } from '../../../shared/runtime-types'
 import {
   ENV,
   HOST_SURFACE_ID,
@@ -19,6 +20,10 @@ import {
   endWebRuntimeInitialTerminalBootstrap,
   isWebRuntimeInitialTerminalBootstrapInFlight
 } from './web-runtime-initial-terminal-bootstrap'
+import {
+  clearWebSessionTabsTrackingForWorktree,
+  clearWebSessionTabsTrackingForEnvironment
+} from './web-session-tabs-sync/tracking-lifecycle'
 
 vi.mock('../store', () => ({
   useAppStore: {
@@ -124,6 +129,53 @@ describe('applyWebSessionTabsSnapshot', () => {
         hasPersistedTerminalState: false
       })
     ).toBe(true)
+  })
+
+  // Why: a runtime that has published nothing for a worktree still answers a forced snapshot with a
+  // synthesized empty frame (`UNPUBLISHED_WORKTREE_PUBLICATION_EPOCH` at version 0). That is "ask me
+  // later", not a host with zero terminals — seeding on it can duplicate a pane the host is about to
+  // republish after a restart, so it must decline even when no terminal row exists yet.
+  it('does not bootstrap on a synthesized unpublished frame with no terminal row', () => {
+    const unpublished = makeSnapshot([], {
+      publicationEpoch: UNPUBLISHED_WORKTREE_PUBLICATION_EPOCH,
+      snapshotVersion: 0,
+      activeGroupId: null,
+      activeTabId: null,
+      activeTabType: null
+    })
+
+    expect(
+      shouldBootstrapInitialWebRuntimeTerminal({
+        event: { type: 'snapshot', ...unpublished },
+        activeWorktreeId: WT,
+        requestedInitialTerminal: false,
+        snapshotIsFresh: true,
+        localTerminalCount: 0,
+        hasPersistedTerminalState: false
+      })
+    ).toBe(false)
+  })
+
+  // Why: the shared latch outlives the subscription closures, so a create RPC that never settles
+  // during a disconnect would leave the per-worktree key set and suppress the next bootstrap after
+  // reconnect. Tracking teardown must release it, mirroring the wake-respawn latch.
+  it('releases the in-flight bootstrap latch when worktree tracking is cleared', () => {
+    expect(beginWebRuntimeInitialTerminalBootstrap(WT)).toBe(true)
+    expect(isWebRuntimeInitialTerminalBootstrapInFlight(WT)).toBe(true)
+
+    clearWebSessionTabsTrackingForWorktree(ENV, WT)
+
+    expect(isWebRuntimeInitialTerminalBootstrapInFlight(WT)).toBe(false)
+    expect(beginWebRuntimeInitialTerminalBootstrap(WT)).toBe(true)
+  })
+
+  it('releases every in-flight bootstrap latch when the environment is torn down', () => {
+    expect(beginWebRuntimeInitialTerminalBootstrap(WT)).toBe(true)
+    expect(isWebRuntimeInitialTerminalBootstrapInFlight(WT)).toBe(true)
+
+    clearWebSessionTabsTrackingForEnvironment(ENV)
+
+    expect(isWebRuntimeInitialTerminalBootstrapInFlight(WT)).toBe(false)
   })
 
   // Why: the second half of STA-6173. One focus re-runs the subscription effect (environment,
