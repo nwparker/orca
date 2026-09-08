@@ -20,6 +20,8 @@ import {
   endWebRuntimeInitialTerminalBootstrap,
   isWebRuntimeInitialTerminalBootstrapInFlight
 } from './web-runtime-initial-terminal-bootstrap'
+
+const OTHER_ENV = 'web-env-2'
 import {
   clearWebSessionTabsTrackingForWorktree,
   clearWebSessionTabsTrackingForEnvironment
@@ -160,22 +162,45 @@ describe('applyWebSessionTabsSnapshot', () => {
   // during a disconnect would leave the per-worktree key set and suppress the next bootstrap after
   // reconnect. Tracking teardown must release it, mirroring the wake-respawn latch.
   it('releases the in-flight bootstrap latch when worktree tracking is cleared', () => {
-    expect(beginWebRuntimeInitialTerminalBootstrap(WT)).toBe(true)
-    expect(isWebRuntimeInitialTerminalBootstrapInFlight(WT)).toBe(true)
+    expect(beginWebRuntimeInitialTerminalBootstrap(ENV, WT)).toBe(true)
+    expect(isWebRuntimeInitialTerminalBootstrapInFlight(ENV, WT)).toBe(true)
 
     clearWebSessionTabsTrackingForWorktree(ENV, WT)
 
-    expect(isWebRuntimeInitialTerminalBootstrapInFlight(WT)).toBe(false)
-    expect(beginWebRuntimeInitialTerminalBootstrap(WT)).toBe(true)
+    expect(isWebRuntimeInitialTerminalBootstrapInFlight(ENV, WT)).toBe(false)
+    expect(beginWebRuntimeInitialTerminalBootstrap(ENV, WT)).toBe(true)
   })
 
-  it('releases every in-flight bootstrap latch when the environment is torn down', () => {
-    expect(beginWebRuntimeInitialTerminalBootstrap(WT)).toBe(true)
-    expect(isWebRuntimeInitialTerminalBootstrapInFlight(WT)).toBe(true)
+  it('releases the torn-down environment latch but preserves a sibling environment mid-create', () => {
+    // A create for OTHER_ENV is in flight when ENV is torn down. Root cause of the cross-environment
+    // duplicate: the latch was keyed by worktree alone, so ENV's teardown released OTHER_ENV's key
+    // and a fresh OTHER_ENV subscription could seed a second terminal (same STA-6173 defect, other
+    // door). Per-environment keying keeps the sibling latch held.
+    expect(beginWebRuntimeInitialTerminalBootstrap(ENV, WT)).toBe(true)
+    expect(beginWebRuntimeInitialTerminalBootstrap(OTHER_ENV, WT)).toBe(true)
 
     clearWebSessionTabsTrackingForEnvironment(ENV)
 
-    expect(isWebRuntimeInitialTerminalBootstrapInFlight(WT)).toBe(false)
+    expect(isWebRuntimeInitialTerminalBootstrapInFlight(ENV, WT)).toBe(false)
+    expect(isWebRuntimeInitialTerminalBootstrapInFlight(OTHER_ENV, WT)).toBe(true)
+
+    // A freshly installed OTHER_ENV closure passes its own flag false, so only the surviving latch
+    // stops it — proving the sibling create cannot be duplicated by ENV's teardown.
+    const freshEmpty = makeSnapshot([], {
+      activeGroupId: null,
+      activeTabId: null,
+      activeTabType: null
+    })
+    expect(
+      shouldBootstrapInitialWebRuntimeTerminal({
+        event: { type: 'snapshot', ...freshEmpty },
+        activeWorktreeId: WT,
+        requestedInitialTerminal: isWebRuntimeInitialTerminalBootstrapInFlight(OTHER_ENV, WT),
+        snapshotIsFresh: true,
+        localTerminalCount: 0,
+        hasPersistedTerminalState: false
+      })
+    ).toBe(false)
   })
 
   // Why: the second half of STA-6173. One focus re-runs the subscription effect (environment,
@@ -193,18 +218,18 @@ describe('applyWebSessionTabsSnapshot', () => {
         activeWorktreeId: WT,
         // What a freshly installed closure passes: its own flag is false, so only the shared latch
         // can stop it.
-        requestedInitialTerminal: isWebRuntimeInitialTerminalBootstrapInFlight(WT),
+        requestedInitialTerminal: isWebRuntimeInitialTerminalBootstrapInFlight(ENV, WT),
         snapshotIsFresh: true,
         localTerminalCount: 0,
         hasPersistedTerminalState: false
       })
 
     expect(decide()).toBe(true)
-    expect(beginWebRuntimeInitialTerminalBootstrap(WT)).toBe(true)
-    expect(beginWebRuntimeInitialTerminalBootstrap(WT)).toBe(false)
+    expect(beginWebRuntimeInitialTerminalBootstrap(ENV, WT)).toBe(true)
+    expect(beginWebRuntimeInitialTerminalBootstrap(ENV, WT)).toBe(false)
     expect(decide()).toBe(false)
 
-    endWebRuntimeInitialTerminalBootstrap(WT)
+    endWebRuntimeInitialTerminalBootstrap(ENV, WT)
     expect(decide()).toBe(true)
   })
 

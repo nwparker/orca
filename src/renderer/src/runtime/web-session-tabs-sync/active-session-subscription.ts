@@ -36,11 +36,8 @@ import {
   shouldSkipWebRuntimeWakeTerminalRespawn
 } from '../web-runtime-wake-terminal-respawn'
 import { createWebRuntimeSessionTerminal } from '../web-runtime-session'
-import {
-  beginWebRuntimeInitialTerminalBootstrap,
-  endWebRuntimeInitialTerminalBootstrap,
-  isWebRuntimeInitialTerminalBootstrapInFlight
-} from '../web-runtime-initial-terminal-bootstrap'
+import { isWebRuntimeInitialTerminalBootstrapInFlight } from '../web-runtime-initial-terminal-bootstrap'
+import { dispatchWebRuntimeInitialTerminalBootstrap } from '../web-runtime-initial-terminal-bootstrap-dispatch'
 import { toRuntimeWorktreeSelector } from '../runtime-worktree-selector'
 import type { SessionTabsStreamEvent } from './state'
 
@@ -153,7 +150,8 @@ export function installActiveSessionTabsSubscription({
       // switch triggers — without it a second closure seeds a second terminal while the first
       // create is still in flight (STA-6173).
       requestedInitialTerminal:
-        requestedInitialTerminal || isWebRuntimeInitialTerminalBootstrapInFlight(activeWorktreeId),
+        requestedInitialTerminal ||
+        isWebRuntimeInitialTerminalBootstrapInFlight(environmentId, activeWorktreeId),
       snapshotIsFresh: decision.apply,
       localTerminalCount,
       hasPersistedTerminalState: Object.hasOwn(syncState.tabsByWorktree, activeWorktreeId)
@@ -196,13 +194,11 @@ export function installActiveSessionTabsSubscription({
       visibilitySnapshotAccepted.current(environmentId, recovered, receivedFrame, runtimeId)
     }
     try {
-      if (isCurrent() && bootstrap && beginWebRuntimeInitialTerminalBootstrap(activeWorktreeId)) {
-        requestedInitialTerminal = true
-        await createWebRuntimeSessionTerminal({
-          worktreeId: activeWorktreeId,
-          environmentId,
-          activate: true
-        }).finally(() => endWebRuntimeInitialTerminalBootstrap(activeWorktreeId))
+      if (isCurrent() && bootstrap) {
+        // Latch claim, create, and row-conditional release live in the dispatch helper.
+        if (await dispatchWebRuntimeInitialTerminalBootstrap(environmentId, activeWorktreeId)) {
+          requestedInitialTerminal = true
+        }
       } else if (isCurrent() && respawn && beginWebRuntimeWakeTerminalRespawn(activeWorktreeId)) {
         requestedRespawnAfterWake = true
         await createWebRuntimeSessionTerminal({

@@ -203,4 +203,30 @@ describe('useWebSessionTabsSync initial-terminal bootstrap across an effect re-r
     await act(settle)
     hook.unmount()
   })
+
+  // CodeRabbit review: the create awaits its own snapshot refresh, but that refresh can resolve on
+  // an empty, unconfirmed frame that leaves no `tabsByWorktree` row. Releasing the latch on settle
+  // then would let the next effect re-run seed a second terminal even though the first create
+  // succeeded. The latch is held until a row exists, so the re-run declines.
+  it('does not seed again after a create that resolved without mirroring a row', async () => {
+    // The create resolves but writes no tabsByWorktree row (host has not published the tab yet).
+    mocks.createTerminal.mockResolvedValue(undefined)
+
+    const hook = renderHook(() => useWebSessionTabsSync())
+    await act(settle)
+
+    await publish(findActiveSubscription(0), { type: 'snapshot', ...emptyActiveSnapshot(1) })
+    expect(mocks.createTerminal).toHaveBeenCalledTimes(1)
+    expect(useAppStore.getState().tabsByWorktree[WORKTREE]).toBeUndefined()
+
+    // Re-run the active effect (workspace switch back) after the create already settled.
+    act(() => {
+      useAppStore.setState({ runtimeStatusByEnvironmentId: runtimeStatusMap(2) })
+    })
+    await act(settle)
+
+    await publish(findActiveSubscription(1), { type: 'snapshot', ...emptyActiveSnapshot(2) })
+    expect(mocks.createTerminal).toHaveBeenCalledTimes(1)
+    hook.unmount()
+  })
 })
