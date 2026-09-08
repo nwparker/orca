@@ -229,4 +229,29 @@ describe('useWebSessionTabsSync initial-terminal bootstrap across an effect re-r
     expect(mocks.createTerminal).toHaveBeenCalledTimes(1)
     hook.unmount()
   })
+
+  // pullfrog review: `createWebRuntimeSessionTerminal` reports RPC and network failures as a
+  // returned `{ status: 'failed' }`, never a throw. A latch released only in `catch` or once a row
+  // exists therefore stays held after a failed create and suppresses every later auto-seed for the
+  // worktree until teardown. A returned failure must release it so the next focus can retry.
+  it('retries the bootstrap on the next focus after a create that returned failed', async () => {
+    mocks.createTerminal.mockResolvedValue({ status: 'failed', message: 'host unreachable' })
+
+    const hook = renderHook(() => useWebSessionTabsSync())
+    await act(settle)
+
+    await publish(findActiveSubscription(0), { type: 'snapshot', ...emptyActiveSnapshot(1) })
+    expect(mocks.createTerminal).toHaveBeenCalledTimes(1)
+    expect(useAppStore.getState().tabsByWorktree[WORKTREE]).toBeUndefined()
+
+    // The next focus installs a fresh closure; with the latch released, it may seed again.
+    act(() => {
+      useAppStore.setState({ runtimeStatusByEnvironmentId: runtimeStatusMap(2) })
+    })
+    await act(settle)
+
+    await publish(findActiveSubscription(1), { type: 'snapshot', ...emptyActiveSnapshot(2) })
+    expect(mocks.createTerminal).toHaveBeenCalledTimes(2)
+    hook.unmount()
+  })
 })

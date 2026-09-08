@@ -1,5 +1,6 @@
 import { useAppStore } from '../store'
 import { createWebRuntimeSessionTerminal } from './web-runtime-session'
+import type { WebRuntimeTerminalCreateOutcome } from './web-runtime-session-types'
 import {
   beginWebRuntimeInitialTerminalBootstrap,
   endWebRuntimeInitialTerminalBootstrap
@@ -26,13 +27,20 @@ export async function dispatchWebRuntimeInitialTerminalBootstrap(
   if (!beginWebRuntimeInitialTerminalBootstrap(environmentId, worktreeId)) {
     return false
   }
+  let outcome: WebRuntimeTerminalCreateOutcome
   try {
-    await createWebRuntimeSessionTerminal({ worktreeId, environmentId, activate: true })
+    outcome = await createWebRuntimeSessionTerminal({ worktreeId, environmentId, activate: true })
   } catch (error) {
     endWebRuntimeInitialTerminalBootstrap(environmentId, worktreeId)
     throw error
   }
-  if (Object.hasOwn(useAppStore.getState().tabsByWorktree, worktreeId)) {
+  // Why check the outcome: the create reports RPC and network failures as `{ status: 'failed' }`
+  // rather than throwing, so the catch above never sees them. Holding the latch on a returned
+  // failure would suppress every later auto-seed for this worktree until teardown.
+  if (
+    outcome.status === 'failed' ||
+    Object.hasOwn(useAppStore.getState().tabsByWorktree, worktreeId)
+  ) {
     endWebRuntimeInitialTerminalBootstrap(environmentId, worktreeId)
   }
   return true
