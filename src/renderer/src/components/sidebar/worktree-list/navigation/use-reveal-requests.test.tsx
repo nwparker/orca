@@ -121,7 +121,7 @@ describe('revealing a filtered workspace', () => {
     expect(revealWorkspaceFilters).toHaveBeenCalledWith(args.worktrees[0])
   })
 
-  it('clears filters and reveals on the original execution host only after confirmation', async () => {
+  it('adjusts blocking filters and reveals on the original execution host only after confirmation', async () => {
     await render()
     await act(async () => {
       requestScrollToCurrentWorkspaceReveal()
@@ -139,7 +139,7 @@ describe('revealing a filtered workspace', () => {
   })
 
   it.each([true, false])(
-    'reveals immediately when clearing filters is unnecessary (%s)',
+    'reveals immediately when filter adjustment is unnecessary (%s)',
     async (visible) => {
       args = {
         ...args,
