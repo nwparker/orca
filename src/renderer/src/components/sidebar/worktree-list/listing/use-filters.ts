@@ -64,7 +64,11 @@ export function useSidebarWorktreeFilters() {
       getSettingsFocusedExecutionHostId(state.settings)
     )
 
-    if (state.filterRepoIds.length > 0 && !state.filterRepoIds.includes(worktree.repoId)) {
+    if (
+      !worktree.id.startsWith('folder:') &&
+      state.filterRepoIds.length > 0 &&
+      !state.filterRepoIds.includes(worktree.repoId)
+    ) {
       state.setFilterRepoIds([...state.filterRepoIds, worktree.repoId])
     }
     const visibleHostIds = state.visibleWorkspaceHostIds
