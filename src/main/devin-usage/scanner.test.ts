@@ -26,7 +26,9 @@ async function makeTranscriptsDir(): Promise<string> {
   return dir
 }
 
-function transcript(overrides: object = {}): string {
+type TranscriptOverrides = Record<string, unknown>
+
+function transcript(overrides: TranscriptOverrides = {}): string {
   return JSON.stringify({
     session_id: 's1',
     working_directory: '/repo/main',
