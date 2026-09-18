@@ -25,6 +25,7 @@ describe('usage provider IPC handlers', () => {
     registerUsageProviderHandlers({
       claudeUsage: claudeUsage as never,
       codexUsage: codexUsage as never,
+      // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: Registration only forwards this mock; no concrete store methods execute in this test.
       devinUsage: devinUsage as never,
       openCodeUsage: openCodeUsage as never
     })

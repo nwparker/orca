@@ -46,6 +46,8 @@ export type FetchAllCyclePrepared = {
   devinResultPromise: Promise<
     { status: 'fulfilled'; value: ProviderRateLimits } | { status: 'rejected'; reason: unknown }
   >
+  previousDevin: ProviderRateLimits | null
+  devinCredentialFingerprint: string
 }
 
 export abstract class RateLimitServiceFullCyclePreparation extends RateLimitServiceFetchPolicy {
@@ -93,6 +95,10 @@ export abstract class RateLimitServiceFullCyclePreparation extends RateLimitServ
     this.grokAuthConfigured = grokAuthReadResult.status === 'ok'
     const devinCredentialsReadResult = readDevinCredentials()
     this.devinAuthConfigured = devinCredentialsReadResult.status === 'ok'
+    const devinCredentialFingerprint = this.getDevinCredentialFingerprint(
+      devinCredentialsReadResult
+    )
+    const previousDevin = this.previousDevinSnapshot(devinCredentialFingerprint)
 
     // Discard stale data on config change — it belongs to a different session/workspace.
     const currentConfigHash = `${cookie}|${workspaceIdOverride}`
@@ -129,7 +135,7 @@ export abstract class RateLimitServiceFullCyclePreparation extends RateLimitServ
         ? this.withFetchingStatus(null, 'minimax')
         : this.withFetchingStatus(previousState.minimax, 'minimax'),
       grok: this.withFetchingStatus(previousState.grok, 'grok'),
-      devin: this.withFetchingStatus(previousState.devin, 'devin')
+      devin: this.withFetchingStatus(previousDevin, 'devin')
     })
 
     const missingWslCodexHome =
@@ -218,7 +224,9 @@ export abstract class RateLimitServiceFullCyclePreparation extends RateLimitServ
         miniMaxResult
       ],
       grokResultPromise,
-      devinResultPromise
+      devinResultPromise,
+      previousDevin,
+      devinCredentialFingerprint
     }
   }
 }

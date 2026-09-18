@@ -1,3 +1,4 @@
+import { getLocalUsageDay } from './usage-calendar-range'
 import { normalizeComparablePath } from './usage-path-comparison'
 import type { UsageWorktreeResolver } from './usage-worktree-resolver'
 
@@ -26,11 +27,10 @@ export function attributeUsageEvent<T extends UnattributedUsageEvent>(
   event: T,
   resolveWorktree: UsageWorktreeResolver
 ): (T & UsageEventAttribution) | null {
-  const date = new Date(event.timestamp)
-  if (Number.isNaN(date.getTime())) {
+  const day = getLocalUsageDay(event.timestamp)
+  if (!day) {
     return null
   }
-  const day = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
   const worktree = event.cwd ? resolveWorktree(event.cwd) : null
   return {
     ...event,

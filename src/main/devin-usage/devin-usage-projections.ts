@@ -37,20 +37,25 @@ export function buildDevinSummary(
   let inputTokens = 0
   let cachedInputTokens = 0
   let outputTokens = 0
+  let reasoningOutputTokens = 0
   let totalTokens = 0
   let events = 0
   const byModel = new Map<string, number>()
   const byProject = new Map<string, number>()
+  const projectLabels = new Map<string, string>()
   for (const row of daily) {
     inputTokens += row.inputTokens
     cachedInputTokens += row.cachedInputTokens
     outputTokens += row.outputTokens
+    reasoningOutputTokens += row.reasoningOutputTokens
     totalTokens += row.totalTokens
     events += row.eventCount
     const model = row.model ?? 'Unknown model'
     byModel.set(model, (byModel.get(model) ?? 0) + row.totalTokens)
-    byProject.set(row.projectLabel, (byProject.get(row.projectLabel) ?? 0) + row.totalTokens)
+    byProject.set(row.projectKey, (byProject.get(row.projectKey) ?? 0) + row.totalTokens)
+    projectLabels.set(row.projectKey, row.projectLabel)
   }
+  const topProjectKey = highestUsageKey(byProject)
   return {
     scope,
     range,
@@ -59,11 +64,11 @@ export function buildDevinSummary(
     inputTokens,
     cachedInputTokens,
     outputTokens,
-    reasoningOutputTokens: 0,
+    reasoningOutputTokens,
     totalTokens,
     estimatedCostUsd: null,
     topModel: highestUsageKey(byModel),
-    topProject: highestUsageKey(byProject),
+    topProject: topProjectKey ? (projectLabels.get(topProjectKey) ?? topProjectKey) : null,
     hasAnyDevinData: sessions.length > 0 || daily.length > 0
   }
 }
@@ -86,6 +91,7 @@ export function buildDevinDaily(
     row.inputTokens += entry.inputTokens
     row.cachedInputTokens += entry.cachedInputTokens
     row.outputTokens += entry.outputTokens
+    row.reasoningOutputTokens += entry.reasoningOutputTokens
     row.totalTokens += entry.totalTokens
     rows.set(entry.day, row)
   }
@@ -118,13 +124,17 @@ export function buildDevinBreakdown(
     row.inputTokens += entry.inputTokens
     row.cachedInputTokens += entry.cachedInputTokens
     row.outputTokens += entry.outputTokens
+    row.reasoningOutputTokens += entry.reasoningOutputTokens
     row.totalTokens += entry.totalTokens
     rows.set(key, row)
   }
   for (const session of filteredSessions(state, scope, range)) {
     const seen = new Set<string>()
     if (kind === 'model') {
-      for (const entry of session.modelBreakdown) {
+      for (const entry of session.locationModelBreakdown) {
+        if (scope === 'orca' && entry.worktreeId === null) {
+          continue
+        }
         if (seen.has(entry.modelKey)) {
           continue
         }
@@ -160,10 +170,15 @@ export function buildDevinRecentSessions(
   limit: number
 ): DevinUsageSessionRow[] {
   return filteredSessions(state, scope, range)
-    .slice(0, limit)
+    .slice(0, Number.isFinite(limit) ? Math.max(0, Math.min(100, Math.floor(limit))) : 10)
     .map((session) => {
       const locations = session.locationBreakdown.filter(
         (entry) => scope === 'all' || entry.worktreeId !== null
+      )
+      const models = new Map(
+        session.locationModelBreakdown
+          .filter((entry) => scope === 'all' || entry.worktreeId !== null)
+          .map((entry) => [entry.modelKey, entry.modelLabel])
       )
       return {
         sessionId: session.sessionId,
@@ -178,12 +193,15 @@ export function buildDevinRecentSessions(
           locations.length > 1
             ? 'Multiple locations'
             : (locations[0]?.projectLabel ?? session.primaryProjectLabel),
-        model: session.primaryModel,
+        model: models.size > 1 ? 'Mixed models' : (models.values().next().value ?? null),
         events: locations.reduce((sum, entry) => sum + entry.eventCount, 0),
         inputTokens: locations.reduce((sum, entry) => sum + entry.inputTokens, 0),
         cachedInputTokens: locations.reduce((sum, entry) => sum + entry.cachedInputTokens, 0),
         outputTokens: locations.reduce((sum, entry) => sum + entry.outputTokens, 0),
-        reasoningOutputTokens: 0,
+        reasoningOutputTokens: locations.reduce(
+          (sum, entry) => sum + entry.reasoningOutputTokens,
+          0
+        ),
         totalTokens: locations.reduce((sum, entry) => sum + entry.totalTokens, 0),
         hasInferredPricing: false
       }

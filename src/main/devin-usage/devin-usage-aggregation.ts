@@ -6,9 +6,14 @@ export const devinUsageAggregation = createUsageEventAggregation<
   DevinUsageMetric
 >({
   metric: {
-    empty: () => ({}),
-    fromEvent: () => ({}),
-    fold: () => {}
+    empty: () => ({ estimatedCostUsd: null }),
+    fromEvent: (event) => ({ estimatedCostUsd: event.estimatedCostUsd }),
+    fold: (target, source) => {
+      if (target.estimatedCostUsd === null && source.estimatedCostUsd === null) {
+        return
+      }
+      target.estimatedCostUsd = (target.estimatedCostUsd ?? 0) + (source.estimatedCostUsd ?? 0)
+    }
   },
   cloneSessionForMerge: (session) => ({
     ...session,

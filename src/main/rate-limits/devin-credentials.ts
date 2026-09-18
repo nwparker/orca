@@ -64,7 +64,13 @@ function parseCredentialsToml(raw: string): DevinCredentials | null {
   }
   // Why: the session token rides in the request body — an http:// override
   // would send it cleartext to whatever host the file names.
-  if (normalizedApiServerUrl.protocol !== 'https:') {
+  if (
+    normalizedApiServerUrl.protocol !== 'https:' ||
+    normalizedApiServerUrl.username ||
+    normalizedApiServerUrl.password ||
+    normalizedApiServerUrl.search ||
+    normalizedApiServerUrl.hash
+  ) {
     throw new SyntaxError('Devin API server must use HTTPS')
   }
   return {

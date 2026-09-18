@@ -52,7 +52,7 @@ const CASES = [
     agent: 'devin',
     envVar: 'DEVIN_HOME',
     absolute: '/srv/devin',
-    absoluteRoot: join('/srv/devin', 'transcripts'),
+    absoluteRoot: join('/srv/devin', 'cli', 'transcripts'),
     defaultRoot: () => join(homedir(), '.local', 'share', 'devin', 'cli', 'transcripts')
   },
   {

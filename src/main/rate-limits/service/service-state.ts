@@ -21,7 +21,7 @@ import {
   DEFAULT_POLL_MS
 } from './service-types'
 import { readGrokAuthSession } from '../grok-auth'
-import { readDevinCredentials } from '../devin-credentials'
+import { readDevinCredentials, type DevinCredentialsReadResult } from '../devin-credentials'
 
 export abstract class RateLimitServiceState {
   protected state: InternalRateLimitState = {
@@ -37,6 +37,20 @@ export abstract class RateLimitServiceState {
   }
   protected grokAuthConfigured = readGrokAuthSession().status === 'ok'
   protected devinAuthConfigured = readDevinCredentials().status === 'ok'
+
+  protected devinSnapshotCredential: string | null = null
+
+  protected getDevinCredentialFingerprint(result: DevinCredentialsReadResult): string {
+    return result.status === 'ok'
+      ? `ok\u0000${result.credentials.apiServerUrl}\u0000${result.credentials.sessionToken}`
+      : result.status
+  }
+
+  protected previousDevinSnapshot(fingerprint: string): ProviderRateLimits | null {
+    const previous = this.devinSnapshotCredential === fingerprint ? this.state.devin : null
+    this.devinSnapshotCredential = fingerprint
+    return previous
+  }
   protected devinOnlyFetchQueued = false
   protected pollInterval: number = DEFAULT_POLL_MS
   protected timer: ReturnType<typeof setInterval> | null = null

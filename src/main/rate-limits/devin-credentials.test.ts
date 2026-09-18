@@ -16,7 +16,7 @@ afterEach(async () => {
 async function makeDevinRoot(toml: string | null): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), 'orca-devin-creds-'))
   tempDirs.push(root)
-  process.env.DEVIN_HOME = join(root, 'cli')
+  process.env.DEVIN_HOME = root
   if (toml !== null) {
     await writeFile(join(root, 'credentials.toml'), toml)
   }

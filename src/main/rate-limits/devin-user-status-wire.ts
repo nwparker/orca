@@ -96,8 +96,11 @@ export function encodeGetUserStatusRequest(sessionToken: string, cliVersion: str
 function readVarint(buf: Uint8Array, pos: number): [bigint, number] {
   let result = 0n
   let shift = 0n
-  while (pos < buf.length) {
+  while (pos < buf.length && shift < 70n) {
     const byte = buf[pos++]
+    if (shift === 63n && byte > 1) {
+      throw new Error('invalid varint')
+    }
     result |= BigInt(byte & 0x7f) << shift
     if ((byte & 0x80) === 0) {
       return [result, pos]
@@ -113,6 +116,9 @@ function readProtoFields(buf: Uint8Array): ProtoField[] {
   while (pos < buf.length) {
     const [tag, afterTag] = readVarint(buf, pos)
     pos = afterTag
+    if (tag >> 3n === 0n || tag >> 3n > 0x1fffffffn) {
+      throw new Error('invalid field number')
+    }
     const num = Number(tag >> 3n)
     const wire = Number(tag & 7n)
     if (wire === 0) {
@@ -121,6 +127,9 @@ function readProtoFields(buf: Uint8Array): ProtoField[] {
       fields.push({ num, wire: 0, value })
     } else if (wire === 2) {
       const [len, afterLen] = readVarint(buf, pos)
+      if (len > BigInt(buf.length - afterLen)) {
+        throw new Error('truncated length-delimited field')
+      }
       const length = Number(len)
       pos = afterLen + length
       if (pos > buf.length) {
@@ -150,7 +159,9 @@ function fieldBytes(fields: ProtoField[], num: number): Uint8Array | null {
 
 function fieldVarint(fields: ProtoField[], num: number): number | null {
   const field = fields.find((f) => f.num === num)
-  return field?.wire === 0 ? Number(field.value) : null
+  return field?.wire === 0 && field.value <= BigInt(Number.MAX_SAFE_INTEGER)
+    ? Number(field.value)
+    : null
 }
 
 function fieldString(fields: ProtoField[], num: number): string | null {

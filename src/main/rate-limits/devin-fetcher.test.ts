@@ -246,7 +246,7 @@ describe('fetchDevinRateLimits', () => {
 
     const result = await fetchDevinRateLimits()
     expect(result.status).toBe('error')
-    expect(result.error).toBe('network down')
+    expect(result.error).toBe('Devin usage request failed — check your connection and retry')
   })
 
   it('aborts the status request when the caller aborts', async () => {
@@ -271,6 +271,40 @@ describe('fetchDevinRateLimits', () => {
 
     const result = await resultPromise
     expect(result.status).toBe('error')
-    expect(result.error).toBe('aborted')
+    expect(result.error).toBe('Devin usage request failed — check your connection and retry')
+  })
+  it('rejects redirects before forwarding the credential-bearing body', async () => {
+    files.credentials = credentialsToml()
+    netFetchMock.mockRejectedValueOnce(new Error('redirect to https://private.invalid/secret'))
+    const result = await fetchDevinRateLimits()
+    expect(netFetchMock).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ redirect: 'error' })
+    )
+    expect(result.error).not.toContain('private.invalid')
+  })
+
+  it('cancels oversized responses before reading the body', async () => {
+    files.credentials = credentialsToml()
+    const cancel = vi.fn()
+    netFetchMock.mockResolvedValueOnce(
+      new Response(new ReadableStream({ cancel }), {
+        headers: { 'content-length': '1048577' }
+      })
+    )
+    expect((await fetchDevinRateLimits()).status).toBe('error')
+    expect(cancel).toHaveBeenCalledOnce()
+  })
+
+  it('cancels unread HTTP error bodies', async () => {
+    files.credentials = credentialsToml()
+    const cancel = vi.fn()
+    netFetchMock.mockResolvedValueOnce(
+      new Response(new ReadableStream({ cancel }), { status: 401 })
+    )
+    expect((await fetchDevinRateLimits()).usageMetadata?.failureKind).toBe(
+      'delegated-refresh-required'
+    )
+    expect(cancel).toHaveBeenCalledOnce()
   })
 })

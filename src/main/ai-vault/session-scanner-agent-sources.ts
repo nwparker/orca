@@ -43,7 +43,7 @@ const PI_SESSIONS_DIR = normalizeAgentSessionsDir(
 // dedicated sessions-root override, so resolution differs from Pi/OMP in shape
 // as well as in variable name.
 const PRIME_AGENT_SESSIONS_DIR = primeAgentSessionsDirFromEnv()
-// Why: Devin ATIF transcripts are stored under <DEVIN_HOME>/transcripts.
+// Devin transcripts share the same root as the usage scanner.
 export const DEVIN_TRANSCRIPTS_DIR = resolveDevinTranscriptsDir()
 const DROID_SESSIONS_DIR = join(homedir(), '.factory', 'sessions')
 const DROID_PROJECTS_DIR = join(homedir(), '.factory', 'projects')

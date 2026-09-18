@@ -5,8 +5,9 @@ import type {
   UsageModelBreakdown,
   UsageSession
 } from '../usage/usage-rollup-records'
+import type { SessionSidecarObservation } from '../ai-vault/session-sidecar-stat'
 
-export type DevinUsageMetric = Record<never, never>
+export type DevinUsageMetric = { estimatedCostUsd: number | null }
 
 export type DevinUsageProcessedFile = {
   path: string
@@ -21,6 +22,8 @@ export type DevinUsageModelBreakdown = UsageModelBreakdown<DevinUsageMetric>
 export type DevinUsageLocationModelBreakdown = UsageLocationModelBreakdown<DevinUsageMetric>
 
 export type DevinUsagePersistedFile = DevinUsageProcessedFile & {
+  sessionsDb?: SessionSidecarObservation
+  sessionId: string
   sessions: DevinUsageSession[]
   dailyAggregates: DevinUsageDailyAggregate[]
 }
@@ -49,6 +52,7 @@ export type DevinUsageParsedEvent = {
   outputTokens: number
   reasoningOutputTokens: number
   totalTokens: number
+  estimatedCostUsd: number | null
 }
 
 export type DevinUsageAttributedEvent = DevinUsageParsedEvent & {

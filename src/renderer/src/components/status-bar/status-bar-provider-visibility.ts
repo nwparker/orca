@@ -175,7 +175,7 @@ export function isUsageEmptyState(
     antigravitySnapshotPending ||
     isProviderSnapshotPending(providers.minimax) ||
     isProviderSnapshotPending(providers.grok) ||
-    isProviderSnapshotPending(providers.devin)
+    (settings.devinAuthConfigured === true && isProviderSnapshotPending(providers.devin))
   ) {
     return false
   }

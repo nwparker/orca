@@ -1,4 +1,6 @@
 import { app } from 'electron'
+import { asRecord } from '../ai-vault/session-scanner-record-value'
+import { devinUsagePersistedStateSchema } from './persisted-state-schema'
 import { join } from 'node:path'
 import type {
   DevinUsageBreakdownKind,
@@ -39,6 +41,16 @@ function defaultState(): DevinUsagePersistedState {
   }
 }
 
+export function normalizeDevinUsageState(value: unknown): DevinUsagePersistedState {
+  const parsed = devinUsagePersistedStateSchema.safeParse(value)
+  if (parsed.success && parsed.data.schemaVersion === DEVIN_USAGE_SCHEMA_VERSION) {
+    return parsed.data
+  }
+  const defaults = defaultState()
+  defaults.scanState.enabled = asRecord(asRecord(value)?.scanState)?.enabled === true
+  return defaults
+}
+
 export function initDevinUsagePath(): void {
   usageFile = join(app.getPath('userData'), 'orca-devin-usage.json')
 }
@@ -53,8 +65,7 @@ export class DevinUsageStore extends UsageProviderStoreLifecycle<
       logTag: '[devin-usage]',
       resolveCacheFile: () => usageFile ?? join(app.getPath('userData'), 'orca-devin-usage.json'),
       createDefaultState: defaultState,
-      normalizeState: (state) =>
-        state.schemaVersion === DEVIN_USAGE_SCHEMA_VERSION ? state : defaultState(),
+      normalizeState: (state) => normalizeDevinUsageState(state),
       sourceKey: 'processedFiles',
       dataPresenceKey: 'hasAnyDevinData',
       scan: devinUsageProvider.scan

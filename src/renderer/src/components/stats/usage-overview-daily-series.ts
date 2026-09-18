@@ -35,6 +35,7 @@ export function buildDailyOverview(input: UsageOverviewInput): UsageOverviewDail
       totalTokens: 0,
       claudeTokens: 0,
       codexTokens: 0,
+      devinTokens: 0,
       openCodeTokens: 0
     }
     const total = getClaudeDailyTotal(entry)
@@ -49,6 +50,7 @@ export function buildDailyOverview(input: UsageOverviewInput): UsageOverviewDail
       totalTokens: 0,
       claudeTokens: 0,
       codexTokens: 0,
+      devinTokens: 0,
       openCodeTokens: 0
     }
     current.totalTokens += entry.totalTokens
@@ -61,9 +63,11 @@ export function buildDailyOverview(input: UsageOverviewInput): UsageOverviewDail
       totalTokens: 0,
       claudeTokens: 0,
       codexTokens: 0,
+      devinTokens: 0,
       openCodeTokens: 0
     }
     current.totalTokens += entry.totalTokens
+    current.devinTokens += entry.totalTokens
     byDay.set(entry.day, current)
   }
 
@@ -73,6 +77,7 @@ export function buildDailyOverview(input: UsageOverviewInput): UsageOverviewDail
       totalTokens: 0,
       claudeTokens: 0,
       codexTokens: 0,
+      devinTokens: 0,
       openCodeTokens: 0
     }
     current.totalTokens += entry.totalTokens
@@ -122,6 +127,7 @@ export function getRecentUsageDays(
         totalTokens: 0,
         claudeTokens: 0,
         codexTokens: 0,
+        devinTokens: 0,
         openCodeTokens: 0,
         intensity: 0
       }

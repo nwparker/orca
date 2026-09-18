@@ -14,6 +14,7 @@ vi.mock('electron', () => ({
 
 import { registerRateLimitHandlers } from './rate-limits'
 import type { RateLimitService } from '../rate-limits/service'
+import { createEmptyRateLimitState } from '../../shared/rate-limit-state-factory'
 import type { RateLimitState } from '../../shared/rate-limit-types'
 import type { CodexAccountService } from '../codex-accounts/service'
 
@@ -30,7 +31,7 @@ function makeCodexAccounts() {
 function makeService() {
   const refresh = vi.fn(() => Promise.resolve({} as RateLimitState))
   const refreshGrok = vi.fn(() => Promise.resolve({} as RateLimitState))
-  const refreshDevin = vi.fn(() => Promise.resolve({} as RateLimitState))
+  const refreshDevin = vi.fn(() => Promise.resolve(createEmptyRateLimitState()))
   const consumeCodexRateLimitResetCredit = vi.fn(() =>
     Promise.resolve({ outcome: 'noCredit', state: {} as RateLimitState })
   )

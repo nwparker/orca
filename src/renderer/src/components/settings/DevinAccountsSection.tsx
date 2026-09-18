@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { ExternalLink, Loader2, RefreshCw, ShieldCheck } from 'lucide-react'
 import { AgentIcon } from '@/lib/agent-catalog'
 import { translate } from '@/i18n/i18n'
@@ -54,10 +54,19 @@ export function DevinAccountsSection(): React.JSX.Element {
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
 
+  const statusRequest = useRef({ sequence: 0 }).current
+
   const loadStatus = useCallback(async (): Promise<void> => {
+    const request = ++statusRequest.sequence
     try {
-      setStatus(await window.api.devinAccounts.getStatus())
+      const nextStatus = await window.api.devinAccounts.getStatus()
+      if (request === statusRequest.sequence) {
+        setStatus(nextStatus)
+      }
     } catch (error) {
+      if (request !== statusRequest.sequence) {
+        return
+      }
       console.error('Failed to load Devin account status:', error)
       setStatus({
         signedIn: false,
@@ -67,14 +76,19 @@ export function DevinAccountsSection(): React.JSX.Element {
         error: error instanceof Error ? error.message : 'Unable to read Devin sign-in'
       })
     } finally {
-      setLoading(false)
+      if (request === statusRequest.sequence) {
+        setLoading(false)
+      }
     }
-  }, [])
+  }, [statusRequest])
 
   // Why: sign-in freshness is derived from the last usage fetch — reload after one lands.
   useEffect(() => {
     void loadStatus()
-  }, [loadStatus, devinUsage?.updatedAt])
+    return () => {
+      statusRequest.sequence++
+    }
+  }, [loadStatus, devinUsage, statusRequest])
 
   const handleRefreshUsage = async (): Promise<void> => {
     setRefreshing(true)

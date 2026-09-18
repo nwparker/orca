@@ -1,5 +1,6 @@
 import { RateLimitServiceFullCyclePreparation } from './service-full-cycle-preparation'
 import { deriveAntigravityRateLimits } from '../antigravity-usage-mirror'
+import { readDevinCredentials } from '../devin-credentials'
 import type { ProviderRateLimits } from './service-types'
 
 export abstract class RateLimitServiceFullCycleApplication extends RateLimitServiceFullCyclePreparation {
@@ -35,7 +36,9 @@ export abstract class RateLimitServiceFullCycleApplication extends RateLimitServ
         miniMaxResult
       ],
       grokResultPromise,
-      devinResultPromise
+      devinResultPromise,
+      devinCredentialFingerprint,
+      previousDevin
     } = prepared
     if (signal.aborted) {
       return
@@ -217,6 +220,12 @@ export abstract class RateLimitServiceFullCycleApplication extends RateLimitServ
     if (signal.aborted) {
       return
     }
+    const latestDevinCredentials = readDevinCredentials()
+    if (devinCredentialFingerprint !== this.getDevinCredentialFingerprint(latestDevinCredentials)) {
+      this.devinAuthConfigured = latestDevinCredentials.status === 'ok'
+      this.updateState({ ...this.state, devin: null })
+      return
+    }
     const devin =
       devinResult.status === 'fulfilled'
         ? devinResult.value
@@ -230,15 +239,9 @@ export abstract class RateLimitServiceFullCycleApplication extends RateLimitServ
             status: 'error'
           } satisfies ProviderRateLimits)
     this.trackActiveFailureStreak('devin', devin)
-    // Why: 'unavailable' here means a signed-in plan with no quota windows
-    // (missing credentials already leave the probe false). Clearing the
-    // configured signal keeps a credit-billed plan from pinning a "--" slot.
-    if (devin.status === 'unavailable') {
-      this.devinAuthConfigured = false
-    }
     this.updateState({
       ...this.state,
-      devin: this.applyStalePolicy(devin, previousState.devin)
+      devin: this.applyStalePolicy(devin, previousDevin)
     })
   }
 }

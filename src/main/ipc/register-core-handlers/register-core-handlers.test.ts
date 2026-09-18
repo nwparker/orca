@@ -489,6 +489,7 @@ describe('registerCoreHandlers', () => {
       stats as never,
       claudeUsage as never,
       codexUsage as never,
+      // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: Registration only forwards this mock; no concrete store methods execute in this test.
       devinUsage as never,
       openCodeUsage as never,
       codexAccounts as never,
@@ -664,6 +665,7 @@ describe('registerCoreHandlers', () => {
       stats2 as never,
       claudeUsage2 as never,
       codexUsage2 as never,
+      // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: Registration only forwards this mock; no concrete store methods execute in this test.
       devinUsage2 as never,
       openCodeUsage2 as never,
       codexAccounts2 as never,

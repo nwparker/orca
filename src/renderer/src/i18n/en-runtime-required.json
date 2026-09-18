@@ -2220,7 +2220,7 @@
         },
         "stats": {
           "search": {
-            "26bb901fcd": "Orca stats plus Claude, Codex, OpenCode token analytics and Grok subscription usage."
+            "26bb901fcd": "Orca stats plus Claude, Codex, Devin, and OpenCode token analytics and Grok subscription usage."
           }
         },
         "usage": {

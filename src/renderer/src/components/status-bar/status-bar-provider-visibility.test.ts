@@ -566,4 +566,22 @@ describe('isUsageEmptyState', () => {
       )
     ).toBe(true)
   })
+  it('does not wait for Devin when an older host omits its snapshot', () => {
+    expect(
+      isUsageEmptyState(
+        {
+          claude: provider('unavailable', { provider: 'claude' }),
+          codex: provider('unavailable', { provider: 'codex' }),
+          gemini: provider('unavailable'),
+          opencodeGo: provider('unavailable', { provider: 'opencode-go' }),
+          kimi: provider('unavailable', { provider: 'kimi' }),
+          antigravity: provider('unavailable', { provider: 'antigravity' }),
+          minimax: provider('unavailable', { provider: 'minimax' }),
+          grok: provider('unavailable', { provider: 'grok' }),
+          devin: undefined
+        },
+        usageSettings()
+      )
+    ).toBe(true)
+  })
 })

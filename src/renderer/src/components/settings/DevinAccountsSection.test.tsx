@@ -3,7 +3,7 @@
 import '@testing-library/jest-dom/vitest'
 
 import React from 'react'
-import { cleanup, render, screen } from '@testing-library/react'
+import { act, cleanup, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -183,5 +183,22 @@ describe('DevinAccountsSection', () => {
 
     expect(mocks.refreshDevinRateLimits).toHaveBeenCalledTimes(1)
     expect(await screen.findByText('dev@example.com')).toBeInTheDocument()
+  })
+  it('does not let an older status request overwrite a refreshed account', async () => {
+    let finishOld: ((value: unknown) => void) | undefined
+    mocks.getStatus.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishOld = resolve
+        })
+    )
+    const { rerender } = render(<DevinAccountsSection />)
+    mocks.devinUsage.mockReturnValue(quotaUsage())
+    rerender(<DevinAccountsSection />)
+    expect(await screen.findByText('dev@example.com')).toBeInTheDocument()
+    await act(async () => {
+      finishOld?.({ signedIn: false, email: null, tokenFresh: false, plan: null, error: null })
+    })
+    expect(screen.getByText('dev@example.com')).toBeInTheDocument()
   })
 })

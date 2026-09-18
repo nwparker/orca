@@ -186,12 +186,13 @@ export abstract class RateLimitServiceProviderCycles extends RateLimitServiceFul
     if (signal.aborted) {
       return
     }
-    const previousState = this.state
     const credentialsReadResult = readDevinCredentials()
+    const credentialFingerprint = this.getDevinCredentialFingerprint(credentialsReadResult)
+    const previousDevin = this.previousDevinSnapshot(credentialFingerprint)
     this.devinAuthConfigured = credentialsReadResult.status === 'ok'
     this.updateState({
-      ...previousState,
-      devin: this.withFetchingStatus(previousState.devin, 'devin')
+      ...this.state,
+      devin: this.withFetchingStatus(previousDevin, 'devin')
     })
     const devin = await fetchDevinRateLimits({ signal, credentialsReadResult }).catch(
       (err): ProviderRateLimits => ({
@@ -206,16 +207,16 @@ export abstract class RateLimitServiceProviderCycles extends RateLimitServiceFul
     if (signal.aborted) {
       return
     }
-    this.trackActiveFailureStreak('devin', devin)
-    // Why: 'unavailable' here means a signed-in plan with no quota windows
-    // (missing credentials already leave the probe false). Clearing the
-    // configured signal keeps a credit-billed plan from pinning a "--" slot.
-    if (devin.status === 'unavailable') {
-      this.devinAuthConfigured = false
+    const latestCredentials = readDevinCredentials()
+    if (credentialFingerprint !== this.getDevinCredentialFingerprint(latestCredentials)) {
+      this.devinAuthConfigured = latestCredentials.status === 'ok'
+      this.updateState({ ...this.state, devin: null })
+      return
     }
+    this.trackActiveFailureStreak('devin', devin)
     this.updateState({
       ...this.state,
-      devin: this.applyStalePolicy(devin, previousState.devin)
+      devin: this.applyStalePolicy(devin, previousDevin)
     })
   }
 }

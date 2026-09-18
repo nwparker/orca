@@ -55,6 +55,7 @@ export const mainProcessState = {
   stats: null as StatsCollector | null,
   claudeUsage: null as ClaudeUsageStore | null,
   codexUsage: null as CodexUsageStore | null,
+  // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: Startup assigns the concrete store before usage handlers are registered.
   devinUsage: null as DevinUsageStore | null,
   openCodeUsage: null as OpenCodeUsageStore | null,
   codexAccounts: null as CodexAccountService | null,

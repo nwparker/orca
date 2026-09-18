@@ -2,7 +2,7 @@ import type { UsageProvider } from '../usage/usage-provider-contract'
 import { scanDevinUsageFilesViaWorker } from '../usage/usage-scan-worker-spawn'
 import type { DevinUsageDailyAggregate, DevinUsagePersistedFile, DevinUsageSession } from './types'
 
-export const DEVIN_USAGE_SCHEMA_VERSION = 1
+export const DEVIN_USAGE_SCHEMA_VERSION = 2
 
 export const devinUsageProvider = {
   id: 'devin',

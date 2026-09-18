@@ -48,6 +48,7 @@ export type UsageOverviewDailyPoint = {
   totalTokens: number
   claudeTokens: number
   codexTokens: number
+  devinTokens: number
   openCodeTokens: number
   intensity: 0 | 1 | 2 | 3 | 4
 }

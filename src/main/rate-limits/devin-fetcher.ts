@@ -1,4 +1,6 @@
 import { net } from 'electron'
+import { readFetchResponseBytesWithinLimit } from '../../shared/fetch-response-body'
+import { cancelUnreadResponseBody } from '../lib/unread-response-body'
 import type {
   ProviderRateLimits,
   RateLimitWindow,
@@ -63,11 +65,12 @@ function mapQuotaWindow(
   if (remainingPercent === null) {
     return null
   }
+  const resetSeconds = resetAtUnix !== null && resetAtUnix <= 8_640_000_000_000 ? resetAtUnix : null
   return {
     usedPercent: Math.min(100, Math.max(0, 100 - remainingPercent)),
     windowMinutes,
-    resetsAt: resetAtUnix !== null ? resetAtUnix * 1000 : null,
-    resetDescription: parseResetDescription(resetAtUnix)
+    resetsAt: resetSeconds !== null ? resetSeconds * 1000 : null,
+    resetDescription: parseResetDescription(resetSeconds)
   }
 }
 
@@ -87,7 +90,14 @@ function quotaResult(quota: DevinUserStatusQuota): ProviderRateLimits {
     // plans omit them) has no visible quota. 'unavailable' also clears the
     // devinAuthConfigured probe in the apply step, so the bar hides instead
     // of pinning a permanent "--" slot.
-    return result('unavailable', 'Devin did not report quota windows for this account')
+    return {
+      ...result('unavailable', 'Devin did not report quota windows for this account', {
+        source: 'oauth',
+        authProvenance: quota.email ?? 'Devin account',
+        credentialSource: 'credentials.toml'
+      }),
+      planType: quota.planName
+    }
   }
   return {
     provider: 'devin',
@@ -131,6 +141,7 @@ async function fetchUserStatus(
   )
   const res = await net.fetch(`${credentials.apiServerUrl}${GET_USER_STATUS_PATH}`, {
     method: 'POST',
+    redirect: 'error',
     headers: {
       'Content-Type': 'application/proto',
       'Connect-Protocol-Version': '1',
@@ -139,6 +150,9 @@ async function fetchUserStatus(
     body: Buffer.from(requestBody),
     signal: requestSignal
   })
+  if (!res.ok) {
+    await cancelUnreadResponseBody(res)
+  }
   if (res.status === 401 || res.status === 403) {
     return { kind: 'result', result: expiredSessionResult() }
   }
@@ -148,7 +162,7 @@ async function fetchUserStatus(
       result: result('error', `Devin usage request failed (HTTP ${res.status})`)
     }
   }
-  const quota = decodeGetUserStatusQuota(new Uint8Array(await res.arrayBuffer()))
+  const quota = decodeGetUserStatusQuota(await readFetchResponseBytesWithinLimit(res, 1024 * 1024))
   if (!quota) {
     return {
       kind: 'result',
@@ -177,7 +191,7 @@ export async function fetchDevinRateLimits(
       return outcome.result
     }
     return quotaResult(outcome.quota)
-  } catch (err) {
-    return result('error', err instanceof Error ? err.message : 'Devin usage request failed')
+  } catch {
+    return result('error', 'Devin usage request failed — check your connection and retry')
   }
 }

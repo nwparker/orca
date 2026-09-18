@@ -14,7 +14,6 @@ import {
   RANGE_LABELS
 } from './share-card-utils'
 import type { ClaudeShareData, CodexShareData } from './share-card-utils'
-import { USAGE_SHARE_PROVIDER_LABELS } from './share-card-utils'
 import { translate } from '@/i18n/i18n'
 
 export type ShareUsageCardProps = (ClaudeShareData | CodexShareData) & {
@@ -54,7 +53,7 @@ export const ShareUsageCard = forwardRef<HTMLDivElement, ShareUsageCardProps>(
             count: (summary as CodexUsageSummary).events
           }
 
-    const providerLabel = USAGE_SHARE_PROVIDER_LABELS[provider]
+    const providerLabel = provider === 'claude' ? 'Claude' : 'Codex'
 
     return (
       <div
