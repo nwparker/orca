@@ -258,7 +258,7 @@ export function useRuntimeFileListForWorktree({
       ? debounceRuntimeFilePathSearch(120, requestAbortController.signal, () =>
           searchRuntimeFilePaths(requestContext, {
             query: remoteQuery,
-            limit: QUICK_OPEN_LISTING_MAX_RESULTS,
+            limit: 32,
             excludePaths,
             ...(connectionId ? { requestToken } : {}),
             signal: requestAbortController.signal

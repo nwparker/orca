@@ -90,7 +90,7 @@ export async function searchRuntimeFilePaths(
 ): Promise<{ files: string[]; truncated: boolean }> {
   const target = getActiveRuntimeTarget(context.settings)
   if (target.kind !== 'environment') {
-    if (!context.worktreePath) {
+    if (!context.connectionId || !context.worktreePath) {
       return { files: [], truncated: false }
     }
     const limit = args.limit ?? 32
@@ -108,7 +108,7 @@ export async function searchRuntimeFilePaths(
     return { files: [], truncated: false }
   }
   const worktreeSelector = toRuntimeWorktreeSelector(context.worktreeId)
-  const limit = Math.min(args.limit ?? 32, 32)
+  const limit = args.limit ?? 32
   if (hasCachedLegacyQuickOpenInventory(target, worktreeSelector, context.worktreePath)) {
     return searchLegacyQuickOpenInventory({
       target,

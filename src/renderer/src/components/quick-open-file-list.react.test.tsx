@@ -270,7 +270,7 @@ describe('useRuntimeFileListForWorktree', () => {
           worktreeId: workspaceKey,
           worktreePath: '/srv/platform'
         }),
-        expect.objectContaining({ query: 'remote-folder', limit: QUICK_OPEN_LISTING_MAX_RESULTS })
+        expect.objectContaining({ query: 'remote-folder', limit: 32 })
       )
       expect(listRuntimeFilesMock).not.toHaveBeenCalled()
     } finally {
@@ -402,7 +402,7 @@ describe('useRuntimeFileListForWorktree', () => {
         }),
         {
           query: 'sta-4354-target',
-          limit: QUICK_OPEN_LISTING_MAX_RESULTS,
+          limit: 32,
           excludePaths: undefined,
           signal: expect.any(AbortSignal)
         }
@@ -566,8 +566,7 @@ describe('useRuntimeFileListForWorktree', () => {
     }
   })
 
-  it('searches local workspaces by query instead of reusing the capped inventory', async () => {
-    vi.useFakeTimers()
+  it('does not restart local listings when only the query changes', async () => {
     const workspaceKey = folderWorkspaceKey('folder-workspace-1')
     useAppStore.setState({
       folderWorkspaces: [makeFolderWorkspace()],
@@ -576,25 +575,26 @@ describe('useRuntimeFileListForWorktree', () => {
       worktreesByRepo: {}
     } as Partial<AppState>)
 
-    try {
-      await renderProbe({
-        enabled: true,
-        onState: () => {},
-        query: 'AppDelegate.swift',
-        worktreeId: workspaceKey
-      })
-      await act(async () => vi.advanceTimersByTimeAsync(120))
+    const root = await renderProbe({
+      enabled: true,
+      onState: () => {},
+      query: 'one',
+      worktreeId: workspaceKey
+    })
+    await waitForListRuntimeFilesCall()
 
-      expect(searchRuntimeFilePathsMock).toHaveBeenCalledWith(
-        expect.objectContaining({ worktreePath: '/srv/platform' }),
-        expect.objectContaining({
-          query: 'AppDelegate.swift',
-          limit: QUICK_OPEN_LISTING_MAX_RESULTS
+    await act(async () => {
+      root.render(
+        createElement(HookProbe, {
+          enabled: true,
+          onState: () => {},
+          query: 'two',
+          worktreeId: workspaceKey
         })
       )
-      expect(listRuntimeFilesMock).not.toHaveBeenCalled()
-    } finally {
-      vi.useRealTimers()
-    }
+    })
+    await flushEffects()
+
+    expect(listRuntimeFilesMock).toHaveBeenCalledTimes(1)
   })
 })
