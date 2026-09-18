@@ -216,6 +216,27 @@ export const getAccountsGrokSearchEntries = createLocalizedCatalog(() => [
   }
 ])
 
+export const getAccountsDevinSearchEntries = createLocalizedCatalog(() => [
+  {
+    title: translate('auto.components.settings.accounts.search.7b1e0d4a95', 'Devin Usage'),
+    description: translate(
+      'auto.components.settings.accounts.search.2c58f9a0e3',
+      'Sign-in via Devin CLI (devin login) for daily and weekly quota usage, plan, and tier.'
+    ),
+    keywords: [
+      ...translateSearchKeyword('auto.components.settings.accounts.search.9a03e7c5b1', 'devin'),
+      ...translateSearchKeyword('auto.components.settings.accounts.search.4f8d2b6e07', 'cognition'),
+      ...translateSearchKeyword('auto.components.settings.accounts.search.a9f3d7b5c8', 'login'),
+      ...translateSearchKeyword('auto.components.settings.accounts.search.c759741d77', 'quota'),
+      ...translateSearchKeyword(
+        'auto.components.settings.accounts.search.e949b08ffb',
+        'rate limit'
+      ),
+      ...translateSearchKeyword('auto.components.settings.accounts.search.86edc96bc9', 'status bar')
+    ]
+  }
+])
+
 export const getAccountsPaneSearchEntries = createLocalizedCatalog((): SettingsSearchEntry[] => [
   ...getAccountsLocationSearchEntries(),
   ...getAccountsClaudeSearchEntries(),
@@ -223,5 +244,6 @@ export const getAccountsPaneSearchEntries = createLocalizedCatalog((): SettingsS
   ...getAccountsGeminiSearchEntries(),
   ...getAccountsOpencodeSearchEntries(),
   ...getAccountsMiniMaxSearchEntries(),
-  ...getAccountsGrokSearchEntries()
+  ...getAccountsGrokSearchEntries(),
+  ...getAccountsDevinSearchEntries()
 ])

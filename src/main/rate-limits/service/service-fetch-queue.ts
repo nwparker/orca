@@ -56,6 +56,15 @@ export abstract class RateLimitServiceFetchQueue extends RateLimitServiceProvide
             break
           }
         }
+        if (this.devinOnlyFetchQueued) {
+          this.devinOnlyFetchQueued = false
+          const devinSignal = await this.runWithFetchAbortSignal((fetchSignal) =>
+            this.runFetchDevinOnlyCycle(fetchSignal)
+          )
+          if (devinSignal.aborted) {
+            break
+          }
+        }
       }
     } finally {
       this.isFetching = false
@@ -112,6 +121,15 @@ export abstract class RateLimitServiceFetchQueue extends RateLimitServiceProvide
             this.runFetchGrokOnlyCycle(fetchSignal)
           )
           if (grokSignal.aborted) {
+            break
+          }
+        }
+        if (this.devinOnlyFetchQueued) {
+          this.devinOnlyFetchQueued = false
+          const devinSignal = await this.runWithFetchAbortSignal((fetchSignal) =>
+            this.runFetchDevinOnlyCycle(fetchSignal)
+          )
+          if (devinSignal.aborted) {
             break
           }
         }
@@ -177,6 +195,15 @@ export abstract class RateLimitServiceFetchQueue extends RateLimitServiceProvide
             break
           }
         }
+        if (this.devinOnlyFetchQueued) {
+          this.devinOnlyFetchQueued = false
+          const devinSignal = await this.runWithFetchAbortSignal((fetchSignal) =>
+            this.runFetchDevinOnlyCycle(fetchSignal)
+          )
+          if (devinSignal.aborted) {
+            break
+          }
+        }
       }
     } finally {
       this.isFetching = false
@@ -236,7 +263,32 @@ export abstract class RateLimitServiceFetchQueue extends RateLimitServiceProvide
             break
           }
         }
+        if (this.devinOnlyFetchQueued) {
+          this.devinOnlyFetchQueued = false
+          const devinSignal = await this.runWithFetchAbortSignal((fetchSignal) =>
+            this.runFetchDevinOnlyCycle(fetchSignal)
+          )
+          if (devinSignal.aborted) {
+            break
+          }
+        }
       }
+    } finally {
+      this.isFetching = false
+      this.resolveFetchIdleWaiters()
+    }
+  }
+  protected async fetchDevinOnly(options?: { force?: boolean }): Promise<void> {
+    if (this.isFetching) {
+      if (options?.force) {
+        this.devinOnlyFetchQueued = true
+        return this.waitForFetchIdle()
+      }
+      return
+    }
+    this.isFetching = true
+    try {
+      await this.runWithFetchAbortSignal((signal) => this.runFetchDevinOnlyCycle(signal))
     } finally {
       this.isFetching = false
       this.resolveFetchIdleWaiters()

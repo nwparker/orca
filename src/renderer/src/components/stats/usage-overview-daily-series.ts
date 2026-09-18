@@ -55,6 +55,17 @@ export function buildDailyOverview(input: UsageOverviewInput): UsageOverviewDail
     current.codexTokens += entry.totalTokens
     byDay.set(entry.day, current)
   }
+  for (const entry of input.devin.daily) {
+    const current = byDay.get(entry.day) ?? {
+      day: entry.day,
+      totalTokens: 0,
+      claudeTokens: 0,
+      codexTokens: 0,
+      openCodeTokens: 0
+    }
+    current.totalTokens += entry.totalTokens
+    byDay.set(entry.day, current)
+  }
 
   for (const entry of input.opencode.daily) {
     const current = byDay.get(entry.day) ?? {

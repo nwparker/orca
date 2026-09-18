@@ -154,6 +154,7 @@ describe('usage overview model', () => {
         summary: codexSummary,
         daily: codexDaily
       },
+      devin: { scanState: null, summary: null, daily: [] },
       opencode: {
         scanState: enabledOpenCodeScanState(),
         summary: openCodeSummary,
@@ -239,6 +240,7 @@ describe('usage overview model', () => {
     const overview = buildUsageOverview({
       claude: { scanState: null, summary: null, daily: [] },
       codex: { scanState: null, summary: null, daily: [] },
+      devin: { scanState: null, summary: null, daily: [] },
       opencode: { scanState: null, summary: null, daily: [] }
     })
 
@@ -269,6 +271,7 @@ describe('usage overview model', () => {
         summary: null,
         daily: codexDaily
       },
+      devin: { scanState: null, summary: null, daily: [] },
       opencode: { scanState: null, summary: null, daily: [] }
     })
 

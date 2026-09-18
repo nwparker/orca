@@ -150,7 +150,8 @@
         "resourceUsageToggleDescription": "Show the Resource Manager. Click it for CPU, memory, sessions, daemon controls, and workspace disk scans.",
         "portsToggleDescription": "Show live workspace ports. Click it for workspace-scoped ports and external listeners.",
         "antigravityToggleDescription": "Show Antigravity subscription usage for the active workspace.",
-        "grokToggleDescription": "Show Grok subscription credit usage when signed in via Grok CLI."
+        "grokToggleDescription": "Show Grok subscription credit usage when signed in via Grok CLI.",
+        "devinToggleDescription": "Show Devin quota usage when signed in via Devin CLI."
       },
       "menuBarIcon": {
         "title": "Show Menu Bar Icon",
@@ -3802,7 +3803,8 @@
             "grokUsageMenu": "Grok Usage",
             "floatingTerminalNewActivity": "{{label}}, new activity",
             "codexSignInSuccess": "Signed in to Codex",
-            "codexSignInError": "Codex sign-in failed. Please try again."
+            "codexSignInError": "Codex sign-in failed. Please try again.",
+            "devinUsageMenu": "Devin Usage"
           },
           "StatusBarUsageEmptyCta": {
             "828c764a79": "Connect an account",
@@ -3988,6 +3990,10 @@
                 "apiKey": "MiniMax API key expired. Replace it in Settings.",
                 "cookie": "MiniMax session cookie expired. Replace it in Settings."
               }
+            },
+            "devin": {
+              "runToRefresh": "Run Devin to refresh",
+              "runToRefreshDetail": "Run devin in a terminal on the computer running Orca and wait for it to start, then retry usage."
             }
           },
           "SshTargetStatusRow": {
@@ -4259,7 +4265,8 @@
           "eb6a066185": "claude",
           "eee19cfade": "overview",
           "grokUsageTab": "Grok",
-          "trackingSince": "Tracking since {{value0}}"
+          "trackingSince": "Tracking since {{value0}}",
+          "devinUsageTab": "Devin"
         },
         "UsageOverviewPane": {
           "22ed1b7669": "sessions",
@@ -4279,7 +4286,8 @@
           "ca6bc5fded": "Refresh",
           "e06d1baf5c": "Refresh usage overview",
           "c760c481c5": "Usage Overview",
-          "55c910f4f1": "- some model prices are unavailable"
+          "55c910f4f1": "- some model prices are unavailable",
+          "enableDevin": "Enable Devin"
         },
         "share": {
           "card": {
@@ -4316,7 +4324,8 @@
             "e7f0a1b2c3": "subscription",
             "d6e9f0a1b2": "credits",
             "a3b6c7d8e9": "grok usage",
-            "9f2a3b4c5d": "xai"
+            "9f2a3b4c5d": "xai",
+            "devin": "devin"
           }
         },
         "usage": {
@@ -4324,7 +4333,8 @@
             "model": {
               "bc474051e5": "OpenCode",
               "eb220d193b": "Codex",
-              "544d6d4c16": "Claude"
+              "544d6d4c16": "Claude",
+              "devin": "Devin"
             },
             "sections": {
               "9564a3b21b": "sessions -",
@@ -4383,6 +4393,43 @@
           "e5a6b7c8d9": "Weekly credits used",
           "f6b7c8d9e0": "Billing period reset",
           "a7b8c9d0e1": "Grok account settings"
+        },
+        "DevinUsagePane": {
+          "range7d": "Last 7 days",
+          "range30d": "Last 30 days",
+          "range90d": "Last 90 days",
+          "rangeAll": "All time",
+          "orcaScope": "Orca worktrees only",
+          "allScope": "All local Devin usage",
+          "title": "Devin Usage Tracking",
+          "enableLabel": "Enable Devin usage analytics",
+          "disabledDescription": "Reads local Devin transcripts to show token, model, and session stats.",
+          "optionsLabel": "Devin usage options",
+          "filters": "Filters",
+          "refreshAria": "Refresh Devin usage",
+          "refresh": "Refresh",
+          "scope": "Scope",
+          "range": "Range",
+          "empty": "No local Devin usage found yet for this scope.",
+          "inputTokens": "Input tokens",
+          "outputTokens": "Output tokens",
+          "cacheTokens": "Cache tokens",
+          "sessionsEvents": "Sessions / Events",
+          "byModel": "By model",
+          "topModel": "Top model:",
+          "events": "events",
+          "byProject": "By project",
+          "topProject": "Top project:",
+          "recentSessions": "Recent sessions",
+          "recentDescription": "Most recent local Devin sessions in this scope.",
+          "lastActive": "Last active",
+          "project": "Project",
+          "model": "Model",
+          "eventsTitle": "Events",
+          "input": "Input",
+          "output": "Output",
+          "total": "Total",
+          "unknown": "Unknown"
         }
       },
       "sparse": {
@@ -8965,7 +9012,11 @@
             "b2c4e7f1a8": "endpoint",
             "3a9b6d2c4e": "api key",
             "5d8f1a3b7c": "china",
-            "7e2a4b8c1d": "overseas"
+            "7e2a4b8c1d": "overseas",
+            "7b1e0d4a95": "Devin Usage",
+            "2c58f9a0e3": "Sign-in via Devin CLI (devin login) for daily and weekly quota usage, plan, and tier.",
+            "9a03e7c5b1": "devin",
+            "4f8d2b6e07": "cognition"
           }
         },
         "advanced": {
@@ -9221,7 +9272,12 @@
               "close": "close",
               "notification": "notification area",
               "background": "background"
-            }
+            },
+            "devinUsageTitle": "Devin Usage",
+            "devinUsageDescription": "Show Devin quota usage from Devin CLI credentials.",
+            "devinKeyword": "devin",
+            "cognitionKeyword": "cognition",
+            "devinQuota": "quota"
           }
         },
         "auto": {
@@ -11953,6 +12009,27 @@
           "targetDescription": "Higher values increase contrast where possible. Background colors stay unchanged.",
           "subtle": "Subtle",
           "strong": "Strong"
+        },
+        "DevinAccountsSection": {
+          "7c1d40ab92": "Resets {{when}}",
+          "5be04c1f83": "Devin reported no quota percentage for this account.",
+          "1f7c0a9e34": "Devin",
+          "c8a2f61d05": "Shows daily and weekly quota from your Devin CLI sign-in (credentials file written by devin login).",
+          "9d3b47e0c6": "Devin CLI docs",
+          "4a0e8c62bd": "Loading…",
+          "2e6b91d7af": "Signed in",
+          "b35f0d8a71": "Signed in. Orca reads the Devin CLI session stored on disk.",
+          "f019c5b2e8": "Session expired. Run devin on the computer running Orca and wait for it to start. If prompted, complete sign-in, then click Refresh usage.",
+          "6d84a1fc37": "Plan: {{plan}}",
+          "a7f2c40be9": "Not signed in to Devin CLI",
+          "0c6ea93bf4": "In a terminal, run devin login, then click Refresh usage here.",
+          "8b52d7e6c0": "Refresh usage",
+          "3fa0b8d24c": "Daily quota used",
+          "e21d6bac05": "Same daily quota percentage as devin auth status in the terminal.",
+          "d59e13c7a2": "Weekly quota used",
+          "47b6e0f9d1": "Same weekly quota percentage as devin auth status in the terminal.",
+          "bf7130e5a8": "Devin usage",
+          "9e40c6b1d3": "Why Devin quota is unknown for this account."
         }
       },
       "right": {

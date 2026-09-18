@@ -3,6 +3,8 @@ import { fetchClaudeRateLimits } from '../claude-fetcher'
 import { fetchCodexRateLimits } from '../codex-fetcher'
 import { fetchGrokRateLimits } from '../grok-fetcher'
 import { readGrokAuthSession } from '../grok-auth'
+import { fetchDevinRateLimits } from '../devin-fetcher'
+import { readDevinCredentials } from '../devin-credentials'
 import type { ProviderRateLimits } from './service-types'
 
 export abstract class RateLimitServiceProviderCycles extends RateLimitServiceFullCycleApplication {
@@ -178,6 +180,42 @@ export abstract class RateLimitServiceProviderCycles extends RateLimitServiceFul
     this.updateState({
       ...this.state,
       grok: this.applyStalePolicy(grok, previousState.grok)
+    })
+  }
+  protected async runFetchDevinOnlyCycle(signal: AbortSignal): Promise<void> {
+    if (signal.aborted) {
+      return
+    }
+    const previousState = this.state
+    const credentialsReadResult = readDevinCredentials()
+    this.devinAuthConfigured = credentialsReadResult.status === 'ok'
+    this.updateState({
+      ...previousState,
+      devin: this.withFetchingStatus(previousState.devin, 'devin')
+    })
+    const devin = await fetchDevinRateLimits({ signal, credentialsReadResult }).catch(
+      (err): ProviderRateLimits => ({
+        provider: 'devin',
+        session: null,
+        weekly: null,
+        updatedAt: Date.now(),
+        error: err instanceof Error ? err.message : 'Unknown error',
+        status: 'error'
+      })
+    )
+    if (signal.aborted) {
+      return
+    }
+    this.trackActiveFailureStreak('devin', devin)
+    // Why: 'unavailable' here means a signed-in plan with no quota windows
+    // (missing credentials already leave the probe false). Clearing the
+    // configured signal keeps a credit-billed plan from pinning a "--" slot.
+    if (devin.status === 'unavailable') {
+      this.devinAuthConfigured = false
+    }
+    this.updateState({
+      ...this.state,
+      devin: this.applyStalePolicy(devin, previousState.devin)
     })
   }
 }

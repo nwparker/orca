@@ -34,7 +34,8 @@ export abstract class RateLimitServiceFullCycleApplication extends RateLimitServ
         kimiResult,
         miniMaxResult
       ],
-      grokResultPromise
+      grokResultPromise,
+      devinResultPromise
     } = prepared
     if (signal.aborted) {
       return
@@ -210,6 +211,34 @@ export abstract class RateLimitServiceFullCycleApplication extends RateLimitServ
     this.updateState({
       ...this.state,
       grok: this.applyStalePolicy(grok, previousState.grok)
+    })
+
+    const devinResult = await devinResultPromise
+    if (signal.aborted) {
+      return
+    }
+    const devin =
+      devinResult.status === 'fulfilled'
+        ? devinResult.value
+        : ({
+            provider: 'devin',
+            session: null,
+            weekly: null,
+            updatedAt: Date.now(),
+            error:
+              devinResult.reason instanceof Error ? devinResult.reason.message : 'Unknown error',
+            status: 'error'
+          } satisfies ProviderRateLimits)
+    this.trackActiveFailureStreak('devin', devin)
+    // Why: 'unavailable' here means a signed-in plan with no quota windows
+    // (missing credentials already leave the probe false). Clearing the
+    // configured signal keeps a credit-billed plan from pinning a "--" slot.
+    if (devin.status === 'unavailable') {
+      this.devinAuthConfigured = false
+    }
+    this.updateState({
+      ...this.state,
+      devin: this.applyStalePolicy(devin, previousState.devin)
     })
   }
 }
