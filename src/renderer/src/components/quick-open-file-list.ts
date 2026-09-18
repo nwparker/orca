@@ -188,7 +188,8 @@ export function useRuntimeFileListForWorktree({
     activeTargetStatus === 'connecting' ||
     activeTargetStatus === 'deploying-relay' ||
     activeTargetStatus === 'reconnecting'
-  const usesRuntimePathSearch = query !== undefined && operationRouteAvailable
+  const usesRuntimePathSearch =
+    (runtimeEnvironmentId !== null || connectionId !== undefined) && query !== undefined
   const remoteQuery = usesRuntimePathSearch ? query.trim() : ''
   const remoteQueryTooLarge = usesRuntimePathSearch && isQuickOpenRemoteQueryTooLarge(remoteQuery)
   const requestKey = useMemo(
@@ -207,7 +208,6 @@ export function useRuntimeFileListForWorktree({
   useEffect(() => {
     if (!enabled) {
       setLoading(false)
-      setTruncated(false)
       setResolvedQuery(null)
       setListedOperationOwner({ kind: 'unresolved' })
       return
@@ -216,7 +216,7 @@ export function useRuntimeFileListForWorktree({
     if (!target.canList || !worktreeId || !worktreePath || !operationRouteAvailable) {
       setFiles([])
       setListedOperationOwner({ kind: 'unresolved' })
-      setLoadError(operationRouteAvailable ? null : getFileExplorerOwnerUnresolvedMessage())
+      setLoadError(!operationRouteAvailable ? getFileExplorerOwnerUnresolvedMessage() : null)
       setLoading(false)
       setTruncated(false)
       setResolvedQuery(null)
