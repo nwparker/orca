@@ -2218,11 +2218,6 @@
           "f6a2c8d019": "Model",
           "faf3444859": "Input"
         },
-        "stats": {
-          "search": {
-            "26bb901fcd": "Orca stats plus Claude, Codex, Devin, and OpenCode token analytics and Grok subscription usage."
-          }
-        },
         "usage": {
           "overview": {
             "sections": {
@@ -2582,7 +2577,8 @@
         "f6300deb8b": "New Browser Tab"
       },
       "useSettingsNavigationMetadata": {
-        "5235c215ca": "Choose which task providers appear in the Tasks page and sidebar."
+        "5235c215ca": "Choose which task providers appear in the Tasks page and sidebar.",
+        "b351014180": "Orca stats plus Claude, Codex, Devin, and OpenCode token analytics and Grok subscription usage."
       }
     },
     "lib": {
