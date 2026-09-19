@@ -1,7 +1,6 @@
 import { collectUnhydratedMirroredTabRetractions } from './mirrored-status-tab-retractions'
 import { isWebSessionTabsWorktreeRemovalFrame } from './session-tabs-inventory-absence'
 import type { RuntimeMobileSessionTabsResult } from '../../../../shared/runtime-types'
-import { isWebSessionTabsWorktreeRemovalFrame } from './session-tabs-inventory-absence'
 import type {
   WebSessionTabsBatchContext,
   WebSessionTabsSnapshotApplyOptions,
