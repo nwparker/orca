@@ -89,6 +89,32 @@ describe('OMP session status ownership', () => {
     await settle()
     expect(JSON.parse(harness.fetchMock.mock.calls[0][1].body).payload.session_id).toBe('separate')
   })
+
+  it('uses OMP parent metadata and nested task paths when the root already owns the pane', async () => {
+    const harness = createAgentStatusExtensionHarness({ kind: 'omp' })
+    const rootFile = '/sessions/root.jsonl'
+    const root = {
+      sessionManager: {
+        getSessionId: () => 'root',
+        getSessionFile: () => rootFile,
+        getHeader: () => ({ parentSession: undefined })
+      }
+    }
+    await harness.callHook('session_start', {}, root)
+    await settle()
+    harness.fetchMock.mockClear()
+    harness.reload()
+    const child = {
+      sessionManager: {
+        getSessionId: () => 'child',
+        getSessionFile: () => '/sessions/root/child.jsonl',
+        getHeader: () => ({ parentSession: rootFile })
+      }
+    }
+    await harness.callHook('agent_start', {}, child)
+    await settle()
+    expect(harness.fetchMock).not.toHaveBeenCalled()
+  })
   it('keeps reporting for legacy callbacks without a session manager', async () => {
     const harness = createAgentStatusExtensionHarness({ kind: 'omp' })
     await harness.callHook('agent_start')
@@ -134,7 +160,6 @@ describe('OMP runtime session provenance', () => {
   it('allows a former child transcript resumed as the runtime main session', async () => {
     const harness = createAgentStatusExtensionHarness({ kind: 'omp' })
     const root = {
-      agentKind: 'main',
       hasUI: false,
       sessionManager: {
         getSessionId: () => 'resumed-child',
