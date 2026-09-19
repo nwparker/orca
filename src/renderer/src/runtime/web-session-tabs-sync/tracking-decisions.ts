@@ -18,7 +18,6 @@ import {
   trackWebSessionTabsWorktree,
   recordAcceptedWebSessionTabsEnvironment
 } from './tracking'
-import { hostSnapshotAffirmsWorktreeContents } from '../host-session-snapshot-authority'
 import { clearWebSessionTabsTrackingForWorktree } from './tracking-lifecycle'
 import { queueAcceptedWebSessionTerminalSnapshot } from '../web-session-terminal-handle-events'
 import { shouldAutoCreateInitialTerminal } from '@/components/terminal/initial-terminal'

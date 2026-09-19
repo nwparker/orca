@@ -11,11 +11,16 @@ const mocks = vi.hoisted(() => ({
   createTerminal: vi.fn(),
   getExplicitRuntimeEnvironmentIdForWorktree: vi.fn(),
   recoverSnapshot: vi.fn(),
-  runtimeSessionMirrorEnvironmentKey: vi.fn()
+  runtimeSessionMirrorEnvironmentKey: vi.fn(),
+  runtimeSessionMirrorEnvironmentKeys: vi.fn(() => ({
+    environmentKey: null,
+    resubscribeSignal: 0
+  }))
 }))
 
 vi.mock('./use-runtime-session-mirror-environment-key', () => ({
-  useRuntimeSessionMirrorEnvironmentKey: mocks.runtimeSessionMirrorEnvironmentKey
+  useRuntimeSessionMirrorEnvironmentKey: mocks.runtimeSessionMirrorEnvironmentKey,
+  useRuntimeSessionMirrorEnvironmentKeys: mocks.runtimeSessionMirrorEnvironmentKeys
 }))
 
 vi.mock('@/lib/worktree-runtime-owner', async (importOriginal) => {
