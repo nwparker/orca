@@ -6,7 +6,6 @@ import { getRuntimeEnvironmentRevision } from '../runtime-environment-revision'
 import { recoverWebSessionTerminalOrphansBeforeApply } from '../web-session-terminal-orphan-recovery'
 import { installWindowVisibilitySubscriptionParking } from '../window-visibility-subscription-parking'
 import {
-  beginWebSessionTabsSnapshotRecovery,
   recordReceivedWebSessionTabsSnapshot,
   shouldApplyRecoveredWebSessionTabsSnapshot
 } from './tracking'
@@ -264,11 +263,6 @@ export function installActiveSessionTabsSubscription({
                 runtimeId
               )
               visibilitySnapshotReceipt.current(environmentId, event, frame, runtimeId)
-              const finish = beginWebSessionTabsSnapshotRecovery(
-                environmentId,
-                event.worktree,
-                frame
-              )
               void applyActiveSnapshot(event, response, isCurrent, frame, runtimeId)
                 .catch((error) => {
                   if (isCurrent()) {
@@ -277,7 +271,6 @@ export function installActiveSessionTabsSubscription({
                   return null
                 })
                 .then((settle) => {
-                  finish()
                   if (isCurrent()) {
                     settle?.()
                   }
