@@ -1,4 +1,5 @@
 import type { RuntimeMobileSessionTabsResult } from '../../../../shared/runtime-types'
+import { isWebSessionTabsWorktreeRemovalFrame } from './session-tabs-inventory-absence'
 import type {
   WebSessionTabsBatchContext,
   WebSessionTabsSnapshotApplyOptions,
@@ -27,7 +28,6 @@ import {
   shouldReplaceTerminalTab
 } from './terminal-surfaces'
 import { buildMirroredTerminalTabs } from './terminal-build'
-import { isWebSessionTabsWorktreeRemovalFrame } from './session-tabs-inventory-absence'
 import { hostSnapshotAffirmsWorktreeContents } from '../host-session-snapshot-authority'
 
 export function prepareWebSessionTabsSnapshotBase(
