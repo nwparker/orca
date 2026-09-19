@@ -1,14 +1,19 @@
-import { createServer } from 'node:http'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { chromium } from 'playwright-core'
-import { fileURLToPath } from 'node:url'
 import { buildMobileWebAppBundle } from './build-mobile-web-app-bundle.mjs'
 import { mobileWebAppDependenciesPresent } from './mobile-web-app-bundle-dependencies.mjs'
-
-const projectDir = fileURLToPath(new URL('../..', import.meta.url))
+import {
+  createBundleServer,
+  installShellDouble,
+  parseCspDirectives,
+  projectDir,
+  readBridgeFaultGrant,
+  readBridgeProtocolVersion,
+  readShellCsp
+} from './mobile-web-app-render-harness.mjs'
 
 // Why a real browser: the route tree is handed to expo-router's own ExpoRoot through a synthesized
 // RequireContext. Nothing short of mounting it proves that object is the shape ExpoRoot reads.
@@ -53,159 +58,6 @@ let faultGrant = null
 const poisonedChunks = new Set()
 const POISON_MESSAGE = 'render check poisoned this route chunk'
 
-/**
- * Both CSP constants are a list of quoted directives with `//` comments between them, and those
- * comments quote directive text. Dropping comment lines first is what keeps a comment out of the
- * header this test serves.
- */
-export function parseCspDirectives(source, startMarker, endMarker) {
-  const start = source.indexOf(startMarker)
-  const end = source.indexOf(endMarker)
-  if (start === -1 || end < start) {
-    throw new Error(`could not find ${startMarker} .. ${endMarker}`)
-  }
-  const body = source
-    .slice(start, end)
-    .split('\n')
-    .filter((line) => !line.trimStart().startsWith('//'))
-    .join('\n')
-  const directives = [...body.matchAll(/"([^"]+)"/g)].map((match) => match[1])
-  if (directives.length < 10) {
-    throw new Error('could not parse the shell CSP')
-  }
-  return directives.join('; ')
-}
-
-/**
- * The envelope version the page speaks, read from the contract rather than written down twice. A
- * bumped `v` would otherwise reach this file as a 30s timeout naming nothing.
- */
-async function readBridgeProtocolVersion() {
-  const source = await readFile(
-    join(projectDir, 'mobile/src/mobile-web-shell/bridge/bridge-envelope.ts'),
-    'utf8'
-  )
-  const match = /BRIDGE_PROTOCOL_VERSION = (\d+)/.exec(source)
-  if (!match) {
-    throw new Error('could not read BRIDGE_PROTOCOL_VERSION')
-  }
-  return Number(match[1])
-}
-
-/** The grant the shell offers every page, read from the same source for the same reason. */
-async function readBridgeFaultGrant() {
-  const source = await readFile(
-    join(projectDir, 'mobile/src/mobile-web-shell/bridge/bridge-envelope.ts'),
-    'utf8'
-  )
-  const match = /BRIDGE_FAULT_GRANT = '([a-zA-Z]+)'/.exec(source)
-  if (!match) {
-    throw new Error('could not read BRIDGE_FAULT_GRANT')
-  }
-  return match[1]
-}
-
-/**
- * The shell's half of the bridge, as the page's channel sees it.
- *
- * The entry mounts nothing until `init` lands, so a render check with no shell renders no route at
- * all. This answers `ready` and refuses everything else: a real reply would make this file the
- * place domain behaviour is decided, and every screen below already has a state for an RPC that
- * failed. The one message that matters here is the one that lets the tree mount.
- */
-function installShellDouble({
-  version,
-  sessionId,
-  buildId,
-  route,
-  host,
-  storage,
-  faultGrant,
-  grants,
-  pageRoutes
-}) {
-  // Where the page's own fault reports land. Read back after the render, so a route that threw
-  // under the boundary names itself instead of timing out as a page that never mounted.
-  globalThis.__orcaRenderCheckFaults = []
-  // Every grant-gated notify the page posted, whole and in order. A control that decided to hand
-  // something to the shell and a control that did nothing look identical on the document; this is
-  // the only thing that tells them apart.
-  globalThis.__orcaRenderCheckNotifies = []
-  const channel = {
-    postMessage: (json) => {
-      const frame = JSON.parse(json)
-      const answer = (message) => {
-        // A microtask, not a task: the page posts `ready` while its script is still running, and
-        // this keeps the answer behind it without moving a timer the page's backoff reads.
-        queueMicrotask(() => {
-          channel.onmessage?.({ data: JSON.stringify(message) })
-        })
-      }
-      if (frame.type === 'ready') {
-        answer({
-          v: version,
-          type: 'init',
-          sessionId,
-          buildId,
-          connection: {
-            state: 'connected',
-            reconnectAttempt: 0,
-            lastConnectedAt: 1,
-            lastInboundAt: 1,
-            generation: 0
-          },
-          grants: {
-            rpc: { maxPendingRequests: 64, maxSubscriptions: 32 },
-            native: grants
-          },
-          ...(pageRoutes === null ? {} : { pageRoutes }),
-          // Omitted for a shell too old to name one, which is the case the page has a panel for.
-          ...(route === null ? {} : { route }),
-          ...(host === null ? {} : { host }),
-          storage
-        })
-        return
-      }
-      if (frame.type === 'notify') {
-        globalThis.__orcaRenderCheckNotifies.push(frame)
-        if (frame.name === faultGrant) {
-          globalThis.__orcaRenderCheckFaults.push(frame.error.message)
-        }
-        return
-      }
-      if (frame.type === 'request' || frame.type === 'subscribe') {
-        answer({
-          v: version,
-          type: 'error',
-          id: frame.id,
-          error: {
-            category: 'RenderCheckShellDouble',
-            message: 'the render check answers no RPC',
-            isRpcDeliveryUnknown: false
-          }
-        })
-      }
-    },
-    onmessage: null
-  }
-  globalThis.orcaBridge = channel
-}
-
-/**
- * The shipped policy, read from the Kotlin source so this test cannot drift from what the shell
- * actually sends. Parsed rather than imported: the constant lives in a JVM module.
- */
-async function readShellCsp() {
-  const source = await readFile(
-    join(
-      projectDir,
-      'mobile/modules/orca-mobile-web-shell/android/src/main/java/expo/modules/orcamobilewebshell/MobileWebShellCsp.kt'
-    ),
-    'utf8'
-  )
-  return parseCspDirectives(source, 'listOf(', ').joinToString')
-}
-
 beforeAll(async () => {
   cspHeader = await readShellCsp()
   bridgeVersion = await readBridgeProtocolVersion()
@@ -217,48 +69,19 @@ beforeAll(async () => {
   const built = await buildMobileWebAppBundle({ outDir: join(scratch, 'bundle') })
   const { outDir } = built
   routeChunks = built.routeChunks
-  server = createServer((request, response) => {
-    const path = new URL(request.url, 'http://localhost').pathname
-    // A browser asks for this on its own and the shell's WebView never does. The bundle carries
-    // no icon, so a 404 would put a console error in every check that runs against a full Chrome
-    // -- which is what CI resolves -- and none against the bundled headless shell.
-    if (path === '/favicon.ico') {
-      response.writeHead(204)
-      response.end()
-      return
-    }
-    // A route path serves the entrypoint and the page routes client-side. A path naming a file
-    // has to come out of the bundle or 404, the same as the shell's manifest map: answering it
-    // with the document instead would hide a publicPath the script cannot fetch from.
-    const namesAFile = path.slice(path.lastIndexOf('/')).includes('.')
-    const file = namesAFile ? path.slice(1) : 'index.html'
-    readFile(join(outDir, file)).then(
-      (real) => {
-        // The real bytes with a throw in front: the module still links, so the importer resolves
-        // every export it asked for and then evaluation throws. A body replaced outright fails at
-        // link instead, which is a different failure from the one the boundary is here for.
-        const bytes = poisonedChunks.has(path)
-          ? `throw new Error(${JSON.stringify(POISON_MESSAGE)});\n${real.toString('utf8')}`
-          : real
-        const headers = {
-          'content-type': file.endsWith('.js') ? 'text/javascript' : 'text/html'
-        }
-        // The document carries the shell's real policy, so a directive the page violates fails
-        // here rather than on a phone. Assets carry none, exactly as the native handler does.
-        if (file === 'index.html' && cspHeader) {
-          headers['content-security-policy'] = cspHeader
-        }
-        response.writeHead(200, headers)
-        response.end(bytes)
-      },
-      () => {
-        response.writeHead(404)
-        response.end()
-      }
-    )
+  // The real bytes with a throw in front: the module still links, so the importer resolves
+  // every export it asked for and then evaluation throws. A body replaced outright fails at
+  // link instead, which is a different failure from the one the boundary is here for.
+  const served = await createBundleServer({
+    outDir,
+    cspHeader,
+    transformChunk: (path, real) =>
+      poisonedChunks.has(path)
+        ? `throw new Error(${JSON.stringify(POISON_MESSAGE)});\n${real.toString('utf8')}`
+        : real
   })
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
-  origin = `http://127.0.0.1:${String(server.address().port)}`
+  server = served.server
+  origin = served.origin
   // CI runs this against the runner's Google Chrome rather than paying for a browser download,
   // the same reason and the same override shape as the orcad browser-provider job.
   const executablePath = process.env.ORCA_MOBILE_WEB_RENDER_BROWSER
@@ -594,6 +417,49 @@ describeRender('the Route A page in a real browser', () => {
     expect(text).not.toContain(UNMATCHED)
   }, 60_000)
 
+  // Both files routes reach OrcaMobileWebShellView from their native file, whose module calls
+  // requireNativeViewManager at import and throws in a browser. The manifest defers every route
+  // behind `import()`, so that throw is invisible until the page opens this route — which is why
+  // it needs a `.web.tsx` sibling and why proving it costs a render of the route itself.
+  it('mounts the file explorer, which its native route module cannot do', async () => {
+    const worktreeRoute = `${HOST_ROUTE}/files/worktree-a`
+    const { errors, cspErrors, text } = await render(worktreeRoute, 'Files', {
+      shellRoute: { pathname: worktreeRoute, params: { name: 'Example Worktree' } }
+    })
+    expect(cspErrors).toEqual([])
+    expect(errors).toEqual([])
+    expect(text).toContain('Files')
+    expect(text).toContain('Example Worktree')
+    expect(text).not.toContain(UNMATCHED)
+  }, 60_000)
+
+  it('mounts the file preview, reading the file path out of a param and not a segment', async () => {
+    const previewRoute = `${HOST_ROUTE}/files/preview/worktree-a`
+    const { errors, cspErrors, text, url } = await render(previewRoute, 'readme.md', {
+      shellRoute: {
+        pathname: previewRoute,
+        params: { relativePath: 'docs/my notes/readme.md', source: 'worktree' }
+      }
+    })
+    expect(cspErrors).toEqual([])
+    // Empty, and that is the point: React Native Web's BackHandler logs "not supported on web" for
+    // anyone who registers one, so this line is what proves the screen no longer does. Android back
+    // inside the page therefore pops the native stack without the unsaved-draft prompt, which lives
+    // on the page's own Back control.
+    expect(errors).toEqual([])
+    // The title is the last segment of the path param, so this says the param reached the screen
+    // with its last segment intact; `readme.md` is what a truncated or re-split path would also
+    // end in. The url assertion below pins the outbound leg — what the page encoded into its own
+    // history, `/` and space included — and no more: a screen that mis-decoded the middle of the
+    // path would satisfy both lines. The decode leg is proved where it can be read directly, in
+    // `mobile/src/files/mobile-file-path-route-encoding.test.ts`, which takes each hazard shape
+    // back out of the href, and `mobile/src/files/mobile-file-preview-route.test.ts`, which drives
+    // the normalizer the screen reads its params through.
+    expect(text).toContain('readme.md')
+    expect(url).toBe(`${previewRoute}?relativePath=docs%2Fmy+notes%2Freadme.md&source=worktree`)
+    expect(text).not.toContain(UNMATCHED)
+  }, 60_000)
+
   it('renders the unmatched route rather than crashing on a path with no module', async () => {
     const { errors, cspErrors, text } = await render(`${HOST_ROUTE}/not-a-route`, UNMATCHED)
     expect(cspErrors).toEqual([])
@@ -664,6 +530,36 @@ describeRender('the Route A page in a real browser', () => {
     } finally {
       poisonedChunks.delete(`/assets/${chunk}`)
     }
+  }, 60_000)
+
+  it('refuses a target the shell will not take, rather than opening it in the page', async () => {
+    // The double grants only `fault`, so `notifyNavigate` answers false -- the shell-disposed and
+    // older-shell cases reach the page the same way. Before C5.1 this left the host route and
+    // painted Unmatched; the bundle carries every route under app/h, so for a target like
+    // `session/[worktreeId]` the same fallback mounts a native-only screen on React Native Web.
+    const opened = await openPage({ shellRoute: { pathname: HOST_ROUTE } })
+    const { page, errors } = opened
+    await page.goto(`${origin}/`, { waitUntil: 'load' })
+    await waitForRoute(opened, HOST_ROUTE, SHELL_HOST.name)
+    // The one labelled control on this screen that leaves the page: `leaveHostRoute` dismisses to
+    // `/`, which is a native route and never one the page serves.
+    await page.getByLabel('Back to hosts').click()
+    // Nothing to wait for but the absence of a navigation, so settle the microtask the handoff
+    // would have posted on and then read the page that is still there.
+    await page.waitForTimeout(1_000)
+    expect(await page.evaluate(() => location.pathname)).toBe(HOST_ROUTE)
+    const text = await page.evaluate(() => document.body.innerText)
+    expect(text).toContain(SHELL_HOST.name)
+    expect(text).not.toContain(UNMATCHED)
+    // The absence that says refused rather than handed off. A page that stayed put because the
+    // notify crossed and the shell did the pushing looks identical on this document otherwise;
+    // the case below it grants `navigate` and asserts this same frame present.
+    const notifies = await page.evaluate(() => globalThis.__orcaRenderCheckNotifies ?? [])
+    expect(notifies.filter((frame) => frame.name === 'navigate')).toEqual([])
+    // Not a page fault either: a refused target is the page declining to move, not a throw.
+    expect(await page.evaluate(() => globalThis.__orcaRenderCheckFaults ?? [])).toEqual([])
+    expect(errors).toEqual([])
+    await page.close()
   }, 60_000)
 
   it("fetches the next route's chunks on a client-side navigation", async () => {
