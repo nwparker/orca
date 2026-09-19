@@ -3,7 +3,6 @@ import { getDefaultWorkspaceSession } from '../../../shared/constants'
 import { parseWorkspaceSession } from '../../../shared/workspace-session-schema'
 import { useAppStore, type AppState } from '@/store'
 import { applyDefaultTerminalTabs } from './worktree-default-terminal-tabs'
-// @ts-expect-error -- this integration spec intentionally exercises the shared main-process merge helper.
 import { preserveRuntimeAuthoredWorkspaceSessionFields } from '../../../main/persistence/runtime-authored-workspace-session-fields'
 import {
   createSessionWriteSubscriber,
