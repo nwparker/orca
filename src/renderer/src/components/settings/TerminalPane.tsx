@@ -120,7 +120,7 @@ export function TerminalPane({
               updateSettings(
                 value === 'system'
                   ? { terminalDefaultShell: '', terminalDefaultShellArgs: undefined }
-                  : { terminalDefaultShell: configuredShell }
+                  : { terminalDefaultShell: configuredShell || systemShell }
               )
             }}
             options={[
@@ -173,8 +173,9 @@ export function TerminalPane({
                       </label>
                       <p className="text-xs text-muted-foreground">
                         One argument per line. If unset, Orca uses <code>-l</code>. An empty saved
-                        list passes no arguments. Values are passed exactly when opening an
-                        interactive terminal pane.
+                        list passes no arguments. For example, enter <code>--rcfile</code> and{' '}
+                        <code>/path/to/rcfile</code> on separate lines. Values are passed exactly
+                        when opening an interactive terminal pane.
                       </p>
                     </div>
                     <Textarea
@@ -187,8 +188,8 @@ export function TerminalPane({
                             .filter((argument) => argument.length > 0)
                         })
                       }
-                      placeholder={'--rcfile\n/path/to/rcfile'}
-                      className="min-h-20 font-mono text-xs"
+                      placeholder="--login"
+                      className="min-h-20"
                       spellCheck={false}
                       aria-label="Shell arguments, one per line"
                     />
