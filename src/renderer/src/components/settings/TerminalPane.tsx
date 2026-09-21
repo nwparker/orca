@@ -73,12 +73,8 @@ export function TerminalPane({
   const configuredShellArgs = settings.terminalDefaultShellArgs ?? []
   const [customShellArgs, setCustomShellArgs] = useState(configuredShellArgs)
   const [shellArgsOpen, setShellArgsOpen] = useState(configuredShellArgs.length > 0)
-  const [shellArgsMode, setShellArgsMode] = useState<'default' | 'custom' | 'none'>(
-    settings.terminalDefaultShellArgs === undefined
-      ? 'default'
-      : configuredShellArgs.length === 0
-        ? 'none'
-        : 'custom'
+  const [shellArgsMode, setShellArgsMode] = useState<'default' | 'custom'>(
+    settings.terminalDefaultShellArgs === undefined ? 'default' : 'custom'
   )
   const systemShell =
     (typeof window !== 'undefined' ? window.api?.platform?.get?.().shell?.trim() : '') || '/bin/zsh'
@@ -185,9 +181,7 @@ export function TerminalPane({
                       <p className="text-xs text-muted-foreground">
                         {shellArgsMode === 'default'
                           ? 'Starts the shell as a login shell with -l.'
-                          : shellArgsMode === 'none'
-                            ? 'Starts the shell without arguments.'
-                            : 'Enter one argument per line. Orca passes these values exactly.'}
+                          : 'Enter one argument per line. Leave it empty to pass no arguments.'}
                       </p>
                     </div>
                     <SettingsSegmentedControl
@@ -197,17 +191,12 @@ export function TerminalPane({
                         setShellArgsMode(value)
                         updateSettings({
                           terminalDefaultShellArgs:
-                            value === 'default'
-                              ? undefined
-                              : value === 'none'
-                                ? []
-                                : customShellArgs
+                            value === 'default' ? undefined : customShellArgs
                         })
                       }}
                       options={[
                         { value: 'default', label: '-l (default)' },
-                        { value: 'custom', label: 'Custom args' },
-                        { value: 'none', label: 'No args' }
+                        { value: 'custom', label: 'Custom args' }
                       ]}
                     />
                     {shellArgsMode === 'custom' ? (
