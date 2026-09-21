@@ -172,7 +172,8 @@ export function TerminalPane({
                         Shell arguments
                       </label>
                       <p className="text-xs text-muted-foreground">
-                        Default: <code>-l</code>. Enter one argument per line.
+                        One argument per line. Leave unset to use <code>-l</code>; save an empty
+                        value to pass no arguments.
                       </p>
                     </div>
                     <Textarea
