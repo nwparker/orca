@@ -71,7 +71,15 @@ export function TerminalPane({
   const configuredShell = settings.terminalDefaultShell?.trim() ?? ''
   const shellMode = configuredShell ? 'custom' : 'system'
   const configuredShellArgs = settings.terminalDefaultShellArgs ?? []
+  const [customShellArgs, setCustomShellArgs] = useState(configuredShellArgs)
   const [shellArgsOpen, setShellArgsOpen] = useState(configuredShellArgs.length > 0)
+  const [shellArgsMode, setShellArgsMode] = useState<'default' | 'custom' | 'none'>(
+    settings.terminalDefaultShellArgs === undefined
+      ? 'default'
+      : configuredShellArgs.length === 0
+        ? 'none'
+        : 'custom'
+  )
   const systemShell =
     (typeof window !== 'undefined' ? window.api?.platform?.get?.().shell?.trim() : '') || '/bin/zsh'
 
@@ -117,6 +125,9 @@ export function TerminalPane({
             value={shellMode}
             onChange={(value) => {
               setShellValidationError(null)
+              if (value === 'system') {
+                setShellArgsMode('default')
+              }
               updateSettings(
                 value === 'system'
                   ? { terminalDefaultShell: '', terminalDefaultShellArgs: undefined }
@@ -172,25 +183,50 @@ export function TerminalPane({
                         Shell arguments
                       </label>
                       <p className="text-xs text-muted-foreground">
-                        One argument per line. The default is <code>-l</code>; an explicitly empty
-                        field passes no arguments.
+                        {shellArgsMode === 'default'
+                          ? 'Starts the shell as a login shell with -l.'
+                          : shellArgsMode === 'none'
+                            ? 'Starts the shell without arguments.'
+                            : 'Enter one argument per line. Orca passes these values exactly.'}
                       </p>
                     </div>
-                    <Textarea
-                      id="default-shell-args"
-                      value={configuredShellArgs.join('\n')}
-                      onChange={(event) =>
+                    <SettingsSegmentedControl
+                      ariaLabel="Shell argument mode"
+                      value={shellArgsMode}
+                      onChange={(value) => {
+                        setShellArgsMode(value)
                         updateSettings({
-                          terminalDefaultShellArgs: event.target.value
+                          terminalDefaultShellArgs:
+                            value === 'default'
+                              ? undefined
+                              : value === 'none'
+                                ? []
+                                : customShellArgs
+                        })
+                      }}
+                      options={[
+                        { value: 'default', label: '-l (default)' },
+                        { value: 'custom', label: 'Custom args' },
+                        { value: 'none', label: 'No args' }
+                      ]}
+                    />
+                    {shellArgsMode === 'custom' ? (
+                      <Textarea
+                        id="default-shell-args"
+                        value={customShellArgs.join('\n')}
+                        onChange={(event) => {
+                          const nextArgs = event.target.value
                             .split('\n')
                             .filter((argument) => argument.length > 0)
-                        })
-                      }
-                      placeholder={'--rcfile\n/path/to/rcfile'}
-                      className="min-h-20"
-                      spellCheck={false}
-                      aria-label="Shell arguments, one per line"
-                    />
+                          setCustomShellArgs(nextArgs)
+                          updateSettings({ terminalDefaultShellArgs: nextArgs })
+                        }}
+                        placeholder={'--rcfile\n/path/to/rcfile'}
+                        className="min-h-20"
+                        spellCheck={false}
+                        aria-label="Shell arguments, one per line"
+                      />
+                    ) : null}
                   </div>
                 </CollapsibleContent>
               </Collapsible>
