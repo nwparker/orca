@@ -245,11 +245,10 @@ export function createLocalPtyLaunchPlan(
     '/bin/zsh'
   return finalizeLocalPtyLaunchPlan(seed, {
     shellPath,
+    // Why: shellOverride here is already resolved from the setting, so it cannot
+    // distinguish a one-off shell pick; the spawn path only sends args for the profile.
     shellArgs:
-      !args.command &&
-      !args.launchAgent &&
-      !args.shellOverride &&
-      args.terminalShellArgs !== undefined
+      !args.command && !args.launchAgent && args.terminalShellArgs !== undefined
         ? args.terminalShellArgs
         : ['-l'],
     effectiveCwd: cwd,
