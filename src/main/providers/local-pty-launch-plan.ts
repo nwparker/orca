@@ -245,7 +245,13 @@ export function createLocalPtyLaunchPlan(
     '/bin/zsh'
   return finalizeLocalPtyLaunchPlan(seed, {
     shellPath,
-    shellArgs: ['-l'],
+    shellArgs:
+      !args.command &&
+      !args.launchAgent &&
+      !args.shellOverride &&
+      args.terminalShellArgs !== undefined
+        ? args.terminalShellArgs
+        : ['-l'],
     effectiveCwd: cwd,
     validationCwd: cwd
   })
