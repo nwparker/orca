@@ -172,8 +172,9 @@ export function TerminalPane({
                         Shell arguments
                       </label>
                       <p className="text-xs text-muted-foreground">
-                        One argument per line. Orca passes these exactly when opening an interactive
-                        terminal pane.
+                        One argument per line. If unset, Orca uses <code>-l</code>. An empty saved
+                        list passes no arguments. Values are passed exactly when opening an
+                        interactive terminal pane.
                       </p>
                     </div>
                     <Textarea
@@ -186,7 +187,7 @@ export function TerminalPane({
                             .filter((argument) => argument.length > 0)
                         })
                       }
-                      placeholder="--rcfile\n/path/to/rcfile"
+                      placeholder={'--rcfile\n/path/to/rcfile'}
                       className="min-h-20 font-mono text-xs"
                       spellCheck={false}
                       aria-label="Shell arguments, one per line"
