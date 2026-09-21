@@ -141,6 +141,16 @@ export async function buildRuntimePtySpawnOptions(
   }
   if (!args.connectionId) {
     ctx.spawnOptions.shellOverride = ctx.terminalRuntimeOptions.shellOverride
+    const configuredShell = ctx.deps.getSettings?.()?.terminalDefaultShell
+    const configuredShellArgs = ctx.deps.getSettings?.()?.terminalDefaultShellArgs
+    if (
+      !args.shellOverride &&
+      !ctx.launchCommand &&
+      configuredShell?.trim() &&
+      configuredShellArgs !== undefined
+    ) {
+      ctx.spawnOptions.terminalShellArgs = [...configuredShellArgs]
+    }
     ctx.spawnOptions.terminalWindowsWslDistro = ctx.expectedWslDistro
     ctx.spawnOptions.terminalWindowsPowerShellImplementation = ctx.deps.getSettings
       ? (ctx.deps.getSettings()?.terminalWindowsPowerShellImplementation ?? 'auto')
