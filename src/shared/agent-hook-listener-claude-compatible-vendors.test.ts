@@ -286,4 +286,97 @@ describe('shared agent-hook-listener', () => {
       toolName: 'AskUserQuestion'
     })
   })
+
+  // Why: Muse emits Claude-compatible hook payloads (captured from muse
+  // 1.0.3 hook stdin); normalize but attribute to Muse, including the
+  // Stop `last_assistant_message` the CLI sends inline.
+  it('normalizes Muse Claude-compatible lifecycle events as muse status', () => {
+    const submitted = normalizeHookPayload(
+      state,
+      'muse',
+      {
+        paneKey: PANE_KEY,
+        payload: {
+          hook_event_name: 'UserPromptSubmit',
+          prompt: 'say hi again',
+          session_id: '01a079de-e5b0-74b1-83df-682c2adcb626',
+          turn_id: '2c040170-d894-4268-ad7b-1b2f9bf2e2e2',
+          cwd: '/repo',
+          transcript_path: null,
+          model: 'unknown',
+          permission_mode: 'default'
+        }
+      },
+      'production'
+    )
+    const waiting = normalizeHookPayload(
+      state,
+      'muse',
+      {
+        paneKey: PANE_KEY,
+        payload: {
+          hook_event_name: 'PermissionRequest',
+          session_id: '01a079de-e5b0-74b1-83df-682c2adcb626'
+        }
+      },
+      'production'
+    )
+    const stopped = normalizeHookPayload(
+      state,
+      'muse',
+      {
+        paneKey: PANE_KEY,
+        payload: {
+          hook_event_name: 'Stop',
+          stop_hook_active: false,
+          last_assistant_message: 'echo: say hi again',
+          session_id: '01a079de-e5b0-74b1-83df-682c2adcb626',
+          turn_id: '2c040170-d894-4268-ad7b-1b2f9bf2e2e2'
+        }
+      },
+      'production'
+    )
+
+    expect(submitted?.payload).toMatchObject({
+      agentType: 'muse',
+      state: 'working',
+      prompt: 'say hi again'
+    })
+    expect(waiting?.payload).toMatchObject({ agentType: 'muse', state: 'waiting' })
+    expect(stopped?.payload).toMatchObject({
+      agentType: 'muse',
+      state: 'done',
+      lastAssistantMessage: 'echo: say hi again'
+    })
+    // The Claude-shaped session_id is captured for provider-session resume.
+    expect(stopped?.providerSession).toMatchObject({
+      key: 'session_id',
+      id: '01a079de-e5b0-74b1-83df-682c2adcb626'
+    })
+  })
+
+  it.each(['AskUserQuestion', 'request_user_input'])(
+    'keeps Muse %s pending until answered',
+    (toolName) => {
+      const toolInput = { questions: [{ question: 'Which color?', options: [{ label: 'Blue' }] }] }
+      const pending = normalizeAndAccept(state, 'muse', {
+        hook_event_name: 'PreToolUse',
+        tool_name: toolName,
+        tool_input: toolInput
+      })
+      expect(pending?.payload).toMatchObject({
+        agentType: 'muse',
+        state: 'waiting',
+        interactivePrompt: JSON.stringify(toolInput)
+      })
+      const answered = normalizeAndAccept(state, 'muse', {
+        hook_event_name: 'PostToolUse',
+        tool_name: toolName,
+        tool_input: toolInput,
+        tool_response: 'Blue'
+      })
+      expect(answered?.payload.state).toBe('working')
+      expect(answered?.payload.interactivePrompt).toBeUndefined()
+    }
+  )
 })
