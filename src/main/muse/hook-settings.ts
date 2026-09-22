@@ -13,8 +13,10 @@ import {
 const MUSE_SCRIPT_BASE = 'muse-hook'
 
 // Muse 1.3 emits Claude-shaped lifecycle events; absent matchers cover every tool.
+// SubagentStart names the internal child sessions whose hooks must not drive pane status.
 export const MUSE_HOOK_EVENTS = [
   'SessionStart',
+  'SubagentStart',
   'SessionEnd',
   'Notification',
   'UserPromptSubmit',

@@ -287,62 +287,75 @@ describe('shared agent-hook-listener', () => {
     })
   })
 
-  // Why: Muse emits Claude-compatible hook payloads (captured from muse
-  // 1.0.3 hook stdin); normalize but attribute to Muse, including the
-  // Stop `last_assistant_message` the CLI sends inline.
+  // Why: Muse emits Claude-compatible hook payloads (captured from muse 1.3.0 hook stdin);
+  // normalize but attribute to Muse, including the Stop `last_assistant_message`.
   it('normalizes Muse Claude-compatible lifecycle events as muse status', () => {
-    const submitted = normalizeHookPayload(
-      state,
-      'muse',
-      {
-        paneKey: PANE_KEY,
-        payload: {
-          hook_event_name: 'UserPromptSubmit',
-          prompt: 'say hi again',
-          session_id: '01a079de-e5b0-74b1-83df-682c2adcb626',
-          turn_id: '2c040170-d894-4268-ad7b-1b2f9bf2e2e2',
-          cwd: '/repo',
-          transcript_path: null,
-          model: 'unknown',
-          permission_mode: 'default'
-        }
-      },
-      'production'
-    )
-    const waiting = normalizeHookPayload(
-      state,
-      'muse',
-      {
-        paneKey: PANE_KEY,
-        payload: {
-          hook_event_name: 'PermissionRequest',
-          session_id: '01a079de-e5b0-74b1-83df-682c2adcb626'
-        }
-      },
-      'production'
-    )
-    const stopped = normalizeHookPayload(
-      state,
-      'muse',
-      {
-        paneKey: PANE_KEY,
-        payload: {
-          hook_event_name: 'Stop',
-          stop_hook_active: false,
-          last_assistant_message: 'echo: say hi again',
-          session_id: '01a079de-e5b0-74b1-83df-682c2adcb626',
-          turn_id: '2c040170-d894-4268-ad7b-1b2f9bf2e2e2'
-        }
-      },
-      'production'
-    )
+    const base = {
+      session_id: '01a0caa3-0e77-7d41-bad7-46283a45633d',
+      turn_id: '2c040170-d894-4268-ad7b-1b2f9bf2e2e2',
+      cwd: '/tmp/ws',
+      transcript_path: null,
+      model: 'muse-spark-1.3',
+      permission_mode: 'default',
+      model_provider: 'meta'
+    }
+    // Why: this id is a real capture; keep the lookup off the developer's own Muse sessions.
+    vi.stubEnv('XDG_DATA_HOME', '/tmp/orca-muse-vendors-test-no-data')
+    const bash = { command: 'ls -la' }
+    const submitted = normalizeAndAccept(state, 'muse', {
+      ...base,
+      hook_event_name: 'UserPromptSubmit',
+      prompt: 'say hi again'
+    })
+    normalizeAndAccept(state, 'muse', {
+      ...base,
+      hook_event_name: 'PreToolUse',
+      tool_name: 'bash',
+      tool_input: bash,
+      tool_use_id: 'call_1'
+    })
+    // Why: auto-approved tools also emit PermissionRequest, so only Notification means a prompt.
+    const permissionRequest = normalizeAndAccept(state, 'muse', {
+      ...base,
+      hook_event_name: 'PermissionRequest',
+      tool_name: 'bash',
+      tool_input: bash
+    })
+    const waiting = normalizeAndAccept(state, 'muse', {
+      ...base,
+      hook_event_name: 'Notification',
+      notification_type: 'permission_prompt',
+      title: 'ws — waiting for approval',
+      message: 'bash wants to run'
+    })
+    const approved = normalizeAndAccept(state, 'muse', {
+      ...base,
+      hook_event_name: 'PostToolUse',
+      tool_name: 'bash',
+      tool_input: bash,
+      tool_use_id: 'call_1'
+    })
+    const stopped = normalizeAndAccept(state, 'muse', {
+      ...base,
+      hook_event_name: 'Stop',
+      stop_hook_active: false,
+      last_assistant_message: 'echo: say hi again'
+    })
 
     expect(submitted?.payload).toMatchObject({
       agentType: 'muse',
       state: 'working',
       prompt: 'say hi again'
     })
-    expect(waiting?.payload).toMatchObject({ agentType: 'muse', state: 'waiting' })
+    expect(permissionRequest).toBeNull()
+    expect(waiting?.payload).toMatchObject({
+      agentType: 'muse',
+      state: 'waiting',
+      toolName: 'bash',
+      interactivePrompt: JSON.stringify({ approval: { tool: 'bash', summary: 'ls -la' } })
+    })
+    expect(approved?.payload.state).toBe('working')
+    expect(approved?.payload.interactivePrompt).toBeUndefined()
     expect(stopped?.payload).toMatchObject({
       agentType: 'muse',
       state: 'done',
@@ -351,7 +364,7 @@ describe('shared agent-hook-listener', () => {
     // The Claude-shaped session_id is captured for provider-session resume.
     expect(stopped?.providerSession).toMatchObject({
       key: 'session_id',
-      id: '01a079de-e5b0-74b1-83df-682c2adcb626'
+      id: '01a0caa3-0e77-7d41-bad7-46283a45633d'
     })
   })
 

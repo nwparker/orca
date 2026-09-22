@@ -14,7 +14,9 @@ export const MUSE_MANAGED_HOOK_ENV_VARS = [
   'ORCA_PANE_KEY',
   'ORCA_TAB_ID',
   'ORCA_WORKTREE_ID',
-  'ORCA_AGENT_LAUNCH_TOKEN'
+  'ORCA_AGENT_LAUNCH_TOKEN',
+  // Why: Windows cmd AutoRun scripts commonly live under %USERPROFILE%; without it every hook exits 1.
+  'USERPROFILE'
 ] as const
 
 export type MuseSettingsSource = {
