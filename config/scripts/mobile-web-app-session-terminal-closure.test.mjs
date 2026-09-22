@@ -347,8 +347,11 @@ const MERMAID_PACKAGE = 'node_modules/mermaid/'
  *
  *   modules        4270 -> 4271   (+1)
  *   local modules  1022 -> 1023   (+1)
+ *
+ * Muse then joined the mobile agent catalog with its bundled icon. The icon is one additional
+ * local input to the shared agent picker, so the session closure is 4,272 modules.
  */
-const SESSION_ROUTE_MODULES = 4271
+const SESSION_ROUTE_MODULES = 4272
 
 /** What the page enters this route through once the route is a switch with a `.web.tsx` sibling. */
 const ROUTE_ENTRY = [
