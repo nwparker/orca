@@ -66,7 +66,8 @@ describe('runtime-controller spawn: hidden until a renderer view mounts', () => 
     mainWindow,
     installObservableDaemonTestProvider,
     getPtySetHiddenRendererPtyListener,
-    getPtySetRendererPtyVisibleListener
+    getPtySetRendererPtyVisibleListener,
+    getPtyDataSendCalls
   } = setupPtyIpcSuite()
 
   function simulateRendererReload(): void {
@@ -162,6 +163,36 @@ describe('runtime-controller spawn: hidden until a renderer view mounts', () => 
     // A reload must not resurrect a runtime mark on a PTY a renderer view already owned.
     expect(isHiddenRendererPty(result.id)).toBe(false)
     expect(daemon.setPtyBackgrounded).not.toHaveBeenCalledWith(result.id, true)
+  })
+
+  it('does not re-hide a PTY whose view mounted visible before spawn committed', async () => {
+    const runtime = createRuntimeMock()
+    const daemon = installObservableDaemonTestProvider()
+    const spawnGate = makeDeferred()
+    let mintedSessionId: string | undefined
+    daemon.spawn.mockImplementation(async (options: { sessionId?: string }) => {
+      mintedSessionId = options.sessionId
+      await spawnGate.promise
+      return { id: options.sessionId ?? 'daemon-pty' }
+    })
+    const controller = installController(runtime)
+
+    const spawnPromise = controller.spawn({ cols: 80, rows: 24, initiallyHidden: true })
+    await vi.waitFor(() => expect(mintedSessionId).toBeDefined())
+    // The visible mount reports visible and releases the pre-spawn mark.
+    getPtySetRendererPtyVisibleListener()(null, { id: mintedSessionId!, visible: true })
+    getPtySetHiddenRendererPtyListener()(null, { id: mintedSessionId!, hidden: false })
+    spawnGate.resolve()
+    const result = await spawnPromise
+
+    expect(isHiddenRendererPty(result.id)).toBe(false)
+    daemon.emitData(result.id, 'visible output')
+    await vi.waitFor(() =>
+      expect(getPtyDataSendCalls()).toContainEqual([
+        'pty:data',
+        expect.objectContaining({ id: result.id, data: 'visible output' })
+      ])
+    )
   })
 
   it('clears the pre-spawn mark when the runtime spawn fails', async () => {

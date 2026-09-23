@@ -1,4 +1,5 @@
 import { markRuntimeOwnedHiddenRendererPty } from '../../pty-hidden-delivery-gate'
+import { visibleRendererPtys } from '../delivery/visibility-state'
 import { closeStartupQueryAuthorityForPty } from '../provider/registry'
 import type { RuntimePtySpawnState } from './spawn-state'
 
@@ -32,6 +33,12 @@ export function commitRuntimeSpawnHiddenDelivery(ctx: RuntimePtySpawnState): voi
     isAdoptedAgentSession(ctx.result.agentSessionEnsure)
   ) {
     releaseRuntimeSpawnPreSpawnHiddenMark(ctx)
+    return
+  }
+  // Why: a view that mounted visible during spawn already unmarked; re-marking would drop its output.
+  if (visibleRendererPtys.has(id)) {
+    releaseRuntimeSpawnPreSpawnHiddenMark(ctx)
+    ctx.deps.syncPtyBackgroundedDelivery?.(id, 'spawn')
     return
   }
   markRuntimeSpawnHidden(ctx, id)
