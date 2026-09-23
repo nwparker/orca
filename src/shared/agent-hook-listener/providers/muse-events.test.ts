@@ -33,7 +33,7 @@ function sessionLogLine(event: Record<string, unknown>): string {
     stream: { kind: 'session', id: SESSION_ID },
     record_type: 'event',
     payload_type: 'runtime.session',
-    payload: { kind: 'run', run_id: 'fdada6f1-d403-41d8-b610-52f1d8489334', event }
+    payload: { kind: 'run', run_id: TURN_ID, event }
   })}\n`
 }
 

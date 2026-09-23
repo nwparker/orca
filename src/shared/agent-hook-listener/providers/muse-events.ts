@@ -119,7 +119,7 @@ export function normalizeMuseEvent(
 
   if (stateName === 'working' && pane.log) {
     // Why: Muse fires no hook for `request_user_input`; its session log is the only structured signal.
-    const pendingInput = readMusePendingUserInput(pane.log)
+    const pendingInput = readMusePendingUserInput(pane.log, readString(hookPayload, 'turn_id'))
     if (pendingInput) {
       stateName = 'waiting'
       toolEventName = 'PreToolUse'

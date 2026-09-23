@@ -1,7 +1,12 @@
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { readJsonlCursor, record, type JsonlCursor } from './codex-rollout-jsonl-cursor'
+import {
+  readJsonlCursor,
+  record,
+  type JsonlCursor,
+  type JsonRecord
+} from './codex-rollout-jsonl-cursor'
 
 // Why: Muse stores sessions under <XDG_DATA_HOME>/muse/sessions (default
 // ~/.local/share/muse/sessions), sharded by the host's local start date:
@@ -54,6 +59,8 @@ export type MuseUserInputQuestion = Record<string, unknown>
 
 export type MusePendingUserInput = {
   promptId: string
+  /** Muse run that asked; equals the hook payload's `turn_id`. */
+  runId?: string
   questions: MuseUserInputQuestion[]
 }
 
@@ -69,32 +76,64 @@ export function createMuseSessionLogState(sessionId: string): MuseSessionLogStat
   return { sessionId, cursor: { offset: 0, carry: '' }, pending: new Map() }
 }
 
-/** Advances the log and returns the newest unanswered `request_user_input` prompt, if any. */
+/** Muse batches some records into a `retained_frame` whose `children[].record_json` hold them as strings. */
+export function unwrapMuseLogRecords(line: JsonRecord): JsonRecord[] {
+  if (!Array.isArray(line.children)) {
+    return [line]
+  }
+  const records: JsonRecord[] = []
+  for (const child of line.children) {
+    const raw: unknown = record(child)?.record_json
+    let parsed: JsonRecord | undefined
+    try {
+      parsed = typeof raw === 'string' ? record(JSON.parse(raw) as unknown) : record(raw)
+    } catch {
+      parsed = undefined
+    }
+    if (parsed) {
+      records.push(parsed)
+    }
+  }
+  return records
+}
+
+function applyUserInputRecord(log: MuseSessionLogState, entry: JsonRecord): void {
+  const payload = record(entry.payload)
+  const event = record(payload?.event)
+  const promptId = typeof event?.prompt_id === 'string' ? event.prompt_id : undefined
+  if (!event || !promptId) {
+    return
+  }
+  if (event.kind === 'user_input_prompt_requested') {
+    const questions = Array.isArray(event.questions)
+      ? event.questions.flatMap((question: unknown) => {
+          const item = record(question)
+          return item ? [item] : []
+        })
+      : []
+    const runId = typeof payload?.run_id === 'string' ? payload.run_id : undefined
+    log.pending.delete(promptId)
+    log.pending.set(promptId, { promptId, runId, questions })
+  } else if (event.kind === 'user_input_prompt_settled') {
+    log.pending.delete(promptId)
+  }
+}
+
+/** Advances the log and returns the newest unanswered `request_user_input` prompt of `turnId`'s run. */
 export function readMusePendingUserInput(
   log: MuseSessionLogState,
+  turnId: string | undefined,
   sessionsDir?: string
 ): MusePendingUserInput | undefined {
   log.cursor.filePath ??= findMuseSessionLogPath(log.sessionId, sessionsDir)
   // Why: most log lines are large model/tool records; parse only the two event kinds we read.
   const lines = readJsonlCursor(log.cursor, (line) => line.includes(USER_INPUT_PROMPT_MARKER))
   for (const line of lines ?? []) {
-    const event = record(record(line.payload)?.event)
-    const promptId = typeof event?.prompt_id === 'string' ? event.prompt_id : undefined
-    if (!event || !promptId) {
-      continue
-    }
-    if (event.kind === 'user_input_prompt_requested') {
-      const questions = Array.isArray(event.questions)
-        ? event.questions.flatMap((question: unknown) => {
-            const entry = record(question)
-            return entry ? [entry] : []
-          })
-        : []
-      log.pending.delete(promptId)
-      log.pending.set(promptId, { promptId, questions })
-    } else if (event.kind === 'user_input_prompt_settled') {
-      log.pending.delete(promptId)
+    for (const entry of unwrapMuseLogRecords(line)) {
+      applyUserInputRecord(log, entry)
     }
   }
-  return Array.from(log.pending.values()).at(-1)
+  // Why: a question left open by a crash or interrupt stays in the log; only the live turn's can block.
+  const pending = Array.from(log.pending.values())
+  return pending.findLast((prompt) => !turnId || !prompt.runId || prompt.runId === turnId)
 }

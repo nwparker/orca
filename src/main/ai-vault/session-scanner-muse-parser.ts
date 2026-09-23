@@ -1,5 +1,6 @@
 import { wslGatedReadFile } from '../native-chat/wsl-transcript-fs-access'
 import type { AiVaultSession } from '../../shared/ai-vault-types'
+import { unwrapMuseLogRecords } from '../../shared/muse-session-log'
 import type { ExecutionHostId } from '../../shared/execution-host'
 import {
   remoteSessionContentLines,
@@ -54,23 +55,12 @@ function unwrapMuseRecords(line: string): MuseRecord[] {
   }
   // Why: retention markers (`retained_marker: omitted_live_only`) stand in for
   // ephemeral records excluded from the retained log — no payload to fold.
-  const rawRecords: unknown[] = Array.isArray(envelope.children)
-    ? envelope.children.map((child) => asRecord(child)?.record_json)
-    : [envelope]
-  const records: MuseRecord[] = []
-  for (const raw of rawRecords) {
-    const record = typeof raw === 'string' ? parseJsonObject(raw) : asRecord(raw)
-    if (!record) {
-      continue
-    }
-    records.push({
-      recordType: extractString(record.record_type),
-      payloadType: extractString(record.payload_type),
-      recordedAtMs: museTimestampMs(record.recorded_at),
-      payload: asRecord(record.payload)
-    })
-  }
-  return records
+  return unwrapMuseLogRecords(envelope).map((record) => ({
+    recordType: extractString(record.record_type),
+    payloadType: extractString(record.payload_type),
+    recordedAtMs: museTimestampMs(record.recorded_at),
+    payload: asRecord(record.payload)
+  }))
 }
 
 function firstTextBlock(value: unknown): string | null {

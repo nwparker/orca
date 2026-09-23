@@ -74,45 +74,67 @@ describe('muse session log', () => {
     ).toBeUndefined()
   })
 
+  it('reads prompts batched inside a retained_frame', () => {
+    const frame = (line: string): string =>
+      `${JSON.stringify({ record_type: 'retained_frame', children: [{ record_json: line.trim() }] })}\n`
+    writeFileSync(logPath, frame(requested()))
+    const log = createMuseSessionLogState(SESSION_ID)
+    expect(readMusePendingUserInput(log, undefined, sessionsDir)?.promptId).toBe(PROMPT_ID)
+    appendFileSync(logPath, frame(settled()))
+    expect(readMusePendingUserInput(log, undefined, sessionsDir)).toBeUndefined()
+  })
+
+  it('ignores a prompt left open by an earlier run', () => {
+    writeFileSync(logPath, requested())
+    const log = createMuseSessionLogState(SESSION_ID)
+    expect(
+      readMusePendingUserInput(log, 'fdada6f1-d403-41d8-b610-52f1d8489334', sessionsDir)?.promptId
+    ).toBe(PROMPT_ID)
+    expect(
+      readMusePendingUserInput(log, '11111111-2222-4333-8444-555555555555', sessionsDir)
+    ).toBeUndefined()
+  })
+
   it('returns the open prompt and clears it once settled', () => {
     writeFileSync(logPath, requested())
     const log = createMuseSessionLogState(SESSION_ID)
-    expect(readMusePendingUserInput(log, sessionsDir)).toEqual({
+    expect(readMusePendingUserInput(log, undefined, sessionsDir)).toEqual({
       promptId: PROMPT_ID,
+      runId: 'fdada6f1-d403-41d8-b610-52f1d8489334',
       questions: [QUESTION]
     })
     // Re-reading with no new bytes keeps the prompt pending.
-    expect(readMusePendingUserInput(log, sessionsDir)?.promptId).toBe(PROMPT_ID)
+    expect(readMusePendingUserInput(log, undefined, sessionsDir)?.promptId).toBe(PROMPT_ID)
 
     appendFileSync(logPath, settled())
-    expect(readMusePendingUserInput(log, sessionsDir)).toBeUndefined()
+    expect(readMusePendingUserInput(log, undefined, sessionsDir)).toBeUndefined()
   })
 
   it('holds a partial trailing line until it is completed', () => {
     const line = requested()
     writeFileSync(logPath, line.slice(0, 40))
     const log = createMuseSessionLogState(SESSION_ID)
-    expect(readMusePendingUserInput(log, sessionsDir)).toBeUndefined()
+    expect(readMusePendingUserInput(log, undefined, sessionsDir)).toBeUndefined()
 
     appendFileSync(logPath, line.slice(40))
-    expect(readMusePendingUserInput(log, sessionsDir)?.questions).toEqual([QUESTION])
+    expect(readMusePendingUserInput(log, undefined, sessionsDir)?.questions).toEqual([QUESTION])
   })
 
   it('reports the newest of several open prompts', () => {
     const second = '01a0caa4-0000-7000-8000-000000000001'
     writeFileSync(logPath, `${requested()}${requested(second)}`)
     const log = createMuseSessionLogState(SESSION_ID)
-    expect(readMusePendingUserInput(log, sessionsDir)?.promptId).toBe(second)
+    expect(readMusePendingUserInput(log, undefined, sessionsDir)?.promptId).toBe(second)
 
     appendFileSync(logPath, settled(second))
-    expect(readMusePendingUserInput(log, sessionsDir)?.promptId).toBe(PROMPT_ID)
+    expect(readMusePendingUserInput(log, undefined, sessionsDir)?.promptId).toBe(PROMPT_ID)
   })
 
   it('locates a log created after the first read', () => {
     const log = createMuseSessionLogState(SESSION_ID)
-    expect(readMusePendingUserInput(log, sessionsDir)).toBeUndefined()
+    expect(readMusePendingUserInput(log, undefined, sessionsDir)).toBeUndefined()
 
     writeFileSync(logPath, requested())
-    expect(readMusePendingUserInput(log, sessionsDir)?.promptId).toBe(PROMPT_ID)
+    expect(readMusePendingUserInput(log, undefined, sessionsDir)?.promptId).toBe(PROMPT_ID)
   })
 })
