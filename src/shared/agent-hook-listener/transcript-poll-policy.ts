@@ -10,15 +10,14 @@ export function shouldPollHookTranscript(
   source: AgentHookSource,
   event: AgentHookEventPayload
 ): boolean {
-  switch (source) {
-    case 'codex':
-      return hasCodexTranscriptSubagents(state, event.paneKey)
-    case 'muse':
-      // Why: Muse's question tool fires no hook, so only its session log shows the wait and its answer.
-      return event.payload.state !== 'done' && hasMuseSessionLog(state, event.paneKey)
-    default:
-      return false
+  if (source === 'codex') {
+    return hasCodexTranscriptSubagents(state, event.paneKey)
   }
+  if (source === 'muse') {
+    // Why: Muse's question tool fires no hook, so only its session log shows the wait and its answer.
+    return event.payload.state !== 'done' && hasMuseSessionLog(state, event.paneKey)
+  }
+  return false
 }
 
 /** Returns the poll result to publish, or undefined when it carries nothing new. */
