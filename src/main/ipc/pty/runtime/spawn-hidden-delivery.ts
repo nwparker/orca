@@ -1,3 +1,4 @@
+import { markRuntimeOwnedHiddenRendererPty } from '../../pty-hidden-delivery-gate'
 import { closeStartupQueryAuthorityForPty } from '../provider/registry'
 import type { RuntimePtySpawnState } from './spawn-state'
 
@@ -16,7 +17,7 @@ export function markRuntimeSpawnHiddenBeforeSpawn(ctx: RuntimePtySpawnState): vo
     return
   }
   ctx.preSpawnHiddenMarkId = ctx.effectiveSessionAppId
-  ctx.deps.transitionSpawnHiddenRendererPtyDeliveryState?.(ctx.preSpawnHiddenMarkId, true)
+  markRuntimeSpawnHidden(ctx, ctx.preSpawnHiddenMarkId)
 }
 
 /** Runs after commit: ptyOwnership must exist so backgrounded pacing can route to the provider. */
@@ -33,7 +34,7 @@ export function commitRuntimeSpawnHiddenDelivery(ctx: RuntimePtySpawnState): voi
     releaseRuntimeSpawnPreSpawnHiddenMark(ctx)
     return
   }
-  ctx.deps.transitionSpawnHiddenRendererPtyDeliveryState?.(id, true)
+  markRuntimeSpawnHidden(ctx, id)
   if (ctx.preSpawnHiddenMarkId !== id) {
     releaseRuntimeSpawnPreSpawnHiddenMark(ctx)
   }
@@ -48,6 +49,17 @@ export function releaseRuntimeSpawnPreSpawnHiddenMark(ctx: RuntimePtySpawnState)
   }
   ctx.deps.transitionSpawnHiddenRendererPtyDeliveryState?.(ctx.preSpawnHiddenMarkId, false)
   ctx.preSpawnHiddenMarkId = null
+}
+
+function markRuntimeSpawnHidden(ctx: RuntimePtySpawnState, id: string): void {
+  const transition = ctx.deps.transitionSpawnHiddenRendererPtyDeliveryState
+  if (!transition) {
+    return
+  }
+  // Transition first so a fresh mark still invalidates the drain policy.
+  transition(id, true)
+  // Why runtime-owned: no renderer party re-marks this PTY after a reload/crash gate reset.
+  markRuntimeOwnedHiddenRendererPty(id)
 }
 
 function isAdoptedAgentSession(ensure: unknown): boolean {

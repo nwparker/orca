@@ -62,7 +62,22 @@ type RuntimeSpawnController = {
 const testDouble = <T>(value: unknown): T => value as T
 
 describe('runtime-controller spawn: hidden until a renderer view mounts', () => {
-  const { mainWindow, installObservableDaemonTestProvider } = setupPtyIpcSuite()
+  const {
+    mainWindow,
+    installObservableDaemonTestProvider,
+    getPtySetHiddenRendererPtyListener,
+    getPtySetRendererPtyVisibleListener
+  } = setupPtyIpcSuite()
+
+  function simulateRendererReload(): void {
+    const reloadHandlers = mainWindow.webContents.on.mock.calls
+      .filter((call: unknown[]) => call[0] === 'did-finish-load')
+      .map((call: unknown[]) => testDouble<() => void>(call[1]))
+    expect(reloadHandlers.length).toBeGreaterThan(0)
+    for (const handler of reloadHandlers) {
+      handler()
+    }
+  }
 
   function createRuntimeMock() {
     return {
@@ -103,6 +118,50 @@ describe('runtime-controller spawn: hidden until a renderer view mounts', () => 
     spawnGate.resolve()
     const result = await spawnPromise
     expect(isHiddenRendererPty(result.id)).toBe(true)
+  })
+
+  it('paces a pane-less background PTY as backgrounded until a view reports visible', async () => {
+    const runtime = createRuntimeMock()
+    const daemon = installObservableDaemonTestProvider()
+    const controller = installController(runtime)
+
+    const result = await controller.spawn({ cols: 80, rows: 24, initiallyHidden: true })
+    expect(daemon.setPtyBackgrounded).toHaveBeenLastCalledWith(result.id, true)
+
+    getPtySetRendererPtyVisibleListener()(null, { id: result.id, visible: true })
+    expect(daemon.setPtyBackgrounded).toHaveBeenLastCalledWith(result.id, false)
+  })
+
+  it('keeps the runtime hidden mark and pacing across a renderer reload', async () => {
+    const runtime = createRuntimeMock()
+    const daemon = installObservableDaemonTestProvider()
+    const controller = installController(runtime)
+
+    const result = await controller.spawn({ cols: 80, rows: 24, initiallyHidden: true })
+    daemon.setPtyBackgrounded.mockClear()
+    simulateRendererReload()
+
+    // No renderer party exists to re-mark it, so main must keep answering its queries.
+    expect(isHiddenRendererPty(result.id)).toBe(true)
+    expect(daemon.setPtyBackgrounded).not.toHaveBeenCalledWith(result.id, false)
+  })
+
+  it('hands the mark to the renderer once a visible view unmarks it', async () => {
+    const runtime = createRuntimeMock()
+    const daemon = installObservableDaemonTestProvider()
+    const controller = installController(runtime)
+
+    const result = await controller.spawn({ cols: 80, rows: 24, initiallyHidden: true })
+    getPtySetRendererPtyVisibleListener()(null, { id: result.id, visible: true })
+    getPtySetHiddenRendererPtyListener()(null, { id: result.id, hidden: false })
+    expect(isHiddenRendererPty(result.id)).toBe(false)
+
+    daemon.setPtyBackgrounded.mockClear()
+    simulateRendererReload()
+
+    // A reload must not resurrect a runtime mark on a PTY a renderer view already owned.
+    expect(isHiddenRendererPty(result.id)).toBe(false)
+    expect(daemon.setPtyBackgrounded).not.toHaveBeenCalledWith(result.id, true)
   })
 
   it('clears the pre-spawn mark when the runtime spawn fails', async () => {
