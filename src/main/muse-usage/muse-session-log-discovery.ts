@@ -16,13 +16,25 @@ export type MuseSessionLogRef = {
   isSubagent: boolean
 }
 
-async function listSubdirectories(dirPath: string, pattern?: RegExp): Promise<string[]> {
+function isMissingPathError(error: unknown): boolean {
+  return error instanceof Error && 'code' in error && error.code === 'ENOENT'
+}
+
+async function listSubdirectories(
+  dirPath: string,
+  pattern?: RegExp,
+  options: { reportUnreadable?: boolean } = {}
+): Promise<string[]> {
   try {
     const entries = await readdir(dirPath, { withFileTypes: true })
     return entries
       .filter((entry) => entry.isDirectory() && (!pattern || pattern.test(entry.name)))
       .map((entry) => entry.name)
-  } catch {
+  } catch (error) {
+    // Why: a missing root means "no Muse data"; any other root failure must reach lastScanError.
+    if (options.reportUnreadable && !isMissingPathError(error)) {
+      throw error
+    }
     return []
   }
 }
@@ -53,7 +65,9 @@ export async function listMuseSessionLogFiles(
   sessionsDir = resolveMuseSessionsDir()
 ): Promise<MuseSessionLogRef[]> {
   const logs: MuseSessionLogRef[] = []
-  for (const year of await listSubdirectories(sessionsDir, YEAR_DIR)) {
+  for (const year of await listSubdirectories(sessionsDir, YEAR_DIR, {
+    reportUnreadable: true
+  })) {
     const yearDir = join(sessionsDir, year)
     for (const month of await listSubdirectories(yearDir, MONTH_OR_DAY_DIR)) {
       const monthDir = join(yearDir, month)

@@ -311,4 +311,12 @@ describe('scanMuseUsageFiles', () => {
     const result = await scanMuseUsageFiles(worktrees(), [], undefined, join(root, 'missing'))
     expect(result).toEqual({ processedFiles: [], sessions: [], dailyAggregates: [] })
   })
+
+  it('reports a sessions root that exists but cannot be listed', async () => {
+    const notADirectory = join(root, 'sessions-file')
+    writeFileSync(notADirectory, '')
+    await expect(
+      scanMuseUsageFiles(worktrees(), [], undefined, notADirectory)
+    ).rejects.toMatchObject({ code: 'ENOTDIR' })
+  })
 })
