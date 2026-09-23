@@ -279,6 +279,38 @@ describe('scanMuseUsageFiles', () => {
     expect(second.sessions[0]).toMatchObject({ sessionId: 'b-fork', totalTokens: 120 })
   })
 
+  it('keeps distinct same-content records in one log and dedupes their copies elsewhere', async () => {
+    const turn = (): Record<string, unknown> =>
+      modelCompleted(MICROS, { input_tokens: 100, output_tokens: 10 }, 'm')
+    const owner = writeSession('2026-09-22', 'a-parent', [
+      metadata(worktreePath),
+      retainedFrame([turn(), turn()])
+    ])
+    writeSession('2026-09-22', 'b-fork', [metadata(worktreePath), turn(), turn()])
+
+    const first = await scanMuseUsageFiles(worktrees(), [], undefined, sessionsDir)
+    const byId = new Map(first.sessions.map((session) => [session.sessionId, session]))
+    expect(byId.get('a-parent')).toMatchObject({ eventCount: 2, totalTokens: 220 })
+    expect(byId.has('b-fork')).toBe(false)
+
+    // Unchanged rescan reuses retained claims; an append reparses without recounting.
+    const second = await scanMuseUsageFiles(
+      worktrees(),
+      first.processedFiles,
+      undefined,
+      sessionsDir
+    )
+    expect(second.sessions.reduce((sum, session) => sum + session.totalTokens, 0)).toBe(220)
+    await appendFile(owner, toJsonl([turn()]))
+    const third = await scanMuseUsageFiles(
+      worktrees(),
+      second.processedFiles,
+      undefined,
+      sessionsDir
+    )
+    expect(third.sessions.reduce((sum, session) => sum + session.totalTokens, 0)).toBe(330)
+  })
+
   it('rolls subagent logs into the parent session and workspace', async () => {
     writeSession('2026-09-22', 'parent', [
       metadata(worktreePath),

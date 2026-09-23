@@ -67,18 +67,21 @@ export async function parseMuseUsageFile(
   }
   const events: MuseUsageAttributedEvent[] = []
   const ownedEventKeys = new Set<string>()
+  const occurrencesByContentKey = new Map<string, number>()
   let hasDeferredClaims = false
   // A partial tail line fails JSON.parse; the size change makes the next scan reparse it.
   for await (const { line } of readJsonlLinesFromOffset(input.info.path, 0)) {
     for (const parsed of parseMuseUsageLine(line, context)) {
-      if (ownedEventKeys.has(parsed.eventKey)) {
-        continue
-      }
-      if (!input.claimEventKey(parsed.eventKey)) {
+      // Why: distinct records in one log can share content; the ordinal keeps them apart
+      // while a fork's copy of the same sequence still maps onto identical keys.
+      const occurrence = occurrencesByContentKey.get(parsed.eventKey) ?? 0
+      occurrencesByContentKey.set(parsed.eventKey, occurrence + 1)
+      const eventKey = `${parsed.eventKey}#${occurrence}`
+      if (!input.claimEventKey(eventKey)) {
         hasDeferredClaims = true
         continue
       }
-      ownedEventKeys.add(parsed.eventKey)
+      ownedEventKeys.add(eventKey)
       const attributed = attributeUsageEvent(parsed, input.resolveWorktree)
       if (attributed) {
         events.push(attributed)
