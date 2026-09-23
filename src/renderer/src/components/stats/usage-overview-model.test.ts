@@ -226,7 +226,7 @@ describe('usage overview model', () => {
     expect(overviewWithUnpricedCodex(false).hasPartialCost).toBe(false)
   })
 
-  it('folds Muse tokens into the overview and flags its missing cost', () => {
+  it('folds Muse tokens into the overview without a partial-cost warning when nothing is priced', () => {
     const overview = buildUsageOverview({
       claude: { scanState: null, summary: null, daily: [] },
       codex: { scanState: null, summary: null, daily: [] },
@@ -275,7 +275,7 @@ describe('usage overview model', () => {
     })
     expect(overview.bestDay).toMatchObject({ day: '2026-09-22', museTokens: 28_300 })
     expect(overview.estimatedCostUsd).toBeNull()
-    expect(overview.hasPartialCost).toBe(true)
+    expect(overview.hasPartialCost).toBe(false)
   })
 
   it('pads recent usage days with zero-token cells', () => {
