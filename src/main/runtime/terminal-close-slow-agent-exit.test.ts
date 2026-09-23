@@ -22,7 +22,7 @@ type Harness = Awaited<ReturnType<typeof startLateExitHarness>>
 
 async function closeThroughDaemon(
   harness: Harness,
-  stopAndWait?: (id: string, opts?: { deadlineMs?: number }) => Promise<boolean>
+  stopAndWait: typeof stopAndWaitPtyFromRuntimeController = stopAndWaitPtyFromRuntimeController
 ) {
   const ports = {
     runtime: harness.runtime,
@@ -39,7 +39,7 @@ async function closeThroughDaemon(
     write: () => true,
     getForegroundProcess: async () => null,
     kill: fallbackKill,
-    stopAndWait: stopAndWait ?? ((id, opts) => stopAndWaitPtyFromRuntimeController(deps, id, opts))
+    stopAndWait: (id, opts) => stopAndWait(deps, id, opts)
   })
   const terminal = (await harness.runtime.listTerminals()).terminals.find(
     (entry) => entry.ptyId === harness.id
@@ -144,15 +144,25 @@ describe('worker release of an agent that is slow to exit after its terminal clo
 
   it('keeps a process still running when the kill budget expires release_unknown', async () => {
     const harness = await startLateExitHarness()
+    // Only Date is faked: the daemon socket and its timers stay real.
+    vi.useFakeTimers({ toFake: ['Date'] })
     try {
+      // A wedged agent ignores SIGKILL, so only the close deadline can end the kill.
+      harness.subprocess.forceKill = () => {}
       let budgetMs = 0
-      // Stands in for a kill RPC that runs out its deadline against a wedged process.
-      const stuckStop = vi.fn(async (_id: string, opts?: { deadlineMs?: number }) => {
-        budgetMs = (opts?.deadlineMs ?? 0) - Date.now()
-        return false
-      })
-      const { receipt, fallbackKill } = await closeThroughDaemon(harness, stuckStop)
+      let expiredBy = -1
+      const expiringStop: typeof stopAndWaitPtyFromRuntimeController = async (deps, id, opts) => {
+        const deadlineMs = opts?.deadlineMs ?? 0
+        budgetMs = deadlineMs - Date.now()
+        // Jump the clock to the deadline so the real stop issues its kill RPC with no time left.
+        vi.setSystemTime(deadlineMs)
+        const stopped = await stopAndWaitPtyFromRuntimeController(deps, id, opts)
+        expiredBy = Date.now() - deadlineMs
+        return stopped
+      }
+      const { receipt, fallbackKill } = await closeThroughDaemon(harness, expiringStop)
       expect(budgetMs).toBeGreaterThan(IMMEDIATE_KILL_REPLY_BUDGET_MS)
+      expect(expiredBy).toBeGreaterThanOrEqual(0)
       expect(receipt).toMatchObject({
         state: 'release_unknown',
         processAction: 'closed_agent_terminal',
@@ -161,6 +171,8 @@ describe('worker release of an agent that is slow to exit after its terminal clo
       expect(fallbackKill).toHaveBeenCalledTimes(1)
       expect(harness.runtime.captureState().liveness).toBe('unverifiable')
     } finally {
+      vi.useRealTimers()
+      harness.subprocess._simulateExit(0)
       await harness.dispose()
     }
   })
