@@ -3768,7 +3768,6 @@
           "444585cb41": "con datos",
           "ecb0cd8a4c": "habilitado -",
           "33f7b043d2": "Proveedores",
-          "60002bb22f": "Aún no se encontró uso local de Claude, Codex u OpenCode. El resumen se completará después de que la siguiente sesión de agente escriba logs de tokens.",
           "70f36452d4": "Porcentaje de caché",
           "327603fe8b": "Días activos",
           "0eaf937335": "Est. costo",
@@ -3781,7 +3780,9 @@
           "ca6bc5fded": "Actualizar",
           "e06d1baf5c": "Actualizar resumen de uso",
           "c760c481c5": "Resumen de uso",
-          "55c910f4f1": "- algunos precios de modelos no están disponibles"
+          "55c910f4f1": "- algunos precios de modelos no están disponibles",
+          "enableMuse": "Activar Muse",
+          "noLocalUsageYet": "Aún no se encontró uso local de Claude, Codex, OpenCode ni Muse. El resumen se completará después de que la próxima sesión de agente escriba registros de tokens."
         },
         "share": {
           "card": {
@@ -3818,7 +3819,8 @@
             "e7f0a1b2c3": "suscripción",
             "d6e9f0a1b2": "créditos",
             "a3b6c7d8e9": "uso de grok",
-            "9f2a3b4c5d": "xai"
+            "9f2a3b4c5d": "xai",
+            "museKeyword": "muse"
           }
         },
         "usage": {
@@ -3836,7 +3838,6 @@
               "1dd166c920": "Menos",
               "52d9221dc0": "Heatmap de actividad reciente de tokens",
               "c424eb3f8e": "Mejor:",
-              "f28ff1f852": "Actividad reciente de tokens combinados de Claude, Codex y OpenCode.",
               "69e2b50427": "Intensidad diaria",
               "3a795542fa": "Mix combinado de tokens",
               "e65084cb4b": "razonamiento",
@@ -3849,7 +3850,8 @@
               "6762f6a682": "tokens",
               "a7f937fb29": "{{value0}} sesiones - {{value1}} {{value2}}",
               "c8f3a2d1e0b4": "turnos",
-              "d9a4b3e2f1c5": "eventos"
+              "d9a4b3e2f1c5": "eventos",
+              "recentCombinedActivity": "Actividad combinada reciente de tokens de Claude, Codex, OpenCode y Muse."
             }
           }
         },
@@ -3879,6 +3881,17 @@
           "e5a6b7c8d9": "Créditos semanales usados",
           "f6b7c8d9e0": "Restablecimiento del periodo de facturación",
           "a7b8c9d0e1": "Configuración de la cuenta de Grok"
+        },
+        "MuseUsagePane": {
+          "title": "Seguimiento de uso de Muse",
+          "enableLabel": "Activar análisis de uso de Muse",
+          "disabledDescription": "Lee los registros de sesión locales de Muse para mostrar estadísticas de tokens, modelos y sesiones.",
+          "scopeAll": "Todo el uso local de Muse",
+          "optionsLabel": "Opciones de uso de Muse",
+          "refreshAriaLabel": "Actualizar uso de Muse",
+          "emptyMessage": "Aún no se encontró uso local de Muse para este ámbito.",
+          "noCostNote": "Los registros de sesión de Muse registran tokens pero no el costo, por lo que no se muestra una estimación de costo.",
+          "recentSessionsDescription": "Sesiones locales de Muse más recientes en este ámbito."
         }
       },
       "sparse": {

@@ -4266,7 +4266,6 @@
           "444585cb41": "with data",
           "ecb0cd8a4c": "enabled -",
           "33f7b043d2": "Providers",
-          "60002bb22f": "No local Claude, Codex, or OpenCode usage found yet. The overview will populate after the next agent session writes token logs.",
           "70f36452d4": "Cache share",
           "327603fe8b": "Active days",
           "0eaf937335": "Est. cost",
@@ -4279,7 +4278,9 @@
           "ca6bc5fded": "Refresh",
           "e06d1baf5c": "Refresh usage overview",
           "c760c481c5": "Usage Overview",
-          "55c910f4f1": "- some model prices are unavailable"
+          "55c910f4f1": "- some model prices are unavailable",
+          "enableMuse": "Enable Muse",
+          "noLocalUsageYet": "No local Claude, Codex, OpenCode, or Muse usage found yet. The overview will populate after the next agent session writes token logs."
         },
         "share": {
           "card": {
@@ -4316,7 +4317,8 @@
             "e7f0a1b2c3": "subscription",
             "d6e9f0a1b2": "credits",
             "a3b6c7d8e9": "grok usage",
-            "9f2a3b4c5d": "xai"
+            "9f2a3b4c5d": "xai",
+            "museKeyword": "muse"
           }
         },
         "usage": {
@@ -4334,7 +4336,6 @@
               "1dd166c920": "Less",
               "52d9221dc0": "Recent token activity heatmap",
               "c424eb3f8e": "Best:",
-              "f28ff1f852": "Recent combined Claude, Codex, and OpenCode token activity.",
               "69e2b50427": "Daily intensity",
               "3a795542fa": "Combined token mix",
               "e65084cb4b": "reasoning",
@@ -4350,7 +4351,8 @@
               "d9a4b3e2f1c5": "events",
               "statusScanning": "Scanning",
               "statusEnabled": "Enabled",
-              "statusOff": "Off"
+              "statusOff": "Off",
+              "recentCombinedActivity": "Recent combined Claude, Codex, OpenCode, and Muse token activity."
             }
           }
         },
@@ -4383,6 +4385,17 @@
           "e5a6b7c8d9": "Weekly credits used",
           "f6b7c8d9e0": "Billing period reset",
           "a7b8c9d0e1": "Grok account settings"
+        },
+        "MuseUsagePane": {
+          "title": "Muse Usage Tracking",
+          "enableLabel": "Enable Muse usage analytics",
+          "disabledDescription": "Reads local Muse session logs to show token, model, and session stats.",
+          "scopeAll": "All local Muse usage",
+          "optionsLabel": "Muse usage options",
+          "refreshAriaLabel": "Refresh Muse usage",
+          "emptyMessage": "No local Muse usage found yet for this scope.",
+          "noCostNote": "Muse session logs record tokens but not cost, so no cost estimate is shown.",
+          "recentSessionsDescription": "Most recent local Muse sessions in this scope."
         }
       },
       "sparse": {
