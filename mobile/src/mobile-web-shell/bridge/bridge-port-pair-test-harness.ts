@@ -55,6 +55,11 @@ export type BridgePortPair<TRpc extends RpcClient = FakeRpcClient> = {
   pageFaults: BridgeErrorCapture[]
   /** How many times the page asked for a session; it re-asks on a backoff until one lands. */
   readonly pageReadyCount: () => number
+  readonly pagePaintCount: () => number
+  /** Every claim on the device Back key the host reported, in order. */
+  readonly backClaims: boolean[]
+  /** What each answered `ready` declared it reports, in order. */
+  readonly pageReports: () => readonly (readonly string[])[]
   /** Every clear the page asked the shell for, in order. */
   readonly routeParamClears: () => readonly { param: string; value: string }[]
   /** Why the host refused to open a session at all, if it did. */
@@ -199,7 +204,11 @@ export function createBridgePortPair<TRpc extends RpcClient>(
   const backPops: BridgeNavigateBackOutcome[] = []
   const storageWrites: { key: string; value: string | null }[] = []
   const pageFaults: BridgeErrorCapture[] = []
+  const backClaims: boolean[] = []
   let pageReadies = 0
+  let pagePaints = 0
+  /** What each answered `ready` declared it reports, in order. */
+  const pageReports: (readonly string[])[] = []
   const routeParamClears: { param: string; value: string }[] = []
   const routeRefusals: string[] = []
   let receiveOnPage: ((json: string) => void) | null = null
@@ -242,9 +251,14 @@ export function createBridgePortPair<TRpc extends RpcClient>(
     }),
     onStorageWrite: (key, value) => storageWrites.push({ key, value }),
     onPageFault: (error) => pageFaults.push(error),
-    onPageReady: () => {
+    onPageReady: (reports) => {
       pageReadies += 1
+      pageReports.push(reports)
     },
+    onPagePainted: () => {
+      pagePaints += 1
+    },
+    onPageBackClaim: (claimed) => backClaims.push(claimed),
     onRouteParamClear: (param, value) => routeParamClears.push({ param, value }),
     onRouteRefused: (issue) => routeRefusals.push(issue),
     onDiagnostic: (diagnostic) => hostDiagnostics.push(diagnostic)
@@ -280,6 +294,9 @@ export function createBridgePortPair<TRpc extends RpcClient>(
     storageWrites,
     pageFaults,
     pageReadyCount: () => pageReadies,
+    pagePaintCount: () => pagePaints,
+    backClaims,
+    pageReports: () => pageReports,
     routeParamClears: () => routeParamClears,
     routeRefusals,
     async flush(): Promise<void> {

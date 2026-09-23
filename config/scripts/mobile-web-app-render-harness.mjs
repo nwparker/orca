@@ -199,6 +199,42 @@ export async function readBridgeFaultGrant() {
   return match[1]
 }
 
+/** The name the page posts its first frame under, read where the page and the shell both read it. */
+export async function readBridgePagePainted() {
+  const source = await readFile(
+    join(projectDir, 'mobile/src/mobile-web-shell/bridge/bridge-page-painted.ts'),
+    'utf8'
+  )
+  const match = /BRIDGE_PAGE_PAINTED = '([a-zA-Z]+)'/.exec(source)
+  if (!match) {
+    throw new Error('could not read BRIDGE_PAGE_PAINTED from bridge-page-painted.ts')
+  }
+  return match[1]
+}
+
+/**
+ * Every name a Back press can travel under, read where the product reads them: the claim and the
+ * frame this lane added, and the pop the page asks for when it has nothing to spend a press on.
+ * The third is what separates "the sheet closed" from "the whole screen went".
+ */
+export async function readBridgeBackNames() {
+  const lane = await readFile(
+    join(projectDir, 'mobile/src/mobile-web-shell/bridge/bridge-page-back.ts'),
+    'utf8'
+  )
+  const fields = await readFile(
+    join(projectDir, 'mobile/src/mobile-web-shell/bridge/bridge-frame-fields.ts'),
+    'utf8'
+  )
+  const claim = /BRIDGE_BACK_CLAIM_NOTIFY = '([a-z-]+)'/.exec(lane)
+  const frame = /BRIDGE_BACK_FRAME = '([a-z-]+)'/.exec(lane)
+  const navigateBack = /BRIDGE_NAVIGATE_BACK_NOTIFY = '([a-z-]+)'/.exec(fields)
+  if (!claim || !frame || !navigateBack) {
+    throw new Error('could not read the Back names the page and the shell exchange')
+  }
+  return { claim: claim[1], frame: frame[1], navigateBack: navigateBack[1] }
+}
+
 /**
  * The shell's half of the bridge, as the page's channel sees it.
  *
@@ -229,6 +265,7 @@ export function installShellDouble({
   pageRoutes = null,
   pageRouteGrants = null,
   accepts = null,
+  backFrame = null,
   replies,
   streams = [],
   windowCaps = null
@@ -253,6 +290,14 @@ export function installShellDouble({
   // acked every frame look the same from the page's side.
   globalThis.__orcaRenderCheckAcks = []
   const openStreams = new Map()
+  // One Back press, on demand. The shell decides when the key goes to the page, so a check has no
+  // other way to make one happen: nothing the document does produces this frame.
+  globalThis.__orcaRenderCheckSendBack = () => {
+    if (backFrame === null) {
+      throw new Error('this shell double was not given the back frame name')
+    }
+    channel.onmessage?.({ data: JSON.stringify({ v: version, type: backFrame }) })
+  }
   const channel = {
     postMessage: (json) => {
       const frame = JSON.parse(json)
@@ -439,6 +484,38 @@ export function installShellDouble({
   globalThis.orcaBridge = channel
 }
 
+/** How long a check waits for a mount's reads before it reports what the page did send. */
+const RECORDED_REQUEST_MS = 30_000
+
+/**
+ * The double's request log, once every method named is in it.
+ *
+ * A route issues its first reads from effects that run after the commit painting its chrome, so a
+ * snapshot taken where the awaited text lands is a race a loaded machine loses. The bound names
+ * what never arrived and what did.
+ */
+export async function waitForRecordedRequests(
+  page,
+  methods,
+  { boundMs = RECORDED_REQUEST_MS } = {}
+) {
+  const started = Date.now()
+  for (;;) {
+    const requests = await page.evaluate(() => globalThis.__orcaRenderCheckRequests ?? [])
+    const missing = methods.filter((method) => !requests.some((one) => one.method === method))
+    if (missing.length === 0) {
+      return requests
+    }
+    if (Date.now() - started > boundMs) {
+      throw new Error(
+        `[render-harness] the page never asked for ${missing.join(', ')} in ${String(boundMs)}ms; ` +
+          `it asked for ${JSON.stringify(requests.map((one) => one.method))}`
+      )
+    }
+    await page.waitForTimeout(25)
+  }
+}
+
 /**
  * The page server the render checks run against: the built bundle, under the shell's own policy.
  *
@@ -453,8 +530,13 @@ export async function createBundleServer({
   transformChunk,
   handleRequest
 }) {
+  const requestedPaths = []
   const server = createServer((request, response) => {
     const path = new URL(request.url, 'http://localhost').pathname
+    // Every path this origin was asked for, the browser's own fetches included. A favicon request
+    // is made by the browser process rather than the page, and Playwright's `page.on('request')`
+    // never reports one, so the server is the only place a check can see it.
+    requestedPaths.push(path)
     // An endpoint of the check's own, answered before anything is looked for on disk: a policy's
     // `report-uri` has to name a real server, and naming this one keeps it on the page's origin.
     if (handleRequest?.(request, response, path)) {
@@ -462,7 +544,10 @@ export async function createBundleServer({
     }
     // A browser asks for this on its own and the shell's WebView never does. The bundle carries
     // no icon, so a 404 would put a console error in every check that runs against a full Chrome
-    // -- which is what CI resolves -- and none against the bundled headless shell.
+    // -- which is what CI resolves -- and none against the bundled headless shell. Kept for the
+    // probe documents the checks compose themselves, which declare no icon; the page's own
+    // document does declare one, and answering 204 hides nothing from a check that reads the
+    // request rather than the response (`mobile-web-app-session-render.test.mjs`).
     if (path === '/favicon.ico') {
       response.writeHead(204)
       response.end()
@@ -502,7 +587,7 @@ export async function createBundleServer({
     )
   })
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
-  return { server, origin: `http://127.0.0.1:${String(server.address().port)}` }
+  return { server, origin: `http://127.0.0.1:${String(server.address().port)}`, requestedPaths }
 }
 
 /**
