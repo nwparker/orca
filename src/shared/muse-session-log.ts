@@ -84,12 +84,13 @@ export function unwrapMuseLogRecords(line: JsonRecord): JsonRecord[] {
   const records: JsonRecord[] = []
   for (const child of line.children) {
     const raw: unknown = record(child)?.record_json
-    let parsed: JsonRecord | undefined
+    let value: unknown = raw
     try {
-      parsed = typeof raw === 'string' ? record(JSON.parse(raw) as unknown) : record(raw)
+      value = typeof raw === 'string' ? JSON.parse(raw) : raw
     } catch {
-      parsed = undefined
+      value = undefined
     }
+    const parsed = record(value)
     if (parsed) {
       records.push(parsed)
     }
