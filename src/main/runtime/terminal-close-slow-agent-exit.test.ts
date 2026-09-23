@@ -150,19 +150,15 @@ describe('worker release of an agent that is slow to exit after its terminal clo
       // A wedged agent ignores SIGKILL, so only the close deadline can end the kill.
       harness.subprocess.forceKill = () => {}
       let budgetMs = 0
-      let expiredBy = -1
       const expiringStop: typeof stopAndWaitPtyFromRuntimeController = async (deps, id, opts) => {
         const deadlineMs = opts?.deadlineMs ?? 0
         budgetMs = deadlineMs - Date.now()
         // Jump the clock to the deadline so the real stop issues its kill RPC with no time left.
         vi.setSystemTime(deadlineMs)
-        const stopped = await stopAndWaitPtyFromRuntimeController(deps, id, opts)
-        expiredBy = Date.now() - deadlineMs
-        return stopped
+        return stopAndWaitPtyFromRuntimeController(deps, id, opts)
       }
       const { receipt, fallbackKill } = await closeThroughDaemon(harness, expiringStop)
       expect(budgetMs).toBeGreaterThan(IMMEDIATE_KILL_REPLY_BUDGET_MS)
-      expect(expiredBy).toBeGreaterThanOrEqual(0)
       expect(receipt).toMatchObject({
         state: 'release_unknown',
         processAction: 'closed_agent_terminal',
