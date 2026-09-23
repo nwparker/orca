@@ -63,6 +63,8 @@ export type MuseSessionLogState = {
   pending: Map<string, MusePendingUserInput>
 }
 
+const USER_INPUT_PROMPT_MARKER = '"user_input_prompt_'
+
 export function createMuseSessionLogState(sessionId: string): MuseSessionLogState {
   return { sessionId, cursor: { offset: 0, carry: '' }, pending: new Map() }
 }
@@ -73,7 +75,9 @@ export function readMusePendingUserInput(
   sessionsDir?: string
 ): MusePendingUserInput | undefined {
   log.cursor.filePath ??= findMuseSessionLogPath(log.sessionId, sessionsDir)
-  for (const line of readJsonlCursor(log.cursor) ?? []) {
+  // Why: most log lines are large model/tool records; parse only the two event kinds we read.
+  const lines = readJsonlCursor(log.cursor, (line) => line.includes(USER_INPUT_PROMPT_MARKER))
+  for (const line of lines ?? []) {
     const event = record(record(line.payload)?.event)
     const promptId = typeof event?.prompt_id === 'string' ? event.prompt_id : undefined
     if (!event || !promptId) {
