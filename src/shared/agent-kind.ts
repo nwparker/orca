@@ -56,6 +56,7 @@ const TUI_AGENT_KIND_BY_AGENT = {
   trae: 'trae',
   muse: 'muse',
   zcode: 'zcode',
+  reasonix: 'reasonix',
   dsh: 'dsh'
 } satisfies Record<TuiAgent, ConcreteAgentKind>
 

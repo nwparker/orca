@@ -140,6 +140,7 @@ const ICONABLE_AGENT_TYPES: Record<TuiAgent, true> = {
   trae: true,
   muse: true,
   zcode: true,
+  reasonix: true,
   dsh: true
 }
 

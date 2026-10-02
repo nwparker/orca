@@ -1,3 +1,4 @@
+import { createReasonixAgentCatalogEntry } from './reasonix-agent-catalog-entry'
 import { getCatalogPlatform } from './agent-catalog-platform'
 import type React from 'react'
 import { ClaudeIcon, DroidIcon, OpenAIIcon } from '@/components/status-bar/icons'
@@ -20,14 +21,11 @@ import { AGENT_FAVICON_ASSETS } from './agent-favicon-assets'
 export type AgentCatalogEntry = {
   id: TuiAgent
   label: string
-  /** Default CLI binary name used for PATH detection. */
   cmd: string
   searchAliases?: readonly string[]
-  /** Direct or bundled image URL for agents whose project identity is not represented by a favicon service. */
   iconUrl?: string
   /** Domain for Google's favicon service — used for agents without an SVG icon. */
   faviconDomain?: string
-  /** Homepage/install docs URL, sourced from the README agent badge list. */
   homepageUrl: string
 }
 
@@ -121,6 +119,7 @@ export const getAgentCatalog = createLocalizedCatalog((): AgentCatalogEntry[] =>
     searchAliases: ['deepseek', 'dsh', 'dst', 'deepseek harness'],
     homepageUrl: 'https://deepseek-harness.github.io/deepseek-harness/'
   },
+  createReasonixAgentCatalogEntry(),
   {
     id: 'qoder',
     label: translate('auto.lib.agent.catalog.qoder_label', 'Qoder CLI'),
