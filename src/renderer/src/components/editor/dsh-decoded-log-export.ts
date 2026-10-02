@@ -1,4 +1,5 @@
 import { toast } from 'sonner'
+import { translate } from '@/i18n/i18n'
 import type { OpenFile } from '@/store/slices/editor'
 import { dshHomeFromSessionPath } from '../../../../shared/dsh-session-paths'
 
@@ -22,7 +23,12 @@ export async function exportDecodedDshLog(file: OpenFile): Promise<void> {
       decodeDshHistory: true
     })
     if (result.decodedDshHistory !== true || result.isBinary) {
-      throw new Error('Update the transcript-owning Orca host to export decoded DSH logs')
+      throw new Error(
+        translate(
+          'auto.components.editor.dshDecodedLogExport.updateHost',
+          'Update the transcript-owning Orca host to export decoded DSH logs'
+        )
+      )
     }
     const name = file.filePath.split(/[\\/]/).at(-1) ?? 'session.jsonl'
     await window.api.fs.saveDownloadedFile({
@@ -31,6 +37,13 @@ export async function exportDecodedDshLog(file: OpenFile): Promise<void> {
       encoding: 'utf8'
     })
   } catch (error) {
-    toast.error(error instanceof Error ? error.message : 'Could not export decoded DSH log')
+    toast.error(
+      error instanceof Error
+        ? error.message
+        : translate(
+            'auto.components.editor.dshDecodedLogExport.failed',
+            'Could not export decoded DSH log'
+          )
+    )
   }
 }

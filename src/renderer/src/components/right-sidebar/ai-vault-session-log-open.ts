@@ -72,7 +72,12 @@ export async function openAiVaultSessionLogInOrca(session: AiVaultLogSession): P
     const host = parseExecutionHostId(session.executionHostId ?? 'local')
     const sshTargetId = host?.kind === 'ssh' ? host.targetId : undefined
     if (sshTargetId && getAiVaultResumeWorkspaceExecutionHostId(state, worktreeId) !== host?.id) {
-      toast.error('Open a workspace on the transcript-owning SSH host to view this log.')
+      toast.error(
+        translate(
+          'auto.components.right.sidebar.aiVaultSessionLogOpen.openTranscriptHost',
+          'Open a workspace on the transcript-owning SSH host to view this log.'
+        )
+      )
       return
     }
     const targetGroupId = state.activeGroupIdByWorktree?.[worktreeId] ?? undefined
