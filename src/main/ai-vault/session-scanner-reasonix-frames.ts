@@ -2,6 +2,7 @@ import { decompressSessionZstdFrames } from './session-zstd-frames'
 
 const MAX_FRAME_BYTES = 8 * 1024 * 1024
 const MAX_SOURCE_BYTES = 64 * 1024 * 1024
+const MAX_DECODED_BYTES = 64 * 1024 * 1024
 
 // Reasonix 1.39.7 RX4F wraps each independent Zstandard record in a big-endian header.
 export async function* reasonixFrameRecords(
@@ -12,6 +13,7 @@ export async function* reasonixFrameRecords(
   let pending = Buffer.alloc(0)
   let ended = false
   let sourceBytes = 0
+  let decodedBytes = 0
   async function take(count: number): Promise<Buffer> {
     const parts: Buffer[] = []
     let size = 0
@@ -72,6 +74,10 @@ export async function* reasonixFrameRecords(
         windowLogMax: 23
       })) {
         signal?.throwIfAborted()
+        decodedBytes += chunk.length
+        if (decodedBytes > MAX_DECODED_BYTES) {
+          throw new Error('Reasonix decoded history exceeds read budget')
+        }
         parts.push(chunk)
         size += chunk.length
       }

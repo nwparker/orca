@@ -5,6 +5,8 @@ import { constants, zstdCompressSync } from 'node:zlib'
 import { expect, it } from 'vitest'
 import { reasonixCommittedBatches } from './session-scanner-reasonix-batches'
 import { reasonixFrameRecords } from './session-scanner-reasonix-frames'
+import { projectReasonixHistory } from './session-scanner-reasonix-projection'
+import { asRecord, parseJsonObject } from './session-scanner-values'
 
 const kinds = new Set([
   'message/complete',
@@ -34,16 +36,21 @@ function frame(raw: Buffer): Buffer {
   header.writeUInt32BE(raw.length, 8)
   return Buffer.concat([header, compressed])
 }
-function batch(kind = 'message/complete', optional = false): Buffer[] {
+function batch(
+  kind = 'message/complete',
+  optional = false,
+  payload: unknown = { message: { id: 'm', role: 'user', content: 'test' } },
+  sequence = 1
+): Buffer[] {
   const records = [
     {
       schemaVersion: 4,
       codec: 'reasonix.session.linear/v4',
       recordType: 'batch/begin',
-      commitId: 'commit',
-      operationId: 'op',
+      commitId: `commit-${sequence}`,
+      operationId: `op-${sequence}`,
       operationHash: 'hash',
-      firstSeq: 1,
+      firstSeq: sequence,
       eventCount: 1,
       writerGeneration: 1
     },
@@ -53,12 +60,10 @@ function batch(kind = 'message/complete', optional = false): Buffer[] {
       recordType: 'batch/event',
       event: {
         id: 'event',
-        seq: 1,
+        seq: sequence,
         kind,
         optional,
-        payload: Buffer.from('{"message":{"id":"m","role":"user","content":"test"}}').toString(
-          'base64'
-        )
+        payload: Buffer.from(JSON.stringify(payload)).toString('base64')
       }
     }
   ].map((record) => Buffer.from(JSON.stringify(record)))
@@ -71,8 +76,8 @@ function batch(kind = 'message/complete', optional = false): Buffer[] {
       schemaVersion: 4,
       codec: 'reasonix.session.linear/v4',
       recordType: 'batch/end',
-      commitId: 'commit',
-      firstSeq: 1,
+      commitId: `commit-${sequence}`,
+      firstSeq: sequence,
       eventCount: 1,
       sha256: digest.digest('hex')
     })
@@ -161,6 +166,21 @@ it('rejects declared frame sizes before allocating or reading their body', async
   await expect(collect(reasonixFrameRecords(chunks(header)))).rejects.toThrow('sizes')
 })
 
+it('bounds cumulative decoded output across highly compressed native-sized frames', async () => {
+  const compressed = frame(Buffer.alloc(8 * 1024 * 1024, 'x'))
+  async function* source() {
+    for (let index = 0; index < 9; index += 1) {
+      yield compressed
+    }
+  }
+  const drain = async () => {
+    for await (const _record of reasonixFrameRecords(source())) {
+      // Discard records so the test also exercises bounded reader retention.
+    }
+  }
+  await expect(drain()).rejects.toThrow('decoded history exceeds read budget')
+})
+
 it('closes its source when the consumer stops early', async () => {
   let closed = false
   async function* source() {
@@ -186,4 +206,125 @@ it('cancels before requesting more source bytes', async () => {
   }
   await expect(collect(reasonixFrameRecords(source(), controller.signal))).rejects.toThrow()
   expect(read).toBe(false)
+})
+
+it('projects the actual native saved model and user/assistant records', async () => {
+  const projection = await projectReasonixHistory(chunks(real))
+  expect(projection.model).toBe('orca-proof/orca-loopback')
+  expect(
+    projection.messages
+      .filter((message) => message.record.origin === 'user')
+      .map((message) => message.record.raw_content)
+  ).toEqual(['Orca loopback transport probe'])
+  expect(
+    projection.messages
+      .filter((message) => message.record.role === 'assistant')
+      .map((message) => message.record.content)
+  ).toEqual(['Loopback transport proof only.'])
+})
+
+it('honors native replacements, upserts and retractions instead of indexing stale messages', async () => {
+  const events = [
+    batch(),
+    batch('message/upsert', false, { message: { id: 'm', role: 'user', content: 'edited' } }, 2),
+    batch(
+      'message/complete',
+      false,
+      { message: { id: 'a', role: 'assistant', content: 'answer' } },
+      3
+    ),
+    batch('message/retract', false, { messageIds: ['m'] }, 4),
+    batch(
+      'history/replace',
+      false,
+      {
+        messages: [
+          { id: 'r', role: 'user', content: 'replacement' },
+          { id: 'r', role: 'user', content: 'duplicate' }
+        ]
+      },
+      5
+    ),
+    batch(
+      'compaction',
+      false,
+      { messages: [{ id: 'model', role: 'system', content: 'model-only summary' }] },
+      6
+    )
+  ]
+    .flat()
+    .map(frame)
+  const projection = await projectReasonixHistory(chunks(Buffer.concat(events)))
+  expect(projection.messages.map((message) => message.record.content)).toEqual(['replacement'])
+})
+
+function referencedBatch(contentDigest: string, size: number, sequence = 1): Buffer[] {
+  const raw = batch('message/complete', false, {}, sequence)
+  const record = parseJsonObject(raw[1].toString())
+  const event = asRecord(record?.event)
+  const end = parseJsonObject(raw[2].toString())
+  if (!record || !event || !end) {
+    throw new Error('Invalid generated Reasonix physical fixture')
+  }
+  delete event.payload
+  event.payloadRef = { digest: contentDigest, bytes: size }
+  raw[1] = Buffer.from(JSON.stringify(record))
+  const digest = createHash('sha256')
+  for (const record of raw.slice(0, 2)) {
+    digest.update(record).update('\0')
+  }
+  end.sha256 = digest.digest('hex')
+  raw[2] = Buffer.from(JSON.stringify(end))
+  return raw
+}
+
+it('fails closed on a malformed referenced-payload digest before requesting content', async () => {
+  let read = false
+  await expect(
+    projectReasonixHistory(
+      chunks(Buffer.concat(referencedBatch('../outside', 10).map(frame))),
+      async () => {
+        read = true
+        return Buffer.alloc(10)
+      }
+    )
+  ).rejects.toThrow('content reference')
+  expect(read).toBe(false)
+})
+
+it('accepts immutable content only when both native byte length and SHA-256 match', async () => {
+  const content = Buffer.from(
+    JSON.stringify({ message: { id: 'ref', role: 'user', origin: 'user', content: 'referenced' } })
+  )
+  const digest = createHash('sha256').update(content).digest('hex')
+  const log = Buffer.concat(referencedBatch(digest, content.length).map(frame))
+  const projection = await projectReasonixHistory(chunks(log), async () => content)
+  expect(projection.messages.map((message) => message.record.content)).toEqual(['referenced'])
+  const changed = Buffer.from(content)
+  changed[changed.length - 1] ^= 1
+  await expect(projectReasonixHistory(chunks(log), async () => changed)).rejects.toThrow(
+    'integrity mismatch'
+  )
+})
+
+it('bounds referenced content across commits before requesting another large object', async () => {
+  const content = Buffer.from(
+    JSON.stringify({
+      message: { id: 'big', role: 'user', content: 'x'.repeat(8 * 1024 * 1024 - 512) }
+    })
+  )
+  const digest = createHash('sha256').update(content).digest('hex')
+  const log = Buffer.concat(
+    Array.from({ length: 9 }, (_, index) => referencedBatch(digest, content.length, index + 1))
+      .flat()
+      .map(frame)
+  )
+  let reads = 0
+  await expect(
+    projectReasonixHistory(chunks(log), async () => {
+      reads += 1
+      return content
+    })
+  ).rejects.toThrow('referenced history exceeds read budget')
+  expect(reads).toBe(8)
 })
