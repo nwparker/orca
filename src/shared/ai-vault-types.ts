@@ -24,7 +24,8 @@ export const AI_VAULT_AGENTS = [
   'cline',
   'kimi',
   'muse',
-  'dsh'
+  'dsh',
+  'reasonix'
 ] as const satisfies readonly TuiAgent[]
 
 // Why: the aiVault.listSessions RPC schema CLAMPS scopePaths to this bound
@@ -74,7 +75,8 @@ export const AI_VAULT_AGENT_LABELS = {
   cline: 'Cline',
   kimi: 'Kimi',
   muse: 'Muse',
-  dsh: 'DeepSeek Harness'
+  dsh: 'DeepSeek Harness',
+  reasonix: 'Reasonix'
 } as const satisfies Record<AiVaultAgent, string>
 
 export type AiVaultSessionPreviewMessage = {
@@ -132,6 +134,7 @@ export type AiVaultSession = {
   // recoverable signal for zero-turn sessions.
   subagentTranscriptCount: number
   resumeCommand: string
+  resumeUnavailableReason?: 'workspace-unverified'
   subagent: AiVaultSessionSubagentInfo | null
   /** Present only when the negotiated client can open the native structured owner. */
   structuredSession?: {
@@ -212,6 +215,7 @@ export type AiVaultScanIssue = {
 }
 
 export type AiVaultListArgs = {
+  includeReasonixHistory?: boolean
   limit?: number
   unlimited?: boolean
   force?: boolean

@@ -47,6 +47,8 @@ export type AiVaultScanOptions = {
   kimiSessionsDir?: string
   museSessionsDir?: string
   dshSessionsDir?: string
+  reasonixProjectsDir?: string
+  includeReasonixHistory?: boolean
   limit?: number
   unlimited?: boolean
   limitPerAgent?: number

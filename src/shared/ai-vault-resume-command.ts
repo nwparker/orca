@@ -1,6 +1,7 @@
 // Resume-command construction for Agent Session History rows: turns a scanned
 // session into the shell line that re-enters it, quoted for the target platform
 // and (when known) the live tab's shell.
+import { reasonixSessionLayout } from './reasonix-session-paths'
 import { dshHomeFromSessionPath } from './dsh-session-paths'
 import { TUI_AGENT_CONFIG } from './tui-agent-config'
 import {
@@ -26,6 +27,9 @@ export function buildAiVaultResumeCommand(args: {
 }): string {
   const { agent, sessionId, cwd, platform, commandOverride, codexHome, resumeFilePath, shell } =
     args
+  if (agent === 'reasonix' && (!cwd || !resumeFilePath || !reasonixSessionLayout(resumeFilePath))) {
+    return ''
+  }
   const baseCommand = commandOverride?.trim() || defaultAiVaultResumeCommandBase(agent)
   // Why: OMP's and Prime Agent's `--resume` accept an absolute transcript path,
   // which resolves regardless of which session-dir root (custom
@@ -50,6 +54,10 @@ export function buildAiVaultResumeCommand(args: {
     platform,
     codexHome,
     dshHome: agent === 'dsh' ? dshHomeFromSessionPath(resumeFilePath) : null,
+    reasonixStateHome:
+      agent === 'reasonix' && resumeFilePath
+        ? reasonixSessionLayout(resumeFilePath)?.stateHome
+        : null,
     shell,
     clearEnvNames: args.clearEnvNames
   })
@@ -58,6 +66,7 @@ export function buildAiVaultResumeCommand(args: {
 export function buildAiVaultResumeShellCommand(args: {
   resumeCommand: string
   dshHome?: string | null
+  reasonixStateHome?: string | null
   cwd: string | null
   platform: NodeJS.Platform
   codexHome?: string | null
@@ -71,8 +80,12 @@ export function buildAiVaultResumeShellCommand(args: {
   shell?: AgentStartupShell
 }): string {
   const { cwd, platform, shell, clearEnvNames } = args
-  const codexHome = args.dshHome ?? args.codexHome
-  const homeEnvName = args.dshHome ? 'DSH_HOME' : 'CODEX_HOME'
+  const codexHome = args.reasonixStateHome ?? args.dshHome ?? args.codexHome
+  const homeEnvName = args.reasonixStateHome
+    ? 'REASONIX_STATE_HOME'
+    : args.dshHome
+      ? 'DSH_HOME'
+      : 'CODEX_HOME'
 
   // Why: shell-aware commands are parsed by a known running shell, while
   // shell-less persisted commands keep the legacy self-contained cmd wrapper.
@@ -132,6 +145,7 @@ export function buildAiVaultResumeShellCommand(args: {
 function buildResumeShellCommandForShell(args: {
   resumeCommand: string
   dshHome?: string | null
+  reasonixStateHome?: string | null
   cwd: string | null
   codexHome: string | null
   shell: Exclude<AgentStartupShell, 'cmd'>
@@ -237,6 +251,7 @@ function buildAgentResumeInvocation(
     case 'openclaw':
     case 'droid':
     case 'dsh':
+    case 'reasonix':
     // Why: OMP and Prime Agent resume by absolute transcript path (see
     // buildAiVaultResumeCommand), but the `--resume <arg>` invocation form is
     // identical to the others here.

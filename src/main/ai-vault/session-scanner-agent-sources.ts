@@ -1,4 +1,5 @@
 import type { Dirent } from 'node:fs'
+import { REASONIX_AGENT_SOURCE } from './session-scanner-reasonix-source'
 import { DSH_AGENT_SOURCE } from './session-scanner-dsh-source'
 import { homedir } from 'node:os'
 import { basename, dirname, extname, join, relative } from 'node:path'
@@ -303,6 +304,7 @@ export const AI_VAULT_AGENT_SOURCES: AiVaultAgentSourceTable = {
     filePredicate: (filePath) =>
       basename(filePath) === 'state.json' && basename(dirname(filePath)).startsWith('session_')
   },
+  reasonix: REASONIX_AGENT_SOURCE,
   dsh: DSH_AGENT_SOURCE,
   muse: {
     rootDirs: (options, wslHomeDirs) =>

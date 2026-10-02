@@ -1,3 +1,4 @@
+import { remoteReasonixSource } from './remote-session-scanner-reasonix-source'
 import { remoteDshSource } from './remote-session-scanner-dsh-source'
 import { remoteSessionDocumentParsers } from './remote-session-document-parsers'
 import type { RemoteSessionContent } from './remote-session-content-lines'
@@ -49,11 +50,15 @@ type RemoteContentParser<T = string> = (
 export function remoteSessionSources(
   remoteHome: string,
   hostPlatform: RemoteHostPlatform,
-  dshSessionsDir?: string
+  dshSessionsDir?: string,
+  reasonix?: { include: boolean; projectsDir?: string }
 ): RemoteSessionSource[] {
   return [
     ...remoteCodexSources(remoteHome, hostPlatform),
     remoteDshSource(remoteHome, hostPlatform, dshSessionsDir),
+    ...(reasonix?.include
+      ? [remoteReasonixSource(remoteHome, hostPlatform, reasonix.projectsDir)]
+      : []),
     {
       ...jsonlSource(
         'claude',

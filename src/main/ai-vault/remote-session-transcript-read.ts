@@ -15,7 +15,7 @@ export async function parseRemoteSessionTranscript(
   if (candidate.source.readAsBytes) {
     if (!context.provider.readTranscriptBytes || !candidate.source.parseDocument) {
       throw new Error(
-        'DSH history requires streaming reads on the transcript-owning host; update the remote Orca host.'
+        `${candidate.source.agent} history requires streaming reads on the transcript-owning host; update the remote Orca host.`
       )
     }
     return candidate.source.parseDocument(
@@ -25,7 +25,9 @@ export async function parseRemoteSessionTranscript(
         context.signal,
         candidate.source.agent === 'dsh' && candidate.file.path.endsWith('.zstd')
           ? 'dsh-zstd'
-          : undefined
+          : candidate.source.agent === 'reasonix'
+            ? 'reasonix-v4'
+            : undefined
       ),
       context
     )

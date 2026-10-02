@@ -51,6 +51,8 @@ export async function scanRemoteAiVaultSessions(args: {
   provider: RemoteSessionFilesystemProvider
   executionHostId: ExecutionHostId
   dshSessionsDir?: string
+  reasonixProjectsDir?: string
+  includeReasonixHistory?: boolean
   remoteHome: string
   hostPlatform: RemoteHostPlatform
   limit?: number
@@ -88,7 +90,10 @@ export async function scanRemoteAiVaultSessions(args: {
     (
       await mapRemoteScanBatches(
         [
-          ...remoteSessionSources(args.remoteHome, args.hostPlatform, args.dshSessionsDir),
+          ...remoteSessionSources(args.remoteHome, args.hostPlatform, args.dshSessionsDir, {
+            include: args.includeReasonixHistory === true,
+            projectsDir: args.reasonixProjectsDir
+          }),
           ...remoteOpenCodeSources(
             provider.openCode,
             limit * REMOTE_PARSE_CANDIDATE_MULTIPLIER +

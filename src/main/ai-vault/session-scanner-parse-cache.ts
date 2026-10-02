@@ -83,6 +83,7 @@ function resumableStateFactoryFor(
     case 'kimi':
     case 'muse':
     case 'dsh':
+    case 'reasonix':
     case 'opencode':
     case 'opencode2':
     case 'zcode':

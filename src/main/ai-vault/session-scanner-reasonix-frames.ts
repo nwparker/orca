@@ -45,7 +45,7 @@ export async function* reasonixFrameRecords(
       if (header.length < 12) {
         return
       }
-      if (header.toString('ascii', 0, 4) !== 'RX4F') {
+      if (header.readUInt32BE(0) !== 0x52583446) {
         throw new Error('Invalid Reasonix frame magic')
       }
       const compressedLength = header.readUInt32BE(4)
