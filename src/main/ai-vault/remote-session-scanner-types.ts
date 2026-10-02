@@ -48,6 +48,11 @@ export type RemoteSessionSource = {
   // Codex sources only: the CODEX_HOME the root belongs to, so bridged or
   // backfilled rollout aliases across remote roots collapse to one canonical row.
   codexHome?: string
+  selectFilePaths?: (
+    paths: readonly string[],
+    reportInvalid?: (path: string, message: string) => void
+  ) => string[]
+  readAsBytes?: boolean
   extensions: readonly string[]
   filePredicate?: (path: string) => boolean
   contentDependencyPath?: (path: string) => string
