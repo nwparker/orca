@@ -27,7 +27,11 @@ export type RemoteSessionFilesystemProvider = Pick<
   'readDir' | 'readFile' | 'stat'
 > & {
   /** Available only beside the execution host's disk; never opens a client path. */
-  readTranscriptBytes?: (path: string, signal?: AbortSignal) => AsyncIterable<Buffer>
+  readTranscriptBytes?: (
+    path: string,
+    signal?: AbortSignal,
+    format?: 'dsh-zstd'
+  ) => AsyncIterable<Buffer>
   /** Execution-host database access; absent from remote filesystem RPC providers. */
   openCode?: RemoteOpenCodeSessionReader
 }

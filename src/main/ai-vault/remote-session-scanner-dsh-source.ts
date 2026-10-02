@@ -16,10 +16,25 @@ export function remoteDshSource(
     directoryPredicate: (_name, depth) => depth < 2,
     selectFilePaths: selectDshGenerationPaths,
     readAsBytes: true,
-    parseDocument: (file, bytes, context) =>
-      parseDshSessionBytes(
+    parseDocument: (file, bytes, context) => {
+      let initial = true
+      return parseDshSessionBytes(
         file,
-        bytes,
+        () => {
+          if (initial) {
+            initial = false
+            return bytes
+          }
+          const read = context.provider.readTranscriptBytes
+          if (!read) {
+            throw new Error('DSH history requires execution-host byte reads')
+          }
+          return read(
+            file.path,
+            context.signal,
+            file.path.endsWith('.zstd') ? 'dsh-zstd' : undefined
+          )
+        },
         context.hostPlatform.os,
         {
           executionHostId: context.executionHostId,
@@ -27,7 +42,8 @@ export function remoteDshSource(
         },
         undefined,
         context.signal
-      ),
+      )
+    },
     parse: async () => {
       throw new Error('DSH history must be read as bytes on its execution host')
     }

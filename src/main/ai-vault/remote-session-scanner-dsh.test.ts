@@ -40,6 +40,65 @@ const args = {
 }
 
 describe('execution-host DSH history', () => {
+  it('rereads seeded history on its owning provider and excludes both inherited generations', async () => {
+    const memory = new MemoryRemoteProvider()
+    memory.addFile(path, 'binary placeholder', 6)
+    const rows = data
+      .toString()
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line))
+    const header: unknown = { ...rows[0], isSeeded: true }
+    const event = (seq: number, text: string) => ({
+      ...rows[1],
+      seq,
+      data: {
+        role: 'user',
+        source: { kind: 'user' },
+        content: [{ type: 'text', text }]
+      }
+    })
+    const boundary = (seq: number) => ({
+      type: 'session/end-seed',
+      seq,
+      time: 1790920000100,
+      data: { inherited: true }
+    })
+    const bytes = zstdCompressSync(
+      Buffer.from(
+        `${[
+          header,
+          event(0, 'Grandparent'),
+          boundary(1),
+          event(2, 'Parent'),
+          boundary(3),
+          event(4, 'Own fork ask')
+        ]
+          .map((row) => JSON.stringify(row))
+          .join('\n')}\n`
+      )
+    )
+    const reads: string[] = []
+    const provider: RemoteSessionFilesystemProvider = {
+      readDir: (path) => memory.readDir(path),
+      stat: (path) => memory.stat(path),
+      readFile: async () => {
+        throw new Error('Never read the client home or text RPC')
+      },
+      readTranscriptBytes: async function* (path) {
+        reads.push(path)
+        yield bytes
+      }
+    }
+    const result = await scanRemoteAiVaultSessions({ ...args, provider })
+    expect(result.issues).toEqual([])
+    expect(reads).toEqual([path, path])
+    expect(result.sessions[0]?.messageCount).toBe(1)
+    expect(result.sessions[0]?.previewMessages.map((message) => message.text)).toEqual([
+      'Own fork ask'
+    ])
+  })
+
   it('streams only latest generation from the provider and preserves host identity', async () => {
     const memory = new MemoryRemoteProvider()
     memory.addFile(path, 'binary placeholder', 5)

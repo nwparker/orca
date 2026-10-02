@@ -20,7 +20,13 @@ export async function parseRemoteSessionTranscript(
     }
     return candidate.source.parseDocument(
       candidate.file,
-      context.provider.readTranscriptBytes(candidate.file.path, context.signal),
+      context.provider.readTranscriptBytes(
+        candidate.file.path,
+        context.signal,
+        candidate.source.agent === 'dsh' && candidate.file.path.endsWith('.zstd')
+          ? 'dsh-zstd'
+          : undefined
+      ),
       context
     )
   }

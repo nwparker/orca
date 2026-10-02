@@ -65,27 +65,28 @@ describe('official DSH persistence', () => {
       const messages: TranscriptMessage[] = []
       const result = await parseDshSessionBytes(
         file(`/tmp/.dsh/sessions/p/s/session${version ? `.v${version}` : ''}.jsonl`),
-        chunks(
-          jsonl([
-            header(version),
-            message(0, 'Injected noise', 'goal'),
-            message(1, 'Human opening ask'),
-            { type: 'assistant/attempt', seq: 2, time: 1790920000200, data: { stream: [] } },
-            {
-              type: 'assistant/message',
-              seq: 3,
-              time: 1790920000300,
-              data: {
-                message: {
-                  role: 'assistant',
-                  source: { kind: 'model', model: 'test-only' },
-                  content: [{ type: 'text', text: 'Synthetic parser fixture reply' }]
-                },
-                usage: { inputTokens: 4, outputTokens: 6 }
+        () =>
+          chunks(
+            jsonl([
+              header(version),
+              message(0, 'Injected noise', 'goal'),
+              message(1, 'Human opening ask'),
+              { type: 'assistant/attempt', seq: 2, time: 1790920000200, data: { stream: [] } },
+              {
+                type: 'assistant/message',
+                seq: 3,
+                time: 1790920000300,
+                data: {
+                  message: {
+                    role: 'assistant',
+                    source: { kind: 'model', model: 'test-only' },
+                    content: [{ type: 'text', text: 'Synthetic parser fixture reply' }]
+                  },
+                  usage: { inputTokens: 4, outputTokens: 6 }
+                }
               }
-            }
-          ])
-        ),
+            ])
+          ),
         'darwin',
         {},
         { active: true, push: (value) => messages.push(value) }
@@ -102,19 +103,20 @@ describe('official DSH persistence', () => {
   it('counts released packed deltas as seed slots without inventing conversation messages', async () => {
     const result = await parseDshSessionBytes(
       file('/tmp/.dsh/sessions/p/s/session.jsonl'),
-      chunks(
-        jsonl([
-          header(0, { parentSession: 'parent', seedLength: 3 }),
-          {
-            type: 'text-chunks',
-            seq0: 0,
-            time0: 1790920000000,
-            data: { turn: 1, step: 1, index: 0, dt: [1], texts: ['partial', 'delta'] }
-          },
-          message(2, 'Inherited ask'),
-          message(3, 'Independent fork ask')
-        ])
-      ),
+      () =>
+        chunks(
+          jsonl([
+            header(0, { parentSession: 'parent', seedLength: 3 }),
+            {
+              type: 'text-chunks',
+              seq0: 0,
+              time0: 1790920000000,
+              data: { turn: 1, step: 1, index: 0, dt: [1], texts: ['partial', 'delta'] }
+            },
+            message(2, 'Inherited ask'),
+            message(3, 'Independent fork ask')
+          ])
+        ),
       'linux'
     )
     expect(result?.previewMessages.map((value) => value.text)).toEqual(['Independent fork ask'])
@@ -124,25 +126,27 @@ describe('official DSH persistence', () => {
     expect(
       await parseDshSessionBytes(
         file(),
-        chunks(
-          jsonl([
-            header(4, { origin: 'subagent', parentSession: 'parent', delegationDepth: 1 }),
-            message(0, 'Child')
-          ])
-        ),
+        () =>
+          chunks(
+            jsonl([
+              header(4, { origin: 'subagent', parentSession: 'parent', delegationDepth: 1 }),
+              message(0, 'Child')
+            ])
+          ),
         'linux'
       )
     ).toBeNull()
     const result = await parseDshSessionBytes(
       file(),
-      chunks(
-        jsonl([
-          header(4, { parentSession: 'parent', isSeeded: true }),
-          message(0, 'Inherited'),
-          { type: 'session/end-seed', seq: 1, time: 1790920000101, data: { inherited: true } },
-          message(2, 'Fork opening ask')
-        ])
-      ),
+      () =>
+        chunks(
+          jsonl([
+            header(4, { parentSession: 'parent', isSeeded: true }),
+            message(0, 'Inherited'),
+            { type: 'session/end-seed', seq: 1, time: 1790920000101, data: { inherited: true } },
+            message(2, 'Fork opening ask')
+          ])
+        ),
       'linux'
     )
     expect(result?.messageCount).toBe(1)
@@ -155,7 +159,7 @@ describe('official DSH persistence', () => {
     ])
     const result = await parseDshSessionBytes(
       file('/tmp/.dsh/sessions/p/s/session.v4.jsonl.zstd'),
-      chunks(bytes),
+      () => chunks(bytes),
       'linux'
     )
     expect(result?.previewMessages[0].text).toBe('Compressed opening ask')
@@ -163,9 +167,10 @@ describe('official DSH persistence', () => {
       (
         await parseDshSessionBytes(
           file(),
-          chunks(
-            Buffer.concat([jsonl([header(), message(0, 'Saved')]), Buffer.from('{"type":"user')])
-          ),
+          () =>
+            chunks(
+              Buffer.concat([jsonl([header(), message(0, 'Saved')]), Buffer.from('{"type":"user')])
+            ),
           'linux'
         )
       )?.messageCount
@@ -173,22 +178,22 @@ describe('official DSH persistence', () => {
     await expect(
       parseDshSessionBytes(
         file('/tmp/.dsh/sessions/p/s/session.v4.jsonl.zstd'),
-        chunks(bytes.subarray(0, -2)),
+        () => chunks(bytes.subarray(0, -2)),
         'linux'
       )
     ).rejects.toThrow()
   })
   it('refuses future versions, sequence gaps and missing inherited seed boundary', async () => {
-    await expect(parseDshSessionBytes(file(), chunks(jsonl([header(5)])), 'linux')).rejects.toThrow(
-      'Unsupported'
-    )
     await expect(
-      parseDshSessionBytes(file(), chunks(jsonl([header(), message(2, 'Gap')])), 'linux')
+      parseDshSessionBytes(file(), () => chunks(jsonl([header(5)])), 'linux')
+    ).rejects.toThrow('Unsupported')
+    await expect(
+      parseDshSessionBytes(file(), () => chunks(jsonl([header(), message(2, 'Gap')])), 'linux')
     ).rejects.toThrow('sequence gap')
     await expect(
       parseDshSessionBytes(
         file(),
-        chunks(jsonl([header(4, { isSeeded: true }), message(0, 'Seed')])),
+        () => chunks(jsonl([header(4, { isSeeded: true }), message(0, 'Seed')])),
         'linux'
       )
     ).rejects.toThrow('boundary')

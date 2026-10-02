@@ -18,33 +18,58 @@ import {
   numberValue,
   parseJsonObject
 } from './session-scanner-values'
+import { dshHistoryMessage } from './session-scanner-dsh-message'
 import { dshGenerationVersion } from './session-scanner-dsh-generations'
 import { dshTranscriptLines, localDshTranscriptBytes } from './session-scanner-dsh-stream'
 
 // Physical schemas: official Harness 639ed015, session-format-v0-to-v1 through v3-to-v4.
 export async function parseDshSessionBytes(
   file: FileWithMtime,
-  bytes: AsyncIterable<Buffer>,
+  bytes: AsyncIterable<Buffer> | (() => AsyncIterable<Buffer>),
   platform: NodeJS.Platform,
   options: ResumableParseFinalizeOptions = {},
   messages?: TranscriptMessageSink,
   signal?: AbortSignal
 ): Promise<AiVaultSession | null> {
+  return parseDshHistoryPass(file, bytes, platform, options, messages, signal)
+}
+
+async function parseDshHistoryPass(
+  file: FileWithMtime,
+  bytes: AsyncIterable<Buffer> | (() => AsyncIterable<Buffer>),
+  platform: NodeJS.Platform,
+  options: ResumableParseFinalizeOptions,
+  messages?: TranscriptMessageSink,
+  signal?: AbortSignal,
+  inheritedCut?: number
+): Promise<AiVaultSession | null> {
   const accumulator = createAccumulator({ agent: 'dsh', file, sessionId: '', messages })
   let header = false
-  let inherited = false
+  let seeded = false
+  let lastInheritedCut: number | undefined
+  let version = 0
   let seedLength = 0
   let sequence = 0
-  for await (const line of dshTranscriptLines(file.path, bytes, signal)) {
+  for await (const line of dshTranscriptLines(
+    file.path,
+    typeof bytes === 'function' ? bytes() : bytes,
+    signal
+  )) {
     const record = parseJsonObject(line)
     if (!record) {
       throw new Error('Malformed DSH history record')
     }
     if (!header) {
-      const version = record.version
-      if (typeof version !== 'number' || version < 0 || version > 4 || !Number.isInteger(version)) {
+      const headerVersion = record.version
+      if (
+        typeof headerVersion !== 'number' ||
+        headerVersion < 0 ||
+        headerVersion > 4 ||
+        !Number.isInteger(headerVersion)
+      ) {
         throw new Error('Unsupported DSH history format; update the transcript-owning Orca host')
       }
+      version = headerVersion
       if (
         record.type !== 'session' ||
         version !== dshGenerationVersion(file.path) ||
@@ -73,7 +98,10 @@ export async function parseDshSessionBytes(
       accumulator.sessionId = extractString(record.id) ?? ''
       accumulator.cwd = extractString(record.cwd)
       updateTimeline(accumulator, record.createdAt)
-      inherited = version >= 2 && record.isSeeded === true
+      seeded = version >= 2 && record.isSeeded === true
+      if (inheritedCut !== undefined && !seeded) {
+        throw new Error('DSH seed ownership changed during its execution-host reread')
+      }
       seedLength = version < 2 ? numberValue(record.seedLength) : 0
       header = true
       continue
@@ -98,19 +126,37 @@ export async function parseDshSessionBytes(
     }
     updateTimeline(accumulator, record.time)
     if (record.type === 'session/end-seed' && data.inherited === true) {
-      inherited = false
+      lastInheritedCut = numberValue(record.seq)
+      if (version >= 2 && !seeded) {
+        throw new Error('DSH unseeded history contains an inherited boundary')
+      }
       continue
     }
-    if (inherited || numberValue(record.seq) < seedLength) {
+    if (
+      (seeded && inheritedCut === undefined) ||
+      numberValue(record.seq) < (inheritedCut ?? seedLength)
+    ) {
       continue
     }
-    foldDshEvent(accumulator, record, data)
+    foldDshEvent(accumulator, record, data, version)
   }
   if (seedLength > sequence) {
     throw new Error('DSH legacy inherited seed exceeds its event count')
   }
-  if (inherited) {
-    throw new Error('DSH seeded history is missing its inherited boundary')
+  if (seeded) {
+    if (lastInheritedCut === undefined) {
+      throw new Error('DSH seeded history is missing its inherited boundary')
+    }
+    if (inheritedCut === undefined) {
+      if (typeof bytes !== 'function') {
+        throw new Error('DSH seeded history requires an execution-host reread')
+      }
+      // Forks retain earlier markers: find the final cut before publishing any messages.
+      return parseDshHistoryPass(file, bytes, platform, options, messages, signal, lastInheritedCut)
+    }
+    if (lastInheritedCut !== inheritedCut) {
+      throw new Error('DSH inherited boundary changed during its execution-host reread')
+    }
   }
   return header ? finalizeSession(accumulator, platform, options) : null
 }
@@ -118,7 +164,8 @@ export async function parseDshSessionBytes(
 function foldDshEvent(
   accumulator: SessionAccumulator,
   record: Record<string, unknown>,
-  data: Record<string, unknown>
+  data: Record<string, unknown>,
+  version: number
 ): void {
   if (record.type === 'session/title') {
     accumulator.title = normalizeTitleText(extractString(data.title) ?? '') ?? accumulator.title
@@ -128,30 +175,18 @@ function foldDshEvent(
     accumulator.model ??=
       extractString(asRecord(model?.config)?.model) ?? extractString(model?.model)
   }
-  const message = record.type === 'user/message' ? data : asRecord(data.message)
-  const source = asRecord(message?.source)
-  if (record.type === 'user/message' && source?.kind !== 'user') {
+  const decoded = dshHistoryMessage(record.type, data, version)
+  if (!decoded) {
     return
   }
-  const role =
-    record.type === 'user/message'
-      ? 'user'
-      : record.type === 'assistant/message'
-        ? 'assistant'
-        : record.type === 'tool/result'
-          ? 'tool'
-          : null
-  if (!role || !message || message.role !== role) {
-    return
-  }
+  const { role, content, source } = decoded
   if (role !== 'tool') {
     accumulator.messageCount++
   }
-  addPreviewContent(accumulator, role, message.content, record.time)
+  addPreviewContent(accumulator, role, content, record.time)
   if (role === 'user') {
     accumulator.title ??= normalizeTitleText(
-      extractString(asRecord(Array.isArray(message.content) ? message.content[0] : null)?.text) ??
-        ''
+      extractString(asRecord(Array.isArray(content) ? content[0] : null)?.text) ?? ''
     )
   }
   if (role === 'assistant') {
@@ -174,7 +209,7 @@ export function parseDshSessionFile(
 ): Promise<AiVaultSession | null> {
   return parseDshSessionBytes(
     file,
-    localDshTranscriptBytes(file.path),
+    () => localDshTranscriptBytes(file.path),
     platform,
     {},
     messages,
