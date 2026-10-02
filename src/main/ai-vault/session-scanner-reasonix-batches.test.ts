@@ -328,3 +328,23 @@ it('bounds referenced content across commits before requesting another large obj
   ).rejects.toThrow('referenced history exceeds read budget')
   expect(reads).toBe(8)
 })
+
+it('closes the transcript source before requesting referenced content', async () => {
+  const content = Buffer.from(
+    JSON.stringify({ message: { id: 'ref', role: 'user', content: 'nested read' } })
+  )
+  const digest = createHash('sha256').update(content).digest('hex')
+  let closed = false
+  async function* source() {
+    try {
+      yield Buffer.concat(referencedBatch(digest, content.length).map(frame))
+    } finally {
+      closed = true
+    }
+  }
+  const projection = await projectReasonixHistory(source(), async () => {
+    expect(closed).toBe(true)
+    return content
+  })
+  expect(projection.messages.map((message) => message.record.content)).toEqual(['nested read'])
+})

@@ -23,7 +23,7 @@ export function limitRemoteScanFilesystemConcurrency(
           readTranscriptBytes: async function* (
             path: string,
             signal?: AbortSignal,
-            format?: 'dsh-zstd'
+            format?: 'dsh-zstd' | 'reasonix-v4'
           ) {
             let enter!: () => void
             let release!: () => void

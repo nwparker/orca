@@ -30,7 +30,7 @@ export type RemoteSessionFilesystemProvider = Pick<
   readTranscriptBytes?: (
     path: string,
     signal?: AbortSignal,
-    format?: 'dsh-zstd'
+    format?: 'dsh-zstd' | 'reasonix-v4'
   ) => AsyncIterable<Buffer>
   /** Execution-host database access; absent from remote filesystem RPC providers. */
   openCode?: RemoteOpenCodeSessionReader

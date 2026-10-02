@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { asRecord, extractString, parseJsonObject } from './session-scanner-values'
 import {
   reasonixCommittedBatches,
+  type ReasonixCommittedBatch,
   type ReasonixPhysicalEvent
 } from './session-scanner-reasonix-batches'
 
@@ -31,6 +32,16 @@ export const REASONIX_PROJECTION_KINDS = new Set([
   'runtime/recovery',
   'legacy/import',
   'diagnostic'
+])
+
+const VISIBLE_HISTORY_KINDS = new Set([
+  'message/complete',
+  'message/upsert',
+  'message/retract',
+  'history/replace',
+  'legacy/import',
+  'session/title',
+  'session/config'
 ])
 
 export type ReasonixProjectedMessage = {
@@ -131,9 +142,23 @@ export async function projectReasonixHistory(
     updatedAt: null,
     messages: []
   }
+  const batches: (ReasonixCommittedBatch | null)[] = []
+  // Close the transcript lease before nested content reads use the host filesystem limiter.
   for await (const batch of reasonixCommittedBatches(bytes, REASONIX_PROJECTION_KINDS, signal)) {
     projection.createdAt ??= batch.createdAt
     projection.updatedAt = batch.createdAt ?? projection.updatedAt
+    const events = batch.events.filter((event) => VISIBLE_HISTORY_KINDS.has(event.kind))
+    if (events.length) {
+      batches.push({ createdAt: batch.createdAt, events })
+    }
+  }
+  for (let index = 0; index < batches.length; index++) {
+    signal?.throwIfAborted()
+    const batch = batches[index]
+    batches[index] = null
+    if (!batch) {
+      continue
+    }
     for (const event of batch.events) {
       signal?.throwIfAborted()
       if (!REASONIX_PROJECTION_KINDS.has(event.kind)) {
