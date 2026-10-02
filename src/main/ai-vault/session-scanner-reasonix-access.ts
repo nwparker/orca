@@ -16,7 +16,7 @@ export type ReasonixHistoryAccess = {
 
 // The execution-host adapter must lstat; client filesystem RPC has no byte capability.
 export async function reasonixHistoryAccess(
-  provider: RemoteSessionFilesystemProvider,
+  provider: Pick<RemoteSessionFilesystemProvider, 'stat' | 'readTranscriptBytes'>,
   platform: RemoteHostPlatform,
   transcriptPath: string,
   signal?: AbortSignal
@@ -76,6 +76,10 @@ export async function reasonixHistoryAccess(
   await directory(layout.projectDirectory)
   await directory(join(layout.projectDirectory, 'sessions-v4'))
   await directory(layout.sessionDirectory)
+  const transcriptStat = await provider.stat(transcriptPath)
+  if (transcriptStat?.type !== 'file') {
+    throw new Error('Reasonix transcript is missing or not a regular file')
+  }
   const manifestBytes = await readFile(join(layout.sessionDirectory, 'manifest.json'), 64 * 1024)
   if (!manifestBytes) {
     throw new Error('Reasonix manifest is missing')

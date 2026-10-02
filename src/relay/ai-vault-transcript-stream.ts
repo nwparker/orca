@@ -1,4 +1,4 @@
-import { open } from 'node:fs/promises'
+import { openRegularFileReadHandle } from '../shared/regular-file-open'
 import { throwIfAiVaultScanCancelled } from '../main/ai-vault/ai-vault-scan-cancellation'
 import { BinarySessionTranscriptError } from '../main/ai-vault/remote-session-content-lines'
 import { BINARY_PROBE_BYTES, isBinaryBuffer } from './fs-handler-utils'
@@ -12,7 +12,7 @@ export async function* readRelayTranscriptBytes(
   format?: 'dsh-zstd' | 'reasonix-v4'
 ): AsyncGenerator<Buffer> {
   throwIfAiVaultScanCancelled(signal)
-  const handle = await open(path, 'r')
+  const handle = await openRegularFileReadHandle(path, 'Expected a regular session file', signal)
   try {
     const probe = Buffer.alloc(BINARY_PROBE_BYTES)
     const { bytesRead } = await handle.read(probe, 0, probe.length, 0)
@@ -29,8 +29,8 @@ export async function* readRelayTranscriptBytes(
       format === 'reasonix-v4' &&
       reasonixSessionLayout(path) !== null &&
       bytesRead >= 4 &&
-      probe.subarray(0, 4).toString('ascii') === 'RX4F'
-    if (format === 'reasonix-v4' && (!reasonix || !(await handle.stat()).isFile())) {
+      probe.readUInt32BE(0) === 0x52583446
+    if (format === 'reasonix-v4' && !reasonix) {
       throw new Error('Expected a canonical Reasonix RX4F transcript')
     }
     if (!compressedDsh && !reasonix && isBinaryBuffer(probe.subarray(0, bytesRead))) {
