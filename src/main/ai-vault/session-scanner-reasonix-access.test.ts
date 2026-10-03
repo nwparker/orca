@@ -1,10 +1,13 @@
+import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { copyFile, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { promisify } from 'node:util'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createRelayAiVaultFilesystemProvider } from '../../relay/ai-vault-service-filesystem'
 import { getRemoteHostPlatform } from '../ssh/ssh-remote-platform'
+import { reasonixFrameRecords } from './session-scanner-reasonix-frames'
 import { reasonixHistoryAccess } from './session-scanner-reasonix-access'
 import { projectReasonixHistory } from './session-scanner-reasonix-projection'
 
@@ -115,4 +118,72 @@ it('requires explicit canonical RX4F format on the host byte reader', async () =
   )
   await writeFile(path, 'unrelated text')
   await expect(collect(read(path, undefined, 'reasonix-v4'))).rejects.toThrow('canonical Reasonix')
+})
+
+function hostByteReader() {
+  const read = provider.readTranscriptBytes
+  if (!read) {
+    throw new Error('Execution-host byte reader missing')
+  }
+  return read
+}
+
+async function drain(source: AsyncIterable<unknown>): Promise<void> {
+  for await (const _chunk of source) {
+    // Consume: these cases assert rejection, not payload.
+  }
+}
+
+function sessionFile(name: string): string {
+  return join(root, 'projects', '-explicit-folder', 'sessions-v4', id, name)
+}
+
+// Why the skip: FIFOs are a POSIX shape; Windows has no mkfifo and no equivalent hazard.
+it.skipIf(process.platform === 'win32')(
+  'refuses a task-owned FIFO manifest before it is opened',
+  async () => {
+    const manifest = sessionFile('manifest.json')
+    await rm(manifest)
+    await promisify(execFile)('mkfifo', [manifest])
+    // Without the pre-open regular-file guard the open never settles, so rejecting at all is the oracle.
+    await expect(reasonixHistoryAccess(provider, platform, path)).rejects.toThrow(
+      'not a regular file or directory'
+    )
+  }
+)
+
+it.skipIf(process.platform === 'win32')(
+  'refuses the final transcript symlink instead of reading its target',
+  async () => {
+    const outside = join(root, 'outside.frames')
+    await copyFile(path, outside)
+    await rm(path)
+    await symlink(outside, path)
+    await expect(reasonixHistoryAccess(provider, platform, path)).rejects.toThrow(
+      'not a regular file'
+    )
+    await expect(drain(hostByteReader()(path, undefined, 'reasonix-v4'))).rejects.toThrow(
+      'regular session file'
+    )
+  }
+)
+
+it('rejects frame magic whose damaged bytes still decode as RX4F in ASCII', async () => {
+  const data = await readFile(path)
+  for (let at = 0; at < data.length;) {
+    for (let index = 0; index < 4; index += 1) {
+      data[at + index] |= 0b1000_0000
+    }
+    at += 12 + data.readUInt32BE(at + 4)
+  }
+  expect(data.subarray(0, 4).toString('hex')).toBe('d2d8b4c6')
+  expect(data.subarray(0, 4).toString('ascii')).toBe('RX4F')
+  await writeFile(path, data)
+  await expect(drain(hostByteReader()(path, undefined, 'reasonix-v4'))).rejects.toThrow(
+    'canonical Reasonix'
+  )
+  async function* once(): AsyncGenerator<Buffer> {
+    yield data
+  }
+  await expect(drain(reasonixFrameRecords(once()))).rejects.toThrow('Invalid Reasonix frame magic')
 })
