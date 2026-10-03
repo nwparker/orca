@@ -1,14 +1,17 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createSessionSearchClient, unavailableSessionSearchStatus } from './ai-vault-search-client'
-import { AiVaultSearchRequestSchema as LegacyRequestSchema } from './__fixtures__/pre-qoder-search-request'
-import { AI_VAULT_AGENTS } from './ai-vault-types'
-import type { AiVaultSearchRequest } from './ai-vault-search-types'
-import { fakeSearchService, searchResults } from './ai-vault-search-test-fixture'
+import {
+  createSessionSearchClient,
+  unavailableSessionSearchStatus
+} from '../../shared/ai-vault-search-client'
+import { AiVaultSearchRequestSchema as LegacyRequestSchema } from '../../shared/__fixtures__/pre-qoder-search-request'
+import { AI_VAULT_AGENTS } from '../../shared/ai-vault-types'
+import type { AiVaultSearchRequest } from '../../shared/ai-vault-search-types'
+import { fakeSearchService, searchResults } from '../../shared/ai-vault-search-test-fixture'
 import {
   searchSessionService,
   sessionSearchServiceStatus,
   setSessionSearchService
-} from '../main/ai-vault-search/session-search-service-registry'
+} from './session-search-service-registry'
 
 afterEach(() => setSessionSearchService(null))
 
