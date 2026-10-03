@@ -1,3 +1,8 @@
+import {
+  candidateFileTime,
+  prioritizeAntigravityTranscriptCandidates
+} from './antigravity-transcript-candidates'
+import { readRemoteAntigravityIndex } from './antigravity-index-reader'
 import { parseRemoteSessionTranscript } from './remote-session-transcript-read'
 import { BinarySessionTranscriptError } from './remote-session-content-lines'
 import type {
@@ -53,6 +58,7 @@ export async function scanRemoteAiVaultSessions(args: {
   dshSessionsDir?: string
   remoteHome: string
   hostPlatform: RemoteHostPlatform
+  includeAntigravityIdeSessions?: boolean
   limit?: number
   unlimited?: boolean
   scopePaths?: readonly string[]
@@ -70,25 +76,18 @@ export async function scanRemoteAiVaultSessions(args: {
     hostPlatform: args.hostPlatform,
     signal: args.signal,
     titleCaches: new Map(),
-    antigravityWorkspaceResolver: createAntigravityWorkspaceResolver(async (historyPath) => {
-      try {
-        throwIfAiVaultScanCancelled(args.signal)
-        const read = await provider.readFile(historyPath)
-        throwIfAiVaultScanCancelled(args.signal)
-        return read.isBinary ? null : read.content
-      } catch (error) {
-        if (error instanceof Error && error.name === 'AbortError') {
-          throw error
-        }
-        return null
-      }
-    })
+    antigravityWorkspaceResolver: createAntigravityWorkspaceResolver((path) =>
+      readRemoteAntigravityIndex(provider, path, args.signal)
+    )
   }
-  const candidates = dedupeCodexRolloutFileAliases(
+  const discoveredCandidates = dedupeCodexRolloutFileAliases(
     (
       await mapRemoteScanBatches(
         [
-          ...remoteSessionSources(args.remoteHome, args.hostPlatform, args.dshSessionsDir),
+          ...remoteSessionSources(args.remoteHome, args.hostPlatform, {
+            dshSessionsDir: args.dshSessionsDir,
+            includeAntigravityIdeSessions: args.includeAntigravityIdeSessions
+          }),
           ...remoteOpenCodeSources(
             provider.openCode,
             limit * REMOTE_PARSE_CANDIDATE_MULTIPLIER +
@@ -110,6 +109,10 @@ export async function scanRemoteAiVaultSessions(args: {
     }
   )
 
+  const candidates = prioritizeAntigravityTranscriptCandidates(
+    discoveredCandidates,
+    (candidate) => candidate.source.agent === 'antigravity'
+  )
   const parsed = await parseRemoteSessionCandidates({
     candidates: candidates.slice(0, limit * REMOTE_PARSE_CANDIDATE_MULTIPLIER),
     context,
@@ -154,7 +157,9 @@ async function parseRemoteSessionCandidates(args: {
   let index = 0
 
   while (index < args.candidates.length) {
-    if (canStopParsingSessions(sessions, args.limit, args.candidates[index]?.file.mtimeMs)) {
+    if (
+      canStopParsingSessions(sessions, args.limit, candidateFileTime(args.candidates[index]?.file))
+    ) {
       break
     }
 

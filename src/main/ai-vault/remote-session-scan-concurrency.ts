@@ -1,4 +1,7 @@
-import type { RemoteSessionFilesystemProvider } from './remote-session-scanner-types'
+import type {
+  RemoteSessionFilesystemProvider,
+  RemoteTranscriptReadOptions
+} from './remote-session-scanner-types'
 
 // Why: discovery batches (8 sources) each stat in batches of 8, and parse
 // batches read whole transcripts — nested fan-out put ~64 filesystem round
@@ -16,14 +19,14 @@ export function limitRemoteScanFilesystemConcurrency(
   return {
     openCode: provider.openCode,
     readDir: (dirPath) => gate(() => provider.readDir(dirPath)),
-    readFile: (filePath) => gate(() => provider.readFile(filePath)),
+    readFile: (filePath, limits) => gate(() => provider.readFile(filePath, limits)),
     stat: (filePath) => gate(() => provider.stat(filePath)),
     ...(provider.readTranscriptBytes
       ? {
           readTranscriptBytes: async function* (
             path: string,
             signal?: AbortSignal,
-            format?: 'dsh-zstd'
+            options?: RemoteTranscriptReadOptions
           ) {
             let enter!: () => void
             let release!: () => void
@@ -39,7 +42,7 @@ export function limitRemoteScanFilesystemConcurrency(
             })
             await entered
             try {
-              yield* provider.readTranscriptBytes!(path, signal, format)
+              yield* provider.readTranscriptBytes!(path, signal, options)
             } finally {
               release()
               await held
