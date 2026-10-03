@@ -431,6 +431,5 @@ export function AgentIcon({
       />
     )
   }
-  const label = getAgentLabel(agent)
-  return <AgentLetterIcon letter={label.charAt(0).toUpperCase()} size={size} />
+  return <AgentLetterIcon letter={getAgentLabel(agent).charAt(0).toUpperCase()} size={size} />
 }
