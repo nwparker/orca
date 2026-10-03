@@ -13,6 +13,11 @@ import {
   redactStatusForTransport,
   type SessionSearchTransport
 } from './ai-vault-search-transport'
+import {
+  compatibleSearchAgents,
+  needsSearchAgentNegotiation
+} from './ai-vault-search-agent-compatibility'
+import { AI_VAULT_AGENTS } from './ai-vault-types'
 
 export function unavailableSessionSearchStatus(): AiVaultSearchStatus {
   return {
@@ -61,30 +66,27 @@ export function createSessionSearchClient(
       let raw: unknown
       try {
         const requestedAgents = parsed.filters?.agents
-        const negotiateDsh = requestedAgents?.includes('dsh')
         // IPC and its all-hosts merge are this build; each remote leg negotiates its own host.
-        const negotiateQoder = transport !== 'ipc' && requestedAgents?.includes('qoder')
-        if (negotiateDsh || negotiateQoder) {
+        if (
+          transport !== 'ipc' &&
+          parsed.filters?.agents &&
+          needsSearchAgentNegotiation(parsed.filters.agents)
+        ) {
           const status = AiVaultSearchStatusSchema.parse(await call('aiVault.searchStatus', {}))
-          let agents = requestedAgents ?? []
-          if (negotiateDsh && !status.dshHistory) {
-            agents = agents.filter((agent) => agent !== 'dsh')
-            if (!agents.length) {
-              return emptySessionSearchResults(status.generation)
-            }
-          }
-          if (negotiateQoder && status.supportsQoderHistory !== true) {
-            agents = agents.filter((agent) => agent !== 'qoder')
-            if (!agents.length) {
-              return { kind: 'unavailable', reason: 'unsupported-agent' }
-            }
+          const agents = compatibleSearchAgents(parsed.filters.agents, status)
+          if (agents.length === 0) {
+            return requestedAgents?.every((agent) => agent === 'dsh')
+              ? emptySessionSearchResults(status.generation)
+              : { kind: 'unavailable', reason: 'unsupported-agent' }
           }
           hostRequest = { ...parsed, filters: { ...parsed.filters, agents } }
         }
         raw = await call('aiVault.searchSessions', {
           ...hostRequest,
           includeDshHistory: true,
-          supportsQoderHistory: true
+          supportedAgents: [...AI_VAULT_AGENTS],
+          supportsQoderHistory: true,
+          supportsJcodeHistory: true
         })
       } catch (error) {
         if (isUnknownSessionSearchMethod(error)) {

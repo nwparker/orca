@@ -247,6 +247,7 @@ function buildAgentResumeInvocation(
     case 'openclaw':
     case 'droid':
     case 'dsh':
+    case 'jcode':
     // Why: OMP and Prime Agent resume by absolute transcript path (see
     // buildAiVaultResumeCommand), but the `--resume <arg>` invocation form is
     // identical to the others here.

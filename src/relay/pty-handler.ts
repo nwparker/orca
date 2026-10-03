@@ -1,6 +1,7 @@
 import type { TmuxManagedPty } from '../shared/tmux-agent-hook-owner'
 /* oxlint-disable max-lines */
 import { resolveSynchronizedOutputSafeSplit } from '../shared/terminal-synchronized-output-scan'
+import { restoreManagedDataAccountEnvironment } from '../shared/managed-data-account-environment'
 import { createTerminalTitleTracker } from '../shared/terminal-output-side-effects'
 import { getDecorativeTitleGateKey } from '../shared/agent-decorative-title-signature'
 import { FreebuffStatusProjection } from './freebuff-status-projection'
@@ -249,6 +250,7 @@ type ManagedPty = {
   wslDistro?: string
   shellCwd?: string
   shellPathEnv?: string
+  agentLaunchToken?: string
   envToDelete: string[]
   gitCredentialPromptGuarded: boolean
   historyIsolationEnabled?: boolean
@@ -756,10 +758,7 @@ export class PtyHandler {
     if (process.platform === 'win32' || this.isPaneSurfaceRetired(paneKey)) {
       return null
     }
-    const candidates = [...this.ptys.values()].filter(
-      (pty) => !pty.disposed && (pty.paneKey ?? pty.attachIdentity?.paneKey) === paneKey
-    )
-    const root = candidates.length === 1 ? candidates[0] : undefined
+    const root = this.getCurrentManagedPty(paneKey)
     if (!root?.worktreeId || !root.pty.pid) {
       return null
     }
@@ -773,6 +772,19 @@ export class PtyHandler {
         workspaceKind: root.worktreeId.startsWith('folder:') ? 'folder' : 'git-worktree'
       }
     }
+  }
+
+  getAgentLaunchToken(paneKey: string): string | undefined {
+    return this.isPaneSurfaceRetired(paneKey)
+      ? undefined
+      : this.getCurrentManagedPty(paneKey)?.agentLaunchToken
+  }
+
+  private getCurrentManagedPty(paneKey: string): ManagedPty | undefined {
+    const candidates = [...this.ptys.values()].filter(
+      (pty) => !pty.disposed && (pty.paneKey ?? pty.attachIdentity?.paneKey) === paneKey
+    )
+    return candidates.length === 1 ? candidates[0] : undefined
   }
 
   /** Notified when the last PTY leaves the pool, so the relay can re-arm its idle grace. */
@@ -846,9 +858,13 @@ export class PtyHandler {
     },
     envToDelete: readonly string[] = []
   ): Promise<Record<string, string>> {
-    const baseEnv = mergeGitConfigEnvProtocol(
+    const inheritedEnv = stripInheritedBuildModeEnv(process.env)
+    restoreManagedDataAccountEnvironment(inheritedEnv)
+    const explicitEnv = { ...rendererEnv }
+    restoreManagedDataAccountEnvironment(explicitEnv, false)
+    const mergedEnv = mergeGitConfigEnvProtocol(
       {
-        ...stripInheritedBuildModeEnv(process.env),
+        ...inheritedEnv,
         TERM: 'xterm-256color',
         COLORTERM: 'truecolor',
         TERM_PROGRAM: 'Orca',
@@ -856,8 +872,13 @@ export class PtyHandler {
           rendererEnv?.ORCA_APP_VERSION || process.env.ORCA_APP_VERSION || '0.0.0-dev',
         FORCE_HYPERLINK: '1'
       },
-      rendererEnv
-    ) as Record<string, string>
+      explicitEnv
+    )
+    const baseEnv: Record<string, string> = Object.fromEntries(
+      Object.entries(mergedEnv).filter(
+        (entry): entry is [string, string] => typeof entry[1] === 'string'
+      )
+    )
     const augmented: Record<string, string> = {}
     for (const augmenter of this.envAugmenters) {
       try {
@@ -868,7 +889,11 @@ export class PtyHandler {
         )
       }
     }
-    const result = mergeGitConfigEnvProtocol(baseEnv, augmented) as Record<string, string>
+    const result: Record<string, string> = Object.fromEntries(
+      Object.entries(mergeGitConfigEnvProtocol(baseEnv, augmented)).filter(
+        (entry): entry is [string, string] => typeof entry[1] === 'string'
+      )
+    )
     result[ORCA_IMAGE_PROTOCOL_ENV] = ORCA_IMAGE_PROTOCOL_VALUE
     // Why: an older client may not ask a newly upgraded relay to delete inherited shim state.
     stripLegacyTerminalShimEnv(result, process.platform)
@@ -2063,6 +2088,11 @@ export class PtyHandler {
     // includes Homebrew, nvm, and user-installed CLIs (claude, codex, gh).
     // When overlays are injected, the launch wrapper keeps those paths after
     // user startup files re-export their defaults.
+    const ptyEnv: Record<string, string> = {
+      ...spawnEnv,
+      [SHELL_STARTUP_FEATURE_ENV]: '',
+      ...shellLaunch.env
+    }
     let term: IPty
     try {
       term = pty.spawn(shell, shellLaunch.args, {
@@ -2073,11 +2103,7 @@ export class PtyHandler {
         cwd,
         // Why the empty default: relay shells inherit process.env, and the launch
         // config is the only thing allowed to name features for this shell.
-        env: {
-          ...spawnEnv,
-          [SHELL_STARTUP_FEATURE_ENV]: '',
-          ...shellLaunch.env
-        },
+        env: ptyEnv,
         ...this.conptyDllSpawnOptions()
       })
     } catch (error) {
@@ -2131,6 +2157,7 @@ export class PtyHandler {
       ...(terminalWindowsWslDistro ? { wslDistro: terminalWindowsWslDistro } : {}),
       shellCwd: cwd,
       shellPathEnv: spawnEnv.PATH,
+      agentLaunchToken: ptyEnv.ORCA_AGENT_LAUNCH_TOKEN?.trim() || undefined,
       ownerBackend: resolvePtyOwnerBackend({
         platform: process.platform,
         shellPath: shell,
@@ -3190,6 +3217,11 @@ export class PtyHandler {
     const shellLaunch = getRelayShellLaunchConfig(shell, spawnEnv, process.platform, {
       terminalWindowsWslDistro
     })
+    const ptyEnv: Record<string, string> = {
+      ...spawnEnv,
+      [SHELL_STARTUP_FEATURE_ENV]: '',
+      ...shellLaunch.env
+    }
     let term: IPty
     try {
       term = ptyMod.spawn(shell, shellLaunch.args, {
@@ -3198,11 +3230,7 @@ export class PtyHandler {
         rows: entry.rows,
         cwd: entry.cwd,
         // Why: no provider-delivered command is waiting for a ready marker.
-        env: {
-          ...spawnEnv,
-          [SHELL_STARTUP_FEATURE_ENV]: '',
-          ...shellLaunch.env
-        },
+        env: ptyEnv,
         ...this.conptyDllSpawnOptions()
       })
     } catch (error) {
@@ -3233,6 +3261,7 @@ export class PtyHandler {
         limit: REPLAY_BUFFER_MAX
       }),
       paneKey: entry.paneKey,
+      agentLaunchToken: ptyEnv.ORCA_AGENT_LAUNCH_TOKEN?.trim() || undefined,
       tabId: entry.tabId,
       attachIdentity: entry.attachIdentity,
       worktreeId: entry.worktreeId,
