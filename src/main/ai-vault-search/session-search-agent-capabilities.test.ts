@@ -57,7 +57,9 @@ describe('combined DSH and Qoder host capabilities', () => {
           ...request,
           filters: { ...request.filters, agents: [...agents] },
           includeDshHistory: true,
-          supportsQoderHistory: true
+          supportedAgents: [...AI_VAULT_AGENTS],
+          supportsQoderHistory: true,
+          supportsJcodeHistory: true
         })
       }
     )
@@ -108,17 +110,23 @@ describe('combined DSH and Qoder host capabilities', () => {
         {
           query: 'needle',
           limit: 20,
-          filters: {
-            agents: AI_VAULT_AGENTS.filter(
-              (agent) => agent !== 'qoder' && (transport !== 'relay' || agent !== 'dsh')
-            )
-          }
+          ...(transport === 'ipc'
+            ? {}
+            : {
+                filters: {
+                  agents: AI_VAULT_AGENTS.filter(
+                    (agent) => !['codebuddy', 'zcode', 'qoder', 'jcode', 'dsh'].includes(agent)
+                  )
+                }
+              })
         },
         undefined
       )
       expect(await sessionSearchServiceStatus({}, transport)).toMatchObject({
         dshHistory: true,
-        supportsQoderHistory: true
+        supportedAgents: [...AI_VAULT_AGENTS],
+        supportsQoderHistory: true,
+        supportsJcodeHistory: true
       })
     }
   )

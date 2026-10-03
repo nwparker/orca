@@ -97,7 +97,6 @@ describe('every search entry point carries the scope identity through', () => {
     setSessionSearchService(service)
     await relayHandler()({
       query: 'needle',
-      supportedAgents: [...AI_VAULT_AGENTS],
       supportsQoderHistory: true,
       supportsJcodeHistory: true,
       within: WITHIN

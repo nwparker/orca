@@ -71,10 +71,12 @@ test.each(['qoder', 'jcode'] as const)(
         query: 'proof',
         limit: 20,
         filters: {
-          agents: AI_VAULT_AGENTS.filter((candidate) =>
-            agent === 'qoder'
-              ? candidate !== 'jcode'
-              : !['codebuddy', 'zcode', 'qoder'].includes(candidate)
+          agents: AI_VAULT_AGENTS.filter(
+            (candidate) =>
+              candidate !== 'dsh' &&
+              (agent === 'qoder'
+                ? candidate !== 'jcode'
+                : !['codebuddy', 'zcode', 'qoder'].includes(candidate))
           )
         }
       },
