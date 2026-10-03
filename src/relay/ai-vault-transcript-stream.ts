@@ -1,9 +1,8 @@
-import { open } from 'node:fs/promises'
 import { throwIfAiVaultScanCancelled } from '../main/ai-vault/ai-vault-scan-cancellation'
 import { BinarySessionTranscriptError } from '../main/ai-vault/remote-session-content-lines'
 import { BINARY_PROBE_BYTES, isBinaryBuffer } from './fs-handler-utils'
 import { dshHomeFromSessionPath } from '../shared/dsh-session-paths'
-import { readNodeFileWithinLimit } from '../shared/node-bounded-file-reader'
+import { openNodeFileForRead, readNodeFileWithinLimit } from '../shared/node-bounded-file-reader'
 import type { RemoteTranscriptReadOptions } from '../main/ai-vault/remote-session-scanner-types'
 
 /** The same open handle supplies the probe and stream, including across renames. */
@@ -25,10 +24,14 @@ export async function* readRelayTranscriptBytes(
     yield read.buffer
     return
   }
-  const handle = await open(path, 'r')
+  const handle = await openNodeFileForRead(path, {
+    regularFileOnly: options === 'dsh-zstd' || dshHomeFromSessionPath(path) !== null,
+    signal
+  })
   try {
     const probe = Buffer.alloc(BINARY_PROBE_BYTES)
     const { bytesRead } = await handle.read(probe, 0, probe.length, 0)
+    throwIfAiVaultScanCancelled(signal)
     const compressedDsh =
       options === 'dsh-zstd' &&
       path.endsWith('.zstd') &&

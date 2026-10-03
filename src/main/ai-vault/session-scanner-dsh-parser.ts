@@ -209,7 +209,7 @@ export function parseDshSessionFile(
 ): Promise<AiVaultSession | null> {
   return parseDshSessionBytes(
     file,
-    () => localDshTranscriptBytes(file.path),
+    () => localDshTranscriptBytes(file.path, signal),
     platform,
     {},
     messages,

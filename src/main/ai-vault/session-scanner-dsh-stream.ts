@@ -29,6 +29,6 @@ export async function* dshTranscriptLines(
   }
 }
 
-export function localDshTranscriptBytes(path: string): AsyncIterable<Buffer> {
-  return openTranscriptReadStream(path, {}, 'scan')
+export function localDshTranscriptBytes(path: string, signal?: AbortSignal): AsyncIterable<Buffer> {
+  return openTranscriptReadStream(path, {}, 'scan', signal)
 }
