@@ -7,6 +7,7 @@ import type {
 import { deriveToolInputPreview } from '../../shared/agent-hook-listener/tool-input-preview'
 import type { StructuredAgentSessionEventSink } from '../native-chat/agent-session-wire/structured-agent-session-event-sink'
 import { ClaudeChildWorkDecoder } from './claude-child-work-decoder'
+import { ClaudePromptRegistry } from './claude-prompt-registry'
 import { claudeChildOperation, drainClaudeChildWork } from './claude-child-work-evidence'
 import { createClaudeJournalTranslator } from './claude-structured-journal-translation'
 import {
@@ -85,7 +86,11 @@ describe('Claude child operation output retention', () => {
       translator.handle({ type: 'message', sessionId: 'orca', message, observedAt: 1_000 })
       const join = vi.spyOn(Array.prototype, 'join')
       const evidence = drainClaudeChildWork(
-        { childWork: new ClaudeChildWorkDecoder(), translator },
+        {
+          childWork: new ClaudeChildWorkDecoder(),
+          prompts: new ClaudePromptRegistry(),
+          translator
+        },
         message,
         1_000
       )
