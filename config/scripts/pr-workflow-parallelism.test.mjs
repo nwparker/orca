@@ -285,11 +285,12 @@ describe('PR workflow parallelism', () => {
     expect(pnpmIndex).toBeLessThan(nodeIndex)
     expect(pnpmIndex).toBeLessThan(requestedNodeIndex)
     const packageManagerVersion = /^pnpm@([^+]+)/.exec(packageJson.packageManager)?.[1]
-    expect(packageManagerVersion).toBe('12.0.0')
+    expect(packageManagerVersion).toBe('12.8.1')
     expect(steps[pnpmIndex].uses).toBe('pnpm/setup@v2')
     expect(steps[pnpmIndex].with.version).toBeUndefined()
     expect(steps[pnpmIndex].with.install).toBe(false)
-    const saveOutsidePrs = "${{ github.event_name != 'pull_request' && 'pnpm' || '' }}"
+    const saveOutsidePrs =
+      "${{ github.event_name != 'pull_request' && inputs.cache-pnpm-store != 'false' && inputs.cache-pnpm-store-lookup-only != 'true' && 'pnpm' || '' }}"
     expect(steps[nodeIndex].with.cache).toBe(saveOutsidePrs)
     expect(steps[nodeIndex].if).toBe("inputs.node-version == ''")
     expect(steps[requestedNodeIndex].if).toBe("inputs.node-version != ''")
@@ -304,7 +305,7 @@ describe('PR workflow parallelism', () => {
     )
     expect(steps[restoreIndex].uses).toBe('actions/cache/restore@v5')
     expect(steps[restoreIndex].if).toBe(
-      "github.event_name == 'pull_request' && (runner.os != 'Windows' || runner.arch != 'X64' || !contains(inputs.cache-dependency-path, 'mobile/pnpm-lock.yaml'))"
+      "github.event_name == 'pull_request' && inputs.cache-pnpm-store != 'false' && !((runner.os == 'Linux' || runner.os == 'macOS') && (runner.arch == 'X64' || runner.arch == 'ARM64') && inputs.cache-dependency-path == 'pnpm-lock.yaml') && (runner.os != 'Windows' || !(runner.arch == 'X64' && contains(inputs.cache-dependency-path, 'mobile/pnpm-lock.yaml')) && !((runner.arch == 'X64' || runner.arch == 'ARM64') && inputs.cache-dependency-path == 'pnpm-lock.yaml'))"
     )
   })
 

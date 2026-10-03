@@ -57,23 +57,34 @@ export function createSessionSearchClient(
   return {
     searchSessions: async (request) => {
       const parsed = AiVaultSearchRequestSchema.parse(request)
+      let hostRequest = parsed
       let raw: unknown
       try {
-        let filters = parsed.filters
-        if (filters?.agents?.includes('dsh')) {
+        const requestedAgents = parsed.filters?.agents
+        const negotiateDsh = requestedAgents?.includes('dsh')
+        // IPC and its all-hosts merge are this build; each remote leg negotiates its own host.
+        const negotiateQoder = transport !== 'ipc' && requestedAgents?.includes('qoder')
+        if (negotiateDsh || negotiateQoder) {
           const status = AiVaultSearchStatusSchema.parse(await call('aiVault.searchStatus', {}))
-          if (!status.dshHistory) {
-            const agents = filters.agents.filter((agent) => agent !== 'dsh')
+          let agents = requestedAgents ?? []
+          if (negotiateDsh && !status.dshHistory) {
+            agents = agents.filter((agent) => agent !== 'dsh')
             if (!agents.length) {
               return emptySessionSearchResults(status.generation)
             }
-            filters = { ...filters, agents }
           }
+          if (negotiateQoder && status.supportsQoderHistory !== true) {
+            agents = agents.filter((agent) => agent !== 'qoder')
+            if (!agents.length) {
+              return { kind: 'unavailable', reason: 'unsupported-agent' }
+            }
+          }
+          hostRequest = { ...parsed, filters: { ...parsed.filters, agents } }
         }
         raw = await call('aiVault.searchSessions', {
-          ...parsed,
-          ...(filters ? { filters } : {}),
-          includeDshHistory: true
+          ...hostRequest,
+          includeDshHistory: true,
+          supportsQoderHistory: true
         })
       } catch (error) {
         if (isUnknownSessionSearchMethod(error)) {

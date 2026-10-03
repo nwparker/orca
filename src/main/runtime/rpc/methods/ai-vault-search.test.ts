@@ -56,9 +56,11 @@ describe('session search runtime RPC', () => {
         {
           query: 'needle',
           limit: 20,
-          ...(clientKind
-            ? { filters: { agents: AI_VAULT_AGENTS.filter((agent) => agent !== 'dsh') } }
-            : {})
+          filters: {
+            agents: AI_VAULT_AGENTS.filter(
+              (agent) => agent !== 'qoder' && (!clientKind || agent !== 'dsh')
+            )
+          }
         },
         undefined
       )
@@ -86,6 +88,27 @@ describe('session search runtime RPC', () => {
       ).toMatchObject({ ok: true })
       expect(service.search).toHaveBeenCalledExactlyOnceWith(
         { query: 'needle', limit: 20, filters: { agents: ['dsh', 'codex'] } },
+        undefined
+      )
+    }
+  )
+  it.each([undefined, 'runtime', 'mobile'] as const)(
+    'preserves explicitly supported Qoder filters for client kind %s',
+    async (clientKind) => {
+      const service = fakeSearchService()
+      setSessionSearchService(service)
+      expect(
+        await dispatcher().dispatch(
+          request({
+            query: 'needle',
+            supportsQoderHistory: true,
+            filters: { agents: ['qoder', 'codex'] }
+          }),
+          { clientKind }
+        )
+      ).toMatchObject({ ok: true })
+      expect(service.search).toHaveBeenCalledExactlyOnceWith(
+        { query: 'needle', limit: 20, filters: { agents: ['qoder', 'codex'] } },
         undefined
       )
     }
