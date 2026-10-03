@@ -41,7 +41,8 @@ export function isReasonixNonInteractiveCommand(tokens: readonly string[]): bool
       name === '--acp' ||
       name === '--help' ||
       name === '-h' ||
-      name === '--version'
+      name === '--version' ||
+      name === '-v'
     ) {
       return true
     }

@@ -159,7 +159,16 @@ export async function parseAgentSessionFile(
     case 'kimi':
       return parseKimiSessionFile(candidate.file, platform, messages)
     case 'reasonix':
-      return parseReasonixSessionFile(candidate.file, platform, messages, signal)
+      return parseReasonixSessionFile(
+        candidate.file,
+        platform,
+        messages,
+        signal,
+        candidate.reasonixWorkspaceRoots,
+        (key) => {
+          candidate.metadataKey = key
+        }
+      )
     case 'dsh':
       return parseDshSessionFile(candidate.file, platform, messages, signal)
     case 'muse':

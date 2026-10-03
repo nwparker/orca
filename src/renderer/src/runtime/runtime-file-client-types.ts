@@ -6,6 +6,7 @@ export type RuntimeReadableFileContent = {
   isImage?: boolean
   mimeType?: string
   decodedDshHistory?: boolean
+  decodedReasonixHistory?: boolean
   fileIdentity?: string
 }
 
@@ -17,6 +18,7 @@ export type RuntimeFileReadArgs = {
   connectionId?: string
   expectedExternalSshTargetId?: string
   decodeDshHistory?: boolean
+  decodeReasonixHistory?: boolean
   includeLocalLogMetadata?: boolean
 }
 

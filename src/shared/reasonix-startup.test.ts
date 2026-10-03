@@ -10,6 +10,7 @@ describe('released Reasonix interactive contract', () => {
     'reasonix --continue',
     'reasonix --resume abc',
     'reasonix --model run',
+    'reasonix --model -v',
     'reasonix --dir serve',
     'reasonix --resume run',
     'node.exe C:\\x\\node_modules\\reasonix\\bin\\reasonix.js --model run',
@@ -28,6 +29,9 @@ describe('released Reasonix interactive contract', () => {
     'reasonix session list --json',
     'reasonix config telemetry off',
     'reasonix --help',
+    'reasonix --version',
+    'reasonix -v',
+    'node /x/node_modules/reasonix/bin/reasonix.js -v',
     'node --require bootstrap /x/node_modules/reasonix/bin/reasonix.js run task'
   ])('excludes %s', (command) => {
     expect(recognizeAgentProcessFromCommandLine(command)).toBeNull()

@@ -2,6 +2,7 @@
 // session into the shell line that re-enters it, quoted for the target platform
 // and (when known) the live tab's shell.
 import { reasonixSessionLayout } from './reasonix-session-paths'
+import { getAgentResumeArgv } from './agent-session-resume'
 import { dshHomeFromSessionPath } from './dsh-session-paths'
 import { TUI_AGENT_CONFIG } from './tui-agent-config'
 import {
@@ -27,7 +28,13 @@ export function buildAiVaultResumeCommand(args: {
 }): string {
   const { agent, sessionId, cwd, platform, commandOverride, codexHome, resumeFilePath, shell } =
     args
-  if (agent === 'reasonix' && (!cwd || !resumeFilePath || !reasonixSessionLayout(resumeFilePath))) {
+  if (
+    agent === 'reasonix' &&
+    (!cwd ||
+      !resumeFilePath ||
+      reasonixSessionLayout(resumeFilePath)?.sessionId !== sessionId ||
+      !getAgentResumeArgv('reasonix', { key: 'session_id', id: sessionId }))
+  ) {
     return ''
   }
   const baseCommand = commandOverride?.trim() || defaultAiVaultResumeCommandBase(agent)

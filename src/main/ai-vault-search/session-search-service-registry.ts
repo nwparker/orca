@@ -38,20 +38,24 @@ export async function searchSessionService(
   // The choke point every entry point funnels through, so every host kind
   // resolves alike; the verdict goes to the service, which answers off and
   // not-ready first.
-  const { within, includeDshHistory, ...input } = parsed
+  const { within, includeDshHistory, includeReasonixHistory, ...input } = parsed
   const request =
-    transport === 'relay' && !includeDshHistory
+    transport !== 'ipc' && (!includeDshHistory || !includeReasonixHistory)
       ? {
           ...input,
           filters: {
             ...input.filters,
-            agents: (input.filters?.agents ?? AI_VAULT_AGENTS).filter((agent) => agent !== 'dsh')
+            agents: (input.filters?.agents ?? AI_VAULT_AGENTS).filter(
+              (agent) =>
+                (agent !== 'dsh' || includeDshHistory === true) &&
+                (agent !== 'reasonix' || includeReasonixHistory === true)
+            )
           }
         }
       : input
   if (
-    transport === 'relay' &&
-    !includeDshHistory &&
+    transport !== 'ipc' &&
+    (!includeDshHistory || !includeReasonixHistory) &&
     input.filters?.agents?.length &&
     !request.filters?.agents?.length
   ) {
@@ -87,7 +91,8 @@ export async function sessionSearchServiceStatus(
       ...AiVaultSearchStatusSchema.parse(
         service ? await service.status() : unavailableSessionSearchStatus()
       ),
-      dshHistory: true
+      dshHistory: true,
+      reasonixHistory: true
     },
     transport
   )

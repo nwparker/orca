@@ -63,6 +63,7 @@ async function scanOneSshHost(
   const relayTimeoutMs = options.relayTimeoutMs ?? options.timeoutMs
   try {
     const params = {
+      includeReasonixHistory: args?.includeReasonixHistory !== false,
       limit: args?.limit,
       ...(args?.unlimited === true ? { unlimited: true } : {}),
       ...(args?.force === true ? { force: true } : {}),

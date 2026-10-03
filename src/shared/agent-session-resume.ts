@@ -2,6 +2,7 @@ import type { AgentHookSource } from './agent-hook-relay'
 import type { AgentStatusState } from './agent-status-types'
 import type { AgentMainAgentStatus } from './main-agent-status'
 import type { TuiAgent } from './tui-agent'
+import { isReasonixStorageSessionId } from './reasonix-session-paths'
 
 export const RESUMABLE_TUI_AGENTS = [
   'claude',
@@ -23,7 +24,8 @@ export const RESUMABLE_TUI_AGENTS = [
   'kimi',
   'muse',
   'zcode',
-  'dsh'
+  'dsh',
+  'reasonix'
 ] as const satisfies readonly TuiAgent[]
 
 export type ResumableTuiAgent = (typeof RESUMABLE_TUI_AGENTS)[number]
@@ -193,6 +195,10 @@ export function extractAgentProviderSession(
   payload: Record<string, unknown>
 ): AgentProviderSessionMetadata | null {
   switch (source) {
+    case 'reasonix': {
+      const id = readSessionId(payload, ['sessionId'])
+      return id && isReasonixStorageSessionId(id) ? { key: 'session_id', id } : null
+    }
     // Native-chat agents: also capture the hook's authoritative transcript_path,
     // since recent Claude Code names the transcript file with a UUID that differs
     // from the hook session_id (so the id-based glob no longer finds it).
@@ -279,6 +285,12 @@ export function getAgentResumeArgv(
 ): string[] | null {
   const id = providerSession.id
   switch (agent) {
+    case 'reasonix':
+      return providerSession.key === 'session_id' &&
+        normalizeSessionId(id) === id &&
+        isReasonixStorageSessionId(id)
+        ? ['reasonix', '--resume', id]
+        : null
     case 'codebuddy':
       return providerSession.key === 'session_id' ? ['codebuddy', '--resume', id] : null
     case 'claude':

@@ -32,7 +32,14 @@ export async function parseReasonixSessionBytes(
   if (!layout) {
     throw new Error('Invalid Reasonix session path')
   }
-  const access = await reasonixHistoryAccess(provider, host, file.path, signal)
+  const access = await reasonixHistoryAccess(
+    provider,
+    host,
+    file.path,
+    signal,
+    options.reasonixWorkspaceRoots
+  )
+  options.reasonixMetadataRead?.(access.metadataKey)
   const projection = await projectReasonixHistory(
     typeof bytes === 'function' ? bytes() : bytes,
     access.readContent,
@@ -81,10 +88,29 @@ export function parseReasonixSessionFile(
   file: FileWithMtime,
   platform: NodeJS.Platform,
   messages?: TranscriptMessageSink,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  workspaceRoots: readonly string[] = [],
+  metadataRead?: (key: string) => void
 ): Promise<AiVaultSession | null> {
+  const { host, provider } = reasonixLocalHistoryReader(file.path, platform, signal)
+  return parseReasonixSessionBytes(
+    file,
+    () => openTranscriptReadStream(file.path, { regularFile: true }, 'scan', signal),
+    provider,
+    host,
+    { reasonixWorkspaceRoots: workspaceRoots, reasonixMetadataRead: metadataRead },
+    messages,
+    signal
+  )
+}
+
+export function reasonixLocalHistoryReader(
+  transcriptPath: string,
+  platform: NodeJS.Platform,
+  signal?: AbortSignal
+): { host: RemoteHostPlatform; provider: HostReader } {
   const host = getRemoteHostPlatform(
-    isWindowsAbsolutePathLike(file.path)
+    isWindowsAbsolutePathLike(transcriptPath)
       ? 'win32-x64'
       : platform === 'darwin'
         ? 'darwin-arm64'
@@ -99,15 +125,8 @@ export function parseReasonixSessionFile(
         mtime: stat.mtimeMs
       }
     },
-    readTranscriptBytes: (path) => openTranscriptReadStream(path, {}, 'scan', signal)
+    readTranscriptBytes: (path) =>
+      openTranscriptReadStream(path, { regularFile: true }, 'scan', signal)
   }
-  return parseReasonixSessionBytes(
-    file,
-    () => openTranscriptReadStream(file.path, {}, 'scan', signal),
-    provider,
-    host,
-    {},
-    messages,
-    signal
-  )
+  return { host, provider }
 }

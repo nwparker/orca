@@ -11,6 +11,7 @@ import { copilotHookService } from '../copilot/hook-service'
 import { cursorHookService } from '../cursor/hook-service'
 import { devinHookService } from '../devin/hook-service'
 import { dshHookService } from '../dsh/hook-service'
+import { reasonixHookService } from '../reasonix/hook-service'
 import { droidHookService } from '../droid/hook-service'
 import { geminiHookService } from '../gemini/hook-service'
 import { grokHookService } from '../grok/hook-service'
@@ -60,7 +61,8 @@ export const MANAGED_AGENT_HOOK_INSTALLERS: readonly ManagedAgentHookInstaller[]
   ['kimi', () => kimiHookService.install()],
   ['muse', () => museHookService.install()],
   ['zcode', () => zcodeHookService.install()],
-  ['dsh', () => dshHookService.install()]
+  ['dsh', () => dshHookService.install()],
+  ['reasonix', () => reasonixHookService.installForExecutionHost()]
 ]
 
 // Why: covers the shared launcher/statusline scripts under ~/.orca/agent-hooks — the files a
@@ -86,7 +88,8 @@ export const MANAGED_AGENT_HOOK_SCRIPT_REFRESHERS: readonly ManagedAgentHookScri
   ['kimi', () => kimiHookService.refreshManagedScripts()],
   ['muse', () => museHookService.refreshManagedScripts()],
   ['zcode', () => zcodeHookService.refreshManagedScripts()],
-  ['dsh', () => dshHookService.refreshManagedScripts()]
+  ['dsh', () => dshHookService.refreshManagedScripts()],
+  ['reasonix', () => reasonixHookService.refreshManagedScripts()]
 ]
 
 export const MANAGED_AGENT_HOOK_REMOVERS: readonly ManagedAgentHookRemover[] = [
@@ -108,7 +111,8 @@ export const MANAGED_AGENT_HOOK_REMOVERS: readonly ManagedAgentHookRemover[] = [
   ['kimi', () => kimiHookService.remove()],
   ['muse', () => museHookService.remove()],
   ['zcode', () => zcodeHookService.remove()],
-  ['dsh', () => dshHookService.remove()]
+  ['dsh', () => dshHookService.remove()],
+  ['reasonix', () => reasonixHookService.removeForExecutionHost()]
 ]
 
 export const MANAGED_AGENT_HOOK_ASYNC_REMOVERS: readonly ManagedAgentHookAsyncRemover[] = [
@@ -134,5 +138,6 @@ export const MANAGED_AGENT_HOOK_STATUS_READERS: readonly ManagedAgentHookStatusR
   ['kimi', () => kimiHookService.getStatus()],
   ['muse', () => museHookService.getStatus()],
   ['zcode', () => zcodeHookService.getStatus()],
-  ['dsh', () => dshHookService.getStatus()]
+  ['dsh', () => dshHookService.getStatus()],
+  ['reasonix', () => reasonixHookService.getStatus()]
 ]

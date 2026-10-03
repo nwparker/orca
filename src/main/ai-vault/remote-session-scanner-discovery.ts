@@ -45,8 +45,7 @@ export async function discoverRemoteSourceCandidates(args: {
     recordSessionScanIssue(args.issues, {
       agent: args.source.agent,
       path: args.source.rootDir,
-      message:
-        'DSH history requires streaming reads on the transcript-owning host; update the remote Orca host.',
+      message: `${args.source.agent === 'reasonix' ? 'Reasonix' : 'DSH'} history requires streaming reads on the transcript-owning host; update the remote Orca host.`,
       executionHostId: args.context.executionHostId
     })
     return []

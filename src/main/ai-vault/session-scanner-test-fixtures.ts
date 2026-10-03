@@ -79,7 +79,8 @@ export function isolatedScanRoots(root: string) {
     clineSessionsDir: join(root, 'cline-sessions'),
     kimiSessionsDir: join(root, 'kimi-sessions'),
     museSessionsDir: join(root, 'muse-sessions'),
-    dshSessionsDir: join(root, 'dsh-sessions')
+    dshSessionsDir: join(root, 'dsh-sessions'),
+    reasonixProjectsDir: join(root, 'reasonix', 'projects')
   }
 }
 

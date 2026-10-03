@@ -94,7 +94,9 @@ describe('every search entry point carries the scope identity through', () => {
       {
         query: 'needle',
         limit: 20,
-        filters: { agents: AI_VAULT_AGENTS.filter((agent) => agent !== 'dsh') }
+        filters: {
+          agents: AI_VAULT_AGENTS.filter((agent) => agent !== 'dsh' && agent !== 'reasonix')
+        }
       },
       {
         kind: 'unknown'

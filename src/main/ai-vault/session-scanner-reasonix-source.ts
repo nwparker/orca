@@ -1,6 +1,6 @@
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { resolveAbsoluteDirOverride } from '../../shared/absolute-dir-override'
+import { reasonixConfigRoots } from '../../shared/reasonix-config-roots'
 import {
   isReasonixStorageSessionId,
   reasonixSessionLayout
@@ -14,16 +14,7 @@ export const REASONIX_AGENT_SOURCE: AiVaultAgentSource = {
       return []
     }
     const platform = options.platform ?? process.platform
-    const defaultHome =
-      platform === 'win32'
-        ? join(process.env.APPDATA?.trim() || join(homedir(), 'AppData', 'Roaming'), 'reasonix')
-        : join(homedir(), '.reasonix')
-    const configHome = resolveAbsoluteDirOverride(process.env.REASONIX_HOME, defaultHome, platform)
-    const stateHome = resolveAbsoluteDirOverride(
-      process.env.REASONIX_STATE_HOME,
-      configHome,
-      platform
-    )
+    const { stateHome } = reasonixConfigRoots(homedir(), platform, process.env)
     return sessionRootDirs(
       options.reasonixProjectsDir ?? join(stateHome, 'projects'),
       wslHomeDirs,

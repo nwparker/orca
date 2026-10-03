@@ -1,6 +1,7 @@
 import { parseExecutionHostId } from '../../../../shared/execution-host'
 import { getAiVaultResumeWorkspaceExecutionHostId } from '@/lib/ai-vault-resume-target'
 import { dshHomeFromSessionPath } from '../../../../shared/dsh-session-paths'
+import { reasonixSessionLayout } from '../../../../shared/reasonix-session-paths'
 import { toast } from 'sonner'
 import { useAppStore } from '@/store'
 import type { AppState } from '@/store/types'
@@ -136,10 +137,13 @@ export async function openAiVaultSessionLogInOrca(session: AiVaultLogSession): P
         // ownership so an active runtime can't reinterpret it as a remote path.
         runtimeEnvironmentId: null,
         ...(sshTargetId ? { externalSshTargetId: sshTargetId } : {}),
-        language: dshHomeFromSessionPath(filePath) ? 'json' : detectLanguage(filePath),
+        language:
+          dshHomeFromSessionPath(filePath) || reasonixSessionLayout(filePath)
+            ? 'json'
+            : detectLanguage(filePath),
         mode: 'edit',
         readOnly: true,
-        liveTail: !sshTargetId
+        liveTail: !sshTargetId && !reasonixSessionLayout(filePath)
       },
       {
         preview: false,

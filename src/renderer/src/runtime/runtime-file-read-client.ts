@@ -32,7 +32,8 @@ export async function readRuntimeFileContent({
   connectionId,
   expectedExternalSshTargetId,
   includeLocalLogMetadata,
-  decodeDshHistory
+  decodeDshHistory,
+  decodeReasonixHistory
 }: RuntimeFileReadArgs): Promise<RuntimeReadableFileContent> {
   assertExternalSshReadOwnership(settings, connectionId, expectedExternalSshTargetId)
   const target = getActiveRuntimeTarget(settings)
@@ -41,7 +42,8 @@ export async function readRuntimeFileContent({
       filePath,
       connectionId,
       includeLocalLogMetadata,
-      ...(decodeDshHistory ? { decodeDshHistory } : {})
+      ...(decodeDshHistory ? { decodeDshHistory } : {}),
+      ...(decodeReasonixHistory ? { decodeReasonixHistory } : {})
     })
   }
   if (!worktreeId) {
@@ -49,11 +51,15 @@ export async function readRuntimeFileContent({
       filePath,
       connectionId,
       includeLocalLogMetadata,
-      ...(decodeDshHistory ? { decodeDshHistory } : {})
+      ...(decodeDshHistory ? { decodeDshHistory } : {}),
+      ...(decodeReasonixHistory ? { decodeReasonixHistory } : {})
     })
   }
   if (decodeDshHistory) {
     throw new Error('Decoded DSH logs are unavailable through this runtime file surface')
+  }
+  if (decodeReasonixHistory) {
+    throw new Error('Decoded Reasonix history is unavailable through this runtime file surface')
   }
   if (!canReadRelativeRuntimeFile(relativePath)) {
     throw new Error('Remote file is outside the owning runtime worktree')

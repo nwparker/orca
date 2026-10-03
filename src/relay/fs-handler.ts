@@ -1,4 +1,5 @@
 import { readDshDecodedLogSnapshot } from '../main/ai-vault/dsh-decoded-log-snapshot'
+import { readReasonixDecodedHistorySnapshot } from '../main/ai-vault/reasonix-decoded-history-snapshot'
 import { pathsExistOnRelay } from './fs-path-existence'
 import { tmpdir } from 'node:os'
 import type { RelayDispatcher, RequestContext } from './dispatcher'
@@ -129,6 +130,9 @@ export class FsHandler {
 
   private async readFile(params: Record<string, unknown>) {
     const filePath = expandTilde(params.filePath as string)
+    if (params.decodeReasonixHistory === true) {
+      return readReasonixDecodedHistorySnapshot(filePath)
+    }
     if (params.decodeDshHistory === true) {
       return readDshDecodedLogSnapshot(filePath)
     }

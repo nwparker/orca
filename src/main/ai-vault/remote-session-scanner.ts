@@ -92,7 +92,8 @@ export async function scanRemoteAiVaultSessions(args: {
         [
           ...remoteSessionSources(args.remoteHome, args.hostPlatform, args.dshSessionsDir, {
             include: args.includeReasonixHistory === true,
-            projectsDir: args.reasonixProjectsDir
+            projectsDir: args.reasonixProjectsDir,
+            workspaceRoots: args.scopePaths
           }),
           ...remoteOpenCodeSources(
             provider.openCode,

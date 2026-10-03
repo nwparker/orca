@@ -4,6 +4,7 @@ import {
   type PathExistenceResult
 } from '../../../shared/path-existence-batch'
 import { readDshDecodedLogSnapshot } from '../../ai-vault/dsh-decoded-log-snapshot'
+import { readReasonixDecodedHistorySnapshot } from '../../ai-vault/reasonix-decoded-history-snapshot'
 import { ipcMain } from 'electron'
 import { readdir, readFile, stat } from 'node:fs/promises'
 import { extname } from 'node:path'
@@ -77,6 +78,7 @@ export function registerFilesystemReadHandlers(context: FilesystemHandlerContext
         connectionId?: string
         includeLocalLogMetadata?: boolean
         decodeDshHistory?: boolean
+        decodeReasonixHistory?: boolean
       }
     ): Promise<{
       content: string
@@ -85,15 +87,23 @@ export function registerFilesystemReadHandlers(context: FilesystemHandlerContext
       mimeType?: string
       fileIdentity?: string
       decodedDshHistory?: boolean
+      decodedReasonixHistory?: boolean
     }> => {
       if (args.connectionId) {
         const provider = requireSshFilesystemProvider(args.connectionId)
         return provider.readFile(
           args.filePath,
-          args.decodeDshHistory ? { decodeDshHistory: true } : undefined
+          args.decodeReasonixHistory
+            ? { decodeReasonixHistory: true }
+            : args.decodeDshHistory
+              ? { decodeDshHistory: true }
+              : undefined
         )
       }
       const filePath = await resolveAuthorizedPath(args.filePath, store)
+      if (args.decodeReasonixHistory === true) {
+        return readReasonixDecodedHistorySnapshot(filePath)
+      }
       if (args.decodeDshHistory === true) {
         return readDshDecodedLogSnapshot(filePath)
       }

@@ -95,13 +95,12 @@ async function listAiVaultSessions(
       scopePaths.length <= AI_VAULT_SCOPE_PATHS_MAX_COUNT
         ? [...new Set(scopePaths)].sort()
         : scopePaths,
-    executionHostScope
+    executionHostScope,
+    includeReasonixHistory: args?.includeReasonixHistory !== false
   })
   const depth = requestedAiVaultSessionDepth(args)
   const scanKey = JSON.stringify({ key, depth })
-  // Why: every renderer request carries its own cancellation signal, so
-  // coalescing has to survive them — the coordinator hands all same-key callers
-  // one scan and only aborts it once every one of them has cancelled.
+  // A coalesced scan aborts only after every caller cancels.
   return scanCoordinator.run({
     key: scanKey,
     force: args?.force,
@@ -252,23 +251,12 @@ async function scanLocalAiVaultSessions(
   // Why: the shared cache module owns codex-home/WSL sourcing and the local
   // scan cache, so the desktop IPC path and the runtime RPC method (mobile)
   // share one cache instance and one source of managed-Codex homes.
-  return listCachedLocalAiVaultSessions(
-    {
-      limit: args?.limit,
-      unlimited: args?.unlimited,
-      force: args?.force,
-      scopePaths: args?.scopePaths
-    },
-    { signal }
-  )
+  return listCachedLocalAiVaultSessions(args, { signal })
 }
 
 export function registerAiVaultHandlers(options: AiVaultHandlerOptions = {}): void {
   handlerOptions = options
-  // Why: configure the SAME shared cache module the runtime RPC method uses so
-  // there is exactly one cache instance and neither caller drops codex-home or
-  // WSL injection. The runtime also configures these sources from its deps
-  // (serve-mode reachable); this desktop path supplies the same source.
+  // Desktop and serve mode configure the same host-owned session sources and cache.
   configureAiVaultSessionSources(options)
   ipcMain.handle('aiVault:listSessions', async (event, args?: AiVaultListArgs) => {
     const requestToken =

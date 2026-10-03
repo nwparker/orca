@@ -56,9 +56,9 @@ describe('session search runtime RPC', () => {
         {
           query: 'needle',
           limit: 20,
-          ...(clientKind
-            ? { filters: { agents: AI_VAULT_AGENTS.filter((agent) => agent !== 'dsh') } }
-            : {})
+          filters: {
+            agents: AI_VAULT_AGENTS.filter((agent) => agent !== 'dsh' && agent !== 'reasonix')
+          }
         },
         undefined
       )

@@ -8,6 +8,7 @@ import type * as CachedSessionListModule from '../ai-vault/cached-session-list'
 import type * as SessionParseCacheModule from '../ai-vault/session-scanner-parse-cache'
 import { getRemoteHostPlatform } from '../ssh/ssh-remote-platform'
 import { SSH_MUX_REQUEST_TIMEOUT_CODE } from '../ssh/ssh-channel-multiplexer'
+import { hostRoutingSession as session } from './ai-vault-host-routing-test-fixture'
 
 const mocks = vi.hoisted(() => ({
   scanAiVaultSessionsInWorker: vi.fn(),
@@ -55,9 +56,7 @@ vi.mock('../ai-vault/session-delete', () => ({
   deleteAiVaultSessionFile: mocks.deleteAiVaultSessionFile
 }))
 
-// Why: only the invalidation seam is replaced — everything else (cachedList,
-// listAiVaultSessions, ...) keeps its real implementation so the existing
-// host-routing/caching tests below stay exercising real behavior.
+// Only invalidation is mocked; host routing and caching retain production behavior.
 vi.mock('../ai-vault/cached-session-list', async (importOriginal) => {
   const actual = await importOriginal<typeof CachedSessionListModule>()
   return {
@@ -165,7 +164,8 @@ describe('listAiVaultSessions host routing', () => {
       'dev-box',
       {
         limit: undefined,
-        scopePaths: ['/home/ada/repo']
+        scopePaths: ['/home/ada/repo'],
+        includeReasonixHistory: true
       },
       expect.objectContaining({ signal: expect.any(AbortSignal) })
     )
@@ -190,7 +190,8 @@ describe('listAiVaultSessions host routing', () => {
       {
         limit: undefined,
         scopePaths: scopePaths.slice(0, 64),
-        scopePathsTruncated: true
+        scopePathsTruncated: true,
+        includeReasonixHistory: true
       },
       expect.objectContaining({ signal: expect.any(AbortSignal) })
     )
@@ -324,7 +325,8 @@ describe('listAiVaultSessions host routing', () => {
     expect(mocks.scanRuntimeAiVaultSessions).toHaveBeenCalledWith(
       'remote-server',
       {
-        executionHostScope: 'runtime:remote-server'
+        executionHostScope: 'runtime:remote-server',
+        includeReasonixHistory: true
       },
       expect.objectContaining({ timeoutMs: expect.any(Number) })
     )
@@ -417,7 +419,8 @@ describe('listAiVaultSessions host routing', () => {
       'remote-server',
       {
         executionHostScope: 'runtime:remote-server',
-        force: true
+        force: true,
+        includeReasonixHistory: true
       },
       {}
     )
@@ -872,7 +875,6 @@ describe('deleteAiVaultSession', () => {
   it('clears the multi-host scan-result cache after a real delete', async () => {
     await _internals.listAiVaultSessions({ executionHostScope: 'ssh:dev-box' })
     await _internals.listAiVaultSessions({ executionHostScope: 'ssh:dev-box' })
-    // Second list is a cache hit, so only one scan so far.
     expect(mocks.scanRemoteAiVaultSessions).toHaveBeenCalledTimes(1)
 
     mocks.deleteAiVaultSessionFile.mockResolvedValue({ outcome: 'deleted' })
@@ -907,14 +909,12 @@ describe('deleteAiVaultSession', () => {
   })
 })
 
-function hostInfo(targetId: string) {
-  return {
-    targetId,
-    executionHostId: `ssh:${targetId}` as const,
-    remoteHome: '/home/ada',
-    hostPlatform: getRemoteHostPlatform('linux-x64')
-  }
-}
+const hostInfo = (targetId: string) => ({
+  targetId,
+  executionHostId: `ssh:${targetId}` as const,
+  remoteHome: '/home/ada',
+  hostPlatform: getRemoteHostPlatform('linux-x64')
+})
 
 /** Mirrors the multiplexer's typed timeout: callers branch on the code, not on
  * the message text. */
@@ -924,39 +924,8 @@ function relayTimeoutError(): Error {
   })
 }
 
-function result(sessions: AiVaultSession[]): AiVaultListResult {
-  return { sessions, issues: [], scannedAt: new Date().toISOString() }
-}
-
-function session(
-  executionHostId: AiVaultSession['executionHostId'],
-  sessionId: string
-): AiVaultSession {
-  return {
-    id: `${executionHostId}:codex:${sessionId}:/tmp/${sessionId}.jsonl`,
-    executionHostId,
-    agent: 'codex',
-    sessionId,
-    title: sessionId,
-    cwd: '/repo',
-    branch: null,
-    model: null,
-    filePath: `/tmp/${sessionId}.jsonl`,
-    codexHome: null,
-    createdAt: null,
-    updatedAt:
-      sessionId === 'runtime-session'
-        ? '2026-07-04T03:00:00.000Z'
-        : sessionId === 'remote-session'
-          ? '2026-07-04T02:00:00.000Z'
-          : '2026-07-04T01:00:00.000Z',
-    modifiedAt: '2026-07-04T00:00:00.000Z',
-    messageCount: 1,
-    totalTokens: 0,
-    previewMessages: [],
-    queuedMessageCount: 0,
-    subagentTranscriptCount: 0,
-    resumeCommand: `codex resume ${sessionId}`,
-    subagent: null
-  }
-}
+const result = (sessions: AiVaultSession[]): AiVaultListResult => ({
+  sessions,
+  issues: [],
+  scannedAt: new Date().toISOString()
+})

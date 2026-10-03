@@ -1,4 +1,5 @@
 import { dshHomeFromSessionPath } from '../../../../shared/dsh-session-paths'
+import { reasonixSessionLayout } from '../../../../shared/reasonix-session-paths'
 import {
   LOCAL_EXECUTION_HOST_ID,
   normalizeExecutionHostId,
@@ -31,7 +32,7 @@ export function canOpenAiVaultSessionLogInOrca(
   if (!canUseLocalAiVaultSessionPathActions(session.executionHostId)) {
     return (
       parseExecutionHostId(session.executionHostId)?.kind === 'ssh' &&
-      Boolean(dshHomeFromSessionPath(filePath))
+      Boolean(dshHomeFromSessionPath(filePath) || reasonixSessionLayout(filePath))
     )
   }
   return !isAiVaultSyntheticSessionPath(filePath)

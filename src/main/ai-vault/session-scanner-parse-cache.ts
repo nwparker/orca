@@ -174,6 +174,7 @@ async function parseCachedInLane(
 ): Promise<AiVaultSession | null> {
   const { file } = candidate
   if (
+    candidate.agent === 'reasonix' ||
     requireRead === 'whole' ||
     (requireRead === 'any' && sessionParseCacheCoversTranscript(candidate, platform))
   ) {
@@ -181,7 +182,11 @@ async function parseCachedInLane(
   }
   const entry = getSessionParseCacheEntry(file.path)
 
-  if (entry !== undefined && sessionParseCacheCoversTranscript(candidate, platform)) {
+  if (
+    candidate.agent !== 'reasonix' &&
+    entry !== undefined &&
+    sessionParseCacheCoversTranscript(candidate, platform)
+  ) {
     if (sidecarUnchanged(entry.sidecar, file.sidecar)) {
       return reuseCachedSession(candidate, entry, stats)
     }

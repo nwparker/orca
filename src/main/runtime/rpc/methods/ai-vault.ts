@@ -76,7 +76,8 @@ export const AI_VAULT_METHODS = [
           limit: params.unlimited ? undefined : params.limit,
           unlimited: params.unlimited,
           force: params.force,
-          scopePaths: params.scopePaths
+          scopePaths: params.scopePaths,
+          includeReasonixHistory: params.includeReasonixHistory === true
         })
       } catch (error) {
         if (error instanceof Error) {

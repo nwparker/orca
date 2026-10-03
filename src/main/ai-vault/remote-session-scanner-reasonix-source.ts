@@ -9,7 +9,8 @@ import { parseReasonixSessionBytes } from './session-scanner-reasonix-parser'
 export function remoteReasonixSource(
   home: string,
   platform: RemoteHostPlatform,
-  projectsDir?: string
+  projectsDir?: string,
+  workspaceRoots: readonly string[] = []
 ): RemoteSessionSource {
   return {
     agent: 'reasonix',
@@ -33,7 +34,8 @@ export function remoteReasonixSource(
         context.hostPlatform,
         {
           executionHostId: context.executionHostId,
-          executionHostPlatform: context.hostPlatform.os
+          executionHostPlatform: context.hostPlatform.os,
+          reasonixWorkspaceRoots: workspaceRoots
         },
         undefined,
         context.signal

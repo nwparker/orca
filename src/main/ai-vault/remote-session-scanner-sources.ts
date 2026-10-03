@@ -51,13 +51,20 @@ export function remoteSessionSources(
   remoteHome: string,
   hostPlatform: RemoteHostPlatform,
   dshSessionsDir?: string,
-  reasonix?: { include: boolean; projectsDir?: string }
+  reasonix?: { include: boolean; projectsDir?: string; workspaceRoots?: readonly string[] }
 ): RemoteSessionSource[] {
   return [
     ...remoteCodexSources(remoteHome, hostPlatform),
     remoteDshSource(remoteHome, hostPlatform, dshSessionsDir),
     ...(reasonix?.include
-      ? [remoteReasonixSource(remoteHome, hostPlatform, reasonix.projectsDir)]
+      ? [
+          remoteReasonixSource(
+            remoteHome,
+            hostPlatform,
+            reasonix.projectsDir,
+            reasonix.workspaceRoots
+          )
+        ]
       : []),
     {
       ...jsonlSource(

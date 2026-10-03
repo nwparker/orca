@@ -8,6 +8,6 @@ export function createReasonixAgentCatalogEntry(): AgentCatalogEntry {
     cmd: 'reasonix',
     searchAliases: ['deepseek reasonix'],
     faviconDomain: 'esengine.github.io',
-    homepageUrl: 'https://github.com/esengine/DeepSeek-Reasonix'
+    homepageUrl: 'https://github.com/esengine/DeepSeek-Reasonix/tree/v1.39.7'
   }
 }

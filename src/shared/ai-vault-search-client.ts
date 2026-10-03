@@ -60,10 +60,15 @@ export function createSessionSearchClient(
       let raw: unknown
       try {
         let filters = parsed.filters
-        if (filters?.agents?.includes('dsh')) {
+        if (filters?.agents?.some((agent) => agent === 'dsh' || agent === 'reasonix')) {
           const status = AiVaultSearchStatusSchema.parse(await call('aiVault.searchStatus', {}))
-          if (!status.dshHistory) {
-            const agents = filters.agents.filter((agent) => agent !== 'dsh')
+          if (!status.dshHistory || !status.reasonixHistory) {
+            const agents =
+              filters.agents?.filter(
+                (agent) =>
+                  (agent !== 'dsh' || status.dshHistory === true) &&
+                  (agent !== 'reasonix' || status.reasonixHistory === true)
+              ) ?? []
             if (!agents.length) {
               return emptySessionSearchResults(status.generation)
             }
@@ -73,7 +78,8 @@ export function createSessionSearchClient(
         raw = await call('aiVault.searchSessions', {
           ...parsed,
           ...(filters ? { filters } : {}),
-          includeDshHistory: true
+          includeDshHistory: true,
+          includeReasonixHistory: true
         })
       } catch (error) {
         if (isUnknownSessionSearchMethod(error)) {
