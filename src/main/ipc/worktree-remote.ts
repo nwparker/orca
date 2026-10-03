@@ -148,7 +148,11 @@ import {
 } from '../../shared/setup-runner-command'
 import { createSequencedSetupAgentCommands } from '../../shared/setup-agent-sequencing'
 import { shouldWaitForSetupBeforeAgentStartup } from '../../shared/setup-agent-startup-policy'
-import { createWorktreeCreateTimingRecorder } from '../worktree-create-timing'
+import {
+  createWorktreeCreateTimingRecorder,
+  localWorktreeCreateExecutionHost,
+  type WorktreeCreateTimingRecorder
+} from '../worktree-create-timing'
 import {
   getLocalProjectGitExecOptions,
   getLocalProjectWorktreeGitOptions,
@@ -169,7 +173,7 @@ import {
 import { createRetiredNameLookup } from '../../shared/worktree/retired-name-registry'
 import { toLocalBaseRefRefreshResult } from '../../shared/worktree/local-base-branch-fast-forward'
 import { isSshRequestOutcomeUnverifiable } from '../ssh/ssh-channel-multiplexer'
-import { findPendingWorktreeRemovalConflict } from '../worktree-background-removal'
+import { findPendingWorktreeRemovalConflict } from '../worktree-removal-table'
 
 const SSH_WORKTREE_CREATE_FETCH_FRESHNESS_MS = 30_000
 const SSH_WORKTREE_CREATE_FETCH_CACHE_MAX = 512
@@ -530,10 +534,6 @@ function getSshWorktreeCreateBaseFetchKey(repo: Repo, base: RemoteTrackingBase):
   return `${repo.connectionId ?? 'ssh'}::${repo.path}::base:${base.remote}:${base.branch}`
 }
 
-function getSshWorktreeCreateRemoteFetchKey(repo: Repo, remote: string): string {
-  return `${repo.connectionId ?? 'ssh'}::${repo.path}::remote:${remote}`
-}
-
 function getSshWorktreeCreateRemoteQueueKey(repo: Repo, remote: string): string {
   return `${repo.connectionId ?? 'ssh'}::${repo.path}::queue:${remote}`
 }
@@ -626,13 +626,17 @@ async function refreshRemoteTrackingBaseForWorktreeCreate(
 async function fetchRemoteForWorktreeCreate(
   provider: SshGitProvider,
   repo: Repo,
-  remote: string
-): Promise<void> {
-  return getOrStartSshWorktreeCreateFetch(
-    getSshWorktreeCreateRemoteFetchKey(repo, remote),
-    getSshWorktreeCreateRemoteQueueKey(repo, remote),
-    () => provider.exec(['fetch', remote], repo.path).then(() => undefined)
-  )
+  baseBranch: string
+): Promise<RemoteTrackingBase> {
+  const branch = normalizeLocalBranchName(baseBranch)
+  const base = {
+    remote: 'origin',
+    branch,
+    ref: `refs/remotes/origin/${branch}`,
+    base: `origin/${branch}`
+  }
+  await refreshRemoteTrackingBaseForWorktreeCreate(provider, repo, base)
+  return base
 }
 
 export function __resetSshWorktreeCreateFetchCacheForTests(): void {
@@ -1626,7 +1630,7 @@ export async function prefetchRemoteWorktreeCreateBase(
   }
 
   // Why: mirrors createRemoteWorktree's legacy local-base fallback so prefetch and create share one process-local SSH fetch cache.
-  await fetchRemoteForWorktreeCreate(provider, repo, 'origin')
+  await fetchRemoteForWorktreeCreate(provider, repo, basePlan.baseBranch)
 }
 
 /** Never rejects: the create may already have succeeded when this settles. */
@@ -1717,9 +1721,10 @@ export async function createRemoteWorktree(
   args: CreateWorktreeArgsWithSystemProvenance,
   repo: Repo,
   store: Store,
-  mainWindow: BrowserWindow
+  mainWindow: BrowserWindow,
+  timing: WorktreeCreateTimingRecorder = createWorktreeCreateTimingRecorder()
 ): Promise<CreateWorktreeResult> {
-  const timing = createWorktreeCreateTimingRecorder()
+  timing.recordExecutionHost('ssh')
   const provider = requireSshGitProvider(repo.connectionId!)
   const fsProvider = getSshFilesystemProvider(repo.connectionId!)
 
@@ -1916,9 +1921,13 @@ export async function createRemoteWorktree(
       }
     }
   } else if (!(await hasRemoteWorktreeBaseRef(provider, repo.path, baseBranch))) {
-    // Why: non-remote-tracking bases keep the legacy best-effort fetch; verified PR/MR SHA bases already have the object, so a broad fetch is wasted.
+    // Why: fetch only the missing named base; verified PR/MR SHA bases already have the object.
     try {
-      await fetchRemoteForWorktreeCreate(provider, repo, 'origin')
+      const fetchedBase = await fetchRemoteForWorktreeCreate(provider, repo, baseBranch)
+      if (await hasCommitRefSsh(provider, repo.path, fetchedBase.ref)) {
+        baseBranch = fetchedBase.base
+        remoteTrackingBase = fetchedBase
+      }
     } catch {
       /* best-effort */
     }
@@ -1976,7 +1985,8 @@ export async function createRemoteWorktree(
     ) {
       // Why: only OLD relays (pre-allowlist-removal) throw these; surface an upgrade message. Remove after version floor moves (docs/relay-fs-allowlist-removal.md).
       throw new Error(
-        `Older relay reported an authorization error; please reconnect to deploy the latest relay. (${err.message})`
+        `Older relay reported an authorization error; please reconnect to deploy the latest relay. (${err.message})`,
+        { cause: err }
       )
     }
     throw err
@@ -2030,6 +2040,7 @@ export async function createRemoteWorktree(
   const gitWorktrees = await timing.time('list_created_worktree', async () =>
     provider.listWorktrees(repo.path)
   )
+  timing.recordWorktreeCount(gitWorktrees.length)
   // Match the exact requested path first, then the exact branch ref. Suffix matching can
   // select an older `prefix/<branchName>` worktree when the newly created row is present.
   const created = findCreatedWorktree(gitWorktrees, remotePath, branchName)
@@ -2190,15 +2201,18 @@ export function createLocalWorktree(
   repo: Repo,
   store: Store,
   mainWindow: BrowserWindow,
-  runtime?: OrcaRuntimeService
+  runtime?: OrcaRuntimeService,
+  timing: WorktreeCreateTimingRecorder = createWorktreeCreateTimingRecorder()
 ): Promise<CreateWorktreeResult> {
   // Why a holder fired in `finally`: consuming a prepared checkout leaves the pool one short, so a
   // create that fails after that point — include copy, push target, terminal startup — must still
   // arm the replacement. Fires exactly once, after startup on the success path.
   const rearm: PreparationRearmHolder = { fire: () => {} }
   return worktreeCreateGit
-    .run(() => performLocalWorktreeCreate(args, repo, store, mainWindow, rearm, runtime))
+    .run(() => performLocalWorktreeCreate(args, repo, store, mainWindow, rearm, timing, runtime))
     .finally(() => {
+      // Closes the create's measured window first, so its own re-arm is not counted against it.
+      timing.finish()
       rearm.fire()
     })
 }
@@ -2209,9 +2223,9 @@ async function performLocalWorktreeCreate(
   store: Store,
   mainWindow: BrowserWindow,
   rearm: PreparationRearmHolder,
+  timing: WorktreeCreateTimingRecorder,
   runtime?: OrcaRuntimeService
 ): Promise<CreateWorktreeResult> {
-  const timing = createWorktreeCreateTimingRecorder()
   const settings = store.getSettings()
   const worktreePathSettings = getWorktreePathSettings(
     repo,
@@ -2220,6 +2234,7 @@ async function performLocalWorktreeCreate(
   )
   const localGitExecOptions = getLocalProjectGitExecOptions(store, repo)
   const localWorktreeGitOptions = getLocalProjectWorktreeGitOptions(store, repo)
+  timing.recordExecutionHost(localWorktreeCreateExecutionHost(localGitExecOptions))
   const hasLocalWorktreeGitOptions = Object.keys(localWorktreeGitOptions).length > 0
   const localWorktreeGitOptionArgs: [] | [{ wslDistro?: string }] = hasLocalWorktreeGitOptions
     ? [localWorktreeGitOptions]
@@ -2628,11 +2643,6 @@ async function performLocalWorktreeCreate(
             options: preparedWorktreeOptions,
             timing
           })
-          timing.recordPreparedCheckout(
-            prepared.status === 'hit'
-              ? { status: 'hit', retargeted: prepared.retargeted }
-              : { status: 'miss', reason: prepared.reason }
-          )
           if (prepared.status === 'hit') {
             // Why deferred: re-arming is a full `reset --hard`; started here it would hold a
             // general admission slot for the rest of this create's own git.
@@ -2750,6 +2760,9 @@ async function performLocalWorktreeCreate(
   } = await timing.time('list_created_worktree', async () =>
     resolveCreatedWorktree(repo.path, worktreePath, branchName, localWorktreeGitOptions)
   )
+  if (listingComplete) {
+    timing.recordWorktreeCount(gitWorktrees.length)
+  }
 
   const worktreeId = `${repo.id}::${created.path}`
   const now = Date.now()
@@ -2828,10 +2841,12 @@ async function performLocalWorktreeCreate(
   // Why gated: registration replaces the repo's root set, so registering a create recovered without
   // a listing would revoke filesystem access to every worktree that listing would have named.
   if (listingComplete) {
-    registerWorktreeRootsForRepo(store, repo, [
-      repo.path,
-      ...gitWorktrees.map((worktree) => worktree.path)
-    ])
+    registerWorktreeRootsForRepo(
+      store,
+      repo,
+      [repo.path, ...gitWorktrees.map((worktree) => worktree.path)],
+      localWorktreeGitOptions
+    )
   } else {
     // Recovered without a listing: authorize just the new root, or the create the user just made
     // is rejected by filesystem/git-status IPC until a full scan repopulates the cache.
