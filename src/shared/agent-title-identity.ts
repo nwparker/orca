@@ -79,7 +79,7 @@ function computeAgentLabel(title: string): string | null {
     return piStateBrand
   }
   if (isQoderTerminalTitle(title)) {
-    return 'Qoder CLI'
+    return title.includes('Qoder CLI CN') ? 'Qoder CLI CN' : 'Qoder CLI'
   }
   // Why: the DSB matcher distinguishes native prefixes from glyphs inside task text.
   if (isDeepSeekBuildTerminalTitle(title)) {

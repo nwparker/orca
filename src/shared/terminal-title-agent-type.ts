@@ -180,7 +180,7 @@ function computeAgentLabel(title: string): string | null {
     return 'DeepSeek Harness'
   }
   if (isQoderTerminalTitle(title)) {
-    return 'Qoder CLI'
+    return title.includes('Qoder CLI CN') ? 'Qoder CLI CN' : 'Qoder CLI'
   }
   // Why: the DSB matcher distinguishes native prefixes from glyphs inside task text.
   if (isDeepSeekBuildTerminalTitle(title)) {
@@ -267,6 +267,8 @@ const TITLE_LABEL_TO_AGENT: Partial<Record<string, TerminalAgent>> = {
   OpenClaude: 'openclaude',
   Codex: 'codex',
   'Qoder CLI': 'qoder',
+  'Qoder CLI CN': 'qoder-cn',
+  'Qoder CLI China': 'qoder-cn',
   'Gemini CLI': 'gemini',
   'GitHub Copilot': 'copilot',
   Grok: 'grok',

@@ -1,4 +1,5 @@
 import { existsSync, globSync, readFileSync } from 'node:fs'
+import { runInNewContext } from 'node:vm'
 import { parse } from 'yaml'
 import { describe, expect, it } from 'vitest'
 import { UNIT_EXCLUDE } from './ci-unit-files.mjs'
@@ -290,7 +291,7 @@ describe('PR workflow parallelism', () => {
     expect(steps[pnpmIndex].with.version).toBeUndefined()
     expect(steps[pnpmIndex].with.install).toBe(false)
     const saveOutsidePrs =
-      "${{ github.event_name != 'pull_request' && inputs.cache-pnpm-store != 'false' && inputs.cache-pnpm-store-lookup-only != 'true' && 'pnpm' || '' }}"
+      "${{ github.event_name != 'pull_request' && inputs.cache-pnpm-store != 'false' && steps.pnpm-store-mode.outputs.lookup-only != 'true' && 'pnpm' || '' }}"
     expect(steps[nodeIndex].with.cache).toBe(saveOutsidePrs)
     expect(steps[nodeIndex].if).toBe("inputs.node-version == ''")
     expect(steps[requestedNodeIndex].if).toBe("inputs.node-version != ''")
@@ -515,6 +516,21 @@ describe('PR workflow parallelism', () => {
     const evidence = workflow.jobs.unit_selection_evidence
     expect(evidence.uses).toBe('./.github/workflows/unit-selection-evidence.yml')
     expect(evidence.needs).toEqual(['test'])
+    for (const [result, cancelled, expected] of [
+      ['success', false, true],
+      ['failure', false, true],
+      ['skipped', false, false],
+      ['cancelled', false, false],
+      ['success', true, false],
+      ['failure', true, false]
+    ]) {
+      expect(
+        runInNewContext(evidence.if.slice(3, -2), {
+          cancelled: () => cancelled,
+          needs: { test: { result } }
+        })
+      ).toBe(expected)
+    }
     expect(workflow.jobs.verify.needs).not.toContain('unit_selection_evidence')
     expect(unitTestWorkflow.jobs.selection_evidence).toBeUndefined()
     const evidenceWorkflow = parse(

@@ -131,6 +131,13 @@ export const getAgentCatalog = createLocalizedCatalog((): AgentCatalogEntry[] =>
     homepageUrl: 'https://docs.qoder.com/cli/overview'
   },
   {
+    id: 'qoder-cn',
+    label: translate('auto.lib.agent.catalog.qoder_cn_label', 'Qoder CLI China'),
+    cmd: 'qoderclicn',
+    faviconDomain: 'qoder.cn',
+    homepageUrl: 'https://docs.qoder.cn/cli/overview'
+  },
+  {
     id: 'zcode',
     label: translate('auto.lib.agent.catalog.zcode_label', 'ZCode'),
     cmd: 'zcode',
