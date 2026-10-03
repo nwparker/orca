@@ -3,12 +3,16 @@ import type { AgentStatusState } from './agent-status-types'
 import type { AgentMainAgentStatus } from './main-agent-status'
 import type { TuiAgent } from './tui-agent'
 import { isReasonixStorageSessionId } from './reasonix-session-paths'
+import type { SleepingAgentLaunchConfig } from './sleeping-agent-launch-config'
+export type { SleepingAgentLaunchConfig } from './sleeping-agent-launch-config'
 
 export const RESUMABLE_TUI_AGENTS = [
   'claude',
   'codebuddy',
   'codex',
   'qoder',
+  'qoder-cn',
+  'qwen-code',
   'gemini',
   'antigravity',
   'opencode',
@@ -21,6 +25,7 @@ export const RESUMABLE_TUI_AGENTS = [
   'omp',
   'prime-agent',
   'copilot',
+  'cursor',
   'kimi',
   'muse',
   'zcode',
@@ -42,13 +47,6 @@ export type AgentProviderSessionMetadata = {
    *  `id` alone fails. Claude/Codex still resume by id; Pi uses its reported
    *  `session_file` as the authoritative `--session` resume locator. */
   transcriptPath?: string
-}
-
-export type SleepingAgentLaunchConfig = {
-  agentCommand?: string
-  agentArgs: string
-  agentEnv: Record<string, string>
-  ompResumeFilePath?: string
 }
 
 export type SleepingAgentSessionRecord = {
@@ -202,6 +200,8 @@ export function extractAgentProviderSession(
     // Native-chat agents: also capture the hook's authoritative transcript_path,
     // since recent Claude Code names the transcript file with a UUID that differs
     // from the hook session_id (so the id-based glob no longer finds it).
+    case 'qoder-cn':
+    case 'qwen-code':
     case 'qoder':
     case 'codebuddy':
     case 'claude':
@@ -270,8 +270,11 @@ export function extractAgentProviderSession(
       const id = readSessionId(payload, ['session_id', 'sessionId'])
       return id ? { key: 'session_id', id } : null
     }
+    case 'cursor': {
+      const id = readSessionId(payload, ['conversation_id'])
+      return id ? { key: 'conversation_id', id } : null
+    }
     case 'amp':
-    case 'cursor':
     case 'command-code':
     case 'hermes':
       return null
@@ -292,15 +295,23 @@ export function getAgentResumeArgv(
         ? ['reasonix', '--resume', id]
         : null
     case 'codebuddy':
-      return providerSession.key === 'session_id' ? ['codebuddy', '--resume', id] : null
     case 'claude':
-      return providerSession.key === 'session_id' ? ['claude', '--resume', id] : null
+    case 'gemini':
+    case 'droid':
+    case 'grok':
+    case 'devin':
+    case 'zcode':
+      return providerSession.key === 'session_id' ? [agent, '--resume', id] : null
+    case 'cursor':
+      return providerSession.key === 'conversation_id' ? ['cursor-agent', '--resume', id] : null
     case 'codex':
       return providerSession.key === 'session_id' ? ['codex', 'resume', id] : null
+    case 'qoder-cn':
+      return providerSession.key === 'session_id' ? ['qoderclicn', '--resume', id] : null
+    case 'qwen-code':
+      return providerSession.key === 'session_id' ? ['qwen', '--resume', id] : null
     case 'qoder':
       return providerSession.key === 'session_id' ? ['qodercli', '--resume', id] : null
-    case 'gemini':
-      return providerSession.key === 'session_id' ? ['gemini', '--resume', id] : null
     case 'antigravity':
       return providerSession.key === 'conversation_id' ? ['agy', '--conversation', id] : null
     case 'opencode':
@@ -319,12 +330,6 @@ export function getAgentResumeArgv(
         : null
     case 'mimo-code':
       return providerSession.key === 'session_id' ? ['mimo', '--session', id] : null
-    case 'droid':
-      return providerSession.key === 'session_id' ? ['droid', '--resume', id] : null
-    case 'grok':
-      return providerSession.key === 'session_id' ? ['grok', '--resume', id] : null
-    case 'devin':
-      return providerSession.key === 'session_id' ? ['devin', '--resume', id] : null
     case 'omp':
       return providerSession.key === 'session_id'
         ? [
@@ -343,8 +348,6 @@ export function getAgentResumeArgv(
       return providerSession.key === 'session_id' ? ['kimi', '--session', id] : null
     case 'muse':
       return providerSession.key === 'session_id' ? ['muse', 'resume', id] : null
-    case 'zcode':
-      return providerSession.key === 'session_id' ? ['zcode', '--resume', id] : null
     // Why: `dsh-tui --resume <id>` re-enters the session the launcher recorded for this
     // workspace. DSH keys sessions by workspace path, so callers must keep the cwd.
     case 'dsh':

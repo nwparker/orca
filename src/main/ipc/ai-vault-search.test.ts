@@ -86,7 +86,9 @@ describe('desktop IPC and preload search boundary', () => {
     expect(sshSearch).toHaveBeenCalledWith('ssh-host', 'aiVault.searchSessions', {
       query: 'needle',
       limit: 20,
-      includeDshHistory: true
+      includeDshHistory: true,
+      includeReasonixHistory: true,
+      supportsQoderHistory: true
     })
     expect(result).toMatchObject({
       hits: [{ executionHostId: 'ssh:ssh-host', source: { presence: 'present' } }]
@@ -107,7 +109,9 @@ describe('desktop IPC and preload search boundary', () => {
     expect(runtimeSearch).toHaveBeenCalledWith('env-1', 'aiVault.searchSessions', {
       query: 'needle',
       limit: 20,
-      includeDshHistory: true
+      includeDshHistory: true,
+      includeReasonixHistory: true,
+      supportsQoderHistory: true
     })
     expect(result).toMatchObject({
       hits: [{ executionHostId: 'runtime:env-1', source: { presence: 'present' } }]

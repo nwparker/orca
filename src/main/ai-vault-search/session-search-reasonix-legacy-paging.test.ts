@@ -51,16 +51,17 @@ it('excludes unsupported new-agent rows before ranking and paging rather than fi
     addSyntheticSession(harness.db, { id: 2, agent: 'dsh', updatedAt: '2026-10-02' })
     addSyntheticSession(harness.db, { id: 3, agent: 'codex', updatedAt: '2026-10-01' })
     addSyntheticSession(harness.db, { id: 4, agent: 'claude', updatedAt: '2026-09-30' })
+    addSyntheticSession(harness.db, { id: 5, agent: 'qoder', updatedAt: '2026-10-04' })
     const service = createSessionSearchService({
       engine: harness.engine,
       indexer: {
         reconcile: async () => {},
         status: () => ({
           phase: 'current' as const,
-          filesIndexed: 4,
+          filesIndexed: 5,
           filesDue: 0,
           filesFailed: 0,
-          messagesIndexed: 4,
+          messagesIndexed: 5,
           degradedRoots: [],
           lastReconcileAt: 1,
           lastSweepCompletedAt: 1,
@@ -97,6 +98,14 @@ it('excludes unsupported new-agent rows before ranking and paging rather than fi
     expect(optedIn).toMatchObject({
       kind: 'results',
       hits: [{ agent: 'reasonix', sessionId: '1' }]
+    })
+    const qoderOptedIn = await searchSessionService(
+      { query: 'needle', limit: 1, sort: 'newest', supportsQoderHistory: true },
+      'runtime'
+    )
+    expect(qoderOptedIn).toMatchObject({
+      kind: 'results',
+      hits: [{ agent: 'qoder', sessionId: '5' }]
     })
     const unsupportedOnly = await searchSessionService(
       { query: 'needle', filters: { agents: ['reasonix'] } },

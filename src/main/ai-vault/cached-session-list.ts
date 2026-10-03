@@ -103,7 +103,8 @@ export async function listAiVaultSessions(
   // Scope paths change the result set, so they must be part of the cache key.
   const key = JSON.stringify({
     scopePaths: [...new Set(args?.scopePaths ?? [])].sort(),
-    includeReasonixHistory: args?.includeReasonixHistory !== false
+    includeReasonixHistory: args?.includeReasonixHistory !== false,
+    includeAntigravityIdeSessions: args?.includeAntigravityIdeSessions === true
   })
   const depth = requestedAiVaultSessionDepth(args)
   const scanKey = JSON.stringify({ key, depth })
@@ -132,6 +133,7 @@ export async function listAiVaultSessions(
     start: async (scanSignal) => {
       const result = await scanAiVaultSessionsInBackground(
         {
+          includeAntigravityIdeSessions: args?.includeAntigravityIdeSessions,
           limit: args?.limit,
           unlimited: args?.unlimited,
           scopePaths: args?.scopePaths,

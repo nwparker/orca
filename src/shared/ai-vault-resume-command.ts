@@ -4,6 +4,11 @@
 import { reasonixSessionLayout } from './reasonix-session-paths'
 import { getAgentResumeArgv } from './agent-session-resume'
 import { dshHomeFromSessionPath } from './dsh-session-paths'
+import {
+  isAntigravityReferenceSession,
+  antigravityTranscriptReferencePrompt
+} from './antigravity-session-origin'
+import { normalizeAiVaultResumeFilePath } from './ai-vault-resume-path'
 import { TUI_AGENT_CONFIG } from './tui-agent-config'
 import {
   clearEnvCommand,
@@ -53,7 +58,11 @@ export function buildAiVaultResumeCommand(args: {
       : shell
         ? quoteStartupArg(resumeTarget, shell)
         : quoteShellArg(resumeTarget, platform)
-  const resumeCommand = buildAgentResumeInvocation(agent, baseCommand, sessionArg)
+  const referencePath = normalizeAiVaultResumeFilePath(resumeFilePath ?? undefined, platform)
+  const resumeCommand =
+    isAntigravityReferenceSession({ agent, filePath: referencePath }) && referencePath
+      ? `${baseCommand} --prompt-interactive ${quoteResumeArg(antigravityTranscriptReferencePrompt(referencePath), platform, shell)}`
+      : buildAgentResumeInvocation(agent, baseCommand, sessionArg)
 
   return buildAiVaultResumeShellCommand({
     resumeCommand,
@@ -247,6 +256,7 @@ function buildAgentResumeInvocation(
       return `${baseCommand} resume ${sessionArg}`
     case 'cline':
       return `${baseCommand} --id ${sessionArg}`
+    case 'qoder':
     case 'codebuddy':
     case 'claude':
     case 'zcode':

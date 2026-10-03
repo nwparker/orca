@@ -128,6 +128,13 @@ export const getAgentCatalog = createLocalizedCatalog((): AgentCatalogEntry[] =>
     homepageUrl: 'https://docs.qoder.com/cli/overview'
   },
   {
+    id: 'qoder-cn',
+    label: translate('auto.lib.agent.catalog.qoder_cn_label', 'Qoder CLI China'),
+    cmd: 'qoderclicn',
+    faviconDomain: 'qoder.cn',
+    homepageUrl: 'https://docs.qoder.cn/cli/overview'
+  },
+  {
     id: 'zcode',
     label: translate('auto.lib.agent.catalog.zcode_label', 'ZCode'),
     cmd: 'zcode',
@@ -352,13 +359,12 @@ export function getAgentLabel(agent: TuiAgent): string {
   return getAgentCatalog().find((entry) => entry.id === agent)?.label ?? agent
 }
 
-export function AgentIcon({
-  agent,
-  size = 14
-}: {
+type AgentIconProps = {
   agent: TuiAgent | null | undefined
   size?: number
-}): React.JSX.Element {
+}
+
+export function AgentIcon({ agent, size = 14 }: AgentIconProps): React.JSX.Element {
   // Why: render a neutral question-mark glyph when the agent identity is not
   // yet known. Before, the caller coerced null → 'claude', which caused Codex
   // panes to briefly show the Claude icon until the first hook callback
@@ -390,10 +396,7 @@ export function AgentIcon({
   if (agent === 'copilot') {
     return <CopilotIcon size={size} />
   }
-  if (agent === 'opencode') {
-    return <OpenCodeIcon size={size} />
-  }
-  if (agent === 'opencode2') {
+  if (agent === 'opencode' || agent === 'opencode2') {
     return <OpenCodeIcon size={size} />
   }
   const catalogEntry = getAgentCatalog().find((a) => a.id === agent)

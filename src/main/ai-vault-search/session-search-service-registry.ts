@@ -38,29 +38,38 @@ export async function searchSessionService(
   // The choke point every entry point funnels through, so every host kind
   // resolves alike; the verdict goes to the service, which answers off and
   // not-ready first.
-  const { within, includeDshHistory, includeReasonixHistory, ...input } = parsed
-  const request =
-    transport !== 'ipc' && (!includeDshHistory || !includeReasonixHistory)
-      ? {
-          ...input,
-          filters: {
-            ...input.filters,
-            agents: (input.filters?.agents ?? AI_VAULT_AGENTS).filter(
-              (agent) =>
-                (agent !== 'dsh' || includeDshHistory === true) &&
-                (agent !== 'reasonix' || includeReasonixHistory === true)
-            )
-          }
-        }
-      : input
+  const { within, includeDshHistory, includeReasonixHistory, supportsQoderHistory, ...request } =
+    parsed
+  const supportsAgent = (agent: (typeof AI_VAULT_AGENTS)[number]): boolean =>
+    (agent !== 'qoder' || supportsQoderHistory === true) &&
+    (transport === 'ipc' ||
+      ((agent !== 'dsh' || includeDshHistory === true) &&
+        (agent !== 'reasonix' || includeReasonixHistory === true)))
+  const requestedAgents = request.filters?.agents
+  const compatibleAgents = (requestedAgents?.length ? requestedAgents : AI_VAULT_AGENTS).filter(
+    supportsAgent
+  )
   if (
     transport !== 'ipc' &&
-    (!includeDshHistory || !includeReasonixHistory) &&
-    input.filters?.agents?.length &&
-    !request.filters?.agents?.length
+    requestedAgents?.some(
+      (agent) =>
+        (agent === 'dsh' && includeDshHistory !== true) ||
+        (agent === 'reasonix' && includeReasonixHistory !== true)
+    ) &&
+    compatibleAgents.length === 0
   ) {
     return emptySessionSearchResults((await current.status()).generation)
   }
+  // Older clients reject the whole page when a hit has an unknown agent tag.
+  const compatibleRequest = AI_VAULT_AGENTS.every(supportsAgent)
+    ? request
+    : {
+        ...request,
+        filters: {
+          ...request.filters,
+          agents: compatibleAgents.length ? compatibleAgents : AI_VAULT_AGENTS.filter(supportsAgent)
+        }
+      }
   const hostScope = within
     ? resolveSessionSearchScope(within, sessionSearchScopeCatalog())
     : undefined
@@ -68,9 +77,14 @@ export async function searchSessionService(
     request.freshness === 'wait-until-current'
       ? await reconcileWithin(current, freshnessTimeoutMs)
       : false
-  const result = AiVaultSearchResponseSchema.parse(await current.search(request, hostScope))
+  const result = AiVaultSearchResponseSchema.parse(
+    await current.search(compatibleRequest, hostScope)
+  )
   if (result.kind !== 'results') {
     return result
+  }
+  if (compatibleAgents.length === 0) {
+    return { ...result, hits: [], page: { cursor: null, hasMore: false } }
   }
   const { debug, ...fields } = result
   return {
@@ -87,13 +101,12 @@ export async function sessionSearchServiceStatus(
 ): Promise<AiVaultSearchStatus> {
   AiVaultSearchStatusRequestSchema.parse(raw)
   return redactStatusForTransport(
-    {
-      ...AiVaultSearchStatusSchema.parse(
-        service ? await service.status() : unavailableSessionSearchStatus()
-      ),
+    AiVaultSearchStatusSchema.parse({
+      ...(service ? await service.status() : unavailableSessionSearchStatus()),
       dshHistory: true,
-      reasonixHistory: true
-    },
+      reasonixHistory: true,
+      supportsQoderHistory: true
+    }),
     transport
   )
 }

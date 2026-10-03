@@ -19,6 +19,7 @@ export const TUI_AGENT_AUTO_PICK_ORDER = [
   'dsh',
   'reasonix',
   'qoder',
+  'qoder-cn',
   'zcode',
   'pi',
   'omp',

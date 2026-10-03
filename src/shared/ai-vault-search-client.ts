@@ -60,26 +60,35 @@ export function createSessionSearchClient(
       let raw: unknown
       try {
         let filters = parsed.filters
-        if (filters?.agents?.some((agent) => agent === 'dsh' || agent === 'reasonix')) {
+        // IPC's remote legs negotiate capabilities independently.
+        if (
+          filters?.agents?.some(
+            (agent) =>
+              agent === 'dsh' || agent === 'reasonix' || (transport !== 'ipc' && agent === 'qoder')
+          )
+        ) {
           const status = AiVaultSearchStatusSchema.parse(await call('aiVault.searchStatus', {}))
-          if (!status.dshHistory || !status.reasonixHistory) {
-            const agents =
-              filters.agents?.filter(
-                (agent) =>
-                  (agent !== 'dsh' || status.dshHistory === true) &&
-                  (agent !== 'reasonix' || status.reasonixHistory === true)
-              ) ?? []
-            if (!agents.length) {
+          const agents =
+            filters.agents?.filter(
+              (agent) =>
+                (agent !== 'dsh' || status.dshHistory === true) &&
+                (agent !== 'reasonix' || status.reasonixHistory === true) &&
+                (agent !== 'qoder' || transport === 'ipc' || status.supportsQoderHistory === true)
+            ) ?? []
+          if (!agents.length) {
+            if (filters.agents?.some((agent) => agent === 'dsh' || agent === 'reasonix')) {
               return emptySessionSearchResults(status.generation)
             }
-            filters = { ...filters, agents }
+            return { kind: 'unavailable', reason: 'unsupported-agent' }
           }
+          filters = { ...filters, agents }
         }
         raw = await call('aiVault.searchSessions', {
           ...parsed,
           ...(filters ? { filters } : {}),
           includeDshHistory: true,
-          includeReasonixHistory: true
+          includeReasonixHistory: true,
+          supportsQoderHistory: true
         })
       } catch (error) {
         if (isUnknownSessionSearchMethod(error)) {

@@ -1,5 +1,6 @@
 import { codebuddyHookService } from '../codebuddy/hook-service'
-import { qoderHookService } from '../qoder/hook-service'
+import { qwenCodeHookService } from '../qwen-code/hook-service'
+import { qoderCnHookService, qoderHookService } from '../qoder/hook-service'
 import type { AgentHookInstallStatus } from '../../shared/agent-hook-types'
 import type { HookInstallAgent } from '../../shared/telemetry-events'
 import { ampHookService } from '../amp/hook-service'
@@ -48,6 +49,8 @@ export const MANAGED_AGENT_HOOK_INSTALLERS: readonly ManagedAgentHookInstaller[]
   ['codex', () => codexHookService.install()],
   ['gemini', () => geminiHookService.install()],
   ['qoder', () => qoderHookService.install()],
+  ['qoder-cn', () => qoderCnHookService.install()],
+  ['qwen-code', () => qwenCodeHookService.install()],
   ['codebuddy', () => codebuddyHookService.install()],
   ['antigravity', () => antigravityHookService.install()],
   ['amp', () => ampHookService.install()],
@@ -77,6 +80,8 @@ export const MANAGED_AGENT_HOOK_SCRIPT_REFRESHERS: readonly ManagedAgentHookScri
   ['codex', () => codexHookService.refreshManagedScripts()],
   ['gemini', () => geminiHookService.refreshManagedScripts()],
   ['qoder', () => qoderHookService.refreshManagedScripts()],
+  ['qoder-cn', () => qoderCnHookService.refreshManagedScripts()],
+  ['qwen-code', () => qwenCodeHookService.refreshManagedScripts()],
   ['codebuddy', () => codebuddyHookService.refreshManagedScripts()],
   ['antigravity', () => antigravityHookService.refreshManagedScripts()],
   ['cursor', () => cursorHookService.refreshManagedScripts()],
@@ -98,6 +103,8 @@ export const MANAGED_AGENT_HOOK_REMOVERS: readonly ManagedAgentHookRemover[] = [
   ['codex', () => codexHookService.remove()],
   ['gemini', () => geminiHookService.remove()],
   ['qoder', () => qoderHookService.remove()],
+  ['qoder-cn', () => qoderCnHookService.remove()],
+  ['qwen-code', () => qwenCodeHookService.remove()],
   ['codebuddy', () => codebuddyHookService.remove()],
   ['antigravity', () => antigravityHookService.remove()],
   ['amp', () => ampHookService.remove()],
@@ -125,6 +132,8 @@ export const MANAGED_AGENT_HOOK_STATUS_READERS: readonly ManagedAgentHookStatusR
   ['codex', () => codexHookService.getStatus()],
   ['gemini', () => geminiHookService.getStatus()],
   ['qoder', () => qoderHookService.getStatus()],
+  ['qoder-cn', () => qoderCnHookService.getStatus()],
+  ['qwen-code', () => qwenCodeHookService.getStatus()],
   ['codebuddy', () => codebuddyHookService.getStatus()],
   ['antigravity', () => antigravityHookService.getStatus()],
   ['amp', () => ampHookService.getStatus()],

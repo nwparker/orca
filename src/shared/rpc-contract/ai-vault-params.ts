@@ -33,6 +33,7 @@ export const AiVaultListSessionsParams = z
       )
       .pipe(z.union([z.number().int(), z.undefined()]))
       .optional(),
+    includeAntigravityIdeSessions: OptionalBoolean,
     unlimited: OptionalBoolean,
     force: OptionalBoolean,
     scopePaths: z

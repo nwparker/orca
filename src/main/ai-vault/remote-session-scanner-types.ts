@@ -22,6 +22,11 @@ export type RemoteScannerContext = {
   antigravityWorkspaceResolver: AntigravityWorkspaceResolver
 }
 
+export type RemoteTranscriptReadOptions =
+  | 'dsh-zstd'
+  | 'reasonix-v4'
+  | { regularFileOnly: true; maxBytes: number }
+
 export type RemoteSessionFilesystemProvider = Pick<
   IFilesystemProvider,
   'readDir' | 'readFile' | 'stat'
@@ -30,7 +35,7 @@ export type RemoteSessionFilesystemProvider = Pick<
   readTranscriptBytes?: (
     path: string,
     signal?: AbortSignal,
-    format?: 'dsh-zstd' | 'reasonix-v4'
+    options?: RemoteTranscriptReadOptions
   ) => AsyncIterable<Buffer>
   /** Execution-host database access; absent from remote filesystem RPC providers. */
   openCode?: RemoteOpenCodeSessionReader
@@ -64,6 +69,7 @@ export type RemoteSessionSource = {
   directoryPredicate?: (name: string, depth: number) => boolean
   // A canonical file directly beneath every top-level session directory.
   fixedChildFileSegments?: readonly string[]
+  additionalFixedChildFileSegments?: readonly (readonly string[])[]
   // Sibling-subagent layouts (Claude `<session>/subagents/`, OMP's same-named
   // artifact dir): count subagent transcripts from the walked listing and drop
   // them from candidates instead of indexing them as sessions.

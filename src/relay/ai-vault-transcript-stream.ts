@@ -4,16 +4,33 @@ import { BinarySessionTranscriptError } from '../main/ai-vault/remote-session-co
 import { BINARY_PROBE_BYTES, isBinaryBuffer } from './fs-handler-utils'
 import { reasonixSessionLayout } from '../shared/reasonix-session-paths'
 import { dshHomeFromSessionPath } from '../shared/dsh-session-paths'
+import { readNodeFileHandleWithinLimit } from '../shared/node-bounded-file-reader'
+import type { RemoteTranscriptReadOptions } from '../main/ai-vault/remote-session-scanner-types'
 
 /** The same open handle supplies the probe and stream, including across renames. */
 export async function* readRelayTranscriptBytes(
   path: string,
   signal?: AbortSignal,
-  format?: 'dsh-zstd' | 'reasonix-v4'
+  options?: RemoteTranscriptReadOptions
 ): AsyncGenerator<Buffer> {
   throwIfAiVaultScanCancelled(signal)
-  const handle = await openRegularFileReadHandle(path, 'Expected a regular session file', signal)
+  const errorMessage =
+    typeof options === 'object' ? 'Expected a regular file' : 'Expected a regular session file'
+  const handle = await openRegularFileReadHandle(path, errorMessage, signal)
   try {
+    if (typeof options === 'object') {
+      const read = await readNodeFileHandleWithinLimit(handle, options.maxBytes, {
+        regularFileOnly: true,
+        signal
+      })
+      if (isBinaryBuffer(read.buffer.subarray(0, BINARY_PROBE_BYTES))) {
+        throw new BinarySessionTranscriptError()
+      }
+      throwIfAiVaultScanCancelled(signal)
+      yield read.buffer
+      return
+    }
+    const format = options
     const probe = Buffer.alloc(BINARY_PROBE_BYTES)
     const { bytesRead } = await handle.read(probe, 0, probe.length, 0)
     const compressedDsh =

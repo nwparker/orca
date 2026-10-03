@@ -64,6 +64,9 @@ async function scanOneSshHost(
   try {
     const params = {
       includeReasonixHistory: args?.includeReasonixHistory !== false,
+      ...(args?.includeAntigravityIdeSessions === true
+        ? { includeAntigravityIdeSessions: true }
+        : {}),
       limit: args?.limit,
       ...(args?.unlimited === true ? { unlimited: true } : {}),
       ...(args?.force === true ? { force: true } : {}),
@@ -109,6 +112,7 @@ async function scanOneSshHost(
       scanRemoteAiVaultSessions({
         provider,
         executionHostId,
+        includeAntigravityIdeSessions: args?.includeAntigravityIdeSessions,
         remoteHome: hostInfo.remoteHome,
         hostPlatform: hostInfo.hostPlatform,
         limit: args?.limit,

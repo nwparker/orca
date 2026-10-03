@@ -1,6 +1,6 @@
 import { normalizeCompatibleLifecycleEvent } from './providers/compatible-lifecycle-events'
 import { normalizeQoderEvent } from './providers/qoder-events'
-import type { ParsedAgentStatusPayload } from '../agent-status-types'
+import type { AgentMainAgentStatus, ParsedAgentStatusPayload } from '../agent-status-types'
 import type { AgentHookSource } from '../agent-hook-relay'
 import { readLastCommandCodeUserPromptEntryFromTranscript } from './command-code-transcript'
 import { readGrokHomeEnvelope } from './grok-result-discovery'
@@ -46,6 +46,7 @@ export function normalizeProviderEvent(input: {
   hookPayload: Record<string, unknown>
   envelope: Record<string, unknown>
   extractedPrompt: ExtractedPromptText
+  previousOpenCodeMainAgent?: AgentMainAgentStatus
 }): ProviderDispatchResult {
   const { state, source, eventName, promptText, paneKey, hookPayload, envelope, extractedPrompt } =
     input
@@ -102,7 +103,8 @@ export function normalizeProviderEvent(input: {
         eventName,
         promptText,
         paneKey,
-        hookPayload
+        hookPayload,
+        input.previousOpenCodeMainAgent
       )
       break
     }
@@ -162,6 +164,21 @@ export function normalizeProviderEvent(input: {
     case 'devin':
       payload = normalizeDevinEvent(state, eventName, promptText, paneKey, hookPayload)
       break
+    case 'qoder-cn':
+      payload = normalizeCompatibleLifecycleEvent(
+        source,
+        state,
+        eventName,
+        promptText,
+        paneKey,
+        hookPayload
+      )
+      break
+    case 'qwen-code': {
+      const normalized = normalizeClaudeEvent(state, eventName, promptText, paneKey, hookPayload)
+      payload = normalized ? { ...normalized, agentType: 'qwen-code' } : null
+      break
+    }
     case 'qoder':
       payload = normalizeQoderEvent(state, eventName, promptText, paneKey, hookPayload)
       break

@@ -3,6 +3,7 @@ import { RelayDispatcher } from './dispatcher'
 import { AiVaultHandler } from './ai-vault-handler'
 import { SshChannelMultiplexer } from '../main/ssh/ssh-channel-multiplexer'
 import { createSessionSearchClient } from '../shared/ai-vault-search-client'
+import { AI_VAULT_AGENTS } from '../shared/ai-vault-types'
 import { fakeSearchService } from '../shared/ai-vault-search-test-fixture'
 import { setSessionSearchService } from '../main/ai-vault-search/session-search-service-registry'
 
@@ -56,7 +57,11 @@ describe('session search over real relay frames', () => {
       {
         query: 'needle',
         limit: 20,
-        filters: { agents: expect.not.arrayContaining(['dsh']) }
+        filters: {
+          agents: AI_VAULT_AGENTS.filter(
+            (agent) => agent !== 'dsh' && agent !== 'reasonix' && agent !== 'qoder'
+          )
+        }
       },
       undefined
     )

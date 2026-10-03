@@ -1,7 +1,7 @@
 export const NODE_SERVER_RUNNERS = [
   'ubuntu-22.04',
   'ubuntu-24.04-arm',
-  'macos-14',
+  'macos-15',
   'macos-15-intel',
   'windows-2022',
   'windows-11-arm'
@@ -12,7 +12,9 @@ const BUILD_PREFIXES = [
   'native/',
   'config/patches/',
   '.github/actions/install-node-dependencies/',
-  '.github/actions/prepare-native-runtime/'
+  '.github/actions/restore-pnpm-verification/',
+  '.github/actions/prepare-native-runtime/',
+  '.github/actions/prepare-orcad-prebuilds/'
 ]
 // A remote target's OS does not identify the client platform that builds its commands.
 const CROSS_HOST_PREFIXES = ['src/main/ssh/', 'src/main/providers/', 'src/relay/']
