@@ -111,7 +111,7 @@ export class OrcaRuntimeWithRestoreStructuredAgentSessionTabsOnce extends OrcaRu
   async publishStructuredAgentSessionTab(input: {
     workspaceId: string
     sessionId: string
-    agent: 'claude' | 'codex'
+    agent: 'claude' | 'codex' | 'dsh-acp'
     activate: boolean
     notify?: boolean
     replacesSessionId?: string
@@ -139,7 +139,7 @@ export class OrcaRuntimeWithRestoreStructuredAgentSessionTabsOnce extends OrcaRu
   projectStructuredAgentSessionTab(input: {
     workspaceId: string
     sessionId: string
-    agent: 'claude' | 'codex'
+    agent: 'claude' | 'codex' | 'dsh-acp'
     activate: boolean
     notify?: boolean
     replacesSessionId?: string

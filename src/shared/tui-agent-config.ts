@@ -295,6 +295,11 @@ const TUI_AGENT_CONFIG_SOURCE: Record<TuiAgent, TuiAgentConfigSource> = {
     // Muse 1.3 treats subcommand-shaped prompts as commands even after `--`.
     promptInjectionMode: 'stdin-after-start'
   },
+  'dsh-acp': {
+    detectCmd: 'dsh',
+    launchCmd: 'dsh --profile acp',
+    promptInjectionMode: 'stdin-after-start'
+  },
   dsh: {
     detectCmd: 'dsh-tui',
     detectCmdAliases: ['dst'],
