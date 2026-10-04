@@ -94,8 +94,12 @@ test.each(['runtime', 'relay'] as const)(
           { query: 'proof', filters: { agents: [agent] }, [field]: false },
           transport
         )
-      ).toEqual({ kind: 'unavailable', reason: 'unsupported-agent' })
-      expect(service.search).not.toHaveBeenCalled()
+      ).toMatchObject({ kind: 'results', hits: [], page: { cursor: null, hasMore: false } })
+      expect(service.search).toHaveBeenCalledExactlyOnceWith(
+        { query: 'proof', limit: 20, filters: { agents: [agent] } },
+        { kind: 'resolved', paths: [''] }
+      )
+      service.search.mockClear()
       await searchSessionService(
         { query: 'proof', filters: { agents: [agent] }, includeDshHistory: false },
         transport
@@ -129,8 +133,15 @@ test.each([
       'relay'
     )
     if (supportedAgents.length === 0) {
-      expect(result).toEqual({ kind: 'unavailable', reason: 'unsupported-agent' })
-      expect(service.search).not.toHaveBeenCalled()
+      expect(result).toMatchObject({
+        kind: 'results',
+        hits: [],
+        page: { cursor: null, hasMore: false }
+      })
+      expect(service.search).toHaveBeenCalledExactlyOnceWith(
+        { query: 'proof', limit: 20, filters: { agents: ['qoder', 'jcode', 'codex', 'dsh'] } },
+        { kind: 'resolved', paths: [''] }
+      )
     } else {
       expect(service.search).toHaveBeenCalledExactlyOnceWith(
         { query: 'proof', limit: 20, filters: { agents: [...supportedAgents] } },
@@ -174,9 +185,12 @@ test.each(['runtime', 'relay'] as const)(
         },
         transport
       )
-    ).toEqual({ kind: 'unavailable', reason: 'unsupported-agent' })
-    expect(service.search).not.toHaveBeenCalled()
-    expect(service.reconcile).not.toHaveBeenCalled()
+    ).toMatchObject({ kind: 'results', hits: [], page: { cursor: null, hasMore: false } })
+    expect(service.search).toHaveBeenCalledExactlyOnceWith(
+      { query: 'proof', limit: 20, freshness: 'wait-until-current' },
+      { kind: 'resolved', paths: [''] }
+    )
+    expect(service.reconcile).toHaveBeenCalledTimes(1)
   }
 )
 
@@ -207,7 +221,7 @@ test.each(['qoder', 'jcode'] as const)(
 )
 
 test.each(['runtime', 'relay'] as const)(
-  'does not query or reconcile an unsupported-only filter on %s',
+  'keeps an unsupported-only filter narrow through normal service checks on %s',
   async (transport) => {
     const request = {
       query: 'proof',
@@ -228,14 +242,25 @@ test.each(['runtime', 'relay'] as const)(
         { ...request, filters: { agents: [...request.filters.agents] } },
         transport
       )
-    ).toEqual({ kind: 'unavailable', reason: 'unsupported-agent' })
-    expect(service.search).not.toHaveBeenCalled()
+    ).toMatchObject({ kind: 'results', hits: [], page: { cursor: null, hasMore: false } })
+    expect(service.search).toHaveBeenCalledExactlyOnceWith(
+      {
+        query: 'proof',
+        limit: 20,
+        filters: { agents: ['jcode'] },
+        freshness: 'wait-until-current'
+      },
+      { kind: 'resolved', paths: [''] }
+    )
     expect(service.status).not.toHaveBeenCalled()
-    expect(service.reconcile).not.toHaveBeenCalled()
+    expect(service.reconcile).toHaveBeenCalledTimes(1)
     for (const reason of ['disabled', 'not-ready'] as const) {
       service.search.mockResolvedValue({ kind: 'unavailable', reason })
       expect(
-        await searchSessionService({ query: 'proof', filters: { agents: ['codex'] } }, transport)
+        await searchSessionService(
+          { query: 'proof', supportedAgents: [], filters: { agents: ['jcode'] } },
+          transport
+        )
       ).toEqual({ kind: 'unavailable', reason })
     }
   }

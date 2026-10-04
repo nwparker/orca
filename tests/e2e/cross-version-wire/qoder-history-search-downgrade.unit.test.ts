@@ -180,7 +180,7 @@ test.each(PRE_QODER_HOSTS)(
     expect(
       await client.searchSessions({ query: 'proof', filters: { agents: ['codex'] }, within })
     ).toMatchObject({ hits: [{ agent: 'codex' }] })
-    expect(call).toHaveBeenCalledTimes(1)
+    expect(call).toHaveBeenCalledTimes(2)
     if (ref.startsWith('b49')) {
       expect(
         await client.searchSessions({ query: 'proof', filters: { agents: [...AI_VAULT_AGENTS] } })
