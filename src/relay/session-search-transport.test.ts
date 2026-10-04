@@ -88,7 +88,10 @@ describe('session search over real relay frames', () => {
     expect(
       await mux.request('aiVault.searchSessions', { query: 'needle', filters: { agents: ['dsh'] } })
     ).toMatchObject({ kind: 'results', hits: [] })
-    expect(service.search).not.toHaveBeenCalled()
+    expect(service.search).toHaveBeenCalledExactlyOnceWith(
+      { query: 'needle', limit: 20, filters: { agents: ['dsh'] } },
+      { kind: 'resolved', paths: [''] }
+    )
   })
   it('maps a real old-host unknown-method response to unavailable without invoking a local service', async () => {
     const local = fakeSearchService()

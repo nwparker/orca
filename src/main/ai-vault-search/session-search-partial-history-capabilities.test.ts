@@ -65,8 +65,11 @@ it('keeps a modern empty inventory authoritative over every legacy opt-in', asyn
       },
       'relay'
     )
-  ).toEqual({ kind: 'unavailable', reason: 'unsupported-agent' })
-  expect(service.search).not.toHaveBeenCalled()
+  ).toMatchObject({ kind: 'results', hits: [], page: { cursor: null, hasMore: false } })
+  expect(service.search).toHaveBeenCalledExactlyOnceWith(
+    { query: 'needle', limit: 20, filters: { agents: ['qoder', 'codex'] } },
+    { kind: 'resolved', paths: [''] }
+  )
 })
 
 it('uses the current inventory ahead of independent old opt-outs', async () => {

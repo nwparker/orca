@@ -13,10 +13,7 @@ import {
   redactStatusForTransport,
   type SessionSearchTransport
 } from './ai-vault-search-transport'
-import {
-  compatibleSearchAgents,
-  needsSearchAgentNegotiation
-} from './ai-vault-search-agent-compatibility'
+import { compatibleSearchAgents } from './ai-vault-search-agent-compatibility'
 import { AI_VAULT_AGENTS } from './ai-vault-types'
 
 export function unavailableSessionSearchStatus(): AiVaultSearchStatus {
@@ -66,12 +63,8 @@ export function createSessionSearchClient(
       try {
         let hostRequest = parsed
         // IPC and its all-hosts merge are this build; each remote leg negotiates its own host.
-        if (
-          transport !== 'ipc' &&
-          parsed.filters?.agents &&
-          needsSearchAgentNegotiation(parsed.filters.agents)
-        ) {
-          const status = AiVaultSearchStatusSchema.parse(await call('aiVault.searchStatus', {}))
+        if (transport !== 'ipc' && parsed.filters?.agents?.length) {
+          const status = await readSessionSearchStatus(call)
           const agents = compatibleSearchAgents(parsed.filters.agents, status)
           if (agents.length === 0) {
             return parsed.filters.agents.some((agent) => agent === 'reasonix' || agent === 'dsh')
@@ -105,18 +98,20 @@ export function createSessionSearchClient(
         ...(parsed.debug && debug ? { debug } : {})
       }
     },
-    searchStatus: async () => {
-      try {
-        return redactStatusForTransport(
-          AiVaultSearchStatusSchema.parse(await call('aiVault.searchStatus', {})),
-          transport
-        )
-      } catch (error) {
-        if (isUnknownSessionSearchMethod(error)) {
-          return unavailableSessionSearchStatus()
-        }
-        throw error
-      }
+    searchStatus: async () =>
+      redactStatusForTransport(await readSessionSearchStatus(call), transport)
+  }
+}
+
+async function readSessionSearchStatus(
+  call: (method: string, params: Record<string, unknown>) => Promise<unknown>
+): Promise<AiVaultSearchStatus> {
+  try {
+    return AiVaultSearchStatusSchema.parse(await call('aiVault.searchStatus', {}))
+  } catch (error) {
+    if (isUnknownSessionSearchMethod(error)) {
+      return unavailableSessionSearchStatus()
     }
+    throw error
   }
 }

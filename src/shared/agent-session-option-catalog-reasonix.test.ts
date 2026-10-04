@@ -15,5 +15,7 @@ it('uses native model selection without fabricating configured account models or
     args: ['--model', 'configured-provider-model'],
     appliedValues: { model: 'configured-provider-model' }
   })
-  expect(catalog?.modelApply?.agentArgsOverride?.(['--model=custom'])).toBe(true)
+  expect(
+    resolveAgentSessionOptionLaunch('reasonix', { model: 'picker-model' }, ['--model=custom'])
+  ).toEqual({ args: ['--model', 'picker-model'], appliedValues: {} })
 })

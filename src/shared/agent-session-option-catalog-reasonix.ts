@@ -1,4 +1,3 @@
-import { hasFlag } from './agent-cli-flag-detection'
 import { removeAgentArgOption } from './agent-session-option-agent-args'
 import type { AgentSessionOptionCatalog } from './agent-session-option-catalog-types'
 
@@ -8,7 +7,6 @@ export const REASONIX_SESSION_OPTION_CATALOG: AgentSessionOptionCatalog = {
   models: [],
   modelApply: {
     launchArgs: (value) => ['--model', String(value)],
-    agentArgsOverride: (tokens) => hasFlag(tokens, ['--model']),
     removeAgentArgs: (tokens) => removeAgentArgOption(tokens, ['--model']),
     midSession: { kind: 'agent-picker', command: '/model' }
   }
