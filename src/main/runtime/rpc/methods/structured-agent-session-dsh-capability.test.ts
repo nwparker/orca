@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DSH_ACP_STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY } from '../../../../shared/protocol-version'
+import { DESKTOP_RENDERER_RUNTIME_CLIENT_CAPABILITIES } from '../../../ipc/desktop-renderer-runtime-capabilities'
+import { ELECTRON_REMOTE_RUNTIME_CLIENT_CAPABILITIES } from '../../../../shared/electron-remote-runtime-client-capabilities'
+import { remoteRuntimeClientCapabilities } from '../../../../shared/remote-runtime-client-capabilities'
 import {
   WORK_METHODS,
   CLEANUP_METHODS
@@ -25,6 +28,29 @@ const capable = {
   ]
 }
 describe('mixed-version official ACP RPC boundaries', () => {
+  it.each([
+    ['desktop IPC', DESKTOP_RENDERER_RUNTIME_CLIENT_CAPABILITIES],
+    ['paired desktop', remoteRuntimeClientCapabilities(ELECTRON_REMOTE_RUNTIME_CLIENT_CAPABILITIES)]
+  ] as const)(
+    'admits official ACP through the actual %s capability set',
+    async (_transport, clientCapabilities) => {
+      const params = { worktree: 'id:workspace-1', agent: 'dsh-acp' }
+      const client = { ...STRUCTURED_CLIENT, clientCapabilities: [...clientCapabilities] }
+      await expect(call('agentSession.createSupport', params, client)).resolves.toMatchObject({
+        ok: true,
+        result: { supported: true }
+      })
+      await expect(
+        call('agentSession.createSupport', params, {
+          ...client,
+          clientCapabilities: clientCapabilities.filter(
+            (capability) => capability !== DSH_ACP_STRUCTURED_AGENT_SESSION_RUNTIME_CAPABILITY
+          )
+        })
+      ).resolves.toMatchObject({ ok: false })
+    }
+  )
+
   it.each(
     WORK_METHODS.filter(
       (entry) =>
