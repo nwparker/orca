@@ -302,6 +302,7 @@ const TUI_AGENT_CONFIG_SOURCE: Record<TuiAgent, TuiAgentConfigSource> = {
     promptInjectionMode: 'stdin-after-start'
   },
   'dsh-acp': {
+    launchTransport: 'structured',
     detectCmd: 'dsh',
     launchCmd: 'dsh --profile acp',
     promptInjectionMode: 'stdin-after-start'

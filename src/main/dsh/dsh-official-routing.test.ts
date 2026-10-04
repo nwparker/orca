@@ -10,8 +10,25 @@ import { RUNTIME_CAPABILITIES } from '../../shared/protocol-version'
 describe('official DeepSeek Harness admission', () => {
   it('offers a distinct protocol route and preserves the community terminal command', () => {
     expect(isAgentSessionHandleProvider('dsh-acp')).toBe(true)
+    expect(TUI_AGENT_CONFIG['dsh-acp'].launchTransport).toBe('structured')
+    expect(TUI_AGENT_CONFIG.dsh.launchTransport).toBeUndefined()
     expect(TUI_AGENT_CONFIG.dsh.launchCmd).toBe('dsh-tui .')
   })
+
+  it.each(['darwin', 'linux', 'win32'] as const)(
+    'refuses terminal overrides on %s for official ACP',
+    (platform) => {
+      expect(
+        resolveAgentLaunchCommand({
+          agent: 'dsh-acp',
+          platform,
+          shell: platform === 'win32' ? 'powershell' : 'posix',
+          cmdOverrides: { 'dsh-acp': 'dsh-tui .' },
+          agentArgs: '--resume community-session'
+        })
+      ).toMatchObject({ ok: false })
+    }
+  )
 
   it('requires the execution host to advertise official ACP before sending its provider enum', () => {
     const input = {

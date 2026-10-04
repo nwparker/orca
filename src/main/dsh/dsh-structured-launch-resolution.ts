@@ -1,7 +1,7 @@
 import { homedir } from 'node:os'
 import { isAbsolute, join, resolve } from 'node:path'
 import { runProcess } from '../../shared/child-process/run-process'
-import { resolveCliCommand } from '../../shared/node-cli-command-resolution'
+import { resolveCliCommand, withCliRuntimeOnPath } from '../../shared/node-cli-command-resolution'
 import { agentSessionProviderHandleChainHead } from '../../shared/agent-session-provider-handle'
 import type { AgentSessionRecordStore } from '../runtime/agent-session-record-store'
 import type { StructuredAgentSessionAcquireInput } from '../native-chat/agent-session-wire/structured-agent-session-adapter'
@@ -42,14 +42,18 @@ export function createDshStructuredLaunchResolver(deps: {
       throw new Error('DeepSeek Harness ACP is unsupported on this execution host')
     }
     const environment = { ...(await deps.resolveEnvironment()), DSH_HOME: record.accountHome.path }
-    const env = Object.fromEntries(
+    const resolvedEnv = Object.fromEntries(
       Object.entries(environment).filter(
         (entry): entry is [string, string] => typeof entry[1] === 'string'
       )
     )
     const command =
-      deps.resolveCommand?.(env) ??
-      resolveCliCommand('dsh', { pathEnv: env.PATH, homePath: env.HOME || env.USERPROFILE })
+      deps.resolveCommand?.(resolvedEnv) ??
+      resolveCliCommand('dsh', {
+        pathEnv: resolvedEnv.PATH,
+        homePath: resolvedEnv.HOME || resolvedEnv.USERPROFILE
+      })
+    const env = withCliRuntimeOnPath(command, resolvedEnv)
     const cwd = await deps.resolveWorkspacePath(record.location.workspaceId)
     if (!isAbsolute(cwd)) {
       throw new Error('DeepSeek Harness workspace must be an absolute host path')
