@@ -1,7 +1,8 @@
 import type { AgentCatalogEntry } from './agent-catalog'
 import type React from 'react'
 import { ClaudeIcon, DroidIcon, OpenAIIcon } from '@/components/status-bar/icons'
-import type { TuiAgent } from '../../../shared/tui-agent'
+import type { TerminalAgent } from '../../../shared/terminal-agent'
+import { formatAgentTypeLabel } from '../../../shared/agent-type-label'
 import {
   AgentLetterIcon,
   AiderIcon,
@@ -18,7 +19,7 @@ export function CatalogAgentIcon({
   size = 14,
   catalogEntry
 }: {
-  agent: TuiAgent | null | undefined
+  agent: TerminalAgent | null | undefined
   size?: number
   catalogEntry?: AgentCatalogEntry
 }): React.JSX.Element {
@@ -90,6 +91,6 @@ export function CatalogAgentIcon({
       />
     )
   }
-  const label = catalogEntry?.label ?? agent
+  const label = catalogEntry?.label ?? formatAgentTypeLabel(agent)
   return <AgentLetterIcon letter={label.charAt(0).toUpperCase()} size={size} />
 }

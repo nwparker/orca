@@ -1,6 +1,8 @@
 import type React from 'react'
 import { CatalogAgentIcon } from './agent-catalog-icon'
 import type { TuiAgent } from '../../../shared/tui-agent'
+import type { TerminalAgent } from '../../../shared/terminal-agent'
+import { formatAgentTypeLabel } from '../../../shared/agent-type-label'
 import { createLocalizedCatalog } from '@/i18n/localized-catalog'
 import { buildAgentCatalogEntries } from './agent-catalog-entries'
 
@@ -23,15 +25,15 @@ export const getAgentCatalog = createLocalizedCatalog(buildAgentCatalogEntries)
 // Why: tests and a few legacy call sites still import a catalog snapshot.
 export const AGENT_CATALOG: AgentCatalogEntry[] = getAgentCatalog()
 
-export function getAgentLabel(agent: TuiAgent): string {
-  return getAgentCatalog().find((entry) => entry.id === agent)?.label ?? agent
+export function getAgentLabel(agent: TerminalAgent): string {
+  return getAgentCatalog().find((entry) => entry.id === agent)?.label ?? formatAgentTypeLabel(agent)
 }
 
 export function AgentIcon({
   agent,
   size = 14
 }: {
-  agent: TuiAgent | null | undefined
+  agent: TerminalAgent | null | undefined
   size?: number
 }): React.JSX.Element {
   return (

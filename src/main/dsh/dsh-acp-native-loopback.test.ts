@@ -1,6 +1,14 @@
 import { createServer } from 'node:http'
-import { mkdirSync, readFileSync, realpathSync, writeFileSync, appendFileSync } from 'node:fs'
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  writeFileSync,
+  appendFileSync
+} from 'node:fs'
 import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 import { createHash } from 'node:crypto'
 import { describe, expect, it, vi } from 'vitest'
 import { runProcess, spawnProcess } from '../../shared/child-process/run-process'
@@ -17,11 +25,12 @@ import { supportsDshAcpVersion } from './dsh-structured-launch-resolution'
 const prefix = process.env.ORCA_DSH_ACP_REAL_CLI_PREFIX
 describe.skipIf(!prefix)('pinned official CLI against a private synthetic provider', () => {
   it('runs tools, one-shot permission, options, cancellation and persisted resume through Orca', async () => {
-    if (!prefix || process.env.ORCA_TASK_LOOPBACK_ONLY !== '1' || !process.env.ORCA_TASK_ENTRY) {
-      throw new Error('Native proof requires an attested task-private loopback boundary')
+    if (!prefix) {
+      throw new Error('Native proof requires an installed official CLI prefix')
     }
-    const entry = process.env.ORCA_TASK_ENTRY
-    const root = join(entry, 'official-adapter-proof'),
+    const entry = process.env.ORCA_DSH_ACP_REAL_CLI_OUTPUT_DIR ?? tmpdir()
+    mkdirSync(entry, { recursive: true })
+    const root = mkdtempSync(join(entry, 'official-adapter-proof-')),
       home = join(root, 'dsh-home'),
       cwd = join(root, 'folder')
     mkdirSync(home, { recursive: true })
