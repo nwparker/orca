@@ -50,25 +50,17 @@ export async function searchSessionService(
   // Older clients reject the whole page when a hit has an unknown agent tag.
   const requestedAgents = request.filters?.agents
   const agents = requestedAgents?.length ? requestedAgents : AI_VAULT_AGENTS
-  const hasLegacyHistoryFlags =
-    includeDshHistory !== undefined ||
-    supportsQoderHistory !== undefined ||
-    supportsJcodeHistory !== undefined
   const compatibleAgents = compatibleSearchAgents(
     agents,
     transport === 'ipc'
       ? { supportedAgents: [...AI_VAULT_AGENTS] }
       : {
-          // Legacy opt-ins remain authoritative until a decoder catalog is supplied.
-          supportedAgents:
-            supportedAgents ??
-            (requestedAgents?.length && !hasLegacyHistoryFlags
-              ? requestedAgents.filter((agent) => agent !== 'dsh')
-              : undefined),
+          supportedAgents,
           supportsQoderHistory,
           supportsJcodeHistory,
           dshHistory: includeDshHistory
-        }
+        },
+    requestedAgents
   )
   if (compatibleAgents.length === 0) {
     return requestedAgents?.every((agent) => agent === 'dsh')
