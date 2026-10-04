@@ -1815,6 +1815,49 @@ received the signal after both builders finished. The qualifying trial requested
 normal cancellation earlier in the same preparation sequence to account for
 observed delivery delay; no workload, wait or proof predicate was shortened.
 
+## October 3 Terminal Perf dependency preparation
+
+The daily/manual Terminal Perf workflow still installed current dependencies through
+raw lifecycle scripts and a global node-gyp installation. Its historical `ref`
+input also accepts revisions that lack the shared installer, so replacing that
+path unconditionally would break older runs. The current-profile path now uses
+the existing shared installer with explicit Electron preparation and archive
+caching. A guard requires GitHub-hosted Linux x64, Node 24/pnpm 12.8.1, the
+native-only root postinstall and the needed local action inputs/files. Other
+profiles and historical revisions keep their original frozen install.
+
+The [hosted comparison](https://github.com/stablyai/orca/actions/runs/37101695800)
+ran both preparation paths in each of two Linux x64 jobs, reversing their order.
+Legacy/shared preparation took 25.164/16.956 seconds and 27.434/18.032 seconds:
+8.208 and 9.402 seconds saved. Both used Node 24.21.0, pnpm 12.8.1 and Electron
+43.7.5. Both shared native-module cache lookups missed, so this improvement did
+not depend on a warm native build. Electron archive and root pnpm cache lookups
+hit. Dependency trees, pnpm data and Electron archives were reset between paths;
+compiler headers and external services were not. Bootstrap, resets, validation,
+post-job cleanup, queueing and the production guard step are outside those times.
+These are preparation measurements, not whole-workflow or billing savings.
+
+Both paths passed a native-module probe inside the actual Electron executable
+with `ELECTRON_RUN_AS_NODE=1`, and built the same Electron-vite e2e application.
+The candidate's 18 focused routing/fallback tests, workflow actionlint and changed
+code-quality checks passed. Performance tests, budgets and report uploads remain
+unchanged. The [existing October 2 run](https://github.com/stablyai/orca/actions/runs/36985792125)
+failed the same-workspace 50/100-terminal budgets (46.9/50.2 ms against 25 ms).
+This dependency change does not claim to resolve those application regressions.
+
+The [full candidate integration](https://github.com/stablyai/orca/actions/runs/37104625474)
+passed on `df71ad849cd854a232f7063562785563743b641a`: current preparation was
+selected, its native cache missed and rebuilt, the app built and all 32 report
+annotation rows passed the unchanged budget checker. The downloaded report also
+passed the same checker locally. This is integration evidence; it does not
+attribute application latency changes to dependency preparation. Subsequent
+rebases resolved report documentation and incorporated fixture teardown fixes.
+Workflow, installer-action and toolchain content stayed unchanged. Main also
+added an import and a Windows-only MSBuild setting to the native-runtime script:
+the imported helper has no top-level side effects, and the Linux rebuild branch
+is unchanged. Focused tests verify its Linux/macOS no-op behavior. Final-head PR
+checks qualify separately.
+
 ## October 3 producer follow-up: automatic selection for the measured profile
 
 The first producer rollout in [#24927](https://github.com/stablyai/orca/pull/24927)
@@ -1868,3 +1911,51 @@ strongly: the owner-collection assertion failed, with the other six tests passin
 The source was restored afterward. Extra collection turns therefore preserve the
 strong-retention oracle. Hosted qualification is still required; these observations
 do not prove a particular VM-retention cause or quantify avoided retries.
+
+## October 3 unit-selection evidence: include failed references
+
+The caller's `needs.test.result == 'success'` condition prevented the advisory
+collector from reading failed unit runs, despite the reviewer's existing support
+for failed tests. A six-run screen from the October 3 occupancy sample found only
+one review artifact; it was a full fallback, so it did not validate selection.
+Missing artifacts cannot establish that selection catches red tests.
+
+The caller now permits both success and failure while excluding cancellation and
+skipped tests. The collector remains advisory and absent from `verify` dependencies.
+Incomplete, interrupted or inconsistent shard records still cannot become complete
+reference evidence. Existing omitted-failure tests preserve that negative control.
+
+The five artifacts from failed [run 37098089274, attempt 1](https://github.com/stablyai/orca/actions/runs/37098089274/attempts/1)
+were reviewed locally using the unchanged script. It recognized a complete failed
+reference covering 10,606 files and 9,270,307 worker-ms. Its candidate was the full
+fallback, so `selectionEvaluated` remained false and no selection promotion is
+justified by this control. Focused workflow/reviewer checks passed 24 tests,
+including actual caller-expression outcomes for success, failure, skipped and
+cancelled states. This repair supplies needed evidence for a later optimization;
+it claims no runner-time savings and does not enable selected tests.
+
+The updated caller also passed the hosted red-run control in
+[37100365037](https://github.com/stablyai/orca/actions/runs/37100365037).
+The collector succeeded after one unit shard failed, while required verification
+remained red. Its review recognized all five shards as a complete reference
+(10,608 files, 8,965,977 worker-ms). This was again a full fallback with
+`selectionEvaluated: false`, not evidence for enabling selected tests.
+
+## October 3 removal fixture cleanup ordering
+
+[37105566358](https://github.com/stablyai/orca/actions/runs/37105566358)
+failed unit shard 4 with `ENOTEMPTY` removing the failed-removal fixture's temporary
+directory; the other four shards passed. A client's removal reply intentionally
+precedes the detached job's final record persistence. This fixture reset tracking
+and removed the directory before waiting for that persistence, allowing a writer
+to race cleanup. Its teardown now awaits the existing settlement helper before
+resetting tracking or deleting the fixture. Production removal behavior and all
+assertions are unchanged.
+
+All 1,348 runtime tests passed (one existing skip). A temporary controlled queue
+held the final record write after the client replied: waiting before reset stayed
+pending and passed; resetting before waiting lost the tracked job and failed the
+same ordering assertion. The gate was released, both controls drained the captured
+job, and the instrumentation was removed. Changed-code quality passed. This proves
+the teardown ordering mechanism, not a measured avoided-retry saving. Final-head
+hosted qualification remains required.

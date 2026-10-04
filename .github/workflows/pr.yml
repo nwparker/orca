@@ -415,6 +415,8 @@ jobs:
       - uses: ./.github/actions/prepare-git-compatibility
 
       - name: Verify Git binary compatibility matrix
+        env:
+          ORCA_BACKGROUND_LAUNCH: '1'
         run: |
           specs=(
             "alpine/git:edge-2.38.1|2.38.1"
@@ -433,7 +435,9 @@ jobs:
               ORCA_GIT_COMPAT_VERSION="2.25.5" \
               pnpm exec vitest run --config config/vitest.config.ts \
               src/shared/git-binary-compatibility.test.ts \
-              src/main/git/worktree-safety-real-git.test.ts
+              src/main/git/worktree-safety-real-git.test.ts \
+              src/main/git/worktree-rebase-update-refs-real-git.test.ts \
+              src/relay/git-review-draft-binary-compatibility.test.ts
           ) &
           pids+=("$!")
 
@@ -444,7 +448,9 @@ jobs:
               ORCA_GIT_COMPAT_IMAGE="$image" ORCA_GIT_COMPAT_VERSION="$version" \
                 pnpm exec vitest run --config config/vitest.config.ts \
                 src/shared/git-binary-compatibility.test.ts \
-                src/main/git/worktree-safety-real-git.test.ts
+                src/main/git/worktree-safety-real-git.test.ts \
+                src/main/git/worktree-rebase-update-refs-real-git.test.ts \
+                src/relay/git-review-draft-binary-compatibility.test.ts
             ) &
             pids+=("$!")
           done
@@ -705,7 +711,7 @@ jobs:
   # after the last shard. Deliberately absent from verify's needs for the same reason.
   unit_selection_evidence:
     needs: [test]
-    if: ${{ !cancelled() && needs.test.result == 'success' }}
+    if: ${{ !cancelled() && (needs.test.result == 'success' || needs.test.result == 'failure') }}
     uses: ./.github/workflows/unit-selection-evidence.yml
 
   # Why a separate job: the test needs a real Chrome, and the sharded `test` matrix
@@ -1131,6 +1137,7 @@ jobs:
           src/shared/child-process/windows-cmd-shim-resolution.test.ts
           src/shared/child-process/windows-cmd-shim-resolution.win32.test.ts
           src/main/agent-hooks/windows-hook-payload-delivery.test.ts
+          src/main/jcode/hook-gate-script.test.ts
           src/main/agent-hooks/windows-direct-cmd-hook-command.test.ts
           src/main/codex/windows-hook-command.test.ts
           src/main/codex/windows-hook-upgrade.test.ts

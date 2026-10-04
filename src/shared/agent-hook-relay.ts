@@ -62,7 +62,8 @@ const AGENT_HOOK_SOURCES = [
   'muse',
   'zcode',
   'dsh',
-  'reasonix'
+  'reasonix',
+  'jcode'
 ] as const
 
 export type AgentHookSource = (typeof AGENT_HOOK_SOURCES)[number]

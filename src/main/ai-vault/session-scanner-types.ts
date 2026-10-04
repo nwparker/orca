@@ -53,6 +53,7 @@ export type AiVaultScanOptions = {
   reasonixProjectsDir?: string
   includeReasonixHistory?: boolean
   reasonixWorkspaceRoots?: readonly string[]
+  jcodeSessionsDir?: string
   limit?: number
   unlimited?: boolean
   limitPerAgent?: number

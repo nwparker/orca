@@ -59,7 +59,7 @@ describe('session search over real relay frames', () => {
         limit: 20,
         filters: {
           agents: AI_VAULT_AGENTS.filter(
-            (agent) => agent !== 'dsh' && agent !== 'reasonix' && agent !== 'qoder'
+            (agent) => !['codebuddy', 'zcode', 'qoder', 'jcode', 'dsh', 'reasonix'].includes(agent)
           )
         }
       },

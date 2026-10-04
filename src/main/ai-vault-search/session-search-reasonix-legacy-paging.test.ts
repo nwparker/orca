@@ -31,14 +31,20 @@ const LEGACY_AGENTS = [
 ] as const satisfies readonly AiVaultAgent[]
 afterEach(() => setSessionSearchService(null))
 
-it('pins the exact pre-integration agent enum at every non-IPC search boundary', async () => {
+it('keeps the conservative current fallback within the exact pre-integration enum', async () => {
   const service = fakeSearchService()
   setSessionSearchService(service)
   for (const transport of ['runtime', 'relay'] as const) {
     service.search.mockClear()
     await searchSessionService({ query: 'needle' }, transport)
     expect(service.search).toHaveBeenCalledExactlyOnceWith(
-      { query: 'needle', limit: 20, filters: { agents: [...LEGACY_AGENTS] } },
+      {
+        query: 'needle',
+        limit: 20,
+        filters: {
+          agents: LEGACY_AGENTS.filter((agent) => agent !== 'codebuddy' && agent !== 'zcode')
+        }
+      },
       undefined
     )
   }

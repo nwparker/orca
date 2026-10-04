@@ -15,6 +15,7 @@ import { devinHookService } from '../devin/hook-service'
 import { droidHookService } from '../droid/hook-service'
 import { grokHookService } from '../grok/hook-service'
 import { hermesHookService } from '../hermes/hook-service'
+import { jcodeHookService } from '../jcode/hook-service'
 import { kimiHookService } from '../kimi/hook-service'
 import { dshHookService } from '../dsh/hook-service'
 import { reasonixHookService } from '../reasonix/hook-service'
@@ -92,7 +93,8 @@ const REMOTE_MANAGED_HOOK_INSTALLERS: readonly RemoteManagedHookInstaller[] = [
     'reasonix',
     (sftp, remoteHome, options) =>
       reasonixHookService.installRemote(sftp, remoteHome, options?.reasonixConfigHomeDir)
-  ]
+  ],
+  ['jcode', (sftp, remoteHome) => jcodeHookService.installRemote(sftp, remoteHome)]
 ]
 
 /** Agents wired into the remote (SSH) hook installer. Exported so an invariant

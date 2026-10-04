@@ -13,6 +13,11 @@ import {
   redactStatusForTransport,
   type SessionSearchTransport
 } from './ai-vault-search-transport'
+import {
+  compatibleSearchAgents,
+  needsSearchAgentNegotiation
+} from './ai-vault-search-agent-compatibility'
+import { AI_VAULT_AGENTS } from './ai-vault-types'
 
 export function unavailableSessionSearchStatus(): AiVaultSearchStatus {
   return {
@@ -59,36 +64,29 @@ export function createSessionSearchClient(
       const parsed = AiVaultSearchRequestSchema.parse(request)
       let raw: unknown
       try {
-        let filters = parsed.filters
-        // IPC's remote legs negotiate capabilities independently.
+        let hostRequest = parsed
+        // IPC and its all-hosts merge are this build; each remote leg negotiates its own host.
         if (
-          filters?.agents?.some(
-            (agent) =>
-              agent === 'dsh' || agent === 'reasonix' || (transport !== 'ipc' && agent === 'qoder')
-          )
+          transport !== 'ipc' &&
+          parsed.filters?.agents &&
+          needsSearchAgentNegotiation(parsed.filters.agents)
         ) {
           const status = AiVaultSearchStatusSchema.parse(await call('aiVault.searchStatus', {}))
-          const agents =
-            filters.agents?.filter(
-              (agent) =>
-                (agent !== 'dsh' || status.dshHistory === true) &&
-                (agent !== 'reasonix' || status.reasonixHistory === true) &&
-                (agent !== 'qoder' || transport === 'ipc' || status.supportsQoderHistory === true)
-            ) ?? []
-          if (!agents.length) {
-            if (filters.agents?.some((agent) => agent === 'dsh' || agent === 'reasonix')) {
-              return emptySessionSearchResults(status.generation)
-            }
-            return { kind: 'unavailable', reason: 'unsupported-agent' }
+          const agents = compatibleSearchAgents(parsed.filters.agents, status)
+          if (agents.length === 0) {
+            return parsed.filters.agents.some((agent) => agent === 'reasonix' || agent === 'dsh')
+              ? emptySessionSearchResults(status.generation)
+              : { kind: 'unavailable', reason: 'unsupported-agent' }
           }
-          filters = { ...filters, agents }
+          hostRequest = { ...parsed, filters: { ...parsed.filters, agents } }
         }
         raw = await call('aiVault.searchSessions', {
-          ...parsed,
-          ...(filters ? { filters } : {}),
+          ...hostRequest,
           includeDshHistory: true,
           includeReasonixHistory: true,
-          supportsQoderHistory: true
+          supportedAgents: [...AI_VAULT_AGENTS],
+          supportsQoderHistory: true,
+          supportsJcodeHistory: true
         })
       } catch (error) {
         if (isUnknownSessionSearchMethod(error)) {

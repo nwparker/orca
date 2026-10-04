@@ -1,3 +1,4 @@
+import { ClaudePromptRegistry } from './claude-prompt-registry'
 import { createHash } from 'node:crypto'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type {
@@ -85,7 +86,11 @@ describe('Claude child operation output retention', () => {
       translator.handle({ type: 'message', sessionId: 'orca', message, observedAt: 1_000 })
       const join = vi.spyOn(Array.prototype, 'join')
       const evidence = drainClaudeChildWork(
-        { childWork: new ClaudeChildWorkDecoder(), translator },
+        {
+          childWork: new ClaudeChildWorkDecoder(),
+          prompts: new ClaudePromptRegistry(),
+          translator
+        },
         message,
         1_000
       )

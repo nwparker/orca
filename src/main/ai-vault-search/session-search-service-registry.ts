@@ -1,4 +1,3 @@
-import { AI_VAULT_AGENTS } from '../../shared/ai-vault-types'
 import {
   AiVaultSearchRequestSchema,
   AiVaultSearchResponseSchema,
@@ -18,6 +17,8 @@ import {
   type SessionSearchTransport
 } from '../../shared/ai-vault-search-transport'
 import type { SessionSearchService } from './session-search-service'
+import { AI_VAULT_AGENTS } from '../../shared/ai-vault-types'
+import { compatibleSearchAgents } from '../../shared/ai-vault-search-agent-compatibility'
 
 let service: SessionSearchService | null = null
 
@@ -38,38 +39,46 @@ export async function searchSessionService(
   // The choke point every entry point funnels through, so every host kind
   // resolves alike; the verdict goes to the service, which answers off and
   // not-ready first.
-  const { within, includeDshHistory, includeReasonixHistory, supportsQoderHistory, ...request } =
-    parsed
-  const supportsAgent = (agent: (typeof AI_VAULT_AGENTS)[number]): boolean =>
-    (agent !== 'qoder' || supportsQoderHistory === true) &&
-    (transport === 'ipc' ||
-      ((agent !== 'dsh' || includeDshHistory === true) &&
-        (agent !== 'reasonix' || includeReasonixHistory === true)))
-  const requestedAgents = request.filters?.agents
-  const compatibleAgents = (requestedAgents?.length ? requestedAgents : AI_VAULT_AGENTS).filter(
-    supportsAgent
-  )
-  if (
-    transport !== 'ipc' &&
-    requestedAgents?.some(
-      (agent) =>
-        (agent === 'dsh' && includeDshHistory !== true) ||
-        (agent === 'reasonix' && includeReasonixHistory !== true)
-    ) &&
-    compatibleAgents.length === 0
-  ) {
-    return emptySessionSearchResults((await current.status()).generation)
-  }
+  const {
+    within,
+    supportedAgents,
+    supportsQoderHistory,
+    supportsJcodeHistory,
+    includeDshHistory,
+    includeReasonixHistory,
+    ...request
+  } = parsed
   // Older clients reject the whole page when a hit has an unknown agent tag.
-  const compatibleRequest = AI_VAULT_AGENTS.every(supportsAgent)
-    ? request
-    : {
-        ...request,
-        filters: {
-          ...request.filters,
-          agents: compatibleAgents.length ? compatibleAgents : AI_VAULT_AGENTS.filter(supportsAgent)
+  const requestedAgents = request.filters?.agents
+  const agents = requestedAgents?.length ? requestedAgents : AI_VAULT_AGENTS
+  const compatibleAgents = compatibleSearchAgents(
+    agents,
+    transport === 'ipc'
+      ? { supportedAgents: [...AI_VAULT_AGENTS] }
+      : {
+          supportedAgents,
+          dshHistory: includeDshHistory,
+          reasonixHistory: includeReasonixHistory,
+          supportsQoderHistory,
+          supportsJcodeHistory
+        },
+    requestedAgents
+  )
+  if (compatibleAgents.length === 0) {
+    return requestedAgents?.some((agent) => agent === 'reasonix' || agent === 'dsh')
+      ? emptySessionSearchResults((await current.status()).generation)
+      : { kind: 'unavailable', reason: 'unsupported-agent' }
+  }
+  const compatibleRequest =
+    compatibleAgents.length === agents.length
+      ? request
+      : {
+          ...request,
+          filters: {
+            ...request.filters,
+            agents: compatibleAgents
+          }
         }
-      }
   const hostScope = within
     ? resolveSessionSearchScope(within, sessionSearchScopeCatalog())
     : undefined
@@ -83,13 +92,12 @@ export async function searchSessionService(
   if (result.kind !== 'results') {
     return result
   }
-  if (compatibleAgents.length === 0) {
-    return { ...result, hits: [], page: { cursor: null, hasMore: false } }
-  }
   const { debug, ...fields } = result
   return {
     ...fields,
-    hits: result.hits.map((hit) => redactForTransport(hit, transport)),
+    hits: result.hits
+      .filter((hit) => compatibleAgents.includes(hit.agent))
+      .map((hit) => redactForTransport(hit, transport)),
     truncated: { ...result.truncated, freshness: result.truncated.freshness || freshness },
     ...(request.debug && debug ? { debug } : {})
   }
@@ -105,7 +113,9 @@ export async function sessionSearchServiceStatus(
       ...(service ? await service.status() : unavailableSessionSearchStatus()),
       dshHistory: true,
       reasonixHistory: true,
-      supportsQoderHistory: true
+      supportedAgents: [...AI_VAULT_AGENTS],
+      supportsQoderHistory: true,
+      supportsJcodeHistory: true
     }),
     transport
   )

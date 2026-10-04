@@ -17,6 +17,7 @@ import { droidHookService } from '../droid/hook-service'
 import { geminiHookService } from '../gemini/hook-service'
 import { grokHookService } from '../grok/hook-service'
 import { hermesHookService } from '../hermes/hook-service'
+import { jcodeHookService } from '../jcode/hook-service'
 import { kimiHookService } from '../kimi/hook-service'
 import { museHookService } from '../muse/hook-service'
 import { openClaudeHookService } from '../openclaude/hook-service'
@@ -65,7 +66,8 @@ export const MANAGED_AGENT_HOOK_INSTALLERS: readonly ManagedAgentHookInstaller[]
   ['muse', () => museHookService.install()],
   ['zcode', () => zcodeHookService.install()],
   ['dsh', () => dshHookService.install()],
-  ['reasonix', () => reasonixHookService.installForExecutionHost()]
+  ['reasonix', () => reasonixHookService.installForExecutionHost()],
+  ['jcode', () => jcodeHookService.install()]
 ]
 
 // Why: covers the shared launcher/statusline scripts under ~/.orca/agent-hooks — the files a
@@ -94,7 +96,8 @@ export const MANAGED_AGENT_HOOK_SCRIPT_REFRESHERS: readonly ManagedAgentHookScri
   ['muse', () => museHookService.refreshManagedScripts()],
   ['zcode', () => zcodeHookService.refreshManagedScripts()],
   ['dsh', () => dshHookService.refreshManagedScripts()],
-  ['reasonix', () => reasonixHookService.refreshManagedScripts()]
+  ['reasonix', () => reasonixHookService.refreshManagedScripts()],
+  ['jcode', () => jcodeHookService.refreshManagedScripts()]
 ]
 
 export const MANAGED_AGENT_HOOK_REMOVERS: readonly ManagedAgentHookRemover[] = [
@@ -119,7 +122,8 @@ export const MANAGED_AGENT_HOOK_REMOVERS: readonly ManagedAgentHookRemover[] = [
   ['muse', () => museHookService.remove()],
   ['zcode', () => zcodeHookService.remove()],
   ['dsh', () => dshHookService.remove()],
-  ['reasonix', () => reasonixHookService.removeForExecutionHost()]
+  ['reasonix', () => reasonixHookService.removeForExecutionHost()],
+  ['jcode', () => jcodeHookService.remove()]
 ]
 
 export const MANAGED_AGENT_HOOK_ASYNC_REMOVERS: readonly ManagedAgentHookAsyncRemover[] = [
@@ -148,5 +152,6 @@ export const MANAGED_AGENT_HOOK_STATUS_READERS: readonly ManagedAgentHookStatusR
   ['muse', () => museHookService.getStatus()],
   ['zcode', () => zcodeHookService.getStatus()],
   ['dsh', () => dshHookService.getStatus()],
-  ['reasonix', () => reasonixHookService.getStatus()]
+  ['reasonix', () => reasonixHookService.getStatus()],
+  ['jcode', () => jcodeHookService.getStatus()]
 ]
