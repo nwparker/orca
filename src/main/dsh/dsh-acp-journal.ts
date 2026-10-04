@@ -18,6 +18,11 @@ import {
   DEFAULT_JOURNAL_PAYLOAD_LIMITS
 } from '../native-chat/agent-session-journal/journal-payload-bounds'
 import type { DshAcpStopReason, DshAcpUpdate } from './dsh-acp-session'
+import {
+  DSH_ACP_MESSAGE_MAX_BYTES,
+  dshAcpMessageContentSchema,
+  dshAcpImageBlock
+} from './dsh-acp-message-content'
 
 const toolSchema = z
   .object({
@@ -134,7 +139,20 @@ export class DshAcpJournal {
       kind === 'agent_message_chunk' ||
       kind === 'agent_thought_chunk'
     ) {
-      const content = z.object({ type: z.literal('text'), text: z.string() }).parse(update.content)
+      const content = dshAcpMessageContentSchema.parse(update.content)
+      if (content.type === 'image') {
+        if (kind !== 'agent_message_chunk') {
+          throw new Error('Dsh ACP images must belong to assistant output')
+        }
+        // Separate rows preserve text/image/text order in the existing prose renderer.
+        this.stream = null
+        this.append(
+          this.identity(replay),
+          { kind: 'message', role: 'assistant', blocks: [dshAcpImageBlock(content)] },
+          replay
+        )
+        return true
+      }
       const role =
         kind === 'user_message_chunk'
           ? 'user'
@@ -149,7 +167,7 @@ export class DshAcpJournal {
         this.stream = { identity: echoedInput ?? this.identity(replay), role, text: '' }
       }
       this.stream.text += content.text
-      if (Buffer.byteLength(this.stream.text, 'utf8') > 1024 * 1024) {
+      if (Buffer.byteLength(this.stream.text, 'utf8') > DSH_ACP_MESSAGE_MAX_BYTES) {
         throw new Error('Dsh ACP message exceeded its bounded stream')
       }
       this.append(
