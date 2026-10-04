@@ -391,7 +391,7 @@ describe('StructuredAgentSessionAttentionBridge', () => {
     })
   })
 
-  it('keeps a published paired chat subscribed and delivers after a workspace-id collision', async () => {
+  it('keeps a legacy published paired chat subscribed and delivers after a workspace-id collision', async () => {
     const store = mocks.store
     if (!store) {
       throw new Error('test store was not initialized')
@@ -449,6 +449,7 @@ describe('StructuredAgentSessionAttentionBridge', () => {
     if (!publishedTab) {
       throw new Error('snapshot did not publish a chat tab')
     }
+    // Why: restored tabs from before host stamping can still have ambiguous catalog ownership.
     const { executionHostId, ...legacyTab } = publishedTab
     expect(executionHostId).toBe('runtime:env-1')
     const tab = makeUnifiedTab(legacyTab)
