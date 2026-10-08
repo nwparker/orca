@@ -10,7 +10,7 @@ import {
 
 afterEach(() => vi.unstubAllGlobals())
 
-describe('physical placement ownership', () => {
+describe('main physical placement ownership', () => {
   it('overlapping replacement retains source bytes and their existing eviction order', async () => {
     const h = createTerminal()
     try {

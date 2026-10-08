@@ -526,7 +526,7 @@ index de889dfff75d9ecc8ab47a025e6989ffe75bb202..cf66e5b75c78645b1641e53d1425d882
      let offset = 0;
      for (const chunk of chunks) {
 diff --git a/src/kitty/KittyImageStorage.ts b/src/kitty/KittyImageStorage.ts
-index 1f5c09ec9e2700f8f6dbd8436a1802217dfc99ef..604d2fb8f269cad0e1ff091deabc8f537091de2c 100644
+index 1f5c09ec9e2700f8f6dbd8436a1802217dfc99ef..e2a94e99c5f72d4f6c764da5b45fad913ba63641 100644
 --- a/src/kitty/KittyImageStorage.ts
 +++ b/src/kitty/KittyImageStorage.ts
 @@ -8,6 +8,11 @@ import { ImageStorage } from '../ImageStorage';
@@ -541,7 +541,7 @@ index 1f5c09ec9e2700f8f6dbd8436a1802217dfc99ef..604d2fb8f269cad0e1ff091deabc8f53
  // Kitty-specific image storage controller.
  //
  // Wraps shared ImageStorage with kitty protocol semantics:
-@@ -19,27 +24,25 @@ export class KittyImageStorage implements IDisposable {
+@@ -19,27 +24,26 @@ export class KittyImageStorage implements IDisposable {
    private static readonly _maxStoredImages = 256;
  
    private _nextImageId = 1;
@@ -575,13 +575,14 @@ index 1f5c09ec9e2700f8f6dbd8436a1802217dfc99ef..604d2fb8f269cad0e1ff091deabc8f53
 +      storageIds.delete(storageId);
 +      if (this._kittyIdToStorageId.get(kittyId) === storageId) {
 +        this._kittyIdToStorageId.delete(kittyId);
-+        for (const remainingId of storageIds) this._kittyIdToStorageId.set(kittyId, remainingId);
++        const remainingId: number | undefined = storageIds.values().next().value;
++        if (remainingId !== undefined) this._kittyIdToStorageId.set(kittyId, remainingId);
 +        if (!this._kittyIdToStorageId.has(kittyId) && this._placingImageId !== kittyId) this._images.delete(kittyId);
 +      }
      }
    };
    private _addImageOpts: IAddImageOpts = { scrolling: true, layer: 'top', zIndex: 0, cursorPos: 'iip' };
-@@ -72,17 +75,32 @@ export class KittyImageStorage implements IDisposable {
+@@ -72,17 +76,32 @@ export class KittyImageStorage implements IDisposable {
    public storeImage(id: number | undefined, imageData: Omit<IKittyImageData, 'id'>): number {
      const imageId = id ?? this._nextImageId++;
  
@@ -620,7 +621,7 @@ index 1f5c09ec9e2700f8f6dbd8436a1802217dfc99ef..604d2fb8f269cad0e1ff091deabc8f53
      this._images.set(imageId, {
        ...imageData,
        id: imageId
-@@ -91,20 +109,23 @@ export class KittyImageStorage implements IDisposable {
+@@ -91,20 +110,23 @@ export class KittyImageStorage implements IDisposable {
    }
  
    public addImage(kittyId: number, image: HTMLCanvasElement | ImageBitmap, scrolling: boolean, layer: ImageLayer, zIndex: number): void {
@@ -632,7 +633,7 @@ index 1f5c09ec9e2700f8f6dbd8436a1802217dfc99ef..604d2fb8f269cad0e1ff091deabc8f53
 -    if (oldStorageId !== undefined) {
 -      this._storageIdToKittyId.delete(oldStorageId);
 -    }
-+    // Every physical placement retains its owner; the forward map names the latest.
++    // Every physical placement retains its owner; the forward map names a live placement.
      this._addImageOpts.scrolling = scrolling;
      this._addImageOpts.layer = layer;
      this._addImageOpts.zIndex = zIndex;
@@ -655,7 +656,7 @@ index 1f5c09ec9e2700f8f6dbd8436a1802217dfc99ef..604d2fb8f269cad0e1ff091deabc8f53
    }
  
    public getImage(kittyId: number): IKittyImageData | undefined {
-@@ -113,23 +134,29 @@ export class KittyImageStorage implements IDisposable {
+@@ -113,23 +135,29 @@ export class KittyImageStorage implements IDisposable {
  
    public deleteById(kittyId: number): void {
      this._images.delete(kittyId);

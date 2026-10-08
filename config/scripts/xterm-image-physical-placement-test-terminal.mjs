@@ -62,12 +62,15 @@ export function countPhysicalOwnershipTraversals(kitty) {
       continue
     }
     observedSets.add(siblings)
-    vi.spyOn(siblings, Symbol.iterator).mockImplementation(function* () {
-      for (const id of Set.prototype[Symbol.iterator].call(siblings)) {
-        counts.siblings++
-        yield id
-      }
-    })
+    for (const method of [Symbol.iterator, 'values']) {
+      const original = Set.prototype[method]
+      vi.spyOn(siblings, method).mockImplementation(function* () {
+        for (const id of original.call(siblings)) {
+          counts.siblings++
+          yield id
+        }
+      })
+    }
   }
   for (const method of [Symbol.iterator, 'keys', 'values', 'entries']) {
     const original = Map.prototype[method]
