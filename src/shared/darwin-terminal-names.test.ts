@@ -163,13 +163,13 @@ describe('nameDarwinTerminals', () => {
     const named = nameDarwinTerminals(darwinRow('16/9'), directory, controller.signal)
     const rejection = expect(named).rejects.toThrow()
     await new Promise((resolve) => setTimeout(resolve, 2))
-    expect(directory.readPaths).toHaveLength(4)
+    expect(directory.readPaths).toHaveLength(1)
     controller.abort()
     await rejection
 
-    expect(directory.readPaths).toHaveLength(4)
+    expect(directory.readPaths).toHaveLength(1)
     expect(directory.closedDirectories).toBe(1)
-    expect(directory.peakReads).toBe(4)
+    expect(directory.peakReads).toBe(1)
   })
 
   it('bounds large inventories and closes the directory without admitting device reads', async () => {
@@ -306,7 +306,7 @@ describe('nameDarwinTerminals', () => {
     expect(await nameDarwinTerminals(darwinRow('16/9'), directory)).toBe(darwinRow(name))
   })
 
-  it('bounds simultaneous device reads while inspecting the full directory', async () => {
+  it('admits one device read at a time while inspecting the full directory', async () => {
     const directory = new TestDeviceDirectory()
     directory.entries = Array.from({ length: 21 }, (_, index) => ({
       name: `entry-${index}`,
@@ -315,7 +315,7 @@ describe('nameDarwinTerminals', () => {
     }))
 
     expect(await nameDarwinTerminals(darwinRow('16/9'), directory)).toBe(darwinRow('??'))
-    expect(directory.peakReads).toBe(4)
+    expect(directory.peakReads).toBe(1)
     expect(directory.readPaths).toHaveLength(directory.entries.length)
   })
 

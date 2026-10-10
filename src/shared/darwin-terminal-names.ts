@@ -39,7 +39,7 @@ async function readTerminalNames(
     budget.record(entry.name)
     entries.push(entry.name)
   }
-  const stats = await mapWithConcurrency(entries, 4, (name) => {
+  const stats = await mapWithConcurrency(entries, 1, (name) => {
     if (signal?.aborted) {
       return Promise.resolve(null)
     }

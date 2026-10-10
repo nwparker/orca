@@ -34,19 +34,17 @@ beforeEach(() => {
 afterEach(() => vi.useRealTimers())
 
 describe('Darwin inventory drain admission', () => {
-  it('keeps other admitted reads tracked when a stat invocation throws synchronously', async () => {
+  it('keeps a held stat tracked after an earlier invocation throws synchronously', async () => {
     opendirMock.mockResolvedValue(
       Array.from({ length: 4 }, (_, index) => ({ name: `entry-${index}` }))
     )
-    const stats = Array.from({ length: 3 }, () =>
-      deferred<{ rdev: bigint; isCharacterDevice: () => boolean }>()
-    )
+    const pending = deferred<{ rdev: bigint; isCharacterDevice: () => boolean }>()
     lstatMock.mockImplementation(() => {
       const index = lstatMock.mock.calls.length - 1
       if (index === 0) {
         throw new Error('stat invocation failed')
       }
-      return stats[index - 1].promise
+      return pending.promise
     })
     const first = captureDarwinProcessTable(capture, validate, 100)
     let settled = false
@@ -55,47 +53,41 @@ describe('Darwin inventory drain admission', () => {
     })
     await vi.advanceTimersByTimeAsync(0)
     expect(settled).toBe(false)
+    expect(lstatMock).toHaveBeenCalledTimes(2)
     expect(await captureDarwinProcessTable(capture, validate, 100)).toBe(canonical)
     expect(opendirMock).toHaveBeenCalledTimes(1)
 
     const stat = { rdev: 0x10000009n, isCharacterDevice: () => true }
-    for (const pending of stats) {
-      pending.resolve(stat)
-    }
+    lstatMock.mockResolvedValue(stat)
+    pending.resolve(stat)
     expect(await first).toBe(raw.replace('16/9', 'entry-1'))
     expect(lstatMock).toHaveBeenCalledTimes(4)
     expect(vi.getTimerCount()).toBe(0)
   })
 
-  it('holds admission until all four uncancelable stat calls drain', async () => {
+  it('holds admission until its one uncancelable stat drains and admits no later reads', async () => {
     opendirMock.mockResolvedValue(
       Array.from({ length: 12 }, (_, index) => ({ name: `entry-${index}` }))
     )
-    const stats = Array.from({ length: 4 }, () =>
-      deferred<{ rdev: bigint; isCharacterDevice: () => boolean }>()
-    )
-    lstatMock.mockImplementation(() => stats[lstatMock.mock.calls.length - 1].promise)
+    const pending = deferred<{ rdev: bigint; isCharacterDevice: () => boolean }>()
+    lstatMock.mockReturnValue(pending.promise)
 
     const first = captureDarwinProcessTable(capture, validate, 100)
     const rejected = expect(first).rejects.toThrow('capture_over_budget')
     await vi.advanceTimersByTimeAsync(100)
     await rejected
-    expect(lstatMock).toHaveBeenCalledTimes(4)
+    expect(lstatMock).toHaveBeenCalledTimes(1)
     const stat = { rdev: 0x10000009n, isCharacterDevice: () => true }
-    stats[0].resolve(stat)
-    await vi.advanceTimersByTimeAsync(0)
 
     for (let index = 0; index < 5; index++) {
       expect(await captureDarwinProcessTable(capture, validate, 100)).toBe(canonical)
     }
     expect(opendirMock).toHaveBeenCalledTimes(1)
-    expect(lstatMock).toHaveBeenCalledTimes(4)
+    expect(lstatMock).toHaveBeenCalledTimes(1)
 
-    for (const pending of stats.slice(1)) {
-      pending.resolve(stat)
-    }
+    pending.resolve(stat)
     await vi.advanceTimersByTimeAsync(0)
-    expect(lstatMock).toHaveBeenCalledTimes(4)
+    expect(lstatMock).toHaveBeenCalledTimes(1)
     lstatMock.mockResolvedValue(stat)
     expect(await captureDarwinProcessTable(capture, validate, 100)).toBe(
       raw.replace('16/9', 'entry-0')
