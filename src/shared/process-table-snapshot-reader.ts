@@ -229,10 +229,7 @@ export function parseLinuxProcStatStartTime(stat: string): string | null {
 /** Read Linux's stable PID start-time ticks without spawning another process. */
 async function readLinuxProcessStartTimes(
   rows: readonly ProcessTableRow[]
-): Promise<ReadonlyMap<number, string> | undefined> {
-  if (process.platform !== 'linux') {
-    return undefined
-  }
+): Promise<ReadonlyMap<number, string>> {
   const candidates = rows.filter((row) => row.tty !== undefined && row.tty !== '?')
   const starts = await Promise.all(
     candidates.map(async (row) => {
@@ -255,12 +252,12 @@ async function readLinuxProcessStartTimes(
   return result
 }
 
-async function captureProcessTable(args: readonly string[]): Promise<string> {
+async function captureProcessTable(args: readonly string[], timeout = PS_TIMEOUT_MS) {
   let stdout: string
   try {
     ;({ stdout } = await execFile('ps', [...args], {
       encoding: 'utf-8',
-      timeout: PS_TIMEOUT_MS,
+      timeout,
       maxBuffer: PS_MAX_BUFFER_BYTES
     }))
   } catch (error) {
@@ -277,11 +274,13 @@ const processTableReader = createProcessTableSnapshotReader<ProcessTableCapture>
   runPs: async () => {
     const stdout =
       process.platform === 'darwin'
-        ? await captureDarwinProcessTable(captureProcessTable, assertWholeCapture)
+        ? await captureDarwinProcessTable(captureProcessTable, assertWholeCapture, PS_TIMEOUT_MS)
         : await captureProcessTable(PS_ARGS)
-    const baseCapture = createProcessTableCapture(stdout)
-    const startTimesByPid = await readLinuxProcessStartTimes(baseCapture.lenient())
-    return createProcessTableCapture(stdout, startTimesByPid, process.platform === 'linux')
+    if (process.platform !== 'linux') {
+      return createProcessTableCapture(stdout)
+    }
+    const startTimesByPid = await readLinuxProcessStartTimes(parseProcessTableRows(stdout))
+    return createProcessTableCapture(stdout, startTimesByPid, true)
   },
   now: () => Date.now()
 })

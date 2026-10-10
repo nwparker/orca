@@ -152,6 +152,40 @@ describe('nameDarwinTerminals', () => {
     expect(directory.readPaths).toEqual(directory.entries.map((entry) => join('/dev', entry.name)))
   })
 
+  it('stops scheduling stats after cancellation while draining all active reads', async () => {
+    const directory = new TestDeviceDirectory()
+    directory.entries = Array.from({ length: 20 }, (_, index) => ({
+      name: `entry-${index}`,
+      rdev: BigInt(index),
+      delayMs: 10
+    }))
+    const controller = new AbortController()
+    const named = nameDarwinTerminals(darwinRow('16/9'), directory, controller.signal)
+    const rejection = expect(named).rejects.toThrow()
+    await new Promise((resolve) => setTimeout(resolve, 2))
+    expect(directory.readPaths).toHaveLength(4)
+    controller.abort()
+    await rejection
+
+    expect(directory.readPaths).toHaveLength(4)
+    expect(directory.closedDirectories).toBe(1)
+    expect(directory.peakReads).toBe(4)
+  })
+
+  it('bounds large inventories and closes the directory without admitting device reads', async () => {
+    const directory = new TestDeviceDirectory()
+    directory.entries = Array.from({ length: 20_000 }, (_, index) => ({
+      name: `entry-${index}-${'x'.repeat(240)}`,
+      rdev: 0n
+    }))
+
+    await expect(nameDarwinTerminals(darwinRow('16/9'), directory)).rejects.toThrow(
+      'Directory listing is too large'
+    )
+    expect(directory.readPaths).toEqual([])
+    expect(directory.closedDirectories).toBe(1)
+  })
+
   it('skips individual stat failures and uses the next direct character alias', async () => {
     const directory = new TestDeviceDirectory()
     directory.entries = [
