@@ -1,6 +1,8 @@
 import { execFile as execFileCb } from 'node:child_process'
 import { readFile } from 'node:fs/promises'
 import { promisify } from 'node:util'
+import { nameDarwinTerminals } from './darwin-terminal-names'
+import { errorMessage } from './error-message'
 import {
   PROCESS_TABLE_SNAPSHOT_MAX_STALENESS_MS,
   PS_ARGS,
@@ -270,9 +272,43 @@ async function captureProcessTable(args: readonly string[]): Promise<string> {
   return assertWholeCapture(stdout)
 }
 
+let darwinDeviceColumnUnsupported = false
+
+async function captureDarwinProcessTable(): Promise<string> {
+  if (darwinDeviceColumnUnsupported) {
+    return captureProcessTable(PS_ARGS)
+  }
+  let captured: string
+  try {
+    captured = await captureProcessTable(['-axo', PS_ARGS[1].replace('tty=', 'tdev=')])
+  } catch (error) {
+    if (
+      !(error instanceof Error) ||
+      !('code' in error) ||
+      (error.code !== 1 && error.code !== 2) ||
+      ('killed' in error && error.killed === true) ||
+      !/^(?:ps: tdev: keyword not found|error: unknown user-defined format specifier "tdev")$/m.test(
+        errorMessage(error)
+      )
+    ) {
+      throw error
+    }
+    darwinDeviceColumnUnsupported = true
+    return captureProcessTable(PS_ARGS)
+  }
+  try {
+    return assertWholeCapture(await nameDarwinTerminals(captured))
+  } catch {
+    return captureProcessTable(PS_ARGS)
+  }
+}
+
 const processTableReader = createProcessTableSnapshotReader<ProcessTableCapture>({
   runPs: async () => {
-    const stdout = await captureProcessTable(PS_ARGS)
+    const stdout =
+      process.platform === 'darwin'
+        ? await captureDarwinProcessTable()
+        : await captureProcessTable(PS_ARGS)
     const baseCapture = createProcessTableCapture(stdout)
     const startTimesByPid = await readLinuxProcessStartTimes(baseCapture.lenient())
     return createProcessTableCapture(stdout, startTimesByPid, process.platform === 'linux')
@@ -355,4 +391,5 @@ export async function getStrictProcessTableSnapshotWithAge(): Promise<{
 export function resetProcessTableSnapshotForTests(): void {
   processTableReader.reset()
   shellForegroundReader.reset()
+  darwinDeviceColumnUnsupported = false
 }
