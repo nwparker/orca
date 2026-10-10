@@ -676,7 +676,7 @@ describe('evidence-publishing capture budget', () => {
   /** A `ps` that answers after `durationMs` of wall clock, the way a loaded host does. */
   function mockPsTaking(
     durationMs: number,
-    stdout = '1 0 1 1 S+ ?? Thu Jan 1 00:00:00 2026 bash\n'
+    stdout = `1 0 1 1 S+ ${process.platform === 'darwin' ? '??' : '?'} Thu Jan 1 00:00:00 2026 bash\n`
   ) {
     execFileMock.mockImplementation(
       (_command: string, _args: string[], _options: unknown, callback: unknown) => {
@@ -689,8 +689,10 @@ describe('evidence-publishing capture budget', () => {
   it('answers from a capture that lands one tick inside the budget', async () => {
     mockPsTaking(PROCESS_TABLE_EVIDENCE_BUDGET_MS - 1)
     const pending = getStrictProcessTableSnapshotWithAge()
+    const settled = pending.catch(() => undefined)
 
     await vi.advanceTimersByTimeAsync(PROCESS_TABLE_EVIDENCE_BUDGET_MS)
+    await settled
 
     // The age carries the capture's own duration, which is the whole reason the budget is this
     // far under the 2,000ms admission ceiling rather than under PS_TIMEOUT_MS.
