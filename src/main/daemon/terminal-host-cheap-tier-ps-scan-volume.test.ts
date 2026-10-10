@@ -1,3 +1,13 @@
+import type * as FsPromises from 'node:fs/promises'
+import type * as DarwinTerminalNames from '../../shared/darwin-terminal-names'
+import type * as FullReader from '../../shared/process-table-snapshot-reader'
+import {
+  createProcessTablePsFixture,
+  type PsFixtureRow
+} from '../../shared/process-table-ps-test-fixture'
+import type * as CheapReader from '../../shared/cheap-process-table-snapshot-reader'
+import type * as TrackerModule from './pty-subprocess/foreground-process-tracker'
+import type * as Inspection from './terminal-host-process-inspection'
 // Measurement for the cheap-tier process inspection. Drives the REAL daemon inspection
 // entrypoint (`inspectTerminalHostProcess`) for 8 idle agent panes over a simulated 60s idle
 // cadence (POLL_TIER_INTERVAL_MS.idle = 2,000ms) and counts `ps` forks BY COLUMN SET: a fork
@@ -19,10 +29,28 @@ const { execFileMock, runProcessMock } = vi.hoisted(() => ({
 vi.mock('node:child_process', () => ({ execFile: execFileMock }))
 vi.mock('@orca/process-host', () => ({ runProcess: runProcessMock }))
 
-import { resetCheapProcessTableSnapshotForTests } from '../../shared/cheap-process-table-snapshot-reader'
-import { resetProcessTableSnapshotForTests } from '../../shared/process-table-snapshot-reader'
-import { createPtyForegroundProcessTracker } from './pty-subprocess/foreground-process-tracker'
-import { inspectTerminalHostProcess } from './terminal-host-process-inspection'
+// Inject /dev data without bypassing the production translator.
+vi.mock('../../shared/darwin-terminal-names', async (importOriginal) => {
+  const original = await importOriginal<typeof DarwinTerminalNames>()
+  return {
+    nameDarwinTerminals: (stdout: string, _deps: unknown, signal?: AbortSignal) =>
+      psFixture.nameTerminals(original.nameDarwinTerminals, stdout, signal)
+  }
+})
+
+let cheapReader: typeof CheapReader
+
+vi.mock('node:fs/promises', async (importOriginal) => ({
+  ...(await importOriginal<typeof FsPromises>()),
+  readFile: async (path: string) => {
+    expect(process.platform).toBe('linux')
+    return psFixture.readProcStat(path)
+  }
+}))
+
+let fullReader: typeof FullReader
+let trackerModule: typeof TrackerModule
+let inspection: typeof Inspection
 import type { Session } from './session'
 
 const PANE_COUNT = 8
@@ -41,42 +69,80 @@ const panes: PaneState[] = Array.from({ length: PANE_COUNT }, () => ({
 
 const forks = { full: 0, cheap: 0 }
 
-function renderRows(): { full: string; cheap: string } {
-  const full: string[] = []
-  const cheap: string[] = []
-  panes.forEach((pane, i) => {
-    const s = shellPid(i)
-    const a = agentPid(i)
-    const tpgid = pane.agent ? a : s
-    const shellStat = pane.agent ? 'Ss' : 'Ss+'
-    cheap.push(`${s} 1 ${s} ${tpgid} ${shellStat} Thu Sep  3 16:02:01 2026`)
-    full.push(`${s} 1 ${s} ${tpgid} ${shellStat} ttys00${i} Thu Sep  3 16:02:01 2026 -zsh`)
+function processRows(): PsFixtureRow[] {
+  return panes.flatMap((pane, i) => {
+    const shell = shellPid(i)
+    const agent = agentPid(i)
+    const rows: PsFixtureRow[] = [
+      {
+        pid: shell,
+        ppid: 1,
+        pgid: shell,
+        tpgid: pane.agent ? agent : shell,
+        stat: pane.agent ? 'Ss' : 'Ss+',
+        terminalMinor: i,
+        startTime: 'Thu Sep  3 16:02:01 2026',
+        command: '-zsh'
+      }
+    ]
     if (pane.agent) {
-      cheap.push(`${a} ${s} ${a} ${a} S+ ${pane.agentStart}`)
-      full.push(`${a} ${s} ${a} ${a} S+ ttys00${i} ${pane.agentStart} node /usr/local/bin/claude`)
+      rows.push({
+        pid: agent,
+        ppid: shell,
+        pgid: agent,
+        tpgid: agent,
+        stat: 'S+',
+        terminalMinor: i,
+        startTime: pane.agentStart,
+        command: 'node /usr/local/bin/claude'
+      })
     }
+    return rows
   })
-  return { full: `${full.join('\n')}\n`, cheap: `${cheap.join('\n')}\n` }
 }
+const psFixture = createProcessTablePsFixture(processRows)
 
 function installCountingPs(): void {
-  execFileMock.mockImplementation((_cmd: string, args: string[], _opts: unknown, cb: unknown) => {
-    expect(args[1]).toContain('command=')
-    forks.full += 1
-    ;(cb as (err: unknown, r: { stdout: string; stderr: string }) => void)(null, {
-      stdout: renderRows().full,
-      stderr: ''
-    })
-  })
-  runProcessMock.mockImplementation(async (spec: { args: readonly string[] }) => {
-    expect(spec.args[1]).not.toContain('command=')
+  execFileMock.mockImplementation(
+    (
+      cmd: string,
+      args: string[],
+      _opts: unknown,
+      callback: (err: unknown, r: { stdout: string; stderr: string }) => void
+    ) => {
+      expect(cmd).toBe('ps')
+      expect(args).toEqual(
+        process.platform === 'darwin'
+          ? ['-axo', 'pid=,ppid=,pgid=,tpgid=,stat=,tdev=,lstart=,command=']
+          : ['-axo', 'pid=,ppid=,pgid=,tpgid=,stat=,tty=,etimes=,command=']
+      )
+      forks.full += 1
+      callback(null, {
+        stdout: psFixture.render(args[1]),
+        stderr: ''
+      })
+    }
+  )
+  runProcessMock.mockImplementation(async (spec: { program: string; args: readonly string[] }) => {
+    expect(spec.program).toBe('ps')
+    expect(spec.args).toEqual(
+      process.platform === 'darwin'
+        ? ['-axo', 'pid=,ppid=,pgid=,tpgid=,stat=,lstart=']
+        : ['-axo', 'pid=,ppid=,pgid=,tpgid=,stat=']
+    )
     forks.cheap += 1
-    return { code: 0, signal: null, stdout: renderRows().cheap, stderr: '', timedOut: false }
+    return {
+      code: 0,
+      signal: null,
+      stdout: psFixture.render(spec.args[1]),
+      stderr: '',
+      timedOut: false
+    }
   })
 }
 
 function createSession(pane: number): Session {
-  const tracker = createPtyForegroundProcessTracker({
+  const tracker = trackerModule.createPtyForegroundProcessTracker({
     process: {
       pid: shellPid(pane),
       get process() {
@@ -106,7 +172,7 @@ async function settle(): Promise<void> {
 async function runTick(sessions: Session[], steadyState: boolean): Promise<(string | null)[]> {
   const results = await Promise.all(
     sessions.map((session, pane) =>
-      inspectTerminalHostProcess({
+      inspection.inspectTerminalHostProcess({
         sessionId: `wt:pane-${pane}`,
         session,
         ...(steadyState ? { steadyState: true } : {}),
@@ -119,14 +185,12 @@ async function runTick(sessions: Session[], steadyState: boolean): Promise<(stri
   return results.map((r) => r.foregroundProcess)
 }
 
-describe('cheap-tier ps scan volume at 8 idle agent panes over 60s', () => {
+describe.each(['darwin', 'linux'])('cheap-tier ps scan volume (%s)', (hostPlatform) => {
   let platform: PropertyDescriptor | undefined
 
-  beforeEach(() => {
+  beforeEach(async () => {
     execFileMock.mockReset()
     runProcessMock.mockReset()
-    resetProcessTableSnapshotForTests()
-    resetCheapProcessTableSnapshotForTests()
     forks.full = 0
     forks.cheap = 0
     panes.forEach((pane) => {
@@ -134,7 +198,15 @@ describe('cheap-tier ps scan volume at 8 idle agent panes over 60s', () => {
       pane.agentStart = 'Thu Sep  3 16:02:05 2026'
     })
     platform = Object.getOwnPropertyDescriptor(process, 'platform')
-    Object.defineProperty(process, 'platform', { configurable: true, value: 'darwin' })
+    Object.defineProperty(process, 'platform', { configurable: true, value: hostPlatform })
+    // Column constants are chosen at import time, so each host needs a fresh module graph.
+    vi.resetModules()
+    fullReader = await import('../../shared/process-table-snapshot-reader')
+    fullReader.resetProcessTableSnapshotForTests()
+    cheapReader = await import('../../shared/cheap-process-table-snapshot-reader')
+    cheapReader.resetCheapProcessTableSnapshotForTests()
+    trackerModule = await import('./pty-subprocess/foreground-process-tracker')
+    inspection = await import('./terminal-host-process-inspection')
     vi.useFakeTimers({ toFake: ['Date'] })
     vi.setSystemTime(1_000_000)
     installCountingPs()
@@ -176,8 +248,8 @@ describe('cheap-tier ps scan volume at 8 idle agent panes over 60s', () => {
 
   it('completion detection is byte-for-byte unchanged: exit, idle, and restart resolve identically with and without the cheap tier', async () => {
     const script = async (steadyState: boolean): Promise<(string | null)[][]> => {
-      resetProcessTableSnapshotForTests()
-      resetCheapProcessTableSnapshotForTests()
+      fullReader.resetProcessTableSnapshotForTests()
+      cheapReader.resetCheapProcessTableSnapshotForTests()
       panes.forEach((pane) => {
         pane.agent = true
         pane.agentStart = 'Thu Sep  3 16:02:05 2026'
