@@ -1,8 +1,10 @@
 import { execFile as execFileCb } from 'node:child_process'
 import { readFile } from 'node:fs/promises'
 import { promisify } from 'node:util'
-import { nameDarwinTerminals } from './darwin-terminal-names'
-import { errorMessage } from './error-message'
+import {
+  captureDarwinProcessTable,
+  resetDarwinProcessTableCaptureForTests
+} from './darwin-process-table-capture'
 import {
   PROCESS_TABLE_SNAPSHOT_MAX_STALENESS_MS,
   PS_ARGS,
@@ -25,7 +27,6 @@ const execFile = promisify(execFileCb)
 // whole subsystem answered "unverifiable" about a table it could read. This keeps a wedged
 // `ps` bounded while staying out of reach of a host that is merely busy.
 export const PS_TIMEOUT_MS = 15_000
-const DEFAULT_SNAPSHOT_TTL_MS = PROCESS_TABLE_SNAPSHOT_MAX_STALENESS_MS
 
 type Snapshot<T> = { value: T; capturedAtMs: number; completedAtMs: number }
 
@@ -44,7 +45,7 @@ export function createProcessTableSnapshotReader<T = string>(
   getFreshSnapshot: () => Promise<T>
   reset: () => void
 } {
-  const ttlMs = deps.ttlMs ?? DEFAULT_SNAPSHOT_TTL_MS
+  const ttlMs = deps.ttlMs ?? PROCESS_TABLE_SNAPSHOT_MAX_STALENESS_MS
   let cached: Snapshot<T> | null = null
   let inFlight: Promise<T> | null = null
   let sequence = 0
@@ -272,42 +273,11 @@ async function captureProcessTable(args: readonly string[]): Promise<string> {
   return assertWholeCapture(stdout)
 }
 
-let darwinDeviceColumnUnsupported = false
-
-async function captureDarwinProcessTable(): Promise<string> {
-  if (darwinDeviceColumnUnsupported) {
-    return captureProcessTable(PS_ARGS)
-  }
-  let captured: string
-  try {
-    captured = await captureProcessTable(['-axo', PS_ARGS[1].replace('tty=', 'tdev=')])
-  } catch (error) {
-    if (
-      !(error instanceof Error) ||
-      !('code' in error) ||
-      (error.code !== 1 && error.code !== 2) ||
-      ('killed' in error && error.killed === true) ||
-      !/^(?:ps: tdev: keyword not found|error: unknown user-defined format specifier "tdev")$/m.test(
-        errorMessage(error)
-      )
-    ) {
-      throw error
-    }
-    darwinDeviceColumnUnsupported = true
-    return captureProcessTable(PS_ARGS)
-  }
-  try {
-    return assertWholeCapture(await nameDarwinTerminals(captured))
-  } catch {
-    return captureProcessTable(PS_ARGS)
-  }
-}
-
 const processTableReader = createProcessTableSnapshotReader<ProcessTableCapture>({
   runPs: async () => {
     const stdout =
       process.platform === 'darwin'
-        ? await captureDarwinProcessTable()
+        ? await captureDarwinProcessTable(captureProcessTable, assertWholeCapture)
         : await captureProcessTable(PS_ARGS)
     const baseCapture = createProcessTableCapture(stdout)
     const startTimesByPid = await readLinuxProcessStartTimes(baseCapture.lenient())
@@ -391,5 +361,5 @@ export async function getStrictProcessTableSnapshotWithAge(): Promise<{
 export function resetProcessTableSnapshotForTests(): void {
   processTableReader.reset()
   shellForegroundReader.reset()
-  darwinDeviceColumnUnsupported = false
+  resetDarwinProcessTableCaptureForTests()
 }
