@@ -1,4 +1,5 @@
 import type * as FsPromises from 'node:fs/promises'
+import type { Session } from './session'
 import type * as DarwinTerminalNames from '../../shared/darwin-terminal-names'
 import type * as FullReader from '../../shared/process-table-snapshot-reader'
 import {
@@ -8,6 +9,7 @@ import {
 import type * as CheapReader from '../../shared/cheap-process-table-snapshot-reader'
 import type * as TrackerModule from './pty-subprocess/foreground-process-tracker'
 import type * as Inspection from './terminal-host-process-inspection'
+import type { TerminalHostInspectionTier } from './terminal-host-process-inspection'
 import type * as AnchorModule from './terminal-host-steady-state-anchor'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -29,22 +31,16 @@ vi.mock('../../shared/darwin-terminal-names', async (importOriginal) => {
   }
 })
 
-let cheapReader: typeof CheapReader
-
 vi.mock('node:fs/promises', async (importOriginal) => ({
   ...(await importOriginal<typeof FsPromises>()),
-  readFile: async (path: string) => {
-    expect(process.platform).toBe('linux')
-    return psFixture.readProcStat(path)
-  }
+  readFile: async (path: string) => readProcStatMock(path)
 }))
 
+let cheapReader: typeof CheapReader
 let fullReader: typeof FullReader
 let trackerModule: typeof TrackerModule
-import type { TerminalHostInspectionTier } from './terminal-host-process-inspection'
 let inspection: typeof Inspection
 let anchorModule: typeof AnchorModule
-import type { Session } from './session'
 
 const SHELL_PID = 4242
 const AGENT_PID = 4300
@@ -67,6 +63,7 @@ function processRows(): PsFixtureRow[] {
       stat: shellTpgid === SHELL_PID ? 'Ss+' : 'Ss',
       terminalMinor: 4,
       startTime: START_SHELL,
+      startTicks: 1_000,
       command: '-zsh'
     },
     {
@@ -77,6 +74,7 @@ function processRows(): PsFixtureRow[] {
       stat: 'Ss+',
       terminalMinor: 9,
       startTime: 'Thu Sep  3 12:00:00 2026',
+      startTicks: 500,
       command: '-zsh'
     }
   ]
@@ -89,6 +87,7 @@ function processRows(): PsFixtureRow[] {
       stat: table.agent === 'stopped' ? 'T' : 'S+',
       terminalMinor: 4,
       startTime: table.agent === 'replaced' ? 'Thu Sep  3 16:30:00 2026' : START_AGENT,
+      startTicks: table.agent === 'replaced' ? 2_000 : 1_400,
       command: 'node /usr/local/bin/claude'
     })
     for (let i = 0; i < (table.children ?? 0); i += 1) {
@@ -100,6 +99,7 @@ function processRows(): PsFixtureRow[] {
         stat: 'S+',
         terminalMinor: 4,
         startTime: `Thu Sep  3 16:05:0${i} 2026`,
+        startTicks: 1_500 + i,
         command: 'rg --files'
       })
     }
@@ -107,6 +107,7 @@ function processRows(): PsFixtureRow[] {
   return rows
 }
 const psFixture = createProcessTablePsFixture(processRows)
+const readProcStatMock = vi.fn((path: string) => psFixture.readProcStat(path))
 
 function installPs(): void {
   execFileMock.mockImplementation(
@@ -213,6 +214,7 @@ describe.each(['darwin', 'linux'])('daemon cheap-tier process inspection (%s)', 
 
   beforeEach(async () => {
     execFileMock.mockReset()
+    readProcStatMock.mockClear()
     runProcessMock.mockReset()
     forks.full = 0
     forks.cheap = 0
@@ -237,6 +239,13 @@ describe.each(['darwin', 'linux'])('daemon cheap-tier process inspection (%s)', 
     vi.useRealTimers()
     if (platform) {
       Object.defineProperty(process, 'platform', platform)
+    }
+    if (hostPlatform === 'darwin') {
+      expect(readProcStatMock).not.toHaveBeenCalled()
+    }
+    // Production catches read errors; assert each path resolved against the fixture at read time.
+    for (const [index, result] of readProcStatMock.mock.results.entries()) {
+      expect(result.type, readProcStatMock.mock.calls[index][0]).toBe('return')
     }
   })
 
@@ -281,6 +290,9 @@ describe.each(['darwin', 'linux'])('daemon cheap-tier process inspection (%s)', 
     }
     expect(forks.cheap).toBe(4)
     expect(forks.full).toBe(fullBefore)
+    if (hostPlatform === 'linux') {
+      expect(readProcStatMock).toHaveBeenCalled()
+    }
   })
 
   it('a request without steadyState (old client, remote client, restore path) always gets the full capture with evidence', async () => {

@@ -1,4 +1,5 @@
 import type * as FsPromises from 'node:fs/promises'
+import type { Session } from './session'
 import type * as DarwinTerminalNames from '../../shared/darwin-terminal-names'
 import type * as FullReader from '../../shared/process-table-snapshot-reader'
 import {
@@ -8,6 +9,7 @@ import {
 import type * as CheapReader from '../../shared/cheap-process-table-snapshot-reader'
 import type * as TrackerModule from './pty-subprocess/foreground-process-tracker'
 import type * as Inspection from './terminal-host-process-inspection'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 // Measurement for the cheap-tier process inspection. Drives the REAL daemon inspection
 // entrypoint (`inspectTerminalHostProcess`) for 8 idle agent panes over a simulated 60s idle
 // cadence (POLL_TIER_INTERVAL_MS.idle = 2,000ms) and counts `ps` forks BY COLUMN SET: a fork
@@ -18,7 +20,6 @@ import type * as Inspection from './terminal-host-process-inspection'
 //
 // The second test is the zero-trade-off proof: the same tick sequence, including an agent exit
 // and a restart, produces the identical foregroundProcess series with the cheap tier on and off.
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 // Two seams because the two tiers spawn differently: the full evidence reader still forks
 // through node:child_process, the cheap reader through Orca's runProcess entry point.
@@ -38,20 +39,15 @@ vi.mock('../../shared/darwin-terminal-names', async (importOriginal) => {
   }
 })
 
-let cheapReader: typeof CheapReader
-
 vi.mock('node:fs/promises', async (importOriginal) => ({
   ...(await importOriginal<typeof FsPromises>()),
-  readFile: async (path: string) => {
-    expect(process.platform).toBe('linux')
-    return psFixture.readProcStat(path)
-  }
+  readFile: async (path: string) => readProcStatMock(path)
 }))
 
+let cheapReader: typeof CheapReader
 let fullReader: typeof FullReader
 let trackerModule: typeof TrackerModule
 let inspection: typeof Inspection
-import type { Session } from './session'
 
 const PANE_COUNT = 8
 const IDLE_POLL_INTERVAL_MS = 2_000 // POLL_TIER_INTERVAL_MS.idle
@@ -61,10 +57,11 @@ const TICKS = Math.floor((WINDOW_SECONDS * 1000) / IDLE_POLL_INTERVAL_MS)
 const shellPid = (pane: number): number => 1000 + pane * 100
 const agentPid = (pane: number): number => shellPid(pane) + 1
 
-type PaneState = { agent: boolean; agentStart: string }
+type PaneState = { agent: boolean; agentStart: string; agentStartTicks: number }
 const panes: PaneState[] = Array.from({ length: PANE_COUNT }, () => ({
   agent: true,
-  agentStart: 'Thu Sep  3 16:02:05 2026'
+  agentStart: 'Thu Sep  3 16:02:05 2026',
+  agentStartTicks: 1_400
 }))
 
 const forks = { full: 0, cheap: 0 }
@@ -82,6 +79,7 @@ function processRows(): PsFixtureRow[] {
         stat: pane.agent ? 'Ss' : 'Ss+',
         terminalMinor: i,
         startTime: 'Thu Sep  3 16:02:01 2026',
+        startTicks: 1_000,
         command: '-zsh'
       }
     ]
@@ -94,6 +92,7 @@ function processRows(): PsFixtureRow[] {
         stat: 'S+',
         terminalMinor: i,
         startTime: pane.agentStart,
+        startTicks: pane.agentStartTicks,
         command: 'node /usr/local/bin/claude'
       })
     }
@@ -101,6 +100,7 @@ function processRows(): PsFixtureRow[] {
   })
 }
 const psFixture = createProcessTablePsFixture(processRows)
+const readProcStatMock = vi.fn((path: string) => psFixture.readProcStat(path))
 
 function installCountingPs(): void {
   execFileMock.mockImplementation(
@@ -190,12 +190,14 @@ describe.each(['darwin', 'linux'])('cheap-tier ps scan volume (%s)', (hostPlatfo
 
   beforeEach(async () => {
     execFileMock.mockReset()
+    readProcStatMock.mockClear()
     runProcessMock.mockReset()
     forks.full = 0
     forks.cheap = 0
     panes.forEach((pane) => {
       pane.agent = true
       pane.agentStart = 'Thu Sep  3 16:02:05 2026'
+      pane.agentStartTicks = 1_400
     })
     platform = Object.getOwnPropertyDescriptor(process, 'platform')
     Object.defineProperty(process, 'platform', { configurable: true, value: hostPlatform })
@@ -216,6 +218,15 @@ describe.each(['darwin', 'linux'])('cheap-tier ps scan volume (%s)', (hostPlatfo
     vi.useRealTimers()
     if (platform) {
       Object.defineProperty(process, 'platform', platform)
+    }
+    if (hostPlatform === 'darwin') {
+      expect(readProcStatMock).not.toHaveBeenCalled()
+    } else {
+      expect(readProcStatMock).toHaveBeenCalled()
+    }
+    // Production catches read errors; assert each path resolved against the fixture at read time.
+    for (const [index, result] of readProcStatMock.mock.results.entries()) {
+      expect(result.type, readProcStatMock.mock.calls[index][0]).toBe('return')
     }
   })
 
@@ -253,6 +264,7 @@ describe.each(['darwin', 'linux'])('cheap-tier ps scan volume (%s)', (hostPlatfo
       panes.forEach((pane) => {
         pane.agent = true
         pane.agentStart = 'Thu Sep  3 16:02:05 2026'
+        pane.agentStartTicks = 1_400
       })
       const sessions = Array.from({ length: PANE_COUNT }, (_, pane) => createSession(pane))
       const series: (string | null)[][] = []
@@ -264,6 +276,7 @@ describe.each(['darwin', 'linux'])('cheap-tier ps scan volume (%s)', (hostPlatfo
         if (tick === 12) {
           panes[2].agent = true // ...and is restarted with a new start time
           panes[2].agentStart = 'Thu Sep  3 16:30:00 2026'
+          panes[2].agentStartTicks = 2_000
         }
         if (tick === 20) {
           panes[6].agent = false

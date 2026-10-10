@@ -9,6 +9,7 @@ export type PsFixtureRow = {
   stat: string
   terminalMinor: number
   startTime: string
+  startTicks: number
   command: string
 }
 
@@ -40,6 +41,7 @@ export function createProcessTablePsFixture(readRows: () => readonly PsFixtureRo
               case 'lstart=':
                 return row.startTime
               case 'etimes=':
+                // Deliberate drift makes /proc the only stable Linux start marker.
                 return String(100 + Math.floor(Date.now() / 1000))
               case 'command=':
                 return row.command
@@ -59,7 +61,7 @@ export function createProcessTablePsFixture(readRows: () => readonly PsFixtureRo
     if (!row) {
       throw new Error(`no fixture process at ${path}`)
     }
-    const start = String(Date.parse(row.startTime) / 1000)
+    const start = String(row.startTicks)
     return `${row.pid} (fixture) ${['S', ...Array.from({ length: 18 }, () => '0'), start, '0'].join(' ')}`
   }
 

@@ -36,10 +36,7 @@ vi.mock('../../shared/darwin-terminal-names', async (importOriginal) => {
 
 vi.mock('node:fs/promises', async (importOriginal) => ({
   ...(await importOriginal<typeof FsPromises>()),
-  readFile: async (path: string) => {
-    expect(process.platform).toBe('linux')
-    return psFixture.readProcStat(path)
-  }
+  readFile: async (path: string) => readProcStatMock(path)
 }))
 
 let fullReader: typeof FullReader
@@ -59,7 +56,7 @@ function processRows(): PsFixtureRow[] {
   return Array.from({ length: PANE_COUNT }, (_, pane) => {
     const shell = shellPid(pane)
     const agent = shell + 1
-    const base = { terminalMinor: pane, startTime: 'Thu Sep  3 16:02:01 2026' }
+    const base = { terminalMinor: pane, startTime: 'Thu Sep  3 16:02:01 2026', startTicks: 1_000 }
     return [
       { ...base, pid: shell, ppid: 99, pgid: shell, tpgid: agent, stat: 'Ss', command: 'bash -i' },
       {
@@ -75,6 +72,7 @@ function processRows(): PsFixtureRow[] {
   }).flat()
 }
 const psFixture = createProcessTablePsFixture(processRows)
+const readProcStatMock = vi.fn((path: string) => psFixture.readProcStat(path))
 
 function installCountingPsMock(): void {
   execFileMock.mockImplementation(
@@ -102,6 +100,7 @@ describe.each(['darwin', 'linux'])('#6288 foreground ps scan volume (%s)', (host
 
   beforeEach(async () => {
     execFileMock.mockReset()
+    readProcStatMock.mockClear()
     psScanCount.value = 0
     platform = Object.getOwnPropertyDescriptor(process, 'platform')
     Object.defineProperty(process, 'platform', { configurable: true, value: hostPlatform })
@@ -118,6 +117,15 @@ describe.each(['darwin', 'linux'])('#6288 foreground ps scan volume (%s)', (host
     vi.useRealTimers()
     if (platform) {
       Object.defineProperty(process, 'platform', platform)
+    }
+    if (hostPlatform === 'darwin') {
+      expect(readProcStatMock).not.toHaveBeenCalled()
+    } else {
+      expect(readProcStatMock).toHaveBeenCalled()
+    }
+    // Production catches read errors; assert each path resolved against the fixture at read time.
+    for (const [index, result] of readProcStatMock.mock.results.entries()) {
+      expect(result.type, readProcStatMock.mock.calls[index][0]).toBe('return')
     }
   })
 
@@ -141,7 +149,6 @@ describe.each(['darwin', 'linux'])('#6288 foreground ps scan volume (%s)', (host
     // shared cache, concurrent panes within a tick share one scan and the 500ms
     // TTL forces a fresh scan each new 750ms tick -> ~one scan per tick.
     expect(psScanCount.value).toBe(TICKS)
-    expect(psScanCount.value).toBeLessThanOrEqual(TICKS + 1)
     expect(psScanCount.value).toBeLessThan(totalInspections / 2)
   })
 })
