@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Alert, View, Text, Pressable, StyleSheet } from 'react-native'
 import { ChevronLeft } from 'lucide-react-native'
 import { colors, spacing } from '../theme/mobile-theme'
@@ -54,22 +54,25 @@ export function QuickCommandsSheet({
   const draftRevisionRef = useRef(0)
   const editorGenerationRef = useRef(0)
 
-  const [previousSurface, setPreviousSurface] = useState({ visible, client, repoId })
-  const contextChanged = previousSurface.client !== client || previousSurface.repoId !== repoId
-  if (visible !== previousSurface.visible || contextChanged) {
-    draftRevisionRef.current += 1
-    editorGenerationRef.current += 1
-    setPreviousSurface({ visible, client, repoId })
-    if (contextChanged) {
-      saveOwnerRef.current = null
-      setSaving(false)
+  const previousSurface = useRef({ visible, client, repoId })
+  useLayoutEffect(() => {
+    const contextChanged =
+      previousSurface.current.client !== client || previousSurface.current.repoId !== repoId
+    if (visible !== previousSurface.current.visible || contextChanged) {
+      draftRevisionRef.current += 1
+      editorGenerationRef.current += 1
+      previousSurface.current = { visible, client, repoId }
+      if (contextChanged) {
+        saveOwnerRef.current = null
+        setSaving(false)
+      }
+      if (visible || contextChanged) {
+        setView('list')
+        setQuery('')
+        setDraft(null)
+      }
     }
-    if (visible || contextChanged) {
-      setView('list')
-      setQuery('')
-      setDraft(null)
-    }
-  }
+  }, [visible, client, repoId])
 
   // Why: prompt bodies can total megabytes. Lowercase them once per settings
   // update instead of allocating the same search text on every keystroke.

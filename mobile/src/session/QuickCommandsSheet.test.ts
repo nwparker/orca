@@ -1,4 +1,4 @@
-import { createElement, type ReactNode } from 'react'
+import { createElement, Fragment, startTransition, Suspense, type ReactNode } from 'react'
 import { act, create, type ReactTestRenderer } from 'react-test-renderer'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { TerminalQuickCommand } from '../../../src/shared/terminal-quick-command-types'
@@ -13,6 +13,15 @@ const mocks = vi.hoisted(() => ({
 }))
 const quickCommandEditorForm = 'QuickCommandEditorForm'
 const quickCommandsList = 'QuickCommandsList'
+const suspended = new Promise<void>(() => {})
+const suspendedRender = vi.fn()
+function Suspend({ active }: { active: boolean }) {
+  if (active) {
+    suspendedRender()
+    throw suspended
+  }
+  return null
+}
 const command: TerminalQuickCommand = {
   id: 'command',
   label: 'Test',
@@ -133,6 +142,54 @@ describe('QuickCommandsSheet', () => {
       save.resolve(true)
       await save.promise
     })
+  })
+
+  it('keeps save ownership when a repository transition suspends before commit', async () => {
+    const save = deferred<boolean>()
+    mocks.persist.mockReturnValue(save.promise)
+    const onClose = vi.fn()
+    const onLaunch = () => true
+    const render = (suspend = false) =>
+      createElement(
+        Suspense,
+        { fallback: null },
+        createElement(
+          Fragment,
+          null,
+          createElement(QuickCommandsSheet, {
+            visible: true,
+            client: null,
+            repoId: suspend ? 'repo-2' : 'repo-1',
+            repoName: 'Repo',
+            agentPromptMaxLength: null,
+            onClose,
+            onLaunch
+          }),
+          createElement(Suspend, { active: suspend })
+        )
+      )
+    act(() => {
+      renderer = create(render())
+    })
+    act(() => renderer!.root.findByType(quickCommandsList).props.onAdd())
+    act(() =>
+      renderer!.root.findByType(quickCommandEditorForm).props.onChange({
+        label: 'Test',
+        command: 'pnpm test'
+      })
+    )
+    act(() => renderer!.root.findByType(quickCommandEditorForm).props.onSave())
+    suspendedRender.mockClear()
+    act(() => {
+      startTransition(() => renderer?.update(render(true)))
+    })
+    expect(suspendedRender).toHaveBeenCalled()
+    await act(async () => {
+      save.resolve(true)
+      await save.promise
+    })
+    expect(renderer!.root.findAllByType(quickCommandEditorForm)).toHaveLength(0)
+    expect(renderer!.root.findAllByType(quickCommandsList)).toHaveLength(1)
   })
 
   it.each(['new editor', 'newer edits'])(
