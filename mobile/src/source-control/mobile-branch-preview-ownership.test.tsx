@@ -1,4 +1,4 @@
-import { createElement } from 'react'
+import { createElement, startTransition, Suspense } from 'react'
 import { act, create, type ReactTestRenderer } from 'react-test-renderer'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createFakeRpcClient } from '../mobile-web-shell/bridge-host-test-fakes'
@@ -25,6 +25,8 @@ const success: RpcResponse = {
   ok: true,
   result: { kind: 'text', originalContent: 'old', modifiedContent: 'new' }
 }
+const suspended = new Promise<void>(() => {})
+const suspendedRender = vi.fn()
 
 describe('committed diff preview ownership', () => {
   let renderer: ReactTestRenderer | null = null
@@ -32,8 +34,14 @@ describe('committed diff preview ownership', () => {
   const replies: ((response: RpcResponse) => void)[] = []
   const client = createFakeRpcClient()
   client.sendRequest = () => new Promise((resolve) => replies.push(resolve))
-  function Probe({ worktreeId = 'wt-1' }: { worktreeId?: string }) {
-    latest = useMobileSourceControlOpeners({
+  function Probe({
+    worktreeId = 'wt-1',
+    suspend = false
+  }: {
+    worktreeId?: string
+    suspend?: boolean
+  }) {
+    const openers = useMobileSourceControlOpeners({
       client,
       connState: 'connected',
       hostId: 'host-1',
@@ -46,6 +54,11 @@ describe('committed diff preview ownership', () => {
       busyActionRef: { current: null },
       setActionError: vi.fn()
     })
+    if (suspend) {
+      suspendedRender()
+      throw suspended
+    }
+    latest = openers
     return null
   }
   afterEach(() => {
@@ -116,5 +129,32 @@ describe('committed diff preview ownership', () => {
       await pending
     })
     expect(latest?.branchDiffPreview).toBeNull()
+  })
+
+  it('keeps the current preview when a workspace transition suspends before commit', async () => {
+    const render = (suspend = false) =>
+      createElement(
+        Suspense,
+        { fallback: null },
+        createElement(Probe, {
+          worktreeId: suspend ? 'wt-2' : 'wt-1',
+          suspend
+        })
+      )
+    act(() => {
+      renderer = create(render())
+    })
+    const pending = open()
+    suspendedRender.mockClear()
+    act(() => {
+      startTransition(() => renderer?.update(render(true)))
+    })
+    expect(suspendedRender).toHaveBeenCalled()
+    await act(async () => {
+      replies[0]?.(success)
+      await pending
+    })
+    expect(latest?.branchDiffPreview?.kind).toBe('ready')
+    expect(latest?.openingBranchPath).toBeNull()
   })
 })

@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState, type MutableRefObject } from 'react'
+import { useCallback, useLayoutEffect, useRef, useState, type MutableRefObject } from 'react'
 import type { RpcClient } from '../transport/rpc-client'
 import type { ConnectionState } from '../transport/types'
 import { refusedRpcMessageOrFallback } from '../transport/rpc-refusal-message'
@@ -53,17 +53,19 @@ export function useMobileBranchDiffPreview({
   const openingBranchPathRef = useRef<string | null>(null)
   const branchPreviewGeneration = useRef(0)
   const previewScope = useRef({ client, hostId, worktreeId })
-  if (
-    previewScope.current.client !== client ||
-    previewScope.current.hostId !== hostId ||
-    previewScope.current.worktreeId !== worktreeId
-  ) {
-    previewScope.current = { client, hostId, worktreeId }
-    branchPreviewGeneration.current += 1
-    openingBranchPathRef.current = null
-    setOpeningBranchPath(null)
-    updateBranchDiffPreview(null)
-  }
+  useLayoutEffect(() => {
+    if (
+      previewScope.current.client !== client ||
+      previewScope.current.hostId !== hostId ||
+      previewScope.current.worktreeId !== worktreeId
+    ) {
+      previewScope.current = { client, hostId, worktreeId }
+      branchPreviewGeneration.current += 1
+      openingBranchPathRef.current = null
+      setOpeningBranchPath(null)
+      updateBranchDiffPreview(null)
+    }
+  }, [client, hostId, worktreeId])
   const setBranchDiffPreview = useCallback((next: MobileBranchDiffPreviewState | null) => {
     if (next === null) {
       branchPreviewGeneration.current += 1
