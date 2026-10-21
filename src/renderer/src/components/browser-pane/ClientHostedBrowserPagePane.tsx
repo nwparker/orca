@@ -36,9 +36,12 @@ import { getBrowserPageZoomIndicatorState } from './host-guest/browser-page-zoom
 import { useBrowserPageWebviewShortcuts } from './host-guest/use-browser-page-webview-shortcuts'
 import { useClientHostedGuestActivationFocus } from './host-guest/use-client-hosted-guest-activation-focus'
 import { useBrowserPageZoomFeedback } from './host-guest/use-browser-page-zoom-feedback'
+import { isPageDocumentNavigationStart } from './host-guest/browser-page-webview-navigation-handlers'
 import { BrowserLoadFailureOverlay } from './navigate/browser-load-failure-overlay'
 import { useClientHostedPageUrlSubmission } from './navigate/use-client-hosted-page-url-submission'
 import { convertBrowserPageToWorkspaceDoc } from '@/lib/file-preview'
+import { isBlankBrowserUrl } from '@/lib/browser-palette-search'
+import { BrowserNewTabPage } from './new-tab/BrowserNewTabPage'
 import { useBrowserPageReloadActions } from './navigate/use-browser-page-reload-actions'
 import { resolveActiveBrowserLoadFailure } from './navigate/browser-load-failure-for-url'
 import { consumeBrowserPageDeferredNavigation } from './navigate/browser-page-deferred-navigation'
@@ -130,7 +133,7 @@ export function ClientHostedBrowserPagePane({
       addressBarInputRef,
       startAddressBarFocusGrab
     })
-  const zoom = useBrowserPageZoomFeedback(browserTab.id)
+  const zoom = useBrowserPageZoomFeedback()
   const reload = useBrowserPageReloadActions({
     browserTab,
     webviewRef,
@@ -151,8 +154,6 @@ export function ClientHostedBrowserPagePane({
     ...shortcutOwner,
     isActiveRef,
     webviewRef,
-    paneZoomLevelRef: zoom.paneZoomLevelRef,
-    setBrowserDefaultZoomLevel: zoom.setBrowserDefaultZoomLevel,
     showBrowserZoomFeedback: zoom.showBrowserZoomFeedback,
     reloadWebviewOrRecoverGuest: reload.reloadWebviewOrRecoverGuest
   })
@@ -256,7 +257,10 @@ export function ClientHostedBrowserPagePane({
       recordHistoryFromGuest(metadata.url, getBrowserDisplayTitle(metadata.title, metadata.url))
       setAddressBarValueFromPage(toDisplayUrl(metadata.url))
     }
-    const onStart = (): void => {
+    const onStart = (event: Electron.DidStartNavigationEvent): void => {
+      if (!isPageDocumentNavigationStart(event)) {
+        return
+      }
       activeLoadFailureRef.current = null
       updatePageStateFromGuest(browserTab.id, { loading: true, loadError: null })
       const startMetadata = readBrowserClientPageGuestMetadataIfLive(webview, undefined, true)
@@ -275,7 +279,7 @@ export function ClientHostedBrowserPagePane({
       }
     )
     const cleanupGuest = (): void => {
-      webview.removeEventListener('did-start-loading', onStart)
+      webview.removeEventListener('did-start-navigation', onStart)
       webview.removeEventListener('did-stop-loading', syncNavigation)
       webview.removeEventListener('did-navigate', syncNavigation)
       webview.removeEventListener('did-navigate-in-page', syncNavigation)
@@ -287,7 +291,7 @@ export function ClientHostedBrowserPagePane({
       attachment.detach()
     }
     releaseGuest = cleanupGuest
-    webview.addEventListener('did-start-loading', onStart)
+    webview.addEventListener('did-start-navigation', onStart)
     webview.addEventListener('did-stop-loading', syncNavigation)
     webview.addEventListener('did-navigate', syncNavigation)
     webview.addEventListener('did-navigate-in-page', syncNavigation)
@@ -316,8 +320,7 @@ export function ClientHostedBrowserPagePane({
   // browserTab.url here named the previous page and offered it an HTTPS retry it never needed.
   const failedNavigationUrl = browserTab.loadError?.validatedUrl ?? toDisplayUrl(browserTab.url)
   const browserZoomIndicatorState = getBrowserPageZoomIndicatorState({
-    feedbackVisible: zoom.browserZoomFeedbackVisible,
-    isDefaultZoom: zoom.browserZoomPercent === zoom.browserDefaultZoomPercent
+    feedbackVisible: zoom.browserZoomFeedbackVisible
   })
 
   const markup = useClientHostedBrowserMarkup({
@@ -330,8 +333,15 @@ export function ClientHostedBrowserPagePane({
     showFailureOverlay
   })
 
+  // Why the unrecovered case reads not-loading: nothing is coming, and a loading cue nobody
+  // will ever stop is the one state this pane must not sit in.
+  const loading = !restoredPageUnrecovered && (placement === null || browserTab.loading)
+
   return (
-    <div className="relative flex h-full min-h-0 flex-1 flex-col bg-background">
+    <div
+      className="relative flex h-full min-h-0 flex-1 flex-col bg-background"
+      data-browser-page-pane-id={browserTab.id}
+    >
       {/* IPC-driven context menu in a Portal so position:fixed escapes ancestor transform/backdrop-filter containing blocks. */}
       <BrowserPageContextMenu
         browserPageId={browserTab.id}
@@ -346,9 +356,6 @@ export function ClientHostedBrowserPagePane({
           controls={{
             canGoBack: browserTab.canGoBack,
             canGoForward: browserTab.canGoForward,
-            // Why the unrecovered case reads not-loading: nothing is coming, and a spinner nobody
-            // will ever stop is the one state this pane must not sit in.
-            loading: !restoredPageUnrecovered && (placement === null || browserTab.loading),
             goBack: () => webviewRef.current?.goBack(),
             goForward: () => webviewRef.current?.goForward(),
             reload: () => reload.runReloadTrigger('button'),
@@ -356,6 +363,7 @@ export function ClientHostedBrowserPagePane({
           }}
           addressSlot={
             <BrowserAddressBar
+              pageId={browserTab.id}
               value={addressBarValue}
               onChange={setAddressBarValue}
               onSubmit={() => navigateToUrl(addressBarValue)}
@@ -371,9 +379,12 @@ export function ClientHostedBrowserPagePane({
                   presentation="client-hosted"
                 />
               }
+              loading={loading}
+              loadFailed={browserTab.loadError !== null}
             />
           }
           reloadLabel={reload.reloadButtonLabel}
+          reloadShowsStop={reload.reloadButtonLabelKind === 'stop'}
         >
           {markup.drawButton}
         </BrowserNavigationControlRow>
@@ -419,6 +430,8 @@ export function ClientHostedBrowserPagePane({
             lastCommittedUrl={browserTab.url}
             placementHostClientId={browserHostClientId}
           />
+        ) : isBlankBrowserUrl(browserTab.url) ? (
+          <BrowserNewTabPage worktreeId={worktreeId} onOpenUrl={navigateToUrl} serversElsewhere />
         ) : null}
       </div>
     </div>

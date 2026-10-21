@@ -5,24 +5,32 @@ import type { NativeChatMessage } from '../../../src/shared/native-chat-types'
 import { resolveNativeChatTranscriptAgent } from '../../../src/shared/native-chat-agent-support'
 import { detectAgentPermission, parseApprovalFromStatus } from './mobile-native-chat-permission'
 import { parseAgentQuestion } from './mobile-native-chat-question'
+import {
+  useMobileStructuredAsyncQuestion,
+  type MobileStructuredAskSession
+} from './use-mobile-structured-async-question'
 
 export type MobileNativeChatPrompts = {
   permission: ReturnType<typeof detectAgentPermission>
   question: ReturnType<typeof parseAgentQuestion>
   detectedAsk: ReturnType<typeof parseAskFromStatus>
   ask: ReturnType<typeof parseAskFromStatus>
+  /** Set in a structured chat, whose ask is answered by a send rather than a terminal write. */
+  structuredAnswer: ReturnType<typeof useMobileStructuredAsyncQuestion>['answer']
 }
 
 /** Derives the prompt cards shown above the composer. */
 export function useMobileNativeChatPrompts(args: {
   enabled: boolean
+  /** A structured chat reads only its async question here; its journal prompts are its own cards. */
+  structured?: MobileStructuredAskSession | null
   status: AgentStatusEntry | null | undefined
   messages: readonly NativeChatMessage[]
   /** True while `messages` is an unsettled read (including the cached list held
    *  across a reconnect). Required: an ask derived from it may already be answered. */
   transcriptLoading: boolean
 }): MobileNativeChatPrompts {
-  const { enabled, status, messages, transcriptLoading } = args
+  const { enabled, structured = null, status, messages, transcriptLoading } = args
   const blocked = status?.state === 'waiting' || status?.state === 'blocked'
   const openCode = resolveNativeChatTranscriptAgent(status?.agentType) === 'opencode'
   // Both permission paths sit inside the paused gate: an approval envelope can
@@ -56,8 +64,24 @@ export function useMobileNativeChatPrompts(args: {
   )
   const askFromMessages = askFromStatus ? null : resolvedAsk
   const detectedAsk = askFromStatus ?? askFromMessages
+  const structuredAsk = useMobileStructuredAsyncQuestion({
+    structured,
+    messages,
+    transcriptLoading
+  })
+  if (structured) {
+    const ask = enabled ? structuredAsk.ask : null
+    return {
+      permission: null,
+      question: null,
+      detectedAsk: ask,
+      ask,
+      structuredAnswer: structuredAsk.answer
+    }
+  }
 
   return {
+    structuredAnswer: null,
     // Why: a heuristic card read from the same waiting status would answer the Ask's dialog.
     permission: askFromStatus ? null : permission,
     question: askFromStatus ? null : question,

@@ -1,4 +1,4 @@
-import { nativeChatApprovalAcceptKey } from '../../../src/shared/native-chat-agent-support'
+import { parseNativeChatApprovalEnvelope } from '../../../src/shared/native-chat-approval-envelope'
 import type { AgentJournalApprovalSubject } from '../../../src/shared/agent-session-journal-types'
 
 // Agent permission asks (e.g. Claude/Codex "Do you want to proceed?") surface
@@ -24,8 +24,6 @@ export type MobileChatPermission = {
   options: Array<{ label: string; send: string }>
 }
 
-const ESCAPE = String.fromCharCode(27)
-
 /** Parse the live `agentStatus.interactivePrompt` approval envelope
  *  (`{ approval: { tool, summary } }`, emitted by the host on a PermissionRequest)
  *  into an Allow/Deny card. This is the reliable, agent-emitted signal — unlike
@@ -37,33 +35,16 @@ export function parseApprovalFromStatus(
   interactivePrompt: string | undefined | null,
   agent?: string
 ): MobileChatPermission | null {
-  if (!interactivePrompt) {
+  const envelope = parseNativeChatApprovalEnvelope(interactivePrompt, agent)
+  if (!envelope) {
     return null
   }
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(interactivePrompt)
-  } catch {
-    return null
-  }
-  if (!parsed || typeof parsed !== 'object') {
-    return null
-  }
-  const approval = (parsed as { approval?: unknown }).approval
-  if (!approval || typeof approval !== 'object') {
-    return null
-  }
-  const tool = (approval as { tool?: unknown }).tool
-  if (typeof tool !== 'string' || tool.length === 0) {
-    return null
-  }
-  const summary = (approval as { summary?: unknown }).summary
   return {
-    title: `Allow ${tool}?`,
-    detail: typeof summary === 'string' && summary.length > 0 ? summary : undefined,
+    title: `Allow ${envelope.tool}?`,
+    detail: envelope.summary,
     options: [
-      { label: 'Allow', send: nativeChatApprovalAcceptKey(agent) },
-      { label: 'Deny', send: ESCAPE }
+      { label: 'Allow', send: envelope.allowSend },
+      { label: 'Deny', send: envelope.denySend }
     ]
   }
 }
