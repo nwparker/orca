@@ -67,7 +67,6 @@ src/settings/native-notification-delivery-settings.test.tsx
 src/settings/notification-display-test.test.tsx
 src/settings/settings-screen-state.test.tsx
 src/settings/voice-settings-poller-refresh.test.tsx
-src/source-control/MobileGitHistoryList.test.tsx
 src/source-control/mobile-branch-compare.test.ts
 src/source-control/mobile-create-pr-action.test.ts
 src/source-control/mobile-git-status.test.ts
