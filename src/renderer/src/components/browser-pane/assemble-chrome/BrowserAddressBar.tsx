@@ -233,8 +233,7 @@ export default function BrowserAddressBar({
     // cycle can cause a transient blur on the input. Without this guard the
     // popover opens on focus, immediately gets a blur, and closes ~150ms later
     // — producing the "flash then disappear" on first click.
-    const elapsed = Date.now() - openedAtRef.current
-    const grace = elapsed < 400
+    const grace = Date.now() - openedAtRef.current < 400
     if (blurCloseTimerRef.current !== null) {
       window.clearTimeout(blurCloseTimerRef.current)
     }
@@ -460,12 +459,8 @@ export default function BrowserAddressBar({
             align="start"
             sideOffset={4}
             className="w-[var(--radix-popover-trigger-width)] p-0"
-            onOpenAutoFocus={(e) => {
-              // Why: prevent the popover from stealing focus away from the
-              // address bar input. The user is still typing; the popover is
-              // an overlay of suggestions, not a focus target.
-              e.preventDefault()
-            }}
+            // Keep focus in the address bar while suggestions open.
+            onOpenAutoFocus={(e) => e.preventDefault()}
           >
             <BrowserAddressBarSuggestionList
               suggestions={suggestions}
