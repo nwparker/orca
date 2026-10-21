@@ -42,6 +42,8 @@ export function useMobileSessionTerminalInput(scope: MobileSessionFileActionsMod
     clearPendingLiveInputCommit,
     showToast,
     getTerminalRef,
+    unsubscribeTerminal,
+    subscribeToTerminal,
     hostQueryReplyInputSupportedRef
   } = scope
   const toggleLiveInput = useCallback(() => {
@@ -230,13 +232,28 @@ export function useMobileSessionTerminalInput(scope: MobileSessionFileActionsMod
     if (!client) {
       return
     }
-    getTerminalRef(target.handle)?.clear()
+    const generation = client.getGeneration?.() ?? 0
+    const terminal = getTerminalRef(target.handle)
+    const isCurrent = () =>
+      clientRef.current === client &&
+      (client.getGeneration?.() ?? 0) === generation &&
+      getTerminalRef(target.handle) === terminal
     try {
-      // The reply is unread: main toasted success on any fulfilled envelope, refusal included.
-      await terminalBufferClear.request(client, { terminal: target.handle })
+      const response = await terminalBufferClear.request(client, { terminal: target.handle })
+      if (!isCurrent()) {
+        return
+      }
+      if (terminalBufferClear.interpret(response) !== true) {
+        showToast("Couldn't clear terminal", 1500)
+        return
+      }
+      unsubscribeTerminal(target.handle)
+      subscribeToTerminal(target.handle)
       showToast('Terminal cleared')
     } catch {
-      showToast("Couldn't clear terminal", 1500)
+      if (isCurrent()) {
+        showToast("Couldn't clear terminal", 1500)
+      }
     }
   }
   return {
