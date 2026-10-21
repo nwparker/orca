@@ -74,7 +74,7 @@ function setFieldValue(
   value: string
 ): void {
   const input = renderer.root
-    .findAllByType('TextInput')
+    .findAll((node) => String(node.type) === 'TextInput')
     .find((node) => node.props.accessibilityLabel === accessibilityLabel)
   if (!input) {
     throw new Error(`${accessibilityLabel} input not found`)
@@ -86,7 +86,7 @@ function setFieldValue(
 
 function findSaveButton(renderer: ReactTestRenderer) {
   const button = renderer.root
-    .findAllByType('Pressable')
+    .findAll((node) => String(node.type) === 'Pressable')
     .find((node) => node.props.accessibilityLabel === 'Save host')
   if (!button) {
     throw new Error('Save button not found')
@@ -104,16 +104,18 @@ async function pressSave(renderer: ReactTestRenderer): Promise<void> {
 }
 
 function findText(renderer: ReactTestRenderer, match: string): boolean {
-  return renderer.root.findAllByType('Text').some((node) => {
-    const children = node.props.children
-    if (typeof children === 'string') {
-      return children.includes(match)
-    }
-    if (Array.isArray(children)) {
-      return children.join('').includes(match)
-    }
-    return false
-  })
+  return renderer.root
+    .findAll((node) => String(node.type) === 'Text')
+    .some((node) => {
+      const children = node.props.children
+      if (typeof children === 'string') {
+        return children.includes(match)
+      }
+      if (Array.isArray(children)) {
+        return children.join('').includes(match)
+      }
+      return false
+    })
 }
 
 describe('edit host handleSave', () => {
@@ -246,6 +248,28 @@ describe('edit host handleSave', () => {
 
     act(() => renderer.unmount())
   })
+  it('does not navigate again if the user leaves while the save is pending', async () => {
+    let resolveSave = () => {}
+    dependencies.updateHostNameAndEndpoint.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveSave = resolve
+        })
+    )
+    const renderer = await renderEditHostRoute()
+    setFieldValue(renderer, 'Address', '192.168.1.20:6768')
+    await pressSave(renderer)
+    act(() => {
+      renderer.root.findByProps({ accessibilityLabel: 'Back' }).props.onPress()
+      renderer.unmount()
+    })
+    expect(dependencies.back).toHaveBeenCalledTimes(1)
+    await act(async () => {
+      resolveSave()
+    })
+    expect(dependencies.back).toHaveBeenCalledTimes(1)
+    expect(dependencies.refreshHostClient).toHaveBeenCalledWith('host-1')
+  })
 })
 
 describe('edit host load() error states', () => {
@@ -267,7 +291,7 @@ describe('edit host load() error states', () => {
     const renderer = await renderEditHostRoute()
 
     expect(findText(renderer, 'Missing host.')).toBe(true)
-    expect(renderer.root.findAllByType('TextInput')).toHaveLength(0)
+    expect(renderer.root.findAll((node) => String(node.type) === 'TextInput')).toHaveLength(0)
 
     act(() => renderer.unmount())
   })
@@ -277,7 +301,7 @@ describe('edit host load() error states', () => {
     const renderer = await renderEditHostRoute()
 
     expect(findText(renderer, 'This host was removed from this phone.')).toBe(true)
-    expect(renderer.root.findAllByType('TextInput')).toHaveLength(0)
+    expect(renderer.root.findAll((node) => String(node.type) === 'TextInput')).toHaveLength(0)
 
     act(() => renderer.unmount())
   })
@@ -287,7 +311,7 @@ describe('edit host load() error states', () => {
     const renderer = await renderEditHostRoute()
 
     expect(findText(renderer, 'storage unreadable')).toBe(true)
-    expect(renderer.root.findAllByType('TextInput')).toHaveLength(0)
+    expect(renderer.root.findAll((node) => String(node.type) === 'TextInput')).toHaveLength(0)
 
     act(() => renderer.unmount())
   })
