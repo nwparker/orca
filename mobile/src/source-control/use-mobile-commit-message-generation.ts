@@ -1,5 +1,6 @@
 import {
   useCallback,
+  useLayoutEffect,
   useRef,
   type Dispatch,
   type MutableRefObject,
@@ -36,12 +37,14 @@ export function useMobileCommitMessageGeneration(params: Params) {
   const runRef = useRef(0)
   const activeRunRef = useRef<number | null>(null)
   const scopeRef = useRef({ client, worktreeId })
-  if (scopeRef.current.client !== client || scopeRef.current.worktreeId !== worktreeId) {
-    scopeRef.current = { client, worktreeId }
-    runRef.current += 1
-    activeRunRef.current = null
-    setGeneratingMessage(false)
-  }
+  useLayoutEffect(() => {
+    if (scopeRef.current.client !== client || scopeRef.current.worktreeId !== worktreeId) {
+      scopeRef.current = { client, worktreeId }
+      runRef.current += 1
+      activeRunRef.current = null
+      setGeneratingMessage(false)
+    }
+  }, [client, worktreeId, setGeneratingMessage])
 
   // AI-generate a commit message from the staged diff. Matches desktop: the
   // button is always available; a missing model surfaces as a toast.

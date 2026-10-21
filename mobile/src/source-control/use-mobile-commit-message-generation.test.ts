@@ -1,4 +1,4 @@
-import { createElement, useRef, useState } from 'react'
+import { createElement, startTransition, Suspense, useRef, useState } from 'react'
 import { act, create, type ReactTestRenderer } from 'react-test-renderer'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { RpcClient } from '../transport/rpc-client'
@@ -35,7 +35,16 @@ const view: {
   cancel: (() => void) | null
 } = { generating: false, message: '', error: null, type: null, generate: null, cancel: null }
 
-function Harness({ worktreeId = 'wt-1' }: { worktreeId?: string }): null {
+const suspended = new Promise<void>(() => {})
+const suspendedRender = vi.fn()
+
+function Harness({
+  worktreeId = 'wt-1',
+  suspend
+}: {
+  worktreeId?: string
+  suspend?: boolean
+}): null {
   const [message, setMessage] = useState('')
   const [generating, setGenerating] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -51,6 +60,10 @@ function Harness({ worktreeId = 'wt-1' }: { worktreeId?: string }): null {
     setCommitMessage: setMessage,
     setActionError: setError
   })
+  if (suspend) {
+    suspendedRender()
+    throw suspended
+  }
   view.generating = generating
   view.message = message
   view.error = error
@@ -154,6 +167,37 @@ describe('useMobileCommitMessageGeneration', () => {
       await Promise.all([first, second])
     })
     expect(view.message).toBe('one generation')
+  })
+
+  it('keeps the current generation when a workspace transition suspends before commit', async () => {
+    const render = (suspend?: boolean) =>
+      createElement(
+        Suspense,
+        { fallback: null },
+        createElement(Harness, {
+          worktreeId: suspend ? 'wt-2' : 'wt-1',
+          suspend
+        })
+      )
+    act(() => {
+      renderer = create(render())
+    })
+    let pending: Promise<void> | undefined
+    act(() => {
+      pending = view.generate?.()
+    })
+    suspendedRender.mockClear()
+    act(() => {
+      startTransition(() => renderer?.update(render(true)))
+    })
+    expect(suspendedRender).toHaveBeenCalled()
+    expect(view.generating).toBe(true)
+    await act(async () => {
+      reply.resolve?.({ success: true, message: 'current workspace' })
+      await pending
+    })
+    expect(view.message).toBe('current workspace')
+    expect(view.generating).toBe(false)
   })
 
   it('shows no error from a run that was stopped and then failed', async () => {
