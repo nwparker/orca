@@ -166,9 +166,7 @@ export function MobileSessionAccessoryKeys({
               if (!key.repeatable) {
                 return
               }
-              const input = createTerminalLiveAccessoryInput(key)
-              void handleAccessoryKey(input)
-              startAccessoryRepeat(input)
+              startAccessoryRepeat(createTerminalLiveAccessoryInput(key))
             }}
             onPressOut={() => {
               if (key.repeatable) {
