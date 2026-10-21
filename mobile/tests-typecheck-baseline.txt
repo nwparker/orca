@@ -21,7 +21,6 @@ src/components/mobile-agent-icon-gradient.test.ts
 src/components/pr-sidebar/PRCommentsSection.test.ts
 src/diagnostics/connection-diagnostics-submission.test.ts
 src/dictation/mobile-dictation-setup.test.ts
-src/files/MobileFileExplorerPanel.test.ts
 src/files/MobileFileMarkdownPreview.test.ts
 src/hooks/mobile-dictation-desktop-start.test.ts
 src/host-edit-route-accessibility.test.ts
