@@ -22,8 +22,6 @@ import { mobileNativeChatScopeKey } from './mobile-native-chat-scope-key'
 
 export type { MobileNativeChatController } from './mobile-native-chat-controller-contract'
 
-const NATIVE_CHAT_STREAM_THROTTLE_MS = 50
-
 /** Owns mobile native-chat state and teardown outside the already dense session
  *  route. The route remains responsible only for choosing and rendering the view. */
 export function useMobileNativeChatController(args: {
@@ -142,7 +140,7 @@ export function useMobileNativeChatController(args: {
     activeChatStructured
       ? undefined
       : mobileNativeChatStreamPreview(nativeChatStatus, nativeChatAgentWorking),
-    NATIVE_CHAT_STREAM_THROTTLE_MS
+    50
   )
   const {
     permission: legacyNativeChatPermission,
@@ -241,6 +239,7 @@ export function useMobileNativeChatController(args: {
       modelSwitchCommand: activeSessionTab?.agentStatus?.modelSwitchCommand,
       structured: {
         optionPickerRequest: structuredNativeChat.optionPickerRequest,
+        optionSurface: structuredNativeChat.optionSurface,
         conversationCommands: structuredNativeChat.conversationCommands,
         snapshot: structuredNativeChat.optionSnapshot,
         pendingId: structuredNativeChat.pendingOptionId,

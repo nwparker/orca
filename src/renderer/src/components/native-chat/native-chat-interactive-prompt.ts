@@ -1,4 +1,4 @@
-import { nativeChatApprovalAcceptKey } from '../../../../shared/native-chat-agent-support'
+import { parseNativeChatApprovalEnvelope } from '../../../../shared/native-chat-approval-envelope'
 import { translate } from '@/i18n/i18n'
 import type {
   AgentJournalApprovalItem,
@@ -64,45 +64,26 @@ export type InteractivePromptCard =
   | { kind: 'approval'; approval: ChatApproval }
   | null
 
-const ESCAPE = String.fromCharCode(27)
-
-/** Parse the desktop-only approval envelope; question parsing stays cross-platform. */
+/** Desktop card for the shared approval envelope; question parsing stays cross-platform. */
 export function parseApprovalFromStatus(
   interactivePrompt: string | undefined | null,
   agent?: string
 ): ChatApproval | null {
-  if (!interactivePrompt) {
+  const envelope = parseNativeChatApprovalEnvelope(interactivePrompt, agent)
+  if (!envelope) {
     return null
   }
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(interactivePrompt)
-  } catch {
-    return null
-  }
-  if (!parsed || typeof parsed !== 'object') {
-    return null
-  }
-  const approval = (parsed as { approval?: unknown }).approval
-  if (!approval || typeof approval !== 'object') {
-    return null
-  }
-  const tool = (approval as { tool?: unknown }).tool
-  if (typeof tool !== 'string' || tool.length === 0) {
-    return null
-  }
-  const summary = (approval as { summary?: unknown }).summary
   return {
     title: translate('components.native-chat.approval.title', 'Allow {{value0}}?', {
-      value0: tool
+      value0: envelope.tool
     }),
-    detail: typeof summary === 'string' && summary.length > 0 ? summary : undefined,
+    detail: envelope.summary,
     options: [
       {
         label: translate('components.native-chat.approval.allow', 'Allow'),
-        send: nativeChatApprovalAcceptKey(agent)
+        send: envelope.allowSend
       },
-      { label: translate('components.native-chat.approval.deny', 'Deny'), send: ESCAPE }
+      { label: translate('components.native-chat.approval.deny', 'Deny'), send: envelope.denySend }
     ]
   }
 }

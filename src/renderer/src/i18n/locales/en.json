@@ -157,6 +157,27 @@
     },
     "request": {
       "pairedServerWorkspace": "This workspace runs on a paired server. Use that server's browser tabs."
+    },
+    "newTab": {
+      "emptyHint": "Search or enter an address above. Sites you visit, dev servers running in this workspace, and its PR and issue will show up here.",
+      "openServerFailed": "Couldn’t open {{address}}",
+      "removedFromHistory": "Removed “{{title}}” from history",
+      "removeSuggestion": "Remove from history",
+      "state": {
+        "closed": "Closed",
+        "draft": "Draft",
+        "merged": "Merged",
+        "open": "Open"
+      },
+      "suggested": "Suggested",
+      "thisWorkspace": "This workspace",
+      "undo": "Undo",
+      "checks": {
+        "failing": "Checks failing",
+        "passing": "Checks passing",
+        "pending": "Checks pending"
+      },
+      "runningElsewhere": "{{count}} running in other workspaces"
     }
   },
   "editor": {
@@ -7401,9 +7422,8 @@
           "ee110e1830": "No default base ref"
         },
         "BrowserDefaultZoomSetting": {
-          "2622126877": "Zoom level applied to newly opened browser tabs.",
-          "bbeec087d3": "Applied to newly opened browser tabs.",
-          "265597101f": "Default Zoom"
+          "265597101f": "Default Zoom",
+          "siteDefault": "Zoom for sites you haven't zoomed."
         },
         "BrowserHomePageSetting": {
           "d4ddcd0056": "Save",
@@ -12494,6 +12514,12 @@
           "cardDescription": "Created per workspace from an environment recipe.",
           "setUpRecipes": "Set up recipes"
         },
+        "ReleaseBuildPicker": {
+          "build": "Build",
+          "searchLabel": "Search builds",
+          "searchPlaceholder": "Search builds…",
+          "noMatches": "No matching builds."
+        },
         "ReleaseChannelSection": {
           "switchFailed": "Could not switch to that build.",
           "title": "Release channel",
@@ -16971,7 +16997,6 @@
             "95af781091": "Send feedback to an agent",
             "ac39b9366b": "Send",
             "a3508d7e6e": "{{value0}} annotation{{value1}} ready. Select another element or copy all feedback.",
-            "f796c774a4": "Type a URL above to start browsing.",
             "366bf5d62c": "New Tab",
             "1c78adc73d": "Open Externally",
             "da68d35f7b": "Open failed page in default browser",
@@ -17073,7 +17098,16 @@
             "bf648471c5": "Creating…",
             "53bbe3dab4": "Imported {{value0}} cookies from file.",
             "c5f0e4d3b2a1": "Imported {{value0}} cookies from {{value1}} ({{value2}}).",
-            "d6a1f5e4c3b2": "Imported {{value0}} cookies from {{value1}}."
+            "d6a1f5e4c3b2": "Imported {{value0}} cookies from {{value1}}.",
+            "zoom": "Zoom",
+            "zoomOut": "Zoom out",
+            "zoomIn": "Zoom in",
+            "resetZoom": "Reset zoom",
+            "appearance": "Appearance",
+            "appearanceMatchOrca": "Match Orca",
+            "appearanceLight": "Light",
+            "appearanceDark": "Dark",
+            "zoomPercent": "Zoom {{value0}}%"
           },
           "GrabConfirmationSheet": {
             "314a0aaa5b": "Attach to AI",
@@ -17097,7 +17131,8 @@
               "bar": {
                 "suggestions": {
                   "87fcdd0da9": "{{value0}} Search"
-                }
+                },
+                "placeholder": "Search or enter URL"
               }
             }
           },

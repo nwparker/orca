@@ -18,7 +18,7 @@
     "@hono/node-server": "^2.1.2",
     "@orca-cloud/postgres-schema": "workspace:*",
     "@orca-cloud/relay-contract": "workspace:*",
-    "hono": "^4.13.10",
+    "hono": "^4.13.11",
     "jose": "^6.2.12",
     "pg": "^8.22.0",
     "tweetnacl": "^1.0.3",
@@ -31,6 +31,6 @@
     "@types/ws": "^8.18.1",
     "tsx": "^4.23.15",
     "typescript": "^5.9.3",
-    "vitest": "^4.1.11"
+    "vitest": "^4.1.12"
   }
 }

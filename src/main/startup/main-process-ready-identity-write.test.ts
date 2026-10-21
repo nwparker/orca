@@ -76,6 +76,10 @@ vi.mock('../persistence', () => ({
       return {}
     }
     onSettingsChanged() {}
+    getUI() {
+      return {}
+    }
+    onUIChanged() {}
     getSshTargets() {
       return []
     }
@@ -87,6 +91,8 @@ vi.mock('../persistence/profile-state/profile-state-startup-authority', () => ({
     store: {
       getSettings: () => ({}),
       onSettingsChanged: () => {},
+      getUI: () => ({}),
+      onUIChanged: () => {},
       getSshTargets: () => []
     }
   })
@@ -119,7 +125,8 @@ vi.mock('../browser/browser-manager', () => ({
     installCertificateRequestGuard: vi.fn(),
     removeCertificateRequestGuard: vi.fn(),
     notifyPermissionDenied: vi.fn(),
-    handleGuestWillDownload: vi.fn()
+    handleGuestWillDownload: vi.fn(),
+    setSiteDisplayController: vi.fn()
   }
 }))
 vi.mock('../orca-profiles/profile-index-store', () => ({
