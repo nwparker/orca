@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Alert, Pressable, Text, View } from 'react-native'
 import { SafeAreaView, useSafeAreaFrame } from 'react-native-safe-area-context'
 import { ChevronLeft, Save } from 'lucide-react-native'
+import { useWorkspaceExecutionHost } from '../navigation/workspace-execution-host'
 import { useWorkspaceRouteHandoff } from '../navigation/workspace-route-handoff'
 import { getWorktreeLabel } from '../session/worktree-label'
 import { colors, spacing } from '../theme/mobile-theme'
@@ -38,6 +39,18 @@ type Props = {
 }
 
 export function MobileFilePreviewScreen({ route }: Props) {
+  const executionHost = useWorkspaceExecutionHost()
+  const documentKey = route.ok
+    ? [
+        route.params.hostId,
+        executionHost,
+        sourceKeyForPreview(previewSourceFromRoute(route.params))
+      ]
+    : ['invalid', route.message]
+  return <MobileFilePreviewDocument key={JSON.stringify(documentKey)} route={route} />
+}
+
+function MobileFilePreviewDocument({ route }: Props) {
   useMobileColorScheme()
   // Use the shared route handoff to keep this screen within the bundle asset budget.
   const router = useWorkspaceRouteHandoff()
@@ -68,6 +81,7 @@ export function MobileFilePreviewScreen({ route }: Props) {
     [routePreviewSource]
   )
   const previewSourceKeyRef = useRef(previewSourceKey)
+  const previewLoadRevisionRef = useRef(0)
   const lineColumn = useMemo(
     () =>
       previewParams
@@ -78,7 +92,6 @@ export function MobileFilePreviewScreen({ route }: Props) {
 
   useEffect(() => {
     setPreviewSource(routePreviewSource)
-    draftSourceKeyRef.current = null
   }, [routePreviewSource])
 
   useEffect(() => {
@@ -94,7 +107,11 @@ export function MobileFilePreviewScreen({ route }: Props) {
   }, [savedContent])
 
   const loadPreview = useCallback(async () => {
+    const loadRevision = ++previewLoadRevisionRef.current
     const loadSourceKey = previewSourceKey
+    const isCurrentLoad = () =>
+      previewLoadRevisionRef.current === loadRevision &&
+      previewSourceKeyRef.current === loadSourceKey
     if (!previewParams || !previewSource || loadSourceKey !== routePreviewSourceKey) {
       setPreview(previewError(route.ok ? 'Unable to load preview' : route.message))
       return
@@ -116,14 +133,22 @@ export function MobileFilePreviewScreen({ route }: Props) {
     setSaveError('')
     try {
       const result = await loadMobileFilePreview(client, previewSource, undefined, {
-        onTerminalArtifactSourceRefreshed: setPreviewSource,
+        onTerminalArtifactSourceRefreshed: (source) => {
+          if (isCurrentLoad()) {
+            setPreviewSource(source)
+          }
+        },
         refreshGrant: true
       })
-      if (previewSourceKeyRef.current !== loadSourceKey) {
+      if (!isCurrentLoad()) {
         return
       }
       if (shouldKeepDirtyDraftOnPreviewLoadResult(preserveDirtyDraft, result)) {
         setSaveError(result.message)
+        return
+      }
+      // A refreshed preview can become truncated or binary while this editor owns a dirty draft.
+      if (preserveDirtyDraft) {
         return
       }
       const loadedContent =
@@ -141,6 +166,9 @@ export function MobileFilePreviewScreen({ route }: Props) {
       }
       setPreview(result)
     } catch (err) {
+      if (!isCurrentLoad()) {
+        return
+      }
       const message = err instanceof Error ? err.message : 'Unable to load preview'
       if (preserveDirtyDraft) {
         setSaveError(message)
@@ -160,6 +188,9 @@ export function MobileFilePreviewScreen({ route }: Props) {
 
   useEffect(() => {
     void loadPreview()
+    return () => {
+      previewLoadRevisionRef.current += 1
+    }
   }, [loadPreview])
 
   const retry = useMemo(
