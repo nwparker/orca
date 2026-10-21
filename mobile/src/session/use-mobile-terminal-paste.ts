@@ -2,6 +2,7 @@ import { separateImagePasteFromFollowingText } from '../../../src/shared/image-p
 import { reportWorkerTerminalUserInput } from '../terminal/worker-terminal-takeover-report'
 import { useCallback, type RefObject } from 'react'
 import { terminalInputSend } from '../terminal/mobile-terminal-operations'
+import { TERMINAL_INPUT_SEND_OPTIONS } from '../terminal/terminal-send-request'
 import { useClipboardReader } from '../platform/clipboard'
 import type { TerminalModes } from '../terminal/terminal-webview-contract'
 import type { RpcClient } from '../transport/rpc-client'
@@ -120,17 +121,24 @@ export function useMobileTerminalPaste({
       ) {
         return
       }
-      const response = await terminalInputSend.request(currentClient, {
-        terminal: targetHandle,
-        text: payload,
-        enter: false,
-        ...(deviceTokenRef.current
-          ? { client: { id: deviceTokenRef.current, type: 'mobile' as const } }
-          : {})
-      })
-      if (terminalInputSend.interpret(response) === true) {
-        reportWorkerTerminalUserInput(currentClient, targetHandle)
+      const response = await terminalInputSend.request(
+        currentClient,
+        {
+          terminal: targetHandle,
+          text: payload,
+          enter: false,
+          ...(deviceTokenRef.current
+            ? { client: { id: deviceTokenRef.current, type: 'mobile' as const } }
+            : {})
+        },
+        TERMINAL_INPUT_SEND_OPTIONS
+      )
+      if (terminalInputSend.interpret(response) !== true) {
+        onError()
+        showToast('Paste failed', 1500)
+        return
       }
+      reportWorkerTerminalUserInput(currentClient, targetHandle)
       onSuccess()
       refreshCanPaste()
     } catch (e) {
