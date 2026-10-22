@@ -239,7 +239,11 @@ export function useMobileSessionTerminalInput(scope: MobileSessionFileActionsMod
       (client.getGeneration?.() ?? 0) === generation &&
       getTerminalRef(target.handle) === terminal
     try {
-      const response = await terminalBufferClear.request(client, { terminal: target.handle })
+      const response = await terminalBufferClear.request(
+        client,
+        { terminal: target.handle },
+        { failWhenDisconnected: true }
+      )
       if (!isCurrent()) {
         return
       }
