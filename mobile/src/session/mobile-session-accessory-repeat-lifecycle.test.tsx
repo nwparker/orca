@@ -267,4 +267,40 @@ describe('mounted accessory-repeat delivery lifecycle', () => {
     await act(async () => finishPreflight({ kind: 'allow-raw' }))
     expect(view.writes()).toHaveLength(0)
   })
+
+  it.each(['refusal', 'disconnect'] as const)(
+    'stops on %s until a new press instead of retrying held input',
+    async (failure) => {
+      const view = await mount()
+      if (failure === 'refusal') {
+        view.client.sendRequest.mockResolvedValue({
+          id: 'input',
+          ok: false,
+          error: { code: 'refused', message: 'Input not accepted' }
+        })
+      } else {
+        view.client.sendRequest.mockRejectedValue(new Error('Disconnected'))
+      }
+      act(() => view.current().startAccessoryRepeat(input))
+      await view.advance(1000)
+      expect(view.writes()).toHaveLength(1)
+      view.client.sendRequest.mockResolvedValue(accepted)
+      await view.advance(1000)
+      expect(view.writes()).toHaveLength(1)
+      act(() => view.current().startAccessoryRepeat(input))
+      await view.advance(445)
+      expect(view.writes().length).toBeGreaterThan(2)
+      expect(
+        view
+          .writes()
+          .every(
+            ([, params]) =>
+              typeof params === 'object' &&
+              params !== null &&
+              'terminal' in params &&
+              params.terminal === 'a'
+          )
+      ).toBe(true)
+    }
+  )
 })
