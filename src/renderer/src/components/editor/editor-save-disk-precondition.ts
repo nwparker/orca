@@ -32,7 +32,7 @@ export function editorTabModelUri(state: AppState, file: OpenFile): string {
 }
 
 /** Whether the tab edits its Monaco model directly; rich, notebook, CSV and preview views don't. */
-function isCodeViewTab(state: AppState, file: OpenFile): boolean {
+export function isCodeViewTab(state: AppState, file: OpenFile): boolean {
   // Why: the Changes view renders its own diff model, not the shared text model.
   if (file.mode !== 'edit' || state.editorViewMode?.[file.id] === 'changes') {
     return false
@@ -71,7 +71,7 @@ export function editorModelSiblingTabs(state: AppState, file: OpenFile): OpenFil
  * write gets the writer's compatibility fallback: the client reads and compares, then writes.
  */
 export type EditorSavePrecondition =
-  | { kind: 'guarded'; signature: string; allowMissing: boolean }
+  | { kind: 'guarded'; signature: string; allowMissing: boolean; requireLosslessUtf8?: boolean }
   | { kind: 'explicit-overwrite' }
   | { kind: 'blocked'; reason: 'no-baseline' }
 
@@ -128,7 +128,12 @@ export function editorSavePrecondition(
     return { kind: 'blocked', reason: 'no-baseline' }
   }
   // Why: autosave must not resurrect a file deleted behind the editor's back; explicit saves may.
-  return { kind: 'guarded', signature: baseline, allowMissing: trigger !== 'autosave' }
+  return {
+    kind: 'guarded',
+    signature: baseline,
+    allowMissing: trigger !== 'autosave',
+    requireLosslessUtf8: trigger === 'autosave' || trigger === 'restart'
+  }
 }
 
 /** The only file write editor save code makes. */
@@ -146,7 +151,11 @@ export function writeEditorSave(
     content,
     access,
     write.kind === 'guarded'
-      ? { expectedSignature: write.signature, allowMissing: write.allowMissing }
+      ? {
+          expectedSignature: write.signature,
+          allowMissing: write.allowMissing,
+          ...(write.requireLosslessUtf8 ? { requireLosslessUtf8: true } : {})
+        }
       : undefined,
     beforeSend
   )

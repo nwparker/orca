@@ -20,7 +20,7 @@ const productionCells = () => Object.fromEntries([
 ].map(([ordinal, zone]) => [`production-gce-c${ordinal}`, {
     hostname: `c${ordinal}`, region: zone.slice(0, -2), zone,
     machine_type: 'e2-standard-4', boot_disk_gb: 30,
-    boot_image: 'https://www.googleapis.com/compute/v1/projects/cos-cloud/global/images/cos-stable-121-18867-528-21',
+    boot_image: 'https://www.googleapis.com/compute/v1/projects/cos-cloud/global/images/cos-121-18867-638-13',
     capacity_requests: 6_000, database_pool_max: zone.startsWith('asia-') ? 16 : 10, image,
     initially_enabled: false,
     connection_hard_cap: 3_000, connection_unobserved_bound: 60
@@ -39,7 +39,7 @@ test('accepts the exact production topology only after it is durably committed',
   assert.deepEqual(existing['production-gce-c27'], {
     hostname: 'c27', region: 'asia-east2', zone: 'asia-east2-a',
     machine_type: 'e2-standard-4', boot_disk_gb: 30,
-    boot_image: 'https://www.googleapis.com/compute/v1/projects/cos-cloud/global/images/cos-stable-121-18867-528-21',
+    boot_image: 'https://www.googleapis.com/compute/v1/projects/cos-cloud/global/images/cos-121-18867-638-13',
     capacity_requests: 6_000, database_pool_max: 16, image, initially_enabled: false,
     connection_hard_cap: 3_000, connection_unobserved_bound: 60
   })
@@ -147,7 +147,7 @@ test('accepts the one exact committed staging Asia cell', () => {
   const stagingCell = {
     hostname: 'c4', region: 'asia-east2', zone: 'asia-east2-a',
     machine_type: 'e2-standard-4', boot_disk_gb: 30,
-    boot_image: 'https://www.googleapis.com/compute/v1/projects/cos-cloud/global/images/cos-stable-121-18867-528-21',
+    boot_image: 'https://www.googleapis.com/compute/v1/projects/cos-cloud/global/images/cos-121-18867-638-13',
     capacity_requests: 6_000, database_pool_max: 10, image: stagingImage,
     initially_enabled: false, connection_hard_cap: 3_000,
     connection_unobserved_bound: 60

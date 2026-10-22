@@ -97,8 +97,103 @@ jobs:
           check-latest: true
 
       - run: pnpm install --frozen-lockfile
+      - name: Audit production and development dependencies
+        run: pnpm audit --json > security-dependencies.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cloud-dependency-audit
+          path: cloud/security-dependencies.json
+          retention-days: 30
       - run: pnpm build
       - run: pnpm typecheck
+
+  containers:
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft != true
+    name: Container security (${{ matrix.app }})
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [relay, push, relay-fence-broker, cloud-sql-proxy]
+    env:
+      APP: ${{ matrix.app }}
+      TRIVY_IMAGE: aquasec/trivy:0.76.1@sha256:790fd66d1697395d8693d1acaa1ea702406a20f109b6fc7bac8db623eca6c06c
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build or resolve the runtime image
+        run: |
+          set -euo pipefail
+          if test "$APP" = cloud-sql-proxy; then
+            IMAGE="$(sed -n '/variable "relay_gce_cloud_sql_proxy_image"/,/^}/s/.*default *= "\([^"]*\)"/\1/p' infra/terraform/variables.tf)"
+            [[ "$IMAGE" =~ ^gcr.io/cloud-sql-connectors/cloud-sql-proxy@sha256:[a-f0-9]{64}$ ]]
+            docker pull --platform linux/amd64 "$IMAGE"
+          else
+            IMAGE="orca-cloud-security:$APP"
+            docker build --platform linux/amd64 \
+              --build-arg "ORCA_RELAY_FENCE_IMAGE_COMMIT=$GITHUB_SHA" \
+              --file "apps/$APP/Dockerfile" --tag "$IMAGE" .
+          fi
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+
+      - name: Smoke test the nonroot Node runtime
+        if: matrix.app != 'cloud-sql-proxy'
+        run: |
+          docker run --rm --platform linux/amd64 --entrypoint sh "$IMAGE" -ec '
+            test "$(id -u)" -ne 0
+            ! command -v npm
+            ! command -v pnpm
+            module=app
+            if test "$1" = push; then module=push-server; fi
+            node --input-type=module -e "await import(\"./apps/$1/dist/$module.js\")"
+          ' sh "$APP"
+
+      - name: Smoke test broker tools and checksum fallback
+        if: matrix.app == 'relay-fence-broker'
+        run: |
+          docker run --rm --platform linux/amd64 --entrypoint sh "$IMAGE" -ec '
+            gcloud version
+            printf relay-security > /tmp/hash-input
+            test "$(gcloud storage hash --format="value(crc32c_hash)" /tmp/hash-input)" = "6oayYQ=="
+            terraform version
+            cd infra/terraform
+            terraform init -backend=false -input=false -lockfile=readonly
+            terraform validate
+          '
+
+      - name: Smoke test the official SQL proxy binary
+        if: matrix.app == 'cloud-sql-proxy'
+        run: docker run --rm --platform linux/amd64 "$IMAGE" --version
+
+      - name: Scan every severity and retain the complete inventory
+        run: |
+          mkdir -p security-reports
+          docker run --rm --volume /var/run/docker.sock:/var/run/docker.sock \
+            --volume "$PWD/security-reports:/reports" "$TRIVY_IMAGE" image \
+            --platform linux/amd64 --scanners vuln --ignorefile '' \
+            --format json --output /reports/vulnerabilities.json "$IMAGE"
+          docker run --rm --volume "$PWD/security-reports:/reports" "$TRIVY_IMAGE" convert \
+            --format cyclonedx --output /reports/sbom.cdx.json /reports/vulnerabilities.json
+
+      - name: Reject available fixes except dated upstream proxy rebuilds
+        run: |
+          jq '(.Results[]?.Vulnerabilities) |= ((. // []) | map(select(.FixedVersion != null and .FixedVersion != "")))' \
+            security-reports/vulnerabilities.json > security-reports/fixable.json
+          ignorefile=''
+          if test "$APP" = cloud-sql-proxy; then
+            ignorefile=/repo/security/cloud-sql-proxy.trivyignore.yaml
+          fi
+          docker run --rm --volume "$PWD:/repo:ro" "$TRIVY_IMAGE" convert \
+            --ignorefile "$ignorefile" --show-suppressed --exit-code 1 \
+            /repo/security-reports/fixable.json
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cloud-container-security-${{ matrix.app }}
+          path: cloud/security-reports/
+          retention-days: 30
 
   # Runs in parallel with build. `pnpm test` compiles the workspace
   # packages it needs through pretest hooks, so it does not depend on
@@ -150,8 +245,27 @@ jobs:
 
       - uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: 1.15.8
+          terraform_version: 1.17.0
 
       - run: terraform -chdir=infra/terraform fmt -check -recursive
       - run: terraform -chdir=infra/terraform init -backend=false -input=false
       - run: terraform -chdir=infra/terraform validate
+
+      - name: Inventory provider binary vulnerabilities
+        env:
+          TRIVY_IMAGE: aquasec/trivy:0.76.1@sha256:790fd66d1697395d8693d1acaa1ea702406a20f109b6fc7bac8db623eca6c06c
+        run: |
+          mkdir -p security-reports
+          docker run --rm --volume "$PWD:/repo" "$TRIVY_IMAGE" rootfs \
+            --scanners vuln --ignorefile '' --format json \
+            --output /repo/security-reports/providers.json /repo/infra/terraform/.terraform/providers
+          docker run --rm --volume "$PWD/security-reports:/reports" "$TRIVY_IMAGE" convert \
+            --format cyclonedx --output /reports/providers.cdx.json /reports/providers.json
+          docker run --rm --volume "$PWD/security-reports:/reports" "$TRIVY_IMAGE" convert /reports/providers.json
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cloud-terraform-provider-security
+          path: cloud/security-reports/
+          retention-days: 30

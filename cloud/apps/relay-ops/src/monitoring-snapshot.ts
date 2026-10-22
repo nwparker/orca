@@ -113,8 +113,8 @@ const PointSchema = z.object({
   })
 })
 const TimeSeriesSchema = z.object({
-  metric: z.object({ labels: z.record(z.string()).default({}) }),
-  resource: z.object({ type: z.string(), labels: z.record(z.string()).default({}) }),
+  metric: z.object({ labels: z.record(z.string(), z.string()).default({}) }),
+  resource: z.object({ type: z.string(), labels: z.record(z.string(), z.string()).default({}) }),
   points: z.array(PointSchema).default([])
 })
 const TimeSeriesResponseSchema = z.object({

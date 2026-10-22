@@ -1,4 +1,4 @@
-FROM node:24.22.1-alpine AS build
+FROM node:24.22.1-alpine@sha256:feb76650b7195319268c59cb2d419c732d6c499b13bf5296f16ab59eb1f0a4f3 AS build
 WORKDIR /app
 RUN corepack enable
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
@@ -11,7 +11,7 @@ COPY apps/push apps/push
 COPY packages/postgres-schema packages/postgres-schema
 RUN pnpm --filter @orca-cloud/postgres-schema build && pnpm --filter @orca-cloud/push-contract build && pnpm --filter @orca-cloud/push build
 
-FROM node:24.22.1-alpine AS runtime
+FROM node:24.22.1-alpine@sha256:feb76650b7195319268c59cb2d419c732d6c499b13bf5296f16ab59eb1f0a4f3 AS runtime
 ENV NODE_ENV=production
 ENV PORT=8080
 WORKDIR /app
@@ -23,7 +23,10 @@ COPY apps/push/package.json apps/push/package.json
 COPY --from=build /app/packages/push-contract/dist packages/push-contract/dist
 COPY --from=build /app/packages/postgres-schema/dist packages/postgres-schema/dist
 COPY --from=build /app/apps/push/dist apps/push/dist
-RUN pnpm install --prod --frozen-lockfile --filter @orca-cloud/push...
+RUN pnpm install --prod --frozen-lockfile --filter @orca-cloud/push... \
+  && rm -rf /usr/local/lib/node_modules /opt/yarn-* /root/.cache /root/.local \
+  && rm -f /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack \
+    /usr/local/bin/pnpm /usr/local/bin/pnpx /usr/local/bin/yarn /usr/local/bin/yarnpkg
 USER node
 EXPOSE 8080
 CMD ["node", "apps/push/dist/index.js"]

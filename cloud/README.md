@@ -10,6 +10,10 @@ This directory is an independent pnpm workspace inside the Orca monorepo. Run
 its commands from `cloud/`, not the repository root. The source is covered by
 the repository's root [MIT license](../LICENSE).
 
+The [2026-10-21 security review](docs/relay-security-2026-10-21.md) records
+dependency/container scans, remaining upstream advisories, CI coverage, and
+the validation required before rolling out the updated images and host pins.
+
 ## Packages
 
 - `packages/relay-contract`: the wire contract shared by the relay, the

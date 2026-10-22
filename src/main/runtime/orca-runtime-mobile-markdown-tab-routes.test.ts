@@ -12,6 +12,7 @@ import { RemoteRuntimeClientError } from '../../shared/remote-runtime-client-err
 import { FILE_MUTATION_OWNERSHIP_RUNTIME_CAPABILITY } from '../../shared/protocol-version'
 import {
   FILE_WRITE_DISK_PRECONDITION_RUNTIME_CAPABILITY,
+  FILE_WRITE_IDENTICAL_RUNTIME_CAPABILITY,
   FILE_WRITE_IF_UNCHANGED_METHOD
 } from '../../shared/file-write-disk-precondition'
 import { SshHostNotServedError } from '../providers/ssh-host-not-served-error'
@@ -96,7 +97,8 @@ async function runtimeOnHost(
 
 const CURRENT_SERVER = [
   FILE_MUTATION_OWNERSHIP_RUNTIME_CAPABILITY,
-  FILE_WRITE_DISK_PRECONDITION_RUNTIME_CAPABILITY
+  FILE_WRITE_DISK_PRECONDITION_RUNTIME_CAPABILITY,
+  FILE_WRITE_IDENTICAL_RUNTIME_CAPABILITY
 ]
 /** A server from before #30605: it advertises no disk check and serves no `files.writeIfUnchanged`. */
 const PRE_DISK_CHECK_SERVER = [FILE_MUTATION_OWNERSHIP_RUNTIME_CAPABILITY]
@@ -269,6 +271,42 @@ describe("a phone's Markdown tab on a paired server's workspace", () => {
     expect(serverCalls).not.toContain('files.write')
     expect(serverCalls).not.toContain(FILE_WRITE_IF_UNCHANGED_METHOD)
     expect(await readFile(readme, 'utf8')).toBe('# Changed on the server\n')
+  })
+
+  it('saves on a server too old to check the disk when its changed disk already holds the text', async () => {
+    const { desktop, call, serverCalls } = await desktopOnServer('local', PRE_DISK_CHECK_SERVER)
+    const forward = call.getMockImplementation()!
+    call.mockImplementation(async (environmentId, method, params, ...rest) => {
+      if (method === 'status.get') {
+        await writeFile(readme, '# Phone\n')
+      }
+      return forward(environmentId, method, params, ...rest)
+    })
+
+    await expect(
+      desktop.saveMobileMarkdownTab(
+        `id:${TEST_WORKTREE_ID}`,
+        readme,
+        hashMarkdownContent('# Notes\n'),
+        '# Phone\n'
+      )
+    ).resolves.toMatchObject({ content: '# Phone\n', isDirty: false })
+    expect(serverCalls).toEqual(['files.read', 'status.get', 'files.read'])
+  })
+
+  it('sends a phone save straight to a v1 server guard, without reading first', async () => {
+    const { desktop, serverCalls } = await desktopOnServer('local', [
+      FILE_MUTATION_OWNERSHIP_RUNTIME_CAPABILITY,
+      FILE_WRITE_DISK_PRECONDITION_RUNTIME_CAPABILITY
+    ])
+    await desktop.saveMobileMarkdownTab(
+      `id:${TEST_WORKTREE_ID}`,
+      readme,
+      hashMarkdownContent('# Notes\n'),
+      '# Phone\n'
+    )
+    expect(serverCalls).toEqual(['files.read', 'status.get', 'files.writeIfUnchanged'])
+    expect(await readFile(readme, 'utf8')).toBe('# Phone\n')
   })
 
   it('refuses a save whose server was re-paired after its first read, writing nothing', async () => {

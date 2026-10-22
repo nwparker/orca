@@ -8,11 +8,13 @@ import { startEchoServer } from '../managed-server/lifecycle/orcad-stdio-bridge-
 import { fakeWslBridgeChildren, posixOrcadStdioBridge } from './wsl-orcad-bridge-test-child'
 import {
   WslOrcadConnectionManager,
-  WslOrcadConnectionSupersededError,
-  WslOrcadLaunchDeferredError,
   type WslOrcadConnection,
   type WslOrcadConnectionDependencies
 } from './wsl-orcad-connection'
+import {
+  WslOrcadConnectionSupersededError,
+  WslOrcadLaunchDeferredError
+} from './wsl-orcad-connection-errors'
 import type { WslOrcadLaunch } from './wsl-orcad-deploy'
 import { createWslOrcadHostTransport } from './wsl-orcad-host-transport'
 import { listenWslOrcadStdioBridge } from './wsl-orcad-stdio-bridge'
@@ -255,6 +257,23 @@ describe('WslOrcadConnectionManager', () => {
     await plain.catch(() => {})
     await expect(forced).rejects.toBeInstanceOf(WslOrcadConnectionSupersededError)
     expect(deployAndLaunch).toHaveBeenCalledTimes(1)
+  })
+
+  it("hands the deploy this desktop's enrolled pairing for the incumbent's terminal count", async () => {
+    const enrolled = parsePairingCode(
+      encodePairingOffer({
+        v: PAIRING_OFFER_VERSION,
+        endpoint: 'ws://127.0.0.1:41000',
+        deviceToken: 'enrolled-token',
+        publicKeyB64: Buffer.alloc(32, 7).toString('base64')
+      })
+    )
+    const { manager, deployAndLaunch } = setup({ getPairingOffer: () => enrolled })
+    await manager.ensure('Ubuntu')
+    expect(deployAndLaunch).toHaveBeenCalledWith(
+      'Ubuntu',
+      expect.objectContaining({ pairedOffer: enrolled })
+    )
   })
 
   it('throws the deferral and starts no bridge', async () => {
