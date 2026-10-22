@@ -104,15 +104,15 @@ export async function saveMobileClipboardImageAsTempFile(
   }
 }
 
-function imageUploadRequestOptions(deadline: number | undefined): SendRequestOptions | undefined {
+function imageUploadRequestOptions(deadline: number | undefined): [] | [SendRequestOptions] {
   if (deadline === undefined) {
-    return undefined
+    return []
   }
   const timeoutMs = deadline - Date.now()
   if (timeoutMs <= 0) {
     throw new Error('Image upload timed out')
   }
-  return { timeoutMs, budgetSpansConnect: true }
+  return [{ timeoutMs, budgetSpansConnect: true }]
 }
 
 async function uploadMobileClipboardImageTransaction(
@@ -124,7 +124,7 @@ async function uploadMobileClipboardImageTransaction(
   const startResponse = await clipboardImageUploadStart.request(
     client,
     { expectedBase64Length: contentBase64.length, connectionId },
-    imageUploadRequestOptions(deadline)
+    ...imageUploadRequestOptions(deadline)
   )
 
   // Why the raw refusal: a host too old to offer a slot answers with a code, and a small enough
@@ -138,7 +138,7 @@ async function uploadMobileClipboardImageTransaction(
         await clipboardImageSaveAsTempFile.request(
           client,
           { contentBase64, connectionId },
-          imageUploadRequestOptions(deadline)
+          ...imageUploadRequestOptions(deadline)
         )
       )
     }
@@ -166,7 +166,7 @@ async function uploadMobileClipboardImageTransaction(
               offset + MOBILE_CLIPBOARD_IMAGE_UPLOAD_CHUNK_BASE64_CHARS
             )
           },
-          imageUploadRequestOptions(deadline)
+          ...imageUploadRequestOptions(deadline)
         )
       )
     }
@@ -174,7 +174,7 @@ async function uploadMobileClipboardImageTransaction(
       await clipboardImageUploadCommit.request(
         client,
         { uploadId },
-        imageUploadRequestOptions(deadline)
+        ...imageUploadRequestOptions(deadline)
       )
     )
   } catch (error) {
@@ -184,9 +184,9 @@ async function uploadMobileClipboardImageTransaction(
       .request(
         client,
         { uploadId },
-        deadline === undefined
-          ? undefined
-          : { failWhenDisconnected: true, timeoutMs: 1_000, budgetSpansConnect: true }
+        ...(deadline === undefined
+          ? ([] as const)
+          : ([{ failWhenDisconnected: true, timeoutMs: 1_000, budgetSpansConnect: true }] as const))
       )
       .catch(() => {})
     throw error

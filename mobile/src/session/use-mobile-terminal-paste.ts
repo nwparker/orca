@@ -123,7 +123,7 @@ export function useMobileTerminalPaste({
         showToast('Paste canceled (computer changed)', 1500)
         return
       }
-      if (currentClient && currentClient.getState() !== 'connected') {
+      if (currentClient && connStateRef.current !== 'connected') {
         await waitForRpcClientReconnected(currentClient, 1_500)
       }
       if (!currentClient || connStateRef.current !== 'connected') {
