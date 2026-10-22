@@ -7103,8 +7103,6 @@
           "ee110e1830": "Sin ref base predeterminada"
         },
         "BrowserDefaultZoomSetting": {
-          "2622126877": "Nivel de zoom aplicado a nuevas pestañas del navegador.",
-          "bbeec087d3": "Se aplica a nuevas pestañas del navegador.",
           "265597101f": "Zoom predeterminado"
         },
         "BrowserHomePageSetting": {
@@ -16658,7 +16656,6 @@
             "95af781091": "Enviar comentarios a un agente",
             "ac39b9366b": "Enviar",
             "a3508d7e6e": "{{value0}} anotación{{value1}} listo. Seleccione otro elemento o copie todos los comentarios.",
-            "f796c774a4": "Escriba una URL arriba para comenzar a navegar.",
             "366bf5d62c": "Nueva pestaña",
             "1c78adc73d": "Abrir externamente",
             "da68d35f7b": "Abrir página fallida en el navegador predeterminado",
@@ -16784,7 +16781,8 @@
               "bar": {
                 "suggestions": {
                   "87fcdd0da9": "{{value0}} Buscar"
-                }
+                },
+                "placeholder": "Busca o introduce una URL"
               }
             }
           },
