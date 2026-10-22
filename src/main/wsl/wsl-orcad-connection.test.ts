@@ -220,10 +220,10 @@ describe('WslOrcadConnectionManager', () => {
     const incumbent = await manager.ensure('Ubuntu')
     expect(incumbent.deferredUpdate).toEqual(deferredUpdate)
     launches.push({ ...ready(first.port), fullVersion: '2.0.0' })
-    const updated = await manager.ensure('Ubuntu', { force: true })
+    const updated = await manager.ensure('Ubuntu', { intent: 'force' })
     expect(deployAndLaunch).toHaveBeenLastCalledWith(
       'Ubuntu',
-      expect.objectContaining({ force: true })
+      expect.objectContaining({ intent: 'force' })
     )
     expect(updated).toMatchObject({
       fullVersion: '2.0.0',
@@ -238,19 +238,19 @@ describe('WslOrcadConnectionManager', () => {
   it('runs a forced connect after a plain one in flight instead of joining it', async () => {
     const { manager, deployAndLaunch } = setup()
     const plain = manager.ensure('Ubuntu')
-    const forced = manager.ensure('Ubuntu', { force: true })
+    const forced = manager.ensure('Ubuntu', { intent: 'force' })
     await Promise.all([plain, forced])
     expect(deployAndLaunch).toHaveBeenCalledTimes(2)
     expect(deployAndLaunch).toHaveBeenLastCalledWith(
       'Ubuntu',
-      expect.objectContaining({ force: true })
+      expect.objectContaining({ intent: 'force' })
     )
   })
 
   it('drops a queued forced connect that a close overtook', async () => {
     const { manager, deployAndLaunch } = setup()
     const plain = manager.ensure('Ubuntu')
-    const forced = manager.ensure('Ubuntu', { force: true })
+    const forced = manager.ensure('Ubuntu', { intent: 'force' })
     await manager.close('Ubuntu')
     await plain.catch(() => {})
     await expect(forced).rejects.toBeInstanceOf(WslOrcadConnectionSupersededError)
@@ -258,7 +258,7 @@ describe('WslOrcadConnectionManager', () => {
   })
 
   it('throws the deferral and starts no bridge', async () => {
-    const { manager, launches, children } = setup()
+    const { manager, launches, children, onChange } = setup()
     launches.push({
       outcome: 'deferred',
       distro: 'Ubuntu',
@@ -270,6 +270,20 @@ describe('WslOrcadConnectionManager', () => {
     await expect(manager.ensure('Ubuntu')).rejects.toBeInstanceOf(WslOrcadLaunchDeferredError)
     expect(children.commands).toHaveLength(0)
     expect(manager.get('Ubuntu')).toBeNull()
+    // Nothing serves, so the deferral is what offers Update or Force.
+    expect(onChange).toHaveBeenLastCalledWith(
+      'Ubuntu',
+      null,
+      expect.objectContaining({
+        state: 'failed',
+        deferredUpdate: {
+          candidateVersion: '2.0.0',
+          code: 'live_terminals',
+          reason: 'Terminals are running.',
+          forceable: true
+        }
+      })
+    )
   })
 
   it('refuses a foreign server behind the port and closes its bridge', async () => {

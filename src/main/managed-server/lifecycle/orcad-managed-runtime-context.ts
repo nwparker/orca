@@ -10,7 +10,7 @@ import { computeLocalOrcadBuildHash } from '../../ssh/orcad-local-build-hash'
 import { sshOrcadHostTransport } from '../../ssh/orcad-ssh-host-transport'
 import type { OrcadHostTarget } from '../../ssh/orcad-host-transport'
 import type { OrcadActivationRecord } from '../activation/orcad-activation-record'
-import { refuseOrcadHostDowngrade } from '../../ssh/orcad-host-version-admission'
+import { admitOrcadRecordForIntent, type OrcadUpdateIntent } from './orcad-managed-update-decision'
 import {
   type OrcadTerminalCensus,
   UNVERIFIABLE_ORCAD_TERMINAL_CENSUS
@@ -129,7 +129,7 @@ export function probeManagedOrcadReadiness(
 export function managedOrcadDeployPolicy(
   context: Pick<OrcadRemoteContext<OrcadHostTarget>, 'activationRecord'>,
   appVersion: string,
-  force?: boolean
+  intent: OrcadUpdateIntent
 ): {
   census: OrcadTerminalCensus
   recountCensus: () => Promise<OrcadTerminalCensus>
@@ -148,14 +148,10 @@ export function managedOrcadDeployPolicy(
     // Nothing was fenced: this recount never asks the server.
     releaseIncumbentAdmission: async () => {},
     censusRecord: context.activationRecord,
-    // Why: a host another desktop stopped may hold state its newer build migrated, and this
-    // path has no linked record to check first, so only the fenced read can refuse it.
-    // An explicit force runs this version anyway, as `environment update --force` does.
-    admitRecord: (record, candidateVersion) =>
-      !force && refuseOrcadHostDowngrade(record, candidateVersion, appVersion)
-        ? `Orca ${record.activeAppVersion} last ran this host's server, newer than this ` +
-          `Orca (${appVersion}). Update Orca to start it.`
-        : null
+    // Why the intent's plan: a host another desktop stopped may hold state its newer build
+    // migrated, and a build the host rolled back from must not return on a connect; this path has
+    // no linked record to check first, so only the fenced read can refuse.
+    admitRecord: admitOrcadRecordForIntent(intent, appVersion)
   }
 }
 

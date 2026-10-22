@@ -10,7 +10,7 @@ import type { BrowserClientPageMetadataSnapshot } from './browser-client-page-me
  * can no longer reach its guest.
  *
  * `eventUrl` wins when a navigation event carries one: the tag's own getURL() can still report the
- * previous page while the event is being delivered. `loading` is forced for did-start-loading,
+ * previous page while the event is being delivered. `loading` is forced for a navigation start,
  * which fires before isLoading() flips.
  *
  * Why total rather than throwing: a guest destroyed in main leaves the tag holding its id, so
