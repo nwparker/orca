@@ -120,7 +120,7 @@ jobs:
 
       - uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: 1.15.8
+          terraform_version: 1.17.0
           terraform_wrapper: false
 
       - id: google-auth

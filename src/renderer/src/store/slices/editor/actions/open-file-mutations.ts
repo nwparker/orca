@@ -31,9 +31,6 @@ export function createOpenFileMutations(
   | 'markFileDirty'
   | 'setExternalMutation'
   | 'setLastKnownDiskSignature'
-  | 'clearPendingDiskBaselineVerification'
-  | 'setPendingDiskBaselineVerification'
-  | 'setPendingLiveDiskVerification'
   | 'clearSelfMoveEcho'
   | 'clearUntitled'
 > {
@@ -145,19 +142,6 @@ export function createOpenFileMutations(
 
     setLastKnownDiskSignature: (fileId, signature) =>
       set((s) => updateEditorBuffer(s, fileId, { lastKnownDiskSignature: signature })),
-
-    clearPendingDiskBaselineVerification: (fileId) =>
-      get().setPendingDiskBaselineVerification(fileId, false),
-
-    setPendingDiskBaselineVerification: (fileId, value) =>
-      set((s) =>
-        updateEditorBuffer(s, fileId, { pendingDiskBaselineVerification: value || undefined })
-      ),
-
-    setPendingLiveDiskVerification: (fileId, value) =>
-      set((s) =>
-        updateEditorBuffer(s, fileId, { pendingLiveDiskVerification: value || undefined })
-      ),
 
     clearSelfMoveEcho: (fileId) =>
       set((s) => {

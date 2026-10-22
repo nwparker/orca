@@ -16287,6 +16287,9 @@
             }
           }
         },
+        "staleViewEdit": {
+          "rejected": "Se descartó lo que escribiste recientemente en esta vista porque el archivo cambió en otra vista."
+        },
         "richMarkdownLargeTextPaste": {
           "tooLarge": "El contenido pegado es demasiado grande.",
           "stopped": "El pegado grande se detuvo antes de terminar.",
@@ -18332,9 +18335,9 @@
         "couldNotStart": "{{agent}} no pudo iniciarse.",
         "editSavedArguments": "Edítalos en Ajustes > Agentes > Argumentos.",
         "couldNotRestart": "{{agent}} no pudo reiniciarse.",
+        "cliTooOld": "{{agent}} {{installedVersion}} es demasiado antiguo para los chats. Actualiza a {{minimumVersion}} o una versión posterior.",
         "startTimedOut": "{{agent}} tardó demasiado en iniciarse (sin respuesta a {{method}} después de {{seconds}} s).",
         "startTimedOutKeepsHappening": "Si esto sigue ocurriendo, es posible que el equipo que ejecuta este chat esté sobrecargado.",
-        "codexCliTooOld": "Codex {{installedVersion}} es demasiado antiguo para los chats. Actualiza a {{minimumVersion}} o una versión posterior.",
         "notSignedIn": "{{agent}} no ha iniciado sesión.",
         "claudeSystemNotSignedIn": "Claude no ha iniciado sesión. Ejecuta `{{loginCommand}}` o elige una cuenta en los ajustes de Cuentas de Claude.",
         "claudeManagedNotSignedIn": "Esta cuenta de Claude no ha iniciado sesión. Vuelve a iniciar sesión en la configuración de Cuentas de Claude.",
@@ -19359,7 +19362,11 @@
           "discarded_other": "Se descartarán las ediciones sin guardar de {{count}} archivos:",
           "moreFiles": "y {{value}} más",
           "blocked_one": "Guarda o cierra antes {{count}} archivo sin guardar en {{name}}",
-          "blocked_other": "Guarda o cierra antes {{count}} archivos sin guardar en {{name}}"
+          "blocked_other": "Guarda o cierra antes {{count}} archivos sin guardar en {{name}}",
+          "closedToast_one": "Se cerró {{count}} archivo con ediciones sin guardar de {{workspace}}",
+          "closedToast_other": "Se cerraron {{count}} archivos con ediciones sin guardar de {{workspace}}",
+          "reopen": "Reabrir",
+          "reopenFailed": "No se pudieron reabrir algunos archivos. Abre un espacio de trabajo e intenta Reabrir de nuevo."
         }
       }
     },
@@ -20615,6 +20622,27 @@
       "siteMismatch": "Elige un proyecto del sitio de Jira del favorito o borra el filtro de proyectos.",
       "truncated": "No se pudieron mostrar algunos favoritos. Gestiona tus favoritos en Jira para acortar la lista.",
       "unsupported": "Actualiza el host de Jira para usar los favoritos."
+    }
+  },
+  "onboarding": {
+    "language": {
+      "back": "Idiomas",
+      "requestPrompt": "¿Qué idioma te gustaría que Orca admitiera?",
+      "requestSuccess": "Solicitud de idioma registrada. Puedes continuar la configuración.",
+      "requestError": "No se pudo registrar tu solicitud. Inténtalo de nuevo.",
+      "retry": "Reintentar",
+      "requestAction": "Solicitar idioma",
+      "title": "Idioma de la interfaz",
+      "device": "Idioma del sistema: {{language}}",
+      "unsupported": "Idioma del sistema: {{language}}. Este idioma aún no es compatible.",
+      "unknown": "No se pudo detectar el idioma del sistema. Elige uno a continuación.",
+      "loadError": "No se pudo cargar este idioma. Inténtalo de nuevo.",
+      "saveError": "No se pudo guardar tu preferencia de idioma. Inténtalo de nuevo.",
+      "other": "Otro idioma…",
+      "settingsError": "No se pudo cargar tu configuración.",
+      "loadingSettings": "Cargando configuración…",
+      "loading": "Cargando idioma…",
+      "saving": "Guardando idioma…"
     }
   }
 }

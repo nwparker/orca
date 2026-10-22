@@ -12518,6 +12518,9 @@
         "useRichMarkdownReviewData": {
           "f9d2acd6b0": "Todas as notas não enviadas"
         },
+        "staleViewEdit": {
+          "rejected": "O que você digitou recentemente nesta visualização foi descartado porque o arquivo foi alterado em outra visualização."
+        },
         "richMarkdownLargeTextPaste": {
           "tooLarge": "A colagem é muito grande.",
           "stopped": "A colagem de conteúdo extenso parou antes de terminar.",
@@ -19391,7 +19394,6 @@
         "couldNotRestart": "Não foi possível reiniciar {{agent}}.",
         "startTimedOut": "{{agent}} demorou demais para iniciar (sem resposta a {{method}} após {{seconds}}s).",
         "startTimedOutKeepsHappening": "Se isso continuar acontecendo, o computador que executa este chat pode estar sobrecarregado.",
-        "codexCliTooOld": "O Codex {{installedVersion}} é antigo demais para chats. Atualize para {{minimumVersion}} ou uma versão mais recente.",
         "notSignedIn": "{{agent}} não está conectado à conta.",
         "claudeSystemNotSignedIn": "O Claude não está conectado à conta. Execute `{{loginCommand}}` ou escolha uma conta nas configurações de Contas do Claude.",
         "claudeManagedNotSignedIn": "Esta conta do Claude não está conectada. Entre novamente nas configurações de Contas do Claude.",
@@ -20886,5 +20888,26 @@
       "unavailable": "Este espaço de trabalho está protegido ou indisponível."
     },
     "rowActions": "Ações para {{name}}"
+  },
+  "onboarding": {
+    "language": {
+      "back": "Idiomas",
+      "requestPrompt": "Qual idioma você gostaria que o Orca oferecesse?",
+      "requestSuccess": "Solicitação de idioma registrada. Você pode continuar a configuração.",
+      "requestError": "Não foi possível registrar sua solicitação. Tente novamente.",
+      "retry": "Tentar novamente",
+      "requestAction": "Solicitar idioma",
+      "title": "Idioma de exibição",
+      "device": "Idioma do sistema: {{language}}",
+      "unsupported": "Idioma do sistema: {{language}}. Este idioma ainda não é compatível.",
+      "unknown": "Não foi possível detectar o idioma do sistema. Escolha um idioma abaixo.",
+      "loadError": "Não foi possível carregar este idioma. Tente novamente.",
+      "saveError": "Não foi possível salvar sua preferência de idioma. Tente novamente.",
+      "other": "Outro idioma…",
+      "settingsError": "Não foi possível carregar suas configurações.",
+      "loadingSettings": "Carregando configurações…",
+      "loading": "Carregando idioma…",
+      "saving": "Salvando idioma…"
+    }
   }
 }

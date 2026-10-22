@@ -16394,6 +16394,9 @@
             }
           }
         },
+        "staleViewEdit": {
+          "rejected": "Votre saisie récente dans cette vue a été abandonnée, car le fichier a été modifié dans une autre vue."
+        },
         "richMarkdownLargeTextPaste": {
           "tooLarge": "Le collage est trop volumineux.",
           "stopped": "La grosse pâte s'est arrêtée avant d'avoir fini.",
@@ -18441,9 +18444,9 @@
         "couldNotStart": "{{agent}} n'a pas pu démarrer.",
         "editSavedArguments": "Modifiez-les dans Paramètres > Agents > Arguments.",
         "couldNotRestart": "{{agent}} n'a pas pu redémarrer.",
+        "cliTooOld": "{{agent}} {{installedVersion}} est trop ancien pour les conversations. Mettez-le à jour vers {{minimumVersion}} ou une version ultérieure.",
         "startTimedOut": "{{agent}} a mis trop de temps à démarrer (aucune réponse à {{method}} après {{seconds}} s).",
         "startTimedOutKeepsHappening": "Si cela se reproduit, l'ordinateur qui exécute ce chat est peut-être surchargé.",
-        "codexCliTooOld": "Codex {{installedVersion}} est trop ancien pour les conversations. Mettez-le à jour vers {{minimumVersion}} ou une version ultérieure.",
         "notSignedIn": "{{agent}} n’est pas connecté.",
         "claudeSystemNotSignedIn": "Claude n’est pas connecté. Exécutez `{{loginCommand}}`, ou choisissez un compte dans les paramètres des Comptes Claude.",
         "claudeManagedNotSignedIn": "Ce compte Claude n’est pas connecté. Reconnectez-vous dans les paramètres des Comptes Claude.",
@@ -19475,7 +19478,11 @@
           "discarded_other": "Les modifications non enregistrées de {{count}} fichiers seront ignorées :",
           "moreFiles": "et {{value}} de plus",
           "blocked_one": "Enregistrez ou fermez d'abord {{count}} fichier non enregistré dans {{name}}",
-          "blocked_other": "Enregistrez ou fermez d'abord {{count}} fichiers non enregistrés dans {{name}}"
+          "blocked_other": "Enregistrez ou fermez d'abord {{count}} fichiers non enregistrés dans {{name}}",
+          "closedToast_one": "{{count}} fichier avec des modifications non enregistrées de {{workspace}} a été fermé",
+          "closedToast_other": "{{count}} fichiers avec des modifications non enregistrées de {{workspace}} ont été fermés",
+          "reopen": "Rouvrir",
+          "reopenFailed": "Certains fichiers n’ont pas pu être rouverts. Ouvrez un espace de travail et réessayez avec Rouvrir."
         }
       }
     },
@@ -20627,6 +20634,27 @@
       "waitingAriaLabel": "Mise à jour en attente d'autres instances Orca. Cliquez pour développer.",
       "preparingLabel": "Préparation de la mise à jour",
       "preparingAriaLabel": "Préparation de la mise à jour. Cliquez pour développer."
+    }
+  },
+  "onboarding": {
+    "language": {
+      "back": "Langues",
+      "requestPrompt": "Quelle langue aimeriez-vous voir prise en charge par Orca ?",
+      "requestSuccess": "Demande de langue enregistrée. Vous pouvez poursuivre la configuration.",
+      "requestError": "Impossible d’enregistrer votre demande. Réessayez.",
+      "retry": "Réessayer",
+      "requestAction": "Demander une langue",
+      "title": "Langue d’affichage",
+      "device": "Langue du système : {{language}}",
+      "unsupported": "Langue du système : {{language}}. Cette langue n’est pas encore prise en charge.",
+      "unknown": "La langue du système n’a pas pu être détectée. Choisissez une langue ci-dessous.",
+      "loadError": "Impossible de charger cette langue. Réessayez.",
+      "saveError": "Impossible d’enregistrer votre préférence de langue. Réessayez.",
+      "other": "Autre langue…",
+      "settingsError": "Impossible de charger vos paramètres.",
+      "loadingSettings": "Chargement des paramètres…",
+      "loading": "Chargement de la langue…",
+      "saving": "Enregistrement de la langue…"
     }
   }
 }

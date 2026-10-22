@@ -13,6 +13,7 @@ import { DEFAULT_LOCALE, resolveUiLocale } from './supported-languages'
 import type { SupportedUiLocale } from '../../../shared/ui-locale'
 import { isPluginUiLanguage, type UiLanguage } from '../../../shared/ui-language'
 import type { PluginLanguagePackRegistration } from '../../../shared/plugins/plugin-language-pack-artifact'
+import { withTimeout } from '../../../shared/promise-timeout-fallback'
 
 export const i18n: I18nInstance = i18next.createInstance()
 
@@ -93,16 +94,27 @@ export function translate(key: string, fallback: string, options?: TOptions): st
   return isPseudoLocalizationLocale(i18n.language) ? pseudoLocalizeString(value) : value
 }
 
-export async function setRendererUiLanguage(language: UiLanguage): Promise<void> {
+export async function loadRendererUiLanguage(language: UiLanguage): Promise<string> {
   const resolved = resolveUiLocale(language)
   const resourceLanguage = resolveRendererResourceLanguage(resolved)
   const locale =
     isPluginUiLanguage(language) && resourceLanguage === resolved
       ? DEFAULT_LOCALE
       : resourceLanguage
+  const loader = Object.entries(NON_DEFAULT_LOCALE_LOADERS).find(([name]) => name === locale)?.[1]
+  if (loader && !i18n.hasResourceBundle(locale, 'translation')) {
+    const catalog = await withTimeout(loader(), 5000, null)
+    if (catalog === null) {
+      throw new Error('Language catalog unavailable')
+    }
+    i18n.addResourceBundle(locale, 'translation', catalog.default, true, true)
+  }
+  return locale
+}
+
+export async function setRendererUiLanguage(language: UiLanguage): Promise<void> {
+  const locale = await loadRendererUiLanguage(language)
   if (i18n.language !== locale) {
-    // changeLanguage triggers the lazy backend load for non-English locales and
-    // resolves once the catalog is in memory.
     await i18n.changeLanguage(locale)
   }
 }
