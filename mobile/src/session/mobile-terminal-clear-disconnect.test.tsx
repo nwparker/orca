@@ -96,7 +96,7 @@ describe('terminal Clear transport delivery', () => {
           client,
           clientRef: { current: client },
           showToast,
-          getTerminalRef: () => null,
+          getTerminalRef: () => undefined,
           unsubscribeTerminal: vi.fn(),
           subscribeToTerminal
         })
