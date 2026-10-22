@@ -30,8 +30,15 @@ function context(): StructuredAgentModelCatalogContext {
     throw new Error('building a probe resolves nothing')
   }
   return {
-    // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: building a probe only captures resolvers; none of these deps is read until a probe runs.
-    deps: { stateDirectory: '/state' } as StructuredAgentModelCatalogContext['deps'],
+    deps: {
+      stateDirectory: '/state',
+      hostId: 'local',
+      claimKeyId: 'catalog-test',
+      resolveWorkspacePath: unused,
+      resolveLaunchArgs: () => [],
+      resolveClaudeAuthPolicy: () => ({ account: 'system' }),
+      logger: { warn: vi.fn(), error: vi.fn() }
+    },
     environment: {
       resolveBaseEnvironment: unused,
       resolveAgentEnvironment: unused,
@@ -118,14 +125,15 @@ describe('the model catalog contract on every registration', () => {
     }
     const env = async () => ({ PATH: '/usr/bin' })
     const { probes } = registeredModelCatalogDiscovery(STRUCTURED_AGENT_RUNTIME_REGISTRATIONS, {
-      // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: a probe reads only the command, env and auth resolvers given here.
       deps: {
+        ...context().deps,
         stateDirectory: '/state',
+        resolveLaunchArgs: () => [],
         resolveClaudeCommand: () => resolveStructuredAgentCommand('claude', settings),
         resolveCodexCommand: (options) => resolveStructuredAgentCommand('codex', settings, options),
         resolveClaudeAuthPolicy: () => ({ account: 'system' as const }),
         resolveAgentCommandSettings: () => settings
-      } as StructuredAgentModelCatalogContext['deps'],
+      },
       environment: {
         resolveBaseEnvironment: env,
         resolveAgentEnvironment: env,
@@ -164,14 +172,15 @@ describe('the model catalog contract on every registration', () => {
       })
       const settings = { agentCmdOverrides: { grok: installed('grok'), pi: installed('pi') } }
       const { probes } = registeredModelCatalogDiscovery(STRUCTURED_AGENT_RUNTIME_REGISTRATIONS, {
-        // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: a probe reads only the command, env and auth resolvers given here.
         deps: {
+          ...context().deps,
           stateDirectory: '/state',
+          resolveLaunchArgs: () => [],
           resolveClaudeCommand: (options) => resolveCliCommand(installed('claude'), options),
           resolveCodexCommand: (options) => resolveCliCommand(installed('codex'), options),
           resolveClaudeAuthPolicy: () => ({ account: 'system' as const }),
           resolveAgentCommandSettings: () => settings
-        } as StructuredAgentModelCatalogContext['deps'],
+        },
         environment: {
           resolveBaseEnvironment: env,
           resolveAgentEnvironment: env,

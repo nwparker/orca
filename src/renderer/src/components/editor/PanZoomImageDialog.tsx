@@ -39,6 +39,8 @@ type PanZoomImageDialogProps = Omit<
   background?: string
   /** Shown instead of the image while it has no source or after it fails to load. */
   fallback?: React.ReactNode
+  toolbarActions?: React.ReactNode
+  restoreFocus?: () => boolean
 }
 
 function ToolbarButton({
@@ -70,6 +72,8 @@ export function PanZoomImageDialog({
   showTitle = false,
   background,
   fallback,
+  toolbarActions,
+  restoreFocus,
   ...contentProps
 }: PanZoomImageDialogProps): React.JSX.Element {
   const openerRef = useRef<Element | null>(null)
@@ -96,6 +100,7 @@ export function PanZoomImageDialog({
           if (
             opener instanceof HTMLElement &&
             opener.isConnected &&
+            (restoreFocus?.() ?? true) &&
             useAppStore.getState().activeModal === 'none'
           ) {
             opener.focus({ preventScroll: true })
@@ -111,6 +116,7 @@ export function PanZoomImageDialog({
           showTitle={showTitle}
           background={background}
           fallback={fallback}
+          toolbarActions={toolbarActions}
           onClose={() => onOpenChange(false)}
         />
       </DialogContent>
@@ -125,10 +131,11 @@ function PanZoomImageCanvas({
   showTitle,
   background,
   fallback,
+  toolbarActions,
   onClose
 }: Pick<
   PanZoomImageDialogProps,
-  'src' | 'size' | 'title' | 'showTitle' | 'background' | 'fallback'
+  'src' | 'size' | 'title' | 'showTitle' | 'background' | 'fallback' | 'toolbarActions'
 > & { onClose: () => void }): React.JSX.Element {
   // Why: state, not a ref — the dialog portal mounts the canvas after this component's first effects.
   const [canvas, setCanvas] = useState<HTMLDivElement | null>(null)
@@ -310,7 +317,10 @@ function PanZoomImageCanvas({
       {showTitle ? (
         <span
           aria-hidden
-          className="absolute top-3 left-3 max-w-[calc(100%-10rem)] truncate rounded-md border border-border bg-background px-2 py-1 text-sm text-foreground shadow-xs"
+          className={cn(
+            'absolute top-3 left-3 truncate rounded-md border border-border bg-background px-2 py-1 text-sm text-foreground shadow-xs',
+            toolbarActions ? 'max-w-[calc(100%-13rem)]' : 'max-w-[calc(100%-10rem)]'
+          )}
         >
           {title}
         </span>
@@ -339,6 +349,7 @@ function PanZoomImageCanvas({
           >
             <Maximize />
           </ToolbarButton>
+          {toolbarActions}
           <ToolbarButton
             label={translate('auto.components.editor.PanZoomImageDialog.close', 'Close')}
             onClick={onClose}
