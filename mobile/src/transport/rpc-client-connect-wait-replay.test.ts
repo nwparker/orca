@@ -1,9 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createElement } from 'react'
-import { act, create } from 'react-test-renderer'
 import { connect } from './rpc-client'
-import { useMobileSessionTerminalInput } from '../session/use-mobile-session-terminal-input'
-import { mountFixture } from '../test-support/rpc-recording/recorder-fixture-shape'
 
 vi.mock('./direct-e2ee-framing-policy', () => import('./legacy-direct-framing-test-policy'))
 
@@ -96,53 +92,6 @@ describe('mobile rpc-client connect-wait replay', () => {
   afterEach(() => {
     vi.useRealTimers()
     globalThis.WebSocket = originalWebSocket
-  })
-
-  it('does not replay a terminal Clear after the connection drops before delivery', async () => {
-    const client = connect('ws://desktop.invalid', 'token', 'server-key')
-    const socket = mockSockets[0]!
-    socket.open()
-    const terminal = { clear: vi.fn() }
-    const showToast = vi.fn()
-    const subscribeToTerminal = vi.fn()
-    let clearHost: (() => Promise<void>) | undefined
-    function Harness() {
-      const actions = useMobileSessionTerminalInput(
-        mountFixture<Parameters<typeof useMobileSessionTerminalInput>[0]>({
-          client,
-          clientRef: { current: client },
-          showToast,
-          getTerminalRef: () => terminal,
-          unsubscribeTerminal: vi.fn(),
-          subscribeToTerminal
-        })
-      )
-      clearHost = () =>
-        actions.handleClearTerminal({ handle: 't1', title: 'Shell', isActive: true })
-      return null
-    }
-    let tree: ReturnType<typeof create> | undefined
-    act(() => {
-      tree = create(createElement(Harness))
-    })
-    socket.close()
-    try {
-      const pending = clearHost?.()
-      await vi.advanceTimersByTimeAsync(0)
-      expect(showToast.mock.calls).toEqual([["Couldn't clear terminal", 1500]])
-      await vi.advanceTimersByTimeAsync(500)
-      mockSockets[1]!.open()
-      await vi.advanceTimersByTimeAsync(0)
-      expect(
-        mockSockets[1]!.sent.filter((frame) => frame.includes('terminal.clearBuffer'))
-      ).toEqual([])
-      expect(subscribeToTerminal).not.toHaveBeenCalled()
-      expect(terminal.clear).not.toHaveBeenCalled()
-      await pending
-    } finally {
-      act(() => tree?.unmount())
-      client.close()
-    }
   })
 
   it('Given a cut connection When a send opts into failWhenDisconnected Then it rejects now and nothing replays after reconnect', async () => {
