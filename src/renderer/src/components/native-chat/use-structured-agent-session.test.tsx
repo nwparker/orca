@@ -113,14 +113,6 @@ const FAST_OPTIONS = {
   current: { ...OPTIONS.current, fastMode: false, confirmed: ['fastMode'] }
 }
 
-function deferred<T>() {
-  let resolve!: (value: T) => void
-  const promise = new Promise<T>((accept) => {
-    resolve = accept
-  })
-  return { promise, resolve }
-}
-
 describe('useStructuredAgentSession working state', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -671,9 +663,12 @@ describe('useStructuredAgentSession options', () => {
   })
 
   it('discards an option read that began before a Fast mutation', async () => {
-    const staleRead = deferred<typeof FAST_OPTIONS>()
+    const staleRead = Promise.withResolvers<typeof FAST_OPTIONS>()
     let optionReads = 0
     mocks.call.mockImplementation((_target, method) => {
+      if (method === 'agentSession.modelCatalog') {
+        return Promise.resolve({ origin: 'unknown' })
+      }
       if (method === 'agentSession.options') {
         optionReads += 1
         if (optionReads === 1) {

@@ -7093,8 +7093,6 @@
           "ee110e1830": "デフォルトの基本参照はありません"
         },
         "BrowserDefaultZoomSetting": {
-          "2622126877": "新しく開いたブラウザタブに適用されるズームレベル。",
-          "bbeec087d3": "新しく開いたブラウザタブに適用されます。",
           "265597101f": "デフォルトのズーム"
         },
         "BrowserHomePageSetting": {
@@ -16663,7 +16661,6 @@
             "95af781091": "Agent にフィードバックを送信する",
             "ac39b9366b": "送信",
             "a3508d7e6e": "{{value0}} アノテーション{{value1}} が準備されました。別の要素を選択するか、すべてのフィードバックをコピーします。",
-            "f796c774a4": "上に URL を入力して閲覧を開始します。",
             "366bf5d62c": "新規タブ",
             "1c78adc73d": "外部で開く",
             "da68d35f7b": "失敗したページをデフォルトのブラウザで開く",
@@ -16789,7 +16786,8 @@
               "bar": {
                 "suggestions": {
                   "87fcdd0da9": "{{value0}} 検索"
-                }
+                },
+                "placeholder": "検索またはURLを入力"
               }
             }
           },
@@ -18374,9 +18372,9 @@
         "couldNotStart": "{{agent}} を起動できませんでした。",
         "editSavedArguments": "設定 > Agent > 引数で編集してください。",
         "couldNotRestart": "{{agent}} を再起動できませんでした。",
+        "cliTooOld": "{{agent}} {{installedVersion}} はチャットには古すぎます。{{minimumVersion}} 以降に更新してください。",
         "startTimedOut": "{{agent}} の起動に時間がかかりすぎました ({{seconds}} 秒経っても {{method}} に応答がありません)。",
         "startTimedOutKeepsHappening": "これが繰り返し起こる場合は、このチャットを実行しているコンピューターが過負荷になっている可能性があります。",
-        "codexCliTooOld": "Codex {{installedVersion}} はチャットには古すぎます。{{minimumVersion}} 以降に更新してください。",
         "notSignedIn": "{{agent}} にサインインしていません。",
         "claudeSystemNotSignedIn": "Claude にサインインしていません。`{{loginCommand}}` を実行するか、Claude アカウント設定でアカウントを選択してください。",
         "claudeManagedNotSignedIn": "この Claude アカウントにサインインしていません。設定の Claude アカウントで再度サインインしてください。",
