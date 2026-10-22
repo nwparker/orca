@@ -434,7 +434,7 @@ variable "relay_gce_cells" {
       contains(["us-central1", "asia-east2"], cell.region) &&
       startswith(cell.zone, "${cell.region}-") &&
       can(regex("^[a-z0-9-]+$", cell.machine_type)) &&
-      can(regex("^https://www.googleapis.com/compute/v1/projects/cos-cloud/global/images/cos-stable-[a-z0-9-]+$", cell.boot_image)) &&
+      can(regex("^https://www[.]googleapis[.]com/compute/v1/projects/cos-cloud/global/images/cos-(stable-)?[0-9]+-[0-9]+-[0-9]+-[0-9]+$", cell.boot_image)) &&
       cell.boot_disk_gb >= 20 &&
       cell.boot_disk_gb <= 100 &&
       cell.capacity_requests >= 1 &&
@@ -501,7 +501,7 @@ variable "relay_event_loop_stall_alert" {
 variable "relay_gce_cloud_sql_proxy_image" {
   type        = string
   description = "Digest-pinned Cloud SQL Auth Proxy image used by private relay workers and the director sidecar."
-  default     = "gcr.io/cloud-sql-connectors/cloud-sql-proxy@sha256:fc224915ef435afeb5b2a9421260a0d31986d5c8b7c7f5783c7f5d5885700cd2"
+  default     = "gcr.io/cloud-sql-connectors/cloud-sql-proxy@sha256:e8c76356fb586300c63f0d29c8c75cfeeba33c29736f9d4afa2df2d78cd0fa19"
 
   validation {
     condition     = can(regex("^[a-z0-9.-]+/[a-z0-9._/-]+@sha256:[a-f0-9]{64}$", var.relay_gce_cloud_sql_proxy_image))

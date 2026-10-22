@@ -16292,6 +16292,9 @@
             }
           }
         },
+        "staleViewEdit": {
+          "rejected": "파일이 다른 보기에서 변경되어 이 보기에서 최근에 입력한 내용이 삭제되었습니다."
+        },
         "richMarkdownLargeTextPaste": {
           "tooLarge": "붙여넣기 내용이 너무 큽니다.",
           "stopped": "큰 페이스트는 완성되기 전에 멈췄습니다.",
@@ -19406,7 +19409,11 @@
           "discarded_other": "파일 {{count}}개의 저장되지 않은 편집 내용이 버려집니다:",
           "moreFiles": "외 {{value}}개",
           "blocked_one": "먼저 {{name}}에서 저장되지 않은 파일 {{count}}개를 저장하거나 닫으세요",
-          "blocked_other": "먼저 {{name}}에서 저장되지 않은 파일 {{count}}개를 저장하거나 닫으세요"
+          "blocked_other": "먼저 {{name}}에서 저장되지 않은 파일 {{count}}개를 저장하거나 닫으세요",
+          "closedToast_one": "{{workspace}}에서 저장되지 않은 편집 내용이 있는 파일 {{count}}개를 닫았습니다",
+          "closedToast_other": "{{workspace}}에서 저장되지 않은 편집 내용이 있는 파일 {{count}}개를 닫았습니다",
+          "reopen": "다시 열기",
+          "reopenFailed": "일부 파일을 다시 열지 못했습니다. 워크스페이스를 열고 다시 열기를 다시 시도하세요."
         }
       }
     },
@@ -20627,6 +20634,27 @@
       "waitingAriaLabel": "다른 Orca 인스턴스를 기다리는 업데이트입니다. 클릭하여 펼치세요.",
       "preparingLabel": "업데이트 준비 중",
       "preparingAriaLabel": "업데이트 준비 중입니다. 클릭하여 펼치세요."
+    }
+  },
+  "onboarding": {
+    "language": {
+      "back": "언어",
+      "requestPrompt": "Orca에서 어떤 언어를 지원하면 좋을까요?",
+      "requestSuccess": "언어 요청이 기록되었습니다. 설정을 계속할 수 있습니다.",
+      "requestError": "요청을 기록하지 못했습니다. 다시 시도하세요.",
+      "retry": "다시 시도",
+      "requestAction": "언어 지원 요청",
+      "title": "표시 언어",
+      "device": "시스템 언어: {{language}}",
+      "unsupported": "시스템 언어: {{language}}. 이 언어는 아직 지원되지 않습니다.",
+      "unknown": "시스템 언어를 감지하지 못했습니다. 아래에서 언어를 선택하세요.",
+      "loadError": "이 언어를 불러오지 못했습니다. 다시 시도하세요.",
+      "saveError": "언어 설정을 저장하지 못했습니다. 다시 시도하세요.",
+      "other": "다른 언어…",
+      "settingsError": "설정을 불러오지 못했습니다.",
+      "loadingSettings": "설정 불러오는 중…",
+      "loading": "언어 불러오는 중…",
+      "saving": "언어 저장 중…"
     }
   }
 }

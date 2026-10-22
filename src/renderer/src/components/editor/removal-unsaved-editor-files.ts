@@ -4,8 +4,13 @@ import { editorBufferSiblingViewIds } from '@/store/slices/editor/buffers/editor
 import type { WorktreePurgeTarget } from '@/store/slices/worktree-helpers'
 import { worktreePurgeClosedFileIds } from '@/store/slices/worktrees/teardown/worktree-purge-closed-files'
 import { canAutoSaveOpenFile } from './editor-autosave'
-import { flushPendingEditorBuffer } from './editor-pending-flush'
-import { editorModelSiblingTabs, editorTabModelUri } from './editor-save-disk-precondition'
+import { flushClosingEditorBuffers } from './editor-pending-flush'
+import {
+  editorModelSiblingTabs,
+  editorTabModelUri,
+  isCodeViewTab
+} from './editor-save-disk-precondition'
+import { editorModelRegistry } from '@/lib/editor-model-registry'
 
 /**
  * Savable tabs among `closedIds` holding unsaved text whose every view (shared model, shared
@@ -33,14 +38,38 @@ export function lastViewUnsavedFiles(state: AppState, closedIds: ReadonlySet<str
   return result
 }
 
-/** Commits text delayed views (rich Markdown, CSV, notebook) still hold for these tabs. */
+/** Every view that shows `file`'s text: tabs on its model and views of its record. */
+export function unsavedTextViewIds(state: AppState, file: OpenFile): string[] {
+  return [
+    ...new Set([
+      file.id,
+      ...editorModelSiblingTabs(state, file).map((tab) => tab.id),
+      ...editorBufferSiblingViewIds(state, file.id)
+    ])
+  ]
+}
+
+/** The freshest text of `file`: its mounted code model, else a draft a sharing view holds. */
+export function currentUnsavedText(state: AppState, file: OpenFile): string | undefined {
+  const registry = isCodeViewTab(state, file) ? editorModelRegistry.get() : null
+  const model = registry?.editor.getModel(registry.Uri.parse(editorTabModelUri(state, file)))
+  // Why attached only: a retained model can hold older text than a restored draft.
+  if (model?.isAttachedToEditor()) {
+    return model.getValue()
+  }
+  return (
+    unsavedTextViewIds(state, file)
+      .map((id) => state.editorDrafts?.[id])
+      .find((draft) => draft !== undefined) ?? model?.getValue()
+  )
+}
+
+/** Commits text every delayed view (rich Markdown, CSV, notebook pane) holds for these tabs. */
 export function flushRemovalPendingEdits(state: AppState, fileIds: Iterable<string>): void {
   try {
-    for (const fileId of fileIds) {
-      flushPendingEditorBuffer(state, fileId)
-    }
+    flushClosingEditorBuffers(state, fileIds)
   } catch (error) {
-    // Why: a view's flush failing must not block the removal that asked.
+    // Why: a flush failing must not block the removal that asked.
     console.error('[editor] flushing pending edits before a removal failed', error)
   }
 }
