@@ -1,9 +1,10 @@
 import { createElement, startTransition, Suspense } from 'react'
 import { act, create, type ReactTestRenderer } from 'react-test-renderer'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createFakeRpcClient } from '../mobile-web-shell/bridge-host-test-fakes'
 import type { RpcResponse } from '../transport/types'
 import { useMobileSourceControlOpeners } from './use-mobile-source-control-openers'
+import { createStableLogicalRpcClient } from '../transport/stable-logical-rpc-client'
 
 vi.mock('../navigation/route-handoff', () => ({
   useRouteHandoff: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn() })
@@ -32,8 +33,12 @@ describe('committed diff preview ownership', () => {
   let renderer: ReactTestRenderer | null = null
   let latest: ReturnType<typeof useMobileSourceControlOpeners> | null = null
   const replies: ((response: RpcResponse) => void)[] = []
-  const client = createFakeRpcClient()
-  client.sendRequest = () => new Promise((resolve) => replies.push(resolve))
+  let client: ReturnType<typeof createStableLogicalRpcClient>
+  beforeEach(() => {
+    const physical = createFakeRpcClient()
+    physical.sendRequest = () => new Promise((resolve) => replies.push(resolve))
+    client = createStableLogicalRpcClient(physical, 'relay')
+  })
   function Probe({
     worktreeId = 'wt-1',
     suspend = false
@@ -66,6 +71,7 @@ describe('committed diff preview ownership', () => {
     renderer = null
     latest = null
     replies.length = 0
+    client.close()
   })
   function mount() {
     act(() => {
@@ -129,6 +135,22 @@ describe('committed diff preview ownership', () => {
       await pending
     })
     expect(latest?.branchDiffPreview).toBeNull()
+  })
+
+  it('keeps a confirmed preview across a connection-path change to the same computer', async () => {
+    mount()
+    const pending = open()
+    await act(async () => {
+      await client.migrateTo(createFakeRpcClient(), 'lan')
+      renderer?.update(createElement(Probe))
+    })
+    expect(latest?.branchDiffPreview?.kind).toBe('loading')
+    await act(async () => {
+      replies[0]?.(success)
+      await pending
+    })
+    expect(latest?.branchDiffPreview?.kind).toBe('ready')
+    expect(latest?.openingBranchPath).toBeNull()
   })
 
   it('keeps the current preview when a workspace transition suspends before commit', async () => {
