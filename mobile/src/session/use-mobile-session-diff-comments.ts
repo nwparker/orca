@@ -57,10 +57,11 @@ export function useMobileSessionDiffComments(scope: MobileSessionDocumentReaders
     [diffCommentsRef, notesOwner, setDiffComments]
   )
   const enqueueMutation = useCallback(
-    <T,>(mutate: () => Promise<T>, inactive: T): Promise<T> =>
-      enqueueMobileReviewNoteMutation(notesOwner, mutate, inactive, setDiffCommentBusy, () =>
+    function enqueueMutation<T>(mutate: () => Promise<T>, inactive: T): Promise<T> {
+      return enqueueMobileReviewNoteMutation(notesOwner, mutate, inactive, setDiffCommentBusy, () =>
         showToast('Unable to load review notes. Reconnect before editing.', 1600)
-      ),
+      )
+    },
     [notesOwner, setDiffCommentBusy, showToast]
   )
   const loadDiffComments = useCallback(async (): Promise<void> => {
