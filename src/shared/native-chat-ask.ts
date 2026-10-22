@@ -5,15 +5,16 @@ import type {
   InteractiveQuestionParser
 } from './native-chat-ask-types'
 import { isInterruptedStatusMessage, type NativeChatMessage } from './native-chat-types'
+import {
+  CODEX_ASYNC_QUESTION_TOOL,
+  parseCodexAsyncQuestionsInput
+} from './codex-async-question-input'
 
 export type { AskOption, AskPrompt, AskQuestion, InteractiveQuestionParser }
 
 const QUESTION_TOOL_PARSERS = new Map<string, InteractiveQuestionParser>()
 
-/** Stable cross-platform identity for one canonical question prompt. */
-export function nativeChatAskDismissKey(prompt: AskPrompt | null): string | null {
-  return prompt ? `question:${JSON.stringify(prompt.questions)}` : null
-}
+export { nativeChatAskDismissKey } from './native-chat-ask-dismiss-key'
 
 export function registerQuestionTool(toolName: string, parser: InteractiveQuestionParser): void {
   QUESTION_TOOL_PARSERS.set(toolName, parser)
@@ -82,6 +83,8 @@ for (const name of ['AskUserQuestion', 'ask_user_question', 'askUserQuestion']) 
   QUESTION_TOOL_PARSERS.set(name, parseCanonicalQuestionsInput)
 }
 
+QUESTION_TOOL_PARSERS.set(CODEX_ASYNC_QUESTION_TOOL, parseCodexAsyncQuestionsInput)
+
 function parseToolInput(toolName: string | undefined, input: unknown): AskPrompt | null {
   const parser = toolName ? QUESTION_TOOL_PARSERS.get(toolName) : undefined
   return (parser ? parser(input) : null) ?? parseCanonicalQuestionsInput(input)
@@ -118,11 +121,41 @@ export function parseAskFromToolInput(
  *  canonical-shape fallback as live status, so a question tool that rendered
  *  live cannot vanish from pending state after a reconnect/replay. */
 export function extractPendingAsk(messages: readonly NativeChatMessage[]): AskPrompt | null {
+  const scan = scanPendingAsks(messages)
+  return scan.blocking ?? scan.replyAsMessage
+}
+
+/** A structured chat's pending question from its messages: blocking ones arrive as journal
+ *  prompts, so only those answered by an ordinary message are left to read here. */
+export function extractPendingMessageReplyAsk(
+  messages: readonly NativeChatMessage[]
+): AskPrompt | null {
+  return scanPendingAsks(messages).replyAsMessage
+}
+
+/** A user row the agent received; a queued, unsent or withdrawn send answers nothing yet. */
+function reachedAgent(message: NativeChatMessage): boolean {
+  return (
+    message.queued !== true &&
+    message.unsent !== true &&
+    message.stoppedBeforeStart !== true &&
+    message.awaitsRetry !== true &&
+    message.sentWhileStopping !== true
+  )
+}
+
+function scanPendingAsks(messages: readonly NativeChatMessage[]): {
+  blocking: AskPrompt | null
+  replyAsMessage: AskPrompt | null
+} {
   let pending: AskPrompt | null = null
   // The FIFO is two counters, not a queue: a result only needs to know how far the
   // call that produced `pending` sits from the head, so nothing is retained per call.
   let outstanding = 0
   let pendingDepth = -1
+  // Each async question stays open past its immediate result until the agent receives a message.
+  let asyncQuestions: AskQuestion[] = []
+  const asyncCallIds = new Set<string>()
   for (const message of messages) {
     // A new user turn (or an interrupt row) ends the turn that owns whatever
     // calls are still in flight: their results never arrive, and `tool_use_id`
@@ -130,15 +163,29 @@ export function extractPendingAsk(messages: readonly NativeChatMessage[]): AskPr
     // Without this reset one orphan shifts the result FIFO for the rest of the
     // transcript and strands an answered ask as a permanent card over the
     // composer (#11761). Claude's tool-result turns decode as role 'tool'.
-    if (message.role === 'user' || isInterruptedStatusMessage(message)) {
+    const interrupted = isInterruptedStatusMessage(message)
+    if (message.role === 'user' || interrupted) {
       outstanding = 0
       pendingDepth = -1
       pending = null
+      if (interrupted || reachedAgent(message)) {
+        asyncQuestions = []
+        asyncCallIds.clear()
+      }
     }
     for (const block of message.blocks) {
       if (block.type === 'tool-call') {
-        const parsed = parseToolInput(block.name, block.input)
-        if (parsed) {
+        const parsed = QUESTION_TOOL_PARSERS.has(block.name)
+          ? parseAskFromToolInput(block.name, block.input)
+          : parseToolInput(block.name, block.input)
+        if (parsed?.replyAsMessage) {
+          if (block.callId === undefined || !asyncCallIds.has(block.callId)) {
+            asyncQuestions = [...asyncQuestions, ...parsed.questions]
+          }
+          if (block.callId !== undefined) {
+            asyncCallIds.add(block.callId)
+          }
+        } else if (parsed) {
           pending = parsed
           pendingDepth = outstanding
         }
@@ -154,7 +201,11 @@ export function extractPendingAsk(messages: readonly NativeChatMessage[]): AskPr
       }
     }
   }
-  return pending
+  return {
+    blocking: pending,
+    replyAsMessage:
+      asyncQuestions.length > 0 ? { questions: asyncQuestions, replyAsMessage: true } : null
+  }
 }
 
 /** Prefers live status and consults transcript history only after its read settles. */
@@ -194,8 +245,18 @@ function answerLabels(question: AskQuestion, sel: AskAnswerSelection | undefined
 /** Build the human-readable answer text: one line per question, in question
  *  order, each the selected label(s) + free text joined by ", ". Empty answers
  *  stay empty lines so N lines always == N questions. Used for agents whose
- *  question tool commits a pasted answer (not Claude's arrow-navigate selector). */
+ *  question tool commits a pasted answer (not Claude's arrow-navigate selector).
+ *  A `replyAsMessage` answer arrives detached from its question, so it quotes each
+ *  answered question in the `> question\n\nanswer` form Codex's own clients send. */
 export function formatAskAnswer(prompt: AskPrompt, selections: AskAnswerSelection[]): string {
+  if (prompt.replyAsMessage) {
+    return prompt.questions
+      .flatMap((q, i) => {
+        const answer = answerLabels(q, selections[i]).join(', ')
+        return answer ? [`> ${q.question.replaceAll(/[\r\n]+/g, ' ')}\n\n${answer}`] : []
+      })
+      .join('\n\n')
+  }
   return prompt.questions.map((q, i) => answerLabels(q, selections[i]).join(', ')).join('\n')
 }
 
