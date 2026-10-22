@@ -23,6 +23,7 @@ import { trackExternalChangeConflictAction } from './editor-external-change-tele
 import { editorTabFileAccess } from '@/lib/local-file-access'
 import { isEditorLargePasteInFlight } from './editor-large-paste-in-flight'
 import {
+  markEditorSaveRefusal,
   rebaselineAfterEditorWrite,
   setModelExternalMutation,
   waitForModelBaselineRestamps
@@ -40,6 +41,7 @@ import { editorSaveWriterView } from './editor-save-writer-view'
 import { createEditorSaveSlots, type EditorSaveRequest } from './editor-save-slots'
 import { EditorSaveDiscardedError, editorDiscardEpoch } from './editor-discard-epoch'
 import { selectWorktreesByRepo } from '@/store/workspace-record-selectors'
+import { releaseNonUtf8PausesWithoutDirtyTab } from './editor-non-utf8-autosave-pause'
 
 export type AppStoreApi = Pick<StoreApi<AppState>, 'getState' | 'subscribe'>
 
@@ -175,15 +177,13 @@ export function createEditorSaveQueue(store: AppStoreApi): EditorSaveQueue {
     }
     if (!writeResult.ok) {
       clearSelfWrite(liveFile.filePath, liveFile.runtimeEnvironmentId)
-      // Why: the banner (or deleted tombstone) explains the refusal and pauses autosave.
-      setModelExternalMutation(
-        store.getState(),
-        fileId,
-        writeResult.diskConflict === 'missing' ? 'deleted' : 'changed'
-      )
-      return 'blocked-stale'
+      markEditorSaveRefusal(store.getState(), liveFile, writeResult.diskConflict)
+      return writeResult.diskConflict === 'not-utf8' ? 'failed' : 'blocked-stale'
     }
 
+    if (writeResult.unchanged) {
+      clearSelfWrite(liveFile.filePath, liveFile.runtimeEnvironmentId)
+    }
     rebaselineAfterEditorWrite(store.getState(), fileId, contentToSave)
     const nextState = store.getState()
     const currentDraft = nextState.editorDrafts[fileId]
@@ -194,8 +194,6 @@ export function createEditorSaveQueue(store: AppStoreApi): EditorSaveQueue {
     if (!stillDirty) {
       nextState.clearEditorDraft(fileId)
     }
-    // Why: disk now holds contentToSave, so a pending restore verification is moot.
-    nextState.clearPendingDiskBaselineVerification(fileId)
     // Why: the write made disk match the buffer, so clear any now-stale changed-on-disk conflict.
     const savedFile = nextState.openFiles.find((openFile) => openFile.id === fileId)
     if (savedFile?.externalMutation === 'changed') {
@@ -259,6 +257,7 @@ export function createEditorSaveQueue(store: AppStoreApi): EditorSaveQueue {
   const syncAutoSave = (): void => {
     const state = store.getState()
     holds.flagOverdue(state)
+    releaseNonUtf8PausesWithoutDirtyTab(state.openFiles)
     const openFilesByKey = new Map(
       state.openFiles.map((file) => [editorBufferIdOfView(state, file.id), file])
     )

@@ -16622,6 +16622,9 @@
             }
           }
         },
+        "staleViewEdit": {
+          "rejected": "Recent typing in this view was discarded because the file changed in another view."
+        },
         "richMarkdownLargeTextPaste": {
           "tooLarge": "Paste is too large.",
           "stopped": "Large paste stopped before it finished.",
@@ -16677,6 +16680,9 @@
             },
             "sectionStale": {
               "notice": "This file changed on disk since this section loaded."
+            },
+            "notUtf8": {
+              "notice": "Autosave is paused for {{name}} because it isn't UTF-8 text. Save it yourself to convert it to UTF-8."
             }
           }
         },
@@ -18579,6 +18585,20 @@
         "copyFailed": "Could not copy the link.",
         "signingIn": "Signing in…",
         "cancel": "Cancel"
+      },
+      "plainSshTerminal": {
+        "open": "Open plain SSH terminal",
+        "unmanaged": "Plain SSH — unmanaged. Not an Orca workspace: agents and tabs here aren’t tracked, and this terminal isn’t restored. Closing it ends the SSH session.",
+        "ended": "ssh exited with code {{code}}. Close this window when you’re done reading.",
+        "title": "Plain SSH · {{host}}",
+        "minimize": "Minimize",
+        "close": "Close and end session",
+        "unknownTarget": "This SSH host is no longer saved in Orca.",
+        "notBlocked": "Orca can reach this host again, so use its terminals instead. Plain SSH is only for while Orca can’t set up on the host.",
+        "alreadyOpen": "Another Orca window already has a plain SSH terminal open to this host.",
+        "endedBySignal": "ssh was stopped (signal {{signal}}). Close this window when you’re done reading.",
+        "cancelled": "This plain SSH terminal was closed before it started.",
+        "terminalUnavailable": "Orca couldn’t open a terminal here."
       }
     },
     "i18n": {
@@ -19785,7 +19805,11 @@
           "discarded_other": "Unsaved edits in {{count}} files will be discarded:",
           "moreFiles": "and {{value}} more",
           "blocked_one": "Save or close {{count}} unsaved file in {{name}} first",
-          "blocked_other": "Save or close {{count}} unsaved files in {{name}} first"
+          "blocked_other": "Save or close {{count}} unsaved files in {{name}} first",
+          "closedToast_one": "Closed {{count}} file with unsaved edits from {{workspace}}",
+          "closedToast_other": "Closed {{count}} files with unsaved edits from {{workspace}}",
+          "reopen": "Reopen",
+          "reopenFailed": "Some files couldn't be reopened. Open a workspace and try Reopen again."
         }
       }
     },
@@ -20945,5 +20969,26 @@
       "unavailable": "This workspace is protected or unavailable."
     },
     "rowActions": "Actions for {{name}}"
+  },
+  "onboarding": {
+    "language": {
+      "back": "Languages",
+      "requestPrompt": "Which language would you like Orca to support?",
+      "requestSuccess": "Language request recorded. You can continue onboarding.",
+      "requestError": "Could not record your request. Try again.",
+      "retry": "Retry",
+      "requestAction": "Request language",
+      "title": "Display language",
+      "device": "System language: {{language}}",
+      "unsupported": "System language: {{language}}. This language is not supported yet.",
+      "unknown": "Your system language could not be detected. Choose a language below.",
+      "loadError": "Could not load this language. Try again.",
+      "saveError": "Could not save your language preference. Try again.",
+      "other": "Other language…",
+      "settingsError": "Could not load your settings.",
+      "loadingSettings": "Loading settings…",
+      "loading": "Loading language…",
+      "saving": "Saving language…"
+    }
   }
 }

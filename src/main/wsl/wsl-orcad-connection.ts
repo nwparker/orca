@@ -4,6 +4,10 @@
  * distro; a relaunch that moved orcad's port moves the bridge with it. In memory only: the
  * deployment record (C7) persists what `onChange` reports.
  */
+import {
+  WslOrcadConnectionSupersededError,
+  WslOrcadLaunchDeferredError
+} from './wsl-orcad-connection-errors'
 import type { WslHostConnectIntent } from '../../shared/wsl-host-types'
 import { errorMessage } from '../../shared/error-message'
 import { parsePairingCode, type PairingOffer } from '../../shared/pairing'
@@ -48,23 +52,6 @@ export type WslOrcadConnection = {
   /** An app update the incumbent `fullVersion` is waiting to take (live terminals). */
   deferredUpdate: WslOrcadDeferredUpdate | null
   close(): Promise<void>
-}
-
-type WslOrcadDeferredLaunch = Extract<WslOrcadLaunch, { outcome: 'deferred' }>
-
-/** orcad installed an update it may not activate yet (live terminals); nothing is listening. */
-export class WslOrcadLaunchDeferredError extends Error {
-  constructor(readonly launch: WslOrcadDeferredLaunch) {
-    super(launch.reason)
-    this.name = 'WslOrcadLaunchDeferredError'
-  }
-}
-
-export class WslOrcadConnectionSupersededError extends Error {
-  constructor(distro: string) {
-    super(`The connection to the WSL distro ${distro} was closed while it was being opened.`)
-    this.name = 'WslOrcadConnectionSupersededError'
-  }
 }
 
 export type WslOrcadConnectOptions = {
@@ -214,6 +201,7 @@ export class WslOrcadConnectionManager {
       environmentId,
       label,
       intent: options.intent,
+      pairedOffer: this.dependencies.getPairingOffer?.(environmentId) ?? null,
       signal: options.signal,
       holder: this.dependencies.holder,
       createTransport: () => transport

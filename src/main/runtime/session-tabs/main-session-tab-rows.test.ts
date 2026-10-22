@@ -84,7 +84,7 @@ function mainProjection(
   return rest
 }
 
-describe('session.tabs rows from main (layout-owner build, before D3b)', () => {
+describe('session.tabs rows from main (layout-owner build)', () => {
   it("takes main's terminal rows and name, with the window's theme, status and draft", () => {
     const theme = { mode: 'dark' as const, theme: {} }
     const agentStatus = null
@@ -123,6 +123,18 @@ describe('session.tabs rows from main (layout-owner build, before D3b)', () => {
       }),
       terminal('t::b')
     ])
+  })
+
+  // Main's diff row is never dirty (its drafts are keyed by path); the window's edit is.
+  it("shows a diff the window lists with the window's dirty state, over main's row", () => {
+    const edited = { ...file('d1', 'diff'), isDirty: true }
+    const merged = withMainSessionTabRows(
+      windowSnapshot([edited], ['d1'], 'd1'),
+      mainProjection([file('d1', 'diff')], ['d1'], 'd1'),
+      NONE_EXITED
+    )
+
+    expect(merged.tabs).toEqual([{ ...edited, isActive: true }])
   })
 
   it('keeps the rows main does not hold (browser, diff) in the window’s place', () => {
