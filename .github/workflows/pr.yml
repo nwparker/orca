@@ -371,6 +371,8 @@ jobs:
             src/shared/ephemeral-vm-runtimes.ts \
             src/shared/ephemeral-vm-recipes.ts \
             src/shared/orca-yaml-hook-types.ts \
+            config/scripts/run-ephemeral-vm-runtime-store-rollback-repro.mjs \
+            config/scripts/ephemeral-vm-runtime-store-cross-version.test.ts \
             src/main/ephemeral-vm-runtime-service.ts \
             src/main/ephemeral-vm-runtime-provisioning-persistence.ts \
             src/main/ephemeral-vm-failed-start-cleanup.ts; then

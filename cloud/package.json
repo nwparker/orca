@@ -23,10 +23,10 @@
   },
   "devDependencies": {
     "@orca/process-host": "link:../src/packages/process-host",
-    "@types/node": "^24.19.0",
+    "@types/node": "^24.19.2",
     "tsx": "^4.23.15",
-    "typescript": "^5.9.3",
-    "vitest": "^4.1.12"
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
   },
   "engines": {
     "node": ">=24 <27",

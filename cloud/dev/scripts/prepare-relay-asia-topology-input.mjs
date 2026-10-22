@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
-const BOOT_IMAGE = 'https://www.googleapis.com/compute/v1/projects/cos-cloud/global/images/cos-stable-121-18867-528-21'
+const BOOT_IMAGE = 'https://www.googleapis.com/compute/v1/projects/cos-cloud/global/images/cos-121-18867-638-13'
 const SHAPES = {
   staging: {
     project: 'onorca-cloud-staging',

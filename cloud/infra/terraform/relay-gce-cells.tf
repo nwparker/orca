@@ -185,6 +185,9 @@ resource "google_compute_instance_template" "relay_gce_cell" {
     device_name  = "persistent-disk-0"
     disk_size_gb = each.value.boot_disk_gb
     disk_type    = "pd-balanced"
+    type         = "PERSISTENT"
+    mode         = "READ_WRITE"
+    interface    = "SCSI"
     source_image = each.value.boot_image
   }
 

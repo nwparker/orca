@@ -108,9 +108,6 @@ export type EditorFilesSlice = {
   setExternalMutation: (fileId: string, mutation: 'deleted' | 'renamed' | 'changed' | null) => void
   /** `undefined` un-records a baseline a failed operation stamped provisionally. */
   setLastKnownDiskSignature: (fileId: string, signature: string | undefined) => void
-  clearPendingDiskBaselineVerification: (fileId: string) => void
-  setPendingDiskBaselineVerification: (fileId: string, value: boolean) => void
-  setPendingLiveDiskVerification: (fileId: string, value: boolean) => void
   clearSelfMoveEcho: (fileId: string) => void
   /** Atomically retargets open editor sessions across an Orca-owned move — one commit-only update migrating every path-derived id + all id-keyed state, no close/reopen. Returns collision/stale without mutating. */
   rekeyOpenFilesForPathChange: (args: {

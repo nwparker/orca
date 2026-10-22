@@ -67,7 +67,7 @@ test('pins staging C4 to the step-5 image, the launch Asia cells to one image, a
 
 test('refreshes only empty staging C4 through the trusted capacity identity', () => {
   const refresh = workflow.slice(workflow.indexOf('  refresh-asia-c4-image:'))
-  assert.match(refresh, /terraform_version: 1\.15\.8/)
+  assert.match(refresh, /terraform_version: 1\.17\.0/)
   assert.doesNotMatch(refresh, /terraform_version: 1\.5\.7/)
   assert.match(refresh, /github\.ref == 'refs\/heads\/main'/)
   assert.match(refresh, /REFRESH_STAGING_ASIA_C4_IMAGE/)
@@ -102,7 +102,7 @@ test('refreshes only empty staging C4 through the trusted capacity identity', ()
 })
 
 test('recovers a failed or cancelled C4 refresh from an independent workflow', () => {
-  assert.match(recoveryWorkflow, /terraform_version: 1\.15\.8/)
+  assert.match(recoveryWorkflow, /terraform_version: 1\.17\.0/)
   assert.doesNotMatch(recoveryWorkflow, /terraform_version: 1\.5\.7/)
   assert.match(recoveryWorkflow, /workflow_run:/)
   assert.match(recoveryWorkflow, /workflows: \[Prove Relay Staging Capacity\]/)

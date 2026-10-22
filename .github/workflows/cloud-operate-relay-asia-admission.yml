@@ -281,7 +281,7 @@ jobs:
       - uses: hashicorp/setup-terraform@v3
         if: ${{ inputs.mode == 'configure' }}
         with:
-          terraform_version: 1.15.8
+          terraform_version: 1.17.0
           terraform_wrapper: false
 
       - name: Run the exact generation-bound admission operation

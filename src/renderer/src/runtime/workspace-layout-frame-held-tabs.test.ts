@@ -17,8 +17,6 @@ import { bootWindowFromPartitions } from '../app-shell/startup-window-view.test-
 import { buildWorkspaceSessionPayload } from '../lib/workspace-session'
 import { createStoreSessionMockApi } from '../store/slices/store-session-test-harness'
 import { createTestStore } from '../store/slices/store-test-helpers'
-import { recordOpenedAgentSessionTabInLayoutOwner } from './agent-session-tab-layout-owner'
-import { recordOpenedSimulatorTabInLayoutOwner } from '@/lib/simulator-tab-layout-owner'
 import { withLayoutOwnerTabProps } from '@/components/tab-bar/tab-bar-layout-owner-props'
 import { endLayoutFramePositions } from './layout-frame-position'
 import { openWorkspaceLayoutFrameSync } from './workspace-layout-frame-sync'
@@ -237,61 +235,7 @@ describe('a tab the window drew, closed or moved, with a frame from before main 
     sync.close()
   })
 
-  it.each([
-    [
-      'chat',
-      (store: ReturnType<typeof createTestStore>) => {
-        const tab = drawTab(store, {
-          id: 'agent-session-new',
-          contentType: 'agent-session',
-          agentSessionAgent: 'claude'
-        })
-        recordOpenedAgentSessionTabInLayoutOwner(store.getState(), tab)
-        return tab
-      }
-    ],
-    [
-      'simulator',
-      (store: ReturnType<typeof createTestStore>) => {
-        const tab = drawTab(store, { id: 'simulator-new' })
-        recordOpenedSimulatorTabInLayoutOwner(store.getState(), tab)
-        return tab
-      }
-    ]
-  ])('keeps a just-opened %s tab', async (_kind, open) => {
-    const { store, sync, before } = await boot()
-    const tab = open(store)
-    expect(rpc.calls.length).toBeGreaterThan(0)
-
-    sendStaleFrame(before)
-    await settle()
-    expect(tabBar(store)).toContain(tab.id)
-    expect(groupOrder(store, 'group-b')).toContain(tab.id)
-    if (tab.contentType === 'editor') {
-      expect(store.getState().openFiles.map((file) => file.id)).toContain(tab.entityId)
-    }
-    sync.close()
-  })
-
-  it('keeps a just-opened browser tab and its page', async () => {
-    const { store, sync, before } = await boot()
-    const created = store.getState().createBrowserTab(GIT_KEY, 'https://example.com/', {
-      title: 'Example'
-    })
-    const entry = store
-      .getState()
-      .unifiedTabsByWorktree[GIT_KEY]!.find((tab) => tab.entityId === created.id)!
-    expect(rpc.calls.some((call) => call.command.type === 'openBrowserTab')).toBe(true)
-
-    sendStaleFrame(before)
-    await settle()
-    expect(tabBar(store)).toContain(entry.id)
-    expect(store.getState().browserTabsByWorktree[GIT_KEY]!.map((tab) => tab.id)).toContain(
-      created.id
-    )
-    expect(store.getState().browserPagesByWorkspace[created.id]?.length).toBeGreaterThan(0)
-    sync.close()
-  })
+  // Browser, chat and simulator opens draw from main's frame alone: content-tabs-from-main-frames.test.ts.
 
   it('keeps a reorder the window made, and main’s order for the rest', async () => {
     const { store, sync, before, answer } = await boot()

@@ -6,6 +6,7 @@ import { registerAgentStatusStartupSnapshot } from '@/hooks/ipc-events/agent-sta
 import { NEWER_DAEMON_HOLD_ERROR } from '../../../../../shared/newer-daemon-hold'
 import { newerDaemonHoldStore, reopenHeldTerminals } from '../newer-daemon-hold-state'
 import { startDeferredSessionReattach } from './deferred-session-reattach-connect'
+import { ORCA_LAYOUT_OWNER_IS_MAIN } from '../../../../../shared/layout-owner-switch'
 import type { ConnectPanePtySession } from './connect-pane-pty-session'
 
 vi.mock('sonner', () => ({ toast: { success: vi.fn() } }))
@@ -70,6 +71,11 @@ function createSession(opts: { runtimeEnvironmentId?: string } = {}) {
   return { fixture, session, transport, nextConnect: (mode: typeof next) => (next = mode) }
 }
 
+/** Switch on, main's start resumes the agent, so the window's reattach claims no resume. */
+const windowResumedDescription = ORCA_LAYOUT_OWNER_IS_MAIN
+  ? undefined
+  : { description: '1 agent session resumed.' }
+
 const isHeld = (): boolean => Object.keys(newerDaemonHoldStore.getState().panes).length > 0
 
 describe('restored pane refused for a newer daemon', () => {
@@ -109,12 +115,14 @@ describe('restored pane refused for a newer daemon', () => {
     nextConnect('reattach')
     await reopenHeldTerminals('tab:leaf')
     expect(transport.connect).toHaveBeenLastCalledWith(
-      expect.objectContaining({ sessionId: 'restored-pty', command: 'claude --resume c1' })
+      expect.objectContaining(
+        ORCA_LAYOUT_OWNER_IS_MAIN
+          ? { sessionId: 'restored-pty', attachOnlyView: true }
+          : { sessionId: 'restored-pty', command: 'claude --resume c1' }
+      )
     )
     expect(fixture.pane.terminal.options.disableStdin).toBe(false)
-    expect(toast.success).toHaveBeenCalledWith('Reopened 1 terminal', {
-      description: '1 agent session resumed.'
-    })
+    expect(toast.success).toHaveBeenCalledWith('Reopened 1 terminal', windowResumedDescription)
   })
 
   it('shows the saved screen while held and clears it before reconnecting', async () => {
@@ -149,9 +157,7 @@ describe('restored pane refused for a newer daemon', () => {
     nextConnect('throw')
     await reopenHeldTerminals('tab:leaf')
     expect(fixture.startFreshColdRestoreAgentResume).toHaveBeenCalledOnce()
-    expect(toast.success).toHaveBeenCalledWith('Reopened 1 terminal', {
-      description: '1 agent session resumed.'
-    })
+    expect(toast.success).toHaveBeenCalledWith('Reopened 1 terminal', windowResumedDescription)
   })
 
   it('treats a paired host refusal as an ordinary error, never a local hold', async () => {
