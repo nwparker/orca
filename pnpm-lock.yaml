@@ -164,6 +164,7 @@ settings:
   excludeLinksFromLockfile: false
 
 overrides:
+  hono@>=4.12.4 <4.13.11: 4.13.11
   monaco-editor>dompurify: 3.4.16
   katex@>=0.11.0 <0.18.2: 0.18.10
 
@@ -179,11 +180,13 @@ patchedDependencies:
   '@xterm/addon-serialize@0.15.0-beta.301': b35533fe252e7e45433150170348889f4e08a6c17f7017ac34ea694d831fec7f
   '@xterm/addon-webgl@0.20.0-beta.300': 5349718f2c19d9319a81552580bf9618ded9b00f3707a5c6cdbbae1910849cd9
   '@xterm/xterm@6.1.0-beta.304': 87de83f62154c0f2c31eb17d14b881e139f3368f8be1e9e2951bfeba16d86156
+  braces@3.0.3: c07bb14cec04bc891e1fe529720444cc9729a25117f9aaf24253cfe3132a34fd
   i18next-cli@1.74.2: 2ee32eef742615cd133e1a6940f027deb3723a8430bb7953bba3a6769b0aac47
   lint-staged@16.4.0: 7333b3837f80a7fbd045964db6d76ba4fc118e49134bdbabb00585b6b7b60673
   monaco-editor@0.55.1: 53b71f7d8a7c00b76ffdb73ce83d18e31692f193f5fafa6a390e48f5b3fdd636
   node-pty@1.1.0: 2aa312c1b29d733bfd3e3ece2fbbb4eed7750384d7d9f91effd27318a75b7a95
   oxlint-plugin-anti-slop@0.1.2: c10c871702365a0c2c59e9f1c5fb92df97cae5755d534c0a3d83c6368f6feafe
+  sprintf-js@1.1.3: 05316a8b01f155fe19a1e0cb4042c81d43d798a76755c407684e1199a18b1e08
   ws@8.22.0: 9393e04dd9a90b01eb7aa35fcd5b1431b5038ce999fbbd82651136193ba51f14
 
 importers:
@@ -1293,7 +1296,7 @@ packages:
     engines: {node: '>=20'}
     peerDependencies:
       '@types/hono': '*'
-      hono: ^4
+      hono: 4.13.11
     peerDependenciesMeta:
       '@types/hono':
         optional: true
@@ -5912,8 +5915,8 @@ packages:
     resolution: {integrity: sha512-Xwwo44whKBVCYoliBQwaPvtd/2tYFkRQtXDWj1nackaV2JPXx3L0+Jvd8/qCJ2p+ML0/XVkJ2q+Mr+UVdpJK5w==}
     engines: {node: '>=12.0.0'}
 
-  hono@4.13.7:
-    resolution: {integrity: sha512-c8/gF9ac8Y78/agExVocyLevgR+JlpNB444Py0FSX8pJoPdYUfUzRcXtYEYGwt6l19qIlVZPN5Mfsw9jFShmQQ==}
+  hono@4.13.11:
+    resolution: {integrity: sha512-/SMX/RQNJn7oNmFwH6DtwDqcrzZU2otm1FD6OJe2cWF6cfy/F8hq0XVBv7xW3FTJshRQwuBnXHDq2kNsdZnshg==}
     engines: {node: '>=16.9.0'}
 
   hookified@1.15.1:
@@ -9139,9 +9142,9 @@ snapshots:
     dependencies:
       graphql: 16.14.2
 
-  '@hono/node-server@2.1.0(hono@4.13.7)':
+  '@hono/node-server@2.1.0(hono@4.13.11)':
     dependencies:
-      hono: 4.13.7
+      hono: 4.13.11
 
   '@humanfs/core@0.19.2':
     dependencies:
@@ -9378,7 +9381,7 @@ snapshots:
 
   '@modelcontextprotocol/sdk@1.32.1(supports-color@7.2.0)(zod@3.25.76)':
     dependencies:
-      '@hono/node-server': 2.1.0(hono@4.13.7)
+      '@hono/node-server': 2.1.0(hono@4.13.11)
       ajv: 8.20.0
       ajv-formats: 3.0.1
       content-type: 1.0.5
@@ -9388,7 +9391,7 @@ snapshots:
       eventsource-parser: 3.0.8
       express: 5.2.1(supports-color@7.2.0)
       express-rate-limit: 8.5.2(express@5.2.1(supports-color@7.2.0))
-      hono: 4.13.7
+      hono: 4.13.11
       jose: 6.2.3
       json-schema-typed: 8.0.2
       pkce-challenge: 5.0.1
@@ -9403,7 +9406,7 @@ snapshots:
 
   '@modelcontextprotocol/sdk@1.32.1(supports-color@7.2.0)(zod@4.6.7)':
     dependencies:
-      '@hono/node-server': 2.1.0(hono@4.13.7)
+      '@hono/node-server': 2.1.0(hono@4.13.11)
       ajv: 8.20.0
       ajv-formats: 3.0.1
       content-type: 1.0.5
@@ -9413,7 +9416,7 @@ snapshots:
       eventsource-parser: 3.0.8
       express: 5.2.1(supports-color@7.2.0)
       express-rate-limit: 8.5.2(express@5.2.1(supports-color@7.2.0))
-      hono: 4.13.7
+      hono: 4.13.11
       jose: 6.2.3
       json-schema-typed: 8.0.2
       pkce-challenge: 5.0.1
@@ -11550,7 +11553,7 @@ snapshots:
 
   '@types/set-cookie-parser@2.4.10':
     dependencies:
-      '@types/node': 18.19.130
+      '@types/node': 24.19.2
     optional: true
 
   '@types/ssh2@1.15.6':
@@ -11912,7 +11915,7 @@ snapshots:
     dependencies:
       balanced-match: 4.0.4
 
-  braces@3.0.3:
+  braces@3.0.3(patch_hash=c07bb14cec04bc891e1fe529720444cc9729a25117f9aaf24253cfe3132a34fd):
     dependencies:
       fill-range: 7.1.1
 
@@ -13366,7 +13369,7 @@ snapshots:
 
   highlight.js@11.11.1: {}
 
-  hono@4.13.7: {}
+  hono@4.13.11: {}
 
   hookified@1.15.1:
     optional: true
@@ -14346,7 +14349,7 @@ snapshots:
 
   micromatch@4.0.8:
     dependencies:
-      braces: 3.0.3
+      braces: 3.0.3(patch_hash=c07bb14cec04bc891e1fe529720444cc9729a25117f9aaf24253cfe3132a34fd)
       picomatch: 2.3.2
 
   mime-db@1.52.0: {}
@@ -15401,7 +15404,7 @@ snapshots:
       globalthis: 1.0.4
       json-stringify-safe: 5.0.1
       semver-compare: 1.0.0
-      sprintf-js: 1.1.3
+      sprintf-js: 1.1.3(patch_hash=05316a8b01f155fe19a1e0cb4042c81d43d798a76755c407684e1199a18b1e08)
     optional: true
 
   robust-predicates@3.0.3: {}
@@ -15695,7 +15698,7 @@ snapshots:
 
   space-separated-tokens@2.0.2: {}
 
-  sprintf-js@1.1.3:
+  sprintf-js@1.1.3(patch_hash=05316a8b01f155fe19a1e0cb4042c81d43d798a76755c407684e1199a18b1e08):
     optional: true
 
   ssh2@1.17.0:
