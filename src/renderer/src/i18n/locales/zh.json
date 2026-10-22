@@ -7093,8 +7093,6 @@
           "ee110e1830": "没有默认的基本参考"
         },
         "BrowserDefaultZoomSetting": {
-          "2622126877": "缩放级别应用于新打开的浏览器选项卡。",
-          "bbeec087d3": "应用于新打开的浏览器选项卡。",
           "265597101f": "默认缩放"
         },
         "BrowserHomePageSetting": {
@@ -16663,7 +16661,6 @@
             "95af781091": "向智能体发送反馈",
             "ac39b9366b": "发送",
             "a3508d7e6e": "{{value0}} 注释{{value1}} 准备就绪。选择另一个元素或复制所有反馈。",
-            "f796c774a4": "在上面输入 URL 即可开始浏览。",
             "366bf5d62c": "新标签",
             "1c78adc73d": "在外部打开",
             "da68d35f7b": "在默认浏览器中打开失败页面",
@@ -16789,7 +16786,8 @@
               "bar": {
                 "suggestions": {
                   "87fcdd0da9": "{{value0}} 搜索"
-                }
+                },
+                "placeholder": "搜索或输入网址"
               }
             }
           },
@@ -18339,9 +18337,9 @@
         "couldNotStart": "{{agent}} 无法启动。",
         "editSavedArguments": "请在设置 > 智能体 > 参数中编辑。",
         "couldNotRestart": "{{agent}} 无法重新启动。",
+        "cliTooOld": "{{agent}} {{installedVersion}} 版本过旧，无法用于聊天。请更新到 {{minimumVersion}} 或更高版本。",
         "startTimedOut": "{{agent}} 启动时间过长（{{seconds}} 秒后 {{method}} 仍无响应）。",
         "startTimedOutKeepsHappening": "如果此问题持续出现，运行此聊天的计算机可能负载过重。",
-        "codexCliTooOld": "Codex {{installedVersion}} 版本过旧，无法用于聊天。请更新到 {{minimumVersion}} 或更高版本。",
         "notSignedIn": "{{agent}} 尚未登录。",
         "claudeSystemNotSignedIn": "Claude 尚未登录。请运行 `{{loginCommand}}`，或在 Claude 账户设置中选择账户。",
         "claudeManagedNotSignedIn": "此 Claude 账户尚未登录。请在 Claude 账户设置中重新登录。",
