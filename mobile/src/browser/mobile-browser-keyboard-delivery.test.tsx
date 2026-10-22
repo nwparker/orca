@@ -4,9 +4,11 @@ import { describe, expect, it, vi } from 'vitest'
 import { createFakeRpcClient, rpcSuccess } from '../mobile-web-shell/bridge-host-test-fakes'
 import { useMobileBrowserCommands } from './use-mobile-browser-commands'
 import { useMobileBrowserRequest } from './use-mobile-browser-request'
+import { createStableLogicalRpcClient } from '../transport/stable-logical-rpc-client'
 
 function mountKeyboard() {
   const client = createFakeRpcClient()
+  const logicalClient = createStableLogicalRpcClient(client, 'relay')
   const toast = vi.fn()
   let pageId = 'page-1'
   let renderer: ReactTestRenderer
@@ -17,14 +19,14 @@ function mountKeyboard() {
     const [draft, setDraft] = useState('first draft')
     const request = useMobileBrowserRequest({
       busyRef: { current: false },
-      client,
+      client: logicalClient,
       pageId,
       worktreeId: 'tree-1',
       setBusy: () => {},
       setError: () => {}
     })
     const commands = useMobileBrowserCommands({
-      client,
+      client: logicalClient,
       frameMetadataRef: { current: null },
       keyboardValue: draft,
       layoutRef: { current: null },
@@ -51,6 +53,12 @@ function mountKeyboard() {
     draft: () => value,
     edit: (text: string) => edit(text),
     send: () => send(),
+    migrateConnection: async () => {
+      await act(async () => {
+        await logicalClient.migrateTo(createFakeRpcClient(), 'lan')
+        renderer.update(createElement(Keyboard))
+      })
+    },
     switchPage: () =>
       act(() => {
         pageId = 'page-2'
@@ -61,6 +69,37 @@ function mountKeyboard() {
 }
 
 describe('browser keyboard draft delivery', () => {
+  it.each([true, false])(
+    'preserves newer typing across a same-computer connection migration: accepted=%s',
+    async (accepted) => {
+      const keyboard = mountKeyboard()
+      try {
+        let pending: Promise<void> | undefined
+        act(() => {
+          pending = keyboard.send()
+        })
+        act(() => keyboard.edit('new typing'))
+        await keyboard.migrateConnection()
+        expect(keyboard.draft()).toBe('new typing')
+        await act(async () => {
+          const request = keyboard.client.requests[0]!
+          if (accepted) {
+            request.resolve(rpcSuccess('send', null))
+          } else {
+            request.reject(new Error('Connection migrated'))
+          }
+          await pending
+        })
+        expect(keyboard.draft()).toBe(accepted ? 'new typing' : 'first draftnew typing')
+        expect(keyboard.toast.mock.calls).toEqual([
+          [accepted ? 'Sent' : 'Could not confirm delivery. Check the page before retrying.']
+        ])
+      } finally {
+        keyboard.unmount()
+      }
+    }
+  )
+
   it('retains newer typing when an earlier send is refused', async () => {
     const keyboard = mountKeyboard()
     let pending: Promise<void>
