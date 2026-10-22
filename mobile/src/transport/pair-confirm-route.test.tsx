@@ -105,6 +105,38 @@ afterEach(() => {
 })
 
 describe('pair confirmation route ownership', () => {
+  it.each(['pairing', 'onboarding'] as const)(
+    'honors Back immediately while %s is pending, before navigation detaches the view',
+    async (phase) => {
+      const pairing = deferred<{ hostId: string }>()
+      const onboarding = deferred<[]>()
+      const dispose = vi.fn()
+      vi.mocked(startPreProfilePairing).mockReturnValue({
+        result: pairing.promise,
+        timedOut: false,
+        dispose
+      })
+      vi.mocked(loadMobileOnboardingSteps).mockReturnValue(onboarding.promise)
+      await renderCode(offerCode('first'))
+      await pressPair()
+      if (phase === 'onboarding') {
+        await act(async () => pairing.resolve({ hostId: 'old-host' }))
+      }
+      await act(async () =>
+        renderer?.root.findByProps({ accessibilityLabel: 'Back' }).props.onPress()
+      )
+      expect(dispose).toHaveBeenCalled()
+      await act(async () => {
+        pairing.resolve({ hostId: 'old-host' })
+        onboarding.resolve([])
+      })
+      expect(route.router.replace.mock.calls).toEqual([['/']])
+      if (phase === 'pairing') {
+        expect(route.refreshHostClient).not.toHaveBeenCalled()
+      }
+    }
+  )
+
   it('renders recovery for repeated code parameters without starting pairing', async () => {
     await renderCode([offerCode('first'), offerCode('second')])
     expect(screenText()).toContain('Not a valid pairing code')

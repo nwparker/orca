@@ -59,6 +59,9 @@ function PairConfirmContent({ routeState }: { routeState: PairConfirmRouteState 
       : errorMessage
 
   const cancel = useCallback(() => {
+    mountedRef.current = false
+    activePairingAttemptRef.current?.dispose()
+    activePairingAttemptRef.current = null
     router.replace('/')
   }, [router])
 
