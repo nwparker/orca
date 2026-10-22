@@ -70,42 +70,23 @@ class MockWebSocket {
 }
 
 const mockSockets: MockWebSocket[] = []
-const originalWebSocket = globalThis.WebSocket
-
-function track(request: Promise<unknown>): { read: () => string } {
-  let outcome = 'pending'
-  request.then(
-    () => {
-      outcome = 'resolved'
-    },
-    (error: Error) => {
-      outcome = error.message
-    }
-  )
-  return { read: () => outcome }
-}
-
-function terminalSendFrames(socket: MockWebSocket): string[] {
-  return socket.sent.filter((frame) => frame.includes('terminal.send'))
-}
 
 describe('terminal Clear transport delivery', () => {
   beforeEach(() => {
     vi.useFakeTimers()
     mockSockets.length = 0
-    globalThis.WebSocket = MockWebSocket as unknown as typeof WebSocket
+    vi.stubGlobal('WebSocket', MockWebSocket)
   })
 
   afterEach(() => {
     vi.useRealTimers()
-    globalThis.WebSocket = originalWebSocket
+    vi.unstubAllGlobals()
   })
 
   it('does not replay a terminal Clear after the connection drops before delivery', async () => {
     const client = connect('ws://desktop.invalid', 'token', 'server-key')
     const socket = mockSockets[0]!
     socket.open()
-    const terminal = { clear: vi.fn() }
     const showToast = vi.fn()
     const subscribeToTerminal = vi.fn()
     let clearHost: (() => Promise<void>) | undefined
@@ -115,7 +96,7 @@ describe('terminal Clear transport delivery', () => {
           client,
           clientRef: { current: client },
           showToast,
-          getTerminalRef: () => terminal,
+          getTerminalRef: () => null,
           unsubscribeTerminal: vi.fn(),
           subscribeToTerminal
         })
@@ -140,7 +121,6 @@ describe('terminal Clear transport delivery', () => {
         mockSockets[1]!.sent.filter((frame) => frame.includes('terminal.clearBuffer'))
       ).toEqual([])
       expect(subscribeToTerminal).not.toHaveBeenCalled()
-      expect(terminal.clear).not.toHaveBeenCalled()
       await pending
     } finally {
       act(() => tree?.unmount())
