@@ -5,6 +5,8 @@ import type { TerminalQuickCommand } from '../../../src/shared/terminal-quick-co
 import type { RpcClient } from '../transport/rpc-client'
 import { MAX_QUICK_COMMANDS } from '../terminal/quick-commands'
 import { QuickCommandsSheet } from './QuickCommandsSheet'
+import { createStableLogicalRpcClient } from '../transport/stable-logical-rpc-client'
+import { FakeSession } from '../transport/mobile-endpoint-supervisor-test-fakes'
 
 const mocks = vi.hoisted(() => ({
   alert: vi.fn(),
@@ -299,6 +301,45 @@ describe('QuickCommandsSheet', () => {
       await second.promise
     })
     expect(renderer!.root.findAllByType(quickCommandEditorForm)).toHaveLength(0)
+  })
+
+  it('keeps newer edits and the pending save when the same computer changes connection paths', async () => {
+    const saved = deferred<boolean>()
+    mocks.persist.mockReturnValue(saved.promise)
+    const client = createStableLogicalRpcClient(new FakeSession('connected'), 'relay')
+    const props = {
+      visible: true,
+      onClose: vi.fn(),
+      client,
+      repoId: 'repo-1',
+      repoName: 'Repo',
+      agentPromptMaxLength: null,
+      onLaunch: () => true
+    }
+    act(() => {
+      renderer = create(createElement(QuickCommandsSheet, props))
+    })
+    act(() => renderer!.root.findByType(quickCommandsList).props.onAdd())
+    const editor = () => renderer!.root.findByType(quickCommandEditorForm)
+    act(() => editor().props.onChange({ label: 'First', command: 'first' }))
+    act(() => editor().props.onSave())
+    act(() => editor().props.onChange({ label: 'Newer', command: 'newer' }))
+    await act(async () => {
+      await client.migrateTo(new FakeSession('connected'), 'lan')
+      renderer!.update(createElement(QuickCommandsSheet, props))
+    })
+    expect(editor().props.draft.label).toBe('Newer')
+    expect(editor().props.saving).toBe(true)
+    await act(async () => {
+      saved.resolve(true)
+      await saved.promise
+    })
+    expect(editor().props.draft).toMatchObject({
+      label: 'Newer',
+      id: mocks.persist.mock.calls[0]?.[0].command.id
+    })
+    expect(editor().props.saving).toBe(false)
+    client.close()
   })
 
   it('keeps creation closed when the host command limit is reached', async () => {
