@@ -131,6 +131,16 @@ async function mountNotes(initial: DiffComment[] = []) {
         await read.promise
       })
     },
+    async missingRecord(index: number) {
+      const read = reads[index]
+      if (!read) {
+        throw new Error(`Missing read ${index}`)
+      }
+      await act(async () => {
+        read.resolve(accepted({}))
+        await read.promise
+      })
+    },
     async reply(index: number, notes: readonly DiffComment[]) {
       const read = reads[index]
       if (!read) {
@@ -329,6 +339,30 @@ it('waits for the initial desktop note baseline before writing a complete replac
   expect(notes.notes().map((note) => note.body)).toEqual(['Existing note', 'New note'])
   const write = notes.calls().find(([method]) => method === 'worktree.set')
   expect(write?.[1]).toEqual({ worktree: 'id:wt', diffComments: notes.notes() })
+})
+
+it('does not replace the desktop notes when a successful read omits its workspace record', async () => {
+  const notes = await mountNotes()
+  let adding: Promise<boolean> | undefined
+  await act(async () => {
+    adding = notes.model().addDiffCommentForFile('b.ts', 2, 'Keep existing desktop notes')
+  })
+  await notes.missingRecord(0)
+  await act(async () => {
+    expect(await adding).toBe(false)
+  })
+  expect(notes.calls().filter(([method]) => method === 'worktree.set')).toEqual([])
+  expect(notes.busy()).toBe(false)
+  let loading: Promise<void> | undefined
+  act(() => {
+    loading = notes.model().loadDiffComments()
+  })
+  await notes.reply(1, [originalNote])
+  await act(async () => {
+    await loading
+    expect(await notes.model().addDiffCommentForFile('b.ts', 2, 'After valid baseline')).toBe(true)
+  })
+  expect(notes.notes().map((note) => note.body)).toEqual(['Existing note', 'After valid baseline'])
 })
 
 it('waits for the new workspace baseline and preserves its desktop notes when editing immediately', async () => {

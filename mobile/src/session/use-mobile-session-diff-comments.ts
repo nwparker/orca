@@ -90,7 +90,7 @@ export function useMobileSessionDiffComments(scope: MobileSessionDocumentReaders
       if (!notesOwner.active || loadRevision !== notesOwner.loadRevision) {
         return
       }
-      if (!response.accepted) {
+      if (!response.accepted || response.value === undefined) {
         finishBaseline(false)
         return
       }
