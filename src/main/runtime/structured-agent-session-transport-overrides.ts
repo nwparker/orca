@@ -1,3 +1,4 @@
+import type { CodexModelCatalogProbeDeps } from '../codex/codex-model-catalog-probe'
 import type { AcpStructuredSessionAdapterDeps } from '../acp/acp-structured-session-adapter-deps'
 import type { AcpStructuredLaunchPartDeps } from '../acp/acp-structured-launch-resolution'
 import type { ClaudeStructuredSessionAdapterDeps } from '../claude/claude-structured-session-adapter'
@@ -13,6 +14,8 @@ export type StructuredAgentSessionTransportOverrides = {
   /** Scripted Pi children resolve their launch here, so no test reaches a real Pi binary. */
   resolvePiLaunch?: PiRpcSessionAdapterDeps['resolveLaunch']
   openCodexConnection?: CodexStructuredSessionAdapterDeps['openConnection']
+  /** Independent discovery uses its own short-lived transport, separate from chat children. */
+  runCodexCatalogSession?: CodexModelCatalogProbeDeps['runSession']
   /** Scripted transports must also replace the real host's version probe. */
   readCodexInstallation?: typeof readCodexCliInstallation
   openAcpConnection?: AcpStructuredSessionAdapterDeps['connect']
