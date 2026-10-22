@@ -313,6 +313,60 @@ it('preserves the dirty artifact identity when its route is normalized again', a
   ).toBe(false)
 })
 
+it('saves once for two taps in one frame and preserves edits made during the save', async () => {
+  const artifactRoute = {
+    ok: true,
+    params: {
+      hostId: 'host-a',
+      worktreeId: 'wt-1',
+      source: 'terminalArtifact',
+      absolutePath: '/workspace/draft.txt',
+      grantId: 'grant-1'
+    }
+  } as const
+  let finishWrite: (value: unknown) => void = () => {}
+  const write = vi.fn(
+    () =>
+      new Promise((resolve) => {
+        finishWrite = resolve
+      })
+  )
+  transport.connection = {
+    state: 'connected',
+    client: {
+      sendRequest: (method) =>
+        method === 'files.writeTerminalArtifact'
+          ? write()
+          : Promise.resolve({
+              ok: true,
+              id: 'preview',
+              result: { content: 'Original', truncated: false, byteLength: 8 }
+            })
+    }
+  }
+  await act(async () => {
+    tree = create(createElement(MobileFilePreviewScreen, { route: artifactRoute }))
+  })
+  if (!tree) {
+    throw new Error('Preview did not mount')
+  }
+  const rendered: ReactTestRenderer = tree
+  const editor = () => rendered.root.find((node) => String(node.type) === 'TextInput')
+  const save = () =>
+    rendered.root.find((node) => node.props.accessibilityLabel === 'Save terminal artifact')
+  await act(async () => editor().props.onChangeText('First edit'))
+  const press = save().props.onPress
+  await act(async () => {
+    press()
+    press()
+  })
+  expect(write).toHaveBeenCalledOnce()
+  await act(async () => editor().props.onChangeText('Newer edit'))
+  await act(async () => finishWrite({ ok: true, id: 'save', result: { written: true } }))
+  expect(editor().props.value).toBe('Newer edit')
+  expect(save().props.disabled).toBe(false)
+})
+
 it.each(['host', 'executionHost'] as const)(
   'does not carry a draft across %s authority with the same workspace and path',
   async (authority) => {
