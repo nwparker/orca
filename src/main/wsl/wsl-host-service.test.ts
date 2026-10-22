@@ -253,9 +253,9 @@ describe('WslHostService', () => {
       deferredUpdate: null
     })
 
-    await service.connect('wsl:ubuntu', { force: true })
+    await service.connect('wsl:ubuntu', { intent: 'force' })
     expect(connector.connect).toHaveBeenLastCalledWith('Ubuntu', {
-      force: true
+      intent: 'force'
     })
   })
 

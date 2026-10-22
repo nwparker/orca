@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react'
 import { ActivityIndicator, Keyboard, Pressable, StyleSheet, Text, View } from 'react-native'
 import {
   ChevronLeft,
@@ -102,6 +103,14 @@ export function MobileNativeChatSessionOptionPickers({
   onDrawerOpen,
   onDrawerAfterClose
 }: MobileNativeChatSessionOptionPickersProps & PresentationProps): React.JSX.Element | null {
+  const open = presentation?.page != null
+  const wasOpen = useRef(false)
+  useEffect(() => {
+    if (open && !wasOpen.current) {
+      controller.optionSurface?.demandModelCatalog?.()
+    }
+    wasOpen.current = open
+  }, [open, controller.optionSurface])
   const { snapshot, pendingId } = controller
   const model = snapshot.find((descriptor) => descriptor.category === 'model')
   const permission = snapshot.find(

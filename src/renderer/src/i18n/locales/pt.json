@@ -8163,8 +8163,6 @@
           "5f5142a62a": "Ícone anterior"
         },
         "BrowserDefaultZoomSetting": {
-          "2622126877": "Nível de zoom aplicado às abas de navegador recém-abertas.",
-          "bbeec087d3": "Aplicado às abas de navegador recém-abertas.",
           "265597101f": "Zoom Padrão"
         },
         "BrowserUseComputerUseNotice": {
@@ -16337,7 +16335,6 @@
             "95af781091": "Enviar feedback para um agente",
             "ac39b9366b": "Enviar",
             "a3508d7e6e": "{{value0}} anotação{{value1}} pronta. Selecione outro elemento ou copie todo o feedback.",
-            "f796c774a4": "Digite uma URL acima para começar a navegar.",
             "366bf5d62c": "Nova Aba",
             "1c78adc73d": "Abrir Externamente",
             "da68d35f7b": "Abrir a página com falha no navegador padrão",

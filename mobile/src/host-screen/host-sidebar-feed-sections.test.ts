@@ -13,6 +13,7 @@ import {
   FEED_ROWS,
   SERVED_SECTIONS,
   feedDomains,
+  feedKey,
   feedRow,
   liveRow,
   phoneView
@@ -137,7 +138,7 @@ describe('the phone list from the sidebar feed', () => {
     const domains = feedDomains({
       workspaces: new Map([
         ...base.workspaces,
-        ['|orca::/w/solo', feedRow({ id: 'orca::/w/solo', manualOrder: 4 })]
+        [feedKey('|orca::/w/solo'), feedRow({ id: 'orca::/w/solo', manualOrder: 4 })]
       ])
     })
     const built = buildSidebarFeedRows(domains, grouped, phoneFeedView(phoneView()))
@@ -209,7 +210,7 @@ describe('the phone list from the sidebar feed', () => {
 
     it('highlights nothing once the row is deleted', () => {
       const workspaces = new Map(feedDomains().workspaces)
-      workspaces.delete('|orca::/w/child')
+      workspaces.delete(feedKey('|orca::/w/child'))
       const domains = feedDomains({ workspaces })
       const sections = sectionsFromDomains(domains, phoneView(), '', {
         worktreeId: 'orca::/w/child'
@@ -324,8 +325,8 @@ describe('the phone list from the sidebar feed', () => {
     const built = buildSidebarFeedRows(
       feedDomains({
         workspaces: new Map([
-          ['|orca::/w/parent', FEED_ROWS.parent],
-          ['|orca::/w/child', feedChild]
+          [feedKey('|orca::/w/parent'), FEED_ROWS.parent],
+          [feedKey('|orca::/w/child'), feedChild]
         ])
       }),
       catalog,
