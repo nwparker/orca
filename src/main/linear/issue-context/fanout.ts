@@ -1,12 +1,8 @@
-import type { LinearErrorCode, LinearWorkspaceCandidate } from '../../shared/linear/agent-access'
-import type { LinearWorkspace } from '../../shared/linear/workspace-types'
-import { getClients, getStatus, type LinearClientForWorkspace } from './client'
-import {
-  LinearAgentAccessError,
-  classifyLinearError,
-  linearError,
-  linearMessage
-} from './issue-context-errors'
+import type { LinearErrorCode } from '../../../shared/linear/agent-access'
+import type { LinearWorkspaceCandidate } from '../../../shared/linear/agent-result-types'
+import type { LinearWorkspace } from '../../../shared/linear/workspace-types'
+import { getClients, getStatus, type LinearClientForWorkspace } from '../client'
+import { LinearAgentAccessError, classifyLinearError, linearError, linearMessage } from './errors'
 
 export type WorkspaceReadFailure = {
   workspace: LinearWorkspaceCandidate

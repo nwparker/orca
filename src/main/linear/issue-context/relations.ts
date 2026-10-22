@@ -1,8 +1,11 @@
-import type { LinearCollectionMeta, LinearIssueRelation } from '../../shared/linear/agent-access'
-import { LINEAR_RELATIONS_CAP } from '../../shared/linear/agent-access'
-import type { ResolvedIssue } from './issue-context-client'
-import { getRequiredEntry, withLinearRead } from './issue-context-client'
-import { readConnectionPages } from './issue-context-pagination'
+import type {
+  LinearCollectionMeta,
+  LinearIssueRelation
+} from '../../../shared/linear/agent-result-types'
+import { LINEAR_RELATIONS_CAP } from '../../../shared/linear/agent-access'
+import type { ResolvedIssue } from './client'
+import { getRequiredEntry, withLinearRead } from './client'
+import { readConnectionPages } from './pagination'
 import {
   INVERSE_RELATIONS_QUERY,
   RELATIONS_QUERY,
@@ -10,7 +13,7 @@ import {
   type RawIssue,
   type RawRelationNode,
   type RawRelationsResponse
-} from './issue-context-raw'
+} from './raw'
 
 export async function readIssueRelations(
   resolved: ResolvedIssue

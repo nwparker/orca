@@ -1,6 +1,6 @@
-import { parseLinearIssueInput } from '../../shared/linear/links'
-import { getConnectedWorkspaces } from './issue-context-client'
-import { linearError } from './issue-context-errors'
+import { parseLinearIssueInput } from '../../../shared/linear/links'
+import { getConnectedWorkspaces } from './client'
+import { linearError } from './errors'
 
 export type CurrentIssueLink = {
   identifier: string

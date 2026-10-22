@@ -1,14 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { LinearIssueContextResult, LinearIssueRequest } from '../../shared/linear/agent-access'
-import type { ResolvedIssue } from './issue-context-client'
-import { ACTIVITY_QUERY } from './issue-activity-raw'
+import type { LinearIssueContextResult } from '../../../shared/linear/agent-result-types'
+import type { LinearIssueRequest } from '../../../shared/linear/agent-access'
+import type { ResolvedIssue } from './client'
+import { ACTIVITY_QUERY } from '../issue-activity-raw'
 import {
   ATTACHMENTS_QUERY,
   CHILDREN_QUERY,
   COMMENTS_QUERY,
   INVERSE_RELATIONS_QUERY,
   RELATIONS_QUERY
-} from './issue-context-raw'
+} from './raw'
 
 // The signed public-file-url client is what body reads must use so Linear
 // rewrites inline uploads.linear.app URLs into temporary signed URLs. The plain
@@ -16,7 +17,7 @@ import {
 const rawRequest = vi.fn()
 const plainRawRequest = vi.fn()
 
-vi.mock('./issue-context-client', () => ({
+vi.mock('./client', () => ({
   getRequiredEntry: () => ({
     workspace: {
       id: 'workspace-1',
@@ -30,7 +31,7 @@ vi.mock('./issue-context-client', () => ({
   withLinearRead: async (_entry: unknown, read: () => Promise<unknown>) => read()
 }))
 
-vi.mock('./client', () => ({
+vi.mock('../client', () => ({
   getPublicFileUrlClient: () => ({ client: { rawRequest } })
 }))
 
@@ -180,7 +181,7 @@ describe('Linear issue context includes', () => {
         }
       })
     }
-    const { readOptionalIncludes } = await import('./issue-context-includes')
+    const { readOptionalIncludes } = await import('./includes')
     const output = result()
 
     await readOptionalIncludes(resolvedIssue(), request(), output, [], output.meta.sections)
@@ -217,7 +218,7 @@ describe('Linear issue context includes', () => {
         }
       })
     }
-    const { readOptionalIncludes } = await import('./issue-context-includes')
+    const { readOptionalIncludes } = await import('./includes')
     const output = result()
 
     await readOptionalIncludes(
@@ -274,7 +275,7 @@ describe('Linear issue context includes', () => {
         }
       }
     })
-    const { readOptionalIncludes } = await import('./issue-context-includes')
+    const { readOptionalIncludes } = await import('./includes')
     const output = result()
 
     await readOptionalIncludes(
@@ -337,7 +338,7 @@ describe('Linear issue context includes', () => {
         }
       })
     }
-    const { readOptionalIncludes } = await import('./issue-context-includes')
+    const { readOptionalIncludes } = await import('./includes')
     const output = result()
 
     await readOptionalIncludes(
@@ -376,7 +377,7 @@ describe('Linear issue context includes', () => {
         }
       }
     })
-    const { readOptionalIncludes } = await import('./issue-context-includes')
+    const { readOptionalIncludes } = await import('./includes')
     const output = result()
 
     await readOptionalIncludes(
@@ -411,7 +412,7 @@ describe('Linear issue context includes', () => {
         }
       }
     })
-    const { readOptionalIncludes } = await import('./issue-context-includes')
+    const { readOptionalIncludes } = await import('./includes')
     const output = result()
 
     await readOptionalIncludes(
@@ -437,7 +438,7 @@ describe('Linear issue context includes', () => {
         }
       }
     })
-    const { readOptionalIncludes } = await import('./issue-context-includes')
+    const { readOptionalIncludes } = await import('./includes')
     const output = result()
 
     await readOptionalIncludes(

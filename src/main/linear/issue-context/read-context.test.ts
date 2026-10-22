@@ -1,22 +1,22 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { LinearClientForWorkspace } from './client'
-import type { LinearWorkspace } from '../../shared/linear/workspace-types'
+import type { LinearClientForWorkspace } from '../client'
+import type { LinearWorkspace } from '../../../shared/linear/workspace-types'
 
 const getClients = vi.fn()
 const getStatus = vi.fn()
 const isAuthError = vi.fn()
 const clearToken = vi.fn()
 
-vi.mock('./linear-request-concurrency', () => ({
+vi.mock('../linear-request-concurrency', () => ({
   acquire: vi.fn().mockResolvedValue(undefined),
   release: vi.fn()
 }))
 
-vi.mock('./linear-token-store', () => ({
+vi.mock('../linear-token-store', () => ({
   clearToken: (...args: unknown[]) => clearToken(...args)
 }))
 
-vi.mock('./client', () => ({
+vi.mock('../client', () => ({
   getClients: (...args: unknown[]) => getClients(...args),
   getStatus: (...args: unknown[]) => getStatus(...args),
   isAuthError: (...args: unknown[]) => isAuthError(...args),
@@ -70,7 +70,7 @@ describe('Linear issue context', () => {
     const rawRequest = vi.fn().mockResolvedValue({ data: { issue: rawIssue('STA-335') } })
     getStatus.mockReturnValue({ workspaces: [stably] })
     getClients.mockReturnValue([makeEntry({ workspace: stably, rawRequest })])
-    const { readLinearIssueContext } = await import('./issue-context')
+    const { readLinearIssueContext } = await import('./read-context')
 
     await expect(
       readLinearIssueContext(

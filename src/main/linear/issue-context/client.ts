@@ -1,38 +1,22 @@
-import type { LinearSearchIssueSummary, LinearSearchResult } from '../../shared/linear/agent-access'
-import { clampLinearSearchLimit } from '../../shared/linear/agent-access'
-import type { LinearWorkspace } from '../../shared/linear/workspace-types'
-import { acquire, release } from './linear-request-concurrency'
-import { clearToken } from './linear-token-store'
+import type {
+  LinearSearchIssueSummary,
+  LinearSearchResult
+} from '../../../shared/linear/agent-result-types'
+import { clampLinearSearchLimit } from '../../../shared/linear/agent-access'
+import type { LinearWorkspace } from '../../../shared/linear/workspace-types'
+import { acquire, release } from '../linear-request-concurrency'
+import { clearToken } from '../linear-token-store'
 import {
   getClients,
   getPublicFileUrlClient,
   getStatus,
   isAuthError,
   type LinearClientForWorkspace
-} from './client'
-import {
-  ISSUE_QUERY,
-  SEARCH_QUERY,
-  mapIssue,
-  pickSearchIssue,
-  type RawIssueResponse
-} from './issue-context-raw'
-import {
-  LinearAgentAccessError,
-  classifyLinearError,
-  linearError,
-  linearMessage
-} from './issue-context-errors'
-import {
-  getFanoutClientEntries,
-  workspaceFailure,
-  type WorkspaceReadFailure
-} from './issue-context-fanout'
-import {
-  ambiguousWorkspace,
-  resolveWorkspaceSelector,
-  unknownWorkspace
-} from './issue-context-workspaces'
+} from '../client'
+import { ISSUE_QUERY, SEARCH_QUERY, mapIssue, pickSearchIssue, type RawIssueResponse } from './raw'
+import { LinearAgentAccessError, classifyLinearError, linearError, linearMessage } from './errors'
+import { getFanoutClientEntries, workspaceFailure, type WorkspaceReadFailure } from './fanout'
+import { ambiguousWorkspace, resolveWorkspaceSelector, unknownWorkspace } from './workspaces'
 
 export type ResolvedIssue = {
   issue: ReturnType<typeof mapIssue>

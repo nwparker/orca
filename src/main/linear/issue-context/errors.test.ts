@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { sanitizeLinearErrorMessage } from './issue-context-errors'
+import { sanitizeLinearErrorMessage } from './errors'
 
 describe('sanitizeLinearErrorMessage', () => {
   it('removes stack frames without regex line splitting', () => {

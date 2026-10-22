@@ -1,30 +1,17 @@
 import type {
   LinearCurrentIssueContextHints,
-  LinearIssueChildNode,
-  LinearIssueContextResult,
   LinearIssueRequest
-} from '../../shared/linear/agent-access'
-import { extractLinearInlineMedia } from '../../shared/linear/inline-media'
-import { parseLinearIssueInput } from '../../shared/linear/links'
-import {
-  resolveIssue,
-  searchLinearIssuesForAgents,
-  type ResolvedIssue
-} from './issue-context-client'
-import {
-  getLinearCurrentIssueFromWorktree,
-  resolveLegacyLinearLinkWorkspace,
-  type CurrentIssueLink
-} from './issue-context-current'
-import { LinearAgentAccessError, linearError } from './issue-context-errors'
-import { readOptionalIncludes } from './issue-context-includes'
-
-export {
-  LinearAgentAccessError,
-  getLinearCurrentIssueFromWorktree,
-  resolveLegacyLinearLinkWorkspace,
-  searchLinearIssuesForAgents
-}
+} from '../../../shared/linear/agent-access'
+import type {
+  LinearIssueChildNode,
+  LinearIssueContextResult
+} from '../../../shared/linear/agent-result-types'
+import { extractLinearInlineMedia } from '../../../shared/linear/inline-media'
+import { parseLinearIssueInput } from '../../../shared/linear/links'
+import { resolveIssue, type ResolvedIssue } from './client'
+import type { CurrentIssueLink } from './current'
+import { linearError } from './errors'
+import { readOptionalIncludes } from './includes'
 
 export async function readLinearIssueContext(
   request: LinearIssueRequest,
