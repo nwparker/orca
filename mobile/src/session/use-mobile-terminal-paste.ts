@@ -7,6 +7,9 @@ import { useClipboardReader } from '../platform/clipboard'
 import type { TerminalModes } from '../terminal/terminal-webview-contract'
 import type { RpcClient } from '../transport/rpc-client'
 import type { ConnectionState } from '../transport/types'
+import { waitForRpcClientReconnected } from '../transport/rpc-client-reconnect-wait'
+import { isRpcDeliveryUnknown } from '../transport/rpc-delivery-ambiguity'
+import { isLogicalClientCutoverError } from '../transport/stable-logical-rpc-client'
 import {
   buildMobileTerminalImagePastePayload,
   prepareMobileClipboardImageBase64,
@@ -74,6 +77,7 @@ export function useMobileTerminalPaste({
       return
     }
     const targetHandle = activeHandle
+    let sendingToTerminal = false
     try {
       const text = await clipboard.readText()
       let payload: string | null = null
@@ -94,7 +98,8 @@ export function useMobileTerminalPaste({
         const connectionId = await getActiveWorktreeConnectionId()
         const base64 = await prepareMobileClipboardImageBase64(image, resizeMobileClipboardImage)
         const imagePath = await saveMobileClipboardImageAsTempFile(client, base64, {
-          connectionId
+          connectionId,
+          deadline: Date.now() + 30_000
         })
         payload = separateImagePasteFromFollowingText(
           buildMobileTerminalImagePastePayload(imagePath, agent),
@@ -113,9 +118,22 @@ export function useMobileTerminalPaste({
       // Why: paste lives in the accessory row and must not overtake pending IME text.
       const flushedPendingInput = await flushPendingLiveInputBeforeExternalSend(targetHandle)
       const currentClient = clientRef.current
+      if (currentClient !== client) {
+        onError()
+        showToast('Paste canceled (computer changed)', 1500)
+        return
+      }
+      if (currentClient && currentClient.getState() !== 'connected') {
+        await waitForRpcClientReconnected(currentClient, 1_500)
+      }
       if (!currentClient || connStateRef.current !== 'connected') {
         onError()
         showToast('Paste failed (disconnected)', 1500)
+        return
+      }
+      if (clientRef.current !== currentClient) {
+        onError()
+        showToast('Paste canceled (computer changed)', 1500)
         return
       }
       if (
@@ -131,6 +149,7 @@ export function useMobileTerminalPaste({
         showToast('Paste failed', 1500)
         return
       }
+      sendingToTerminal = true
       const response = await terminalInputSend.request(
         currentClient,
         {
@@ -153,11 +172,13 @@ export function useMobileTerminalPaste({
       refreshCanPaste()
     } catch (e) {
       onError()
-      const err = e as { name?: string; message?: string }
-      const isDisconnected = connState !== 'connected'
+      const err = e instanceof Error ? e : new Error(String(e))
+      const isDisconnected = connStateRef.current !== 'connected'
       // eslint-disable-next-line no-console
       console.warn('[mobile-clip] paste failed', { name: err.name, message: err.message })
-      if (isDisconnected) {
+      if (sendingToTerminal && (isRpcDeliveryUnknown(e) || isLogicalClientCutoverError(e))) {
+        showToast('Could not confirm paste. Check the terminal before retrying.', 3000)
+      } else if (isDisconnected) {
         showToast('Paste failed (disconnected)', 1500)
       } else if (err.message === 'Clipboard image is too large') {
         showToast('Image too large to paste', 1500)
