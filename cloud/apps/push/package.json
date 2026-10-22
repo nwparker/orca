@@ -19,7 +19,7 @@
     "@orca-cloud/postgres-schema": "workspace:*",
     "@orca-cloud/push-contract": "workspace:*",
     "google-auth-library": "^10.5.0",
-    "hono": "^4.13.10",
+    "hono": "^4.13.11",
     "pg": "^8.22.0",
     "pg-connection-string": "2.14.0",
     "tweetnacl": "^1.0.3",
@@ -30,6 +30,6 @@
     "@types/pg": "^8.20.0",
     "tsx": "^4.23.15",
     "typescript": "^5.9.3",
-    "vitest": "^4.1.11"
+    "vitest": "^4.1.12"
   }
 }

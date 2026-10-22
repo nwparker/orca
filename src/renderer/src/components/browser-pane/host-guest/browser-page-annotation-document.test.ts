@@ -71,7 +71,6 @@ function createHarness() {
     ...common,
     browserTabUrlRef: ref('https://example.com/'),
     addressBarValueRef: ref('https://example.com/'),
-    trackNextLoadingEventRef: ref(false),
     keepAddressBarFocusRef: ref(false),
     focusAddressBarNow: () => false
   })
