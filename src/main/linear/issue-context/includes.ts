@@ -1,13 +1,12 @@
 import type {
   LinearCollectionMeta,
   LinearIssueAttachment,
-  LinearIssueActivityEntry,
   LinearIssueChildNode,
   LinearIssueCommentNode,
-  LinearIssueContextResult,
-  LinearIssueInclude,
-  LinearIssueRequest
-} from '../../shared/linear/agent-access'
+  LinearIssueContextResult
+} from '../../../shared/linear/agent-result-types'
+import type { LinearIssueActivityEntry } from '../../../shared/linear/issue-activity'
+import type { LinearIssueInclude, LinearIssueRequest } from '../../../shared/linear/agent-access'
 import {
   LINEAR_ATTACHMENTS_CAP,
   LINEAR_ACTIVITY_CAP,
@@ -15,15 +14,15 @@ import {
   LINEAR_COMMENTS_CAP,
   LINEAR_COMMENT_BODY_CAP,
   clampLinearIssueDepth
-} from '../../shared/linear/agent-access'
-import { extractLinearInlineMedia } from '../../shared/linear/inline-media'
-import type { ResolvedIssue } from './issue-context-client'
-import { getRequiredEntry, withLinearRead } from './issue-context-client'
-import { getPublicFileUrlClient } from './client'
-import { includeErrorCode } from './issue-context-errors'
-import { readConnectionPages } from './issue-context-pagination'
-import { ACTIVITY_QUERY, mapActivity, type RawActivityResponse } from './issue-activity-raw'
-import { readIssueRelations } from './issue-context-relations'
+} from '../../../shared/linear/agent-access'
+import { extractLinearInlineMedia } from '../../../shared/linear/inline-media'
+import type { ResolvedIssue } from './client'
+import { getRequiredEntry, withLinearRead } from './client'
+import { getPublicFileUrlClient } from '../client'
+import { includeErrorCode } from './errors'
+import { readConnectionPages } from './pagination'
+import { ACTIVITY_QUERY, mapActivity, type RawActivityResponse } from '../issue-activity-raw'
+import { readIssueRelations } from './relations'
 import {
   ATTACHMENTS_QUERY,
   CHILDREN_QUERY,
@@ -33,7 +32,7 @@ import {
   type RawAttachmentsResponse,
   type RawChildrenResponse,
   type RawCommentsResponse
-} from './issue-context-raw'
+} from './raw'
 
 export async function readOptionalIncludes(
   resolved: ResolvedIssue,

@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ResolvedIssue } from './issue-context-client'
+import type { ResolvedIssue } from './client'
 
 const rawRequest = vi.fn()
 
-vi.mock('./issue-context-client', () => ({
+vi.mock('./client', () => ({
   getRequiredEntry: () => ({ client: { client: { rawRequest } } }),
   withLinearRead: async (_entry: unknown, read: () => Promise<unknown>) => read()
 }))
@@ -68,7 +68,7 @@ describe('Linear issue context relations', () => {
           }
         }
       })
-    const { readIssueRelations } = await import('./issue-context-relations')
+    const { readIssueRelations } = await import('./relations')
 
     const result = await readIssueRelations(resolvedIssue())
 
@@ -136,7 +136,7 @@ describe('Linear issue context relations', () => {
           }
         }
       })
-    const { readIssueRelations } = await import('./issue-context-relations')
+    const { readIssueRelations } = await import('./relations')
 
     const result = await readIssueRelations(resolvedIssue())
 

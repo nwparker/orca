@@ -1,6 +1,6 @@
 import { createElement } from 'react'
 import TestRenderer from 'react-test-renderer'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { AgentStatusEntry } from '../../../src/shared/agent-status-types'
 import type { NativeChatMessage } from '../../../src/shared/native-chat-types'
 import { useMobileNativeChatPrompts } from './use-mobile-native-chat-prompts'
@@ -188,5 +188,41 @@ describe('useMobileNativeChatPrompts ask state gate', () => {
     ]
     expect(promptsFor({ state: 'done', interactivePrompt: ASK }, answered).ask).toBeNull()
     expect(promptsFor({ state: 'done' }, answered).ask).toBeNull()
+  })
+})
+
+describe('useMobileNativeChatPrompts in a structured chat', () => {
+  it('shows a Codex async question and answers it with an ordinary send', async () => {
+    const sendWithOutcome = vi.fn(async () => 'accepted' as const)
+    const questions = [{ title: 'Which color?', options: ['Red', 'Blue'] }]
+    const message: NativeChatMessage = {
+      id: 'ask',
+      role: 'assistant',
+      blocks: [
+        { type: 'text', text: 'Which color?\n- Red\n- Blue' },
+        { type: 'tool-call', name: 'request_user_input_async', input: { questions } }
+      ],
+      timestamp: null,
+      source: 'transcript'
+    }
+    let captured: ReturnType<typeof useMobileNativeChatPrompts> | undefined
+    function Probe(): null {
+      captured = useMobileNativeChatPrompts({
+        enabled: true,
+        structured: { permission: null, question: null, sendWithOutcome },
+        status: null,
+        messages: [message],
+        transcriptLoading: false
+      })
+      return null
+    }
+    TestRenderer.act(() => {
+      TestRenderer.create(createElement(Probe))
+    })
+
+    const ask = captured?.ask
+    expect(ask?.questions[0]?.question).toBe('Which color?')
+    await expect(ask && captured?.structuredAnswer?.(ask, [{ indices: [1] }])).resolves.toBe(true)
+    expect(sendWithOutcome).toHaveBeenCalledWith('> Which color?\n\nBlue')
   })
 })

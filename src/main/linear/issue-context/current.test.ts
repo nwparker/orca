@@ -1,18 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { LinearWorkspace } from '../../shared/linear/workspace-types'
+import type { LinearWorkspace } from '../../../shared/linear/workspace-types'
 
 const { connectedWorkspaces } = vi.hoisted(() => ({
   connectedWorkspaces: [] as LinearWorkspace[]
 }))
 
-vi.mock('./issue-context-client', () => ({
+vi.mock('./client', () => ({
   getConnectedWorkspaces: () => connectedWorkspaces
 }))
 
-import {
-  getLinearCurrentIssueFromWorktree,
-  resolveLegacyLinearLinkWorkspace
-} from './issue-context-current'
+import { getLinearCurrentIssueFromWorktree, resolveLegacyLinearLinkWorkspace } from './current'
 
 describe('linear issue current worktree link resolution', () => {
   beforeEach(() => {

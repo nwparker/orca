@@ -1,21 +1,21 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { LinearClientForWorkspace } from './client'
+import type { LinearClientForWorkspace } from '../client'
 
 const getClients = vi.fn()
 const getStatus = vi.fn()
 const isAuthError = vi.fn()
 const clearToken = vi.fn()
 
-vi.mock('./linear-request-concurrency', () => ({
+vi.mock('../linear-request-concurrency', () => ({
   acquire: vi.fn().mockResolvedValue(undefined),
   release: vi.fn()
 }))
 
-vi.mock('./linear-token-store', () => ({
+vi.mock('../linear-token-store', () => ({
   clearToken: (...args: unknown[]) => clearToken(...args)
 }))
 
-vi.mock('./client', () => ({
+vi.mock('../client', () => ({
   getClients: (...args: unknown[]) => getClients(...args),
   getStatus: (...args: unknown[]) => getStatus(...args),
   isAuthError: (...args: unknown[]) => isAuthError(...args),
@@ -76,7 +76,7 @@ describe('Linear agent issue context client', () => {
         rawRequest: workingRequest
       })
     ])
-    const { resolveIssue } = await import('./issue-context-client')
+    const { resolveIssue } = await import('./client')
 
     await expect(resolveIssue('ENG-123', {})).resolves.toMatchObject({
       issue: { identifier: 'ENG-123' },
@@ -105,7 +105,7 @@ describe('Linear agent issue context client', () => {
         rawRequest: workingRequest
       })
     ])
-    const { searchLinearIssuesForAgents } = await import('./issue-context-client')
+    const { searchLinearIssuesForAgents } = await import('./client')
 
     await expect(
       searchLinearIssuesForAgents({ query: 'auth', workspaceId: 'all' })
@@ -158,7 +158,7 @@ describe('Linear agent issue context client', () => {
         })
       ]
     })
-    const { searchLinearIssuesForAgents } = await import('./issue-context-client')
+    const { searchLinearIssuesForAgents } = await import('./client')
 
     await expect(
       searchLinearIssuesForAgents({ query: 'auth', workspaceId: 'all' })
@@ -192,7 +192,7 @@ describe('Linear agent issue context client', () => {
         rawRequest: missingRequest
       })
     ])
-    const { resolveIssue } = await import('./issue-context-client')
+    const { resolveIssue } = await import('./client')
 
     await expect(resolveIssue('ENG-123', {})).rejects.toMatchObject({
       code: 'linear_network_error'
@@ -219,7 +219,7 @@ describe('Linear agent issue context client', () => {
         rawRequest: failingRequest
       })
     ])
-    const { resolveIssue } = await import('./issue-context-client')
+    const { resolveIssue } = await import('./client')
 
     await expect(
       resolveIssue('ENG-123', { workspaceId: 'workspace-selected' })
@@ -244,7 +244,7 @@ describe('Linear agent issue context client', () => {
       }
       return []
     })
-    const { resolveIssue } = await import('./issue-context-client')
+    const { resolveIssue } = await import('./client')
 
     await expect(
       resolveIssue('ENG-123', { workspaceId: 'workspace-selected' })
@@ -272,7 +272,7 @@ describe('Linear agent issue context client', () => {
       }
       return []
     })
-    const { searchLinearIssuesForAgents } = await import('./issue-context-client')
+    const { searchLinearIssuesForAgents } = await import('./client')
 
     await expect(
       searchLinearIssuesForAgents({ query: 'auth', workspaceId: 'workspace-selected' })
@@ -294,7 +294,7 @@ describe('Linear agent issue context client', () => {
         }
       ]
     })
-    const { searchLinearIssuesForAgents } = await import('./issue-context-client')
+    const { searchLinearIssuesForAgents } = await import('./client')
 
     await expect(
       searchLinearIssuesForAgents({ query: 'auth', workspaceId: 'workspace-typo' })
@@ -319,7 +319,7 @@ describe('Linear agent issue context client', () => {
       }
       return []
     })
-    const { searchLinearIssuesForAgents } = await import('./issue-context-client')
+    const { searchLinearIssuesForAgents } = await import('./client')
 
     await expect(
       searchLinearIssuesForAgents({ query: 'auth', workspaceId: 'workspace-typo' })
@@ -344,7 +344,7 @@ describe('Linear agent issue context client', () => {
       }
       return []
     })
-    const { resolveIssue } = await import('./issue-context-client')
+    const { resolveIssue } = await import('./client')
 
     await expect(resolveIssue('ENG-123', { workspaceId: 'workspace-typo' })).rejects.toMatchObject({
       code: 'linear_invalid_workspace'

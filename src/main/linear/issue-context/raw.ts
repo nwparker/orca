@@ -2,8 +2,8 @@ import type {
   LinearCollectionMeta,
   LinearIssueSummary,
   LinearSearchIssueSummary
-} from '../../shared/linear/agent-access'
-import { linearPriorityLabel } from '../../shared/linear/priority-label'
+} from '../../../shared/linear/agent-result-types'
+import { linearPriorityLabel } from '../../../shared/linear/priority-label'
 
 export type RawIssueResponse = {
   issue?: RawIssue | null
