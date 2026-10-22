@@ -62,6 +62,7 @@ function MobileFilePreviewDocument({ route }: Props) {
   const [savedContent, setSavedContent] = useState('')
   const [saveError, setSaveError] = useState('')
   const [saving, setSaving] = useState(false)
+  const savingRef = useRef(false)
   const draftContentRef = useRef(draftContent)
   const savedContentRef = useRef(savedContent)
   const draftSourceKeyRef = useRef<string | null>(null)
@@ -231,9 +232,15 @@ function MobileFilePreviewDocument({ route }: Props) {
   })
 
   const saveArtifact = useCallback(async () => {
-    if (!client || previewSource?.source !== 'terminalArtifact' || !canSaveArtifact || saving) {
+    if (
+      !client ||
+      previewSource?.source !== 'terminalArtifact' ||
+      !canSaveArtifact ||
+      savingRef.current
+    ) {
       return
     }
+    savingRef.current = true
     setSaving(true)
     setSaveError('')
     try {
@@ -250,9 +257,10 @@ function MobileFilePreviewDocument({ route }: Props) {
       const message = err instanceof Error ? err.message : 'Unable to save file'
       setSaveError(message)
     } finally {
+      savingRef.current = false
       setSaving(false)
     }
-  }, [canSaveArtifact, client, draftContent, previewSource, savedContent, saving])
+  }, [canSaveArtifact, client, draftContent, previewSource, savedContent])
 
   const leave = useCallback(() => router.back(), [router])
   const { confirmingDiscard, requestBack, stay, discard } = useMobileFilePreviewBack({
