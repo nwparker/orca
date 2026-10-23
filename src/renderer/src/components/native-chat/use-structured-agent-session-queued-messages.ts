@@ -45,10 +45,11 @@ export type StructuredAgentSessionQueuedMessagesController = {
   resume: () => Promise<boolean>
   /** Delete every card shown; false when one could not be (already a toast). */
   clear: () => Promise<boolean>
-  /** Resume or Clear all is on its way; both header actions grey. */
-  queueBusy: boolean
-  /** The card's own action, or the Clear deleting it, is in flight. */
-  busy: (messageId: string) => boolean
+  /** Resume or Clear all on its way: both header actions grey, and the pressed one spins. */
+  queuePending: QueuedMessagesPendingAction | null
+  /** The card's own action, or the Clear deleting it, in flight: the card greys, and the
+   *  pressed button spins. */
+  pending: (messageId: string) => QueuedMessagesPendingAction | null
   /** Send-now into the running turn; the transcript shows it at delivery position. */
   steer: (messageId: string) => Promise<void>
   remove: (messageId: string) => Promise<void>
@@ -61,6 +62,9 @@ export type StructuredAgentSessionQueuedMessagesController = {
   /** Cmd/Ctrl+Enter: Send-now the newest card. False when there is none to steer. */
   steerNewest: () => boolean
 }
+
+/** Which control is on its way, so the button that was pressed is the one that spins. */
+export type QueuedMessagesPendingAction = 'send' | 'delete' | 'resume' | 'clear'
 
 const NO_SENDS: readonly StructuredAgentSessionPendingSend[] = []
 const CLEAR_DELETE_CONCURRENCY = 8
@@ -117,21 +121,27 @@ export function useStructuredAgentSessionQueuedMessages(args: {
 
   // One action per control at a time, drawn as busy until it settles. The ref closes the
   // same-frame double click or chord repeat the disabled state cannot.
-  const inFlightRef = useRef(new Set<string>())
-  const [inFlight, setInFlight] = useState<ReadonlySet<string>>(() => new Set())
+  const inFlightRef = useRef(new Map<string, QueuedMessagesPendingAction>())
+  const [inFlight, setInFlight] = useState<ReadonlyMap<string, QueuedMessagesPendingAction>>(
+    () => new Map()
+  )
   const run = useCallback(
-    async <T>(keys: readonly string[], action: () => Promise<T>): Promise<T | false> => {
+    async <T>(
+      keys: readonly string[],
+      pending: QueuedMessagesPendingAction,
+      action: () => Promise<T>
+    ): Promise<T | false> => {
       const held = inFlightRef.current
       if (keys.some((key) => held.has(key))) {
         return false
       }
-      keys.forEach((key) => held.add(key))
-      setInFlight(new Set(held))
+      keys.forEach((key) => held.set(key, pending))
+      setInFlight(new Map(held))
       try {
         return await action()
       } finally {
         keys.forEach((key) => held.delete(key))
-        setInFlight(new Set(held))
+        setInFlight(new Map(held))
       }
     },
     []
@@ -139,7 +149,7 @@ export function useStructuredAgentSessionQueuedMessages(args: {
 
   const steer = useCallback(
     async (messageId: string): Promise<void> => {
-      await run([messageId], () =>
+      await run([messageId], 'send', () =>
         mutate<AgentSessionSendResult>(
           'agentSession.queuedMessageSend',
           'agentSession.queuedMessageSend',
@@ -152,7 +162,7 @@ export function useStructuredAgentSessionQueuedMessages(args: {
 
   const remove = useCallback(
     async (messageId: string): Promise<void> => {
-      await run([messageId], async () => {
+      await run([messageId], 'delete', async () => {
         const result = await mutate<AgentSessionQueuedMessageDeleteResult>(
           'agentSession.queuedMessageDelete',
           'agentSession.queuedMessageDelete',
@@ -190,7 +200,7 @@ export function useStructuredAgentSessionQueuedMessages(args: {
 
   const resume = useCallback(
     (): Promise<boolean> =>
-      run([QUEUE_KEY], async () => {
+      run([QUEUE_KEY], 'resume', async () => {
         const result = await mutate<AgentSessionQueuedMessagesResumeResult>(
           'agentSession.queuedMessagesResume',
           'agentSession.queuedMessagesResume',
@@ -213,7 +223,7 @@ export function useStructuredAgentSessionQueuedMessages(args: {
       return false
     }
     // Refused while any of these cards is in flight; each shows busy until the whole Clear settles.
-    return run([QUEUE_KEY, ...messageIds], async () => {
+    return run([QUEUE_KEY, ...messageIds], 'clear', async () => {
       const results = await mapSettledWithConcurrency(
         messageIds,
         CLEAR_DELETE_CONCURRENCY,
@@ -254,8 +264,8 @@ export function useStructuredAgentSessionQueuedMessages(args: {
     pause,
     resume,
     clear,
-    queueBusy: inFlight.has(QUEUE_KEY),
-    busy: (messageId) => inFlight.has(messageId),
+    queuePending: inFlight.get(QUEUE_KEY) ?? null,
+    pending: (messageId) => inFlight.get(messageId) ?? null,
     steer,
     remove,
     edit: editing.begin,

@@ -34,7 +34,6 @@ export function getWorktreeRevealCollapsedGroupKeys(args: {
   pinnedDisplayPolicy: PinnedWorktreeDisplayPolicy
   prCache: AppState['prCache'] | null
   workspaceStatuses: readonly WorkspaceStatusDefinition[]
-  settings: AppState['settings']
   projectGroups: readonly ProjectGroup[]
   projectGrouping?: ProjectGroupingModel
 }): string[] {
@@ -49,7 +48,7 @@ export function getWorktreeRevealCollapsedGroupKeys(args: {
       groupBy: args.groupBy,
       worktrees: [...(args.visibleWorktrees ?? args.worktrees)],
       repoMap: args.repoMap,
-      prGroupOf: createSidebarPRGroupReader(args.repoMap, args.prCache, args.settings),
+      prGroupOf: createSidebarPRGroupReader(args.repoMap, args.prCache),
       workspaceStatuses: args.workspaceStatuses,
       projectOrderBy: 'manual',
       lineageById: { ...args.worktreeLineageById },

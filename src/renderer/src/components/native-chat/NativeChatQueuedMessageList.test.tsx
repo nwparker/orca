@@ -85,8 +85,8 @@ function controller(
     pause,
     resume: vi.fn(async () => false),
     clear: vi.fn(async () => true),
-    queueBusy: false,
-    busy: () => false,
+    queuePending: null,
+    pending: () => null,
     steer: vi.fn(async () => {}),
     remove: vi.fn(async () => {}),
     edit: vi.fn(async () => {}),
@@ -544,9 +544,9 @@ describe('NativeChatQueuedMessageList', () => {
 
   it('Resume shows it is pending and hands focus back', async () => {
     const focusComposer = vi.fn()
-    const owner = {
+    const owner: StructuredAgentSessionQueuedMessagesController = {
       ...controller([card({ messageId: 'waiting', hold: 'queue-paused' })], { reason: 'stopped' }),
-      queueBusy: true
+      queuePending: 'resume' as const
     }
     render(
       <TooltipProvider delayDuration={0}>
@@ -559,6 +559,11 @@ describe('NativeChatQueuedMessageList', () => {
     )
     const resume = screen.getByRole('button', { name: 'Resume' })
     expect(resume).toHaveProperty('disabled', true)
+    // Only the pressed button spins, and only after the deferral that keeps fast replies still.
+    expect(resume.querySelector('.animate-spin')).toBeNull()
+    await waitFor(() => expect(resume.querySelector('.animate-spin')).not.toBeNull())
+    const clearAll = screen.getByRole('button', { name: 'Clear all' })
+    expect(clearAll.querySelector('.animate-spin')).toBeNull()
     cleanup()
     const idle = controller([card({ messageId: 'waiting', hold: 'queue-paused' })], {
       reason: 'stopped'

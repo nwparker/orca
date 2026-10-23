@@ -262,7 +262,7 @@ export function useNativeChatResolvedPathAttachments({
           operation
         }
         operation = undefined
-        applyResolvedPaths([batch], true, false, !mountedRef.current)
+        applyResolvedPaths([batch], options.focus !== false, false, !mountedRef.current)
       } finally {
         operation?.cancel()
       }

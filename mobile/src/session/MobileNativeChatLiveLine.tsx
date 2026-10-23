@@ -1,9 +1,10 @@
 import { useContext } from 'react'
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native'
+import { Pressable, StyleSheet, Text, View } from 'react-native'
 import { ChevronRight } from 'lucide-react-native'
 import { nativeChatReasoningDisclosureKey } from '../../../src/shared/native-chat-reasoning-row'
 import { formatNativeChatActiveTurnLabel } from '../../../src/shared/native-chat-turn-status'
 import { INLINE_TEXT_SELECTION } from '../components/inline-text-selection'
+import { LoadingSpinner } from '../components/LoadingSpinner'
 import { colors, spacing, typography } from '../theme/mobile-theme'
 import { MobileNativeChatReasoningBody } from './MobileNativeChatReasoningRow'
 import { MobileNativeChatRowOverlaysContext } from './mobile-native-chat-row-overlays'
@@ -49,7 +50,7 @@ export function MobileNativeChatLiveLine({
         accessibilityLiveRegion="polite"
       >
         <View style={styles.glyph}>
-          <ActivityIndicator size="small" color={colors.textMuted} />
+          <LoadingSpinner size={15} color={colors.textMuted} />
         </View>
         <Text style={styles.label} numberOfLines={1}>
           {label}
@@ -63,6 +64,7 @@ export function MobileNativeChatLiveLine({
       {reasoning && open ? (
         <View style={styles.body}>
           <MobileNativeChatReasoningBody
+            positionKey={nativeChatReasoningDisclosureKey(reasoning.message.id)}
             markdown={reasoning.markdown}
             fontScale={fontScale}
             onOpenFile={onOpenFile}

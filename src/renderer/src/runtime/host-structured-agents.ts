@@ -33,9 +33,16 @@ const inflight = new Map<string, Promise<void>>()
 /** Host runtimes whose last read failed, keyed like `inflight`: unlearned but not loading. */
 const failed = new Set<string>()
 const listeners = new Set<() => void>()
+let version = 0
 
 function publish(): void {
+  version += 1
   listeners.forEach((listener) => listener())
+}
+
+/** Changes whenever any host's list does; a React snapshot for `subscribeHostStructuredAgents`. */
+export function hostStructuredAgentsVersion(): number {
+  return version
 }
 
 /** The runtime instance a host's list must come from: null locally, undefined when unknown. */
@@ -103,7 +110,6 @@ export function loadHostStructuredAgents(
   if (pending) {
     return pending
   }
-  failed.delete(key)
   const read = callRuntimeRpc<unknown>(
     host.kind === 'local'
       ? { kind: 'local' }
@@ -114,10 +120,12 @@ export function loadHostStructuredAgents(
   )
     .then((result) => {
       const agents = decodeAgentSessionAgentsResult(result)
-      if (agents) {
-        entries.set(executionHostId, { runtimeId, agents })
-        publish()
+      if (!agents) {
+        throw new Error('Invalid registered-agent response')
       }
+      failed.delete(key)
+      entries.set(executionHostId, { runtimeId, agents })
+      publish()
     })
     .catch((error: unknown) => {
       console.warn('[native-chat] could not read the host structured agents', error)

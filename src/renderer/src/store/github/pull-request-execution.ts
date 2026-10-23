@@ -1,3 +1,4 @@
+import { CLEARED_HOSTED_REVIEW_SELECTION_UPDATES } from '../../../../shared/worktree/hosted-review-links'
 import type { StateCreator } from 'zustand'
 import type { RuntimeClientTarget } from '../../../../shared/runtime-client-target'
 import type { AppState } from '../types'
@@ -14,7 +15,6 @@ import type {
 import { normalizeGitHubPRForBranchOutcome } from '../../../../shared/github/pull-request-for-branch-outcome'
 import { getRepoExecutionHostId, LOCAL_EXECUTION_HOST_ID } from '../../../../shared/execution-host'
 import { callRuntimeRpc } from '../../runtime/runtime-rpc-client'
-import { debouncedSaveCache } from './cache-persistence'
 import { inflightPRRequests, prRequestGenerations } from './request-coordination'
 import { getRuntimeRepoTarget } from './repository-routing'
 import { applyCachedChecksStatus } from './pr-check-status-cache'
@@ -153,7 +153,6 @@ export function startPullRequestLookup(args: {
       }
       if (prRequestGenerations.get(cacheKey) === generation) {
         let skippedStaleLinkedPRLookup = false
-        let didUpdatePRCache = false
         set((s) => {
           // Why: unlinking a PR mid exact-linked-PR-lookup must stop the older result from restoring the manual link UI.
           if (isStaleExactLinkedPRLookup(s, options?.worktreeId, linkedPRNumber)) {
@@ -189,14 +188,10 @@ export function startPullRequestLookup(args: {
             requestStartedAt,
             requestStartedEntry: requestStartedHostedReviewEntry
           })
-          didUpdatePRCache = updates.prCache !== undefined
           return updates.prCache || updates.hostedReviewCache ? updates : s
         })
         if (skippedStaleLinkedPRLookup) {
           return null
-        }
-        if (didUpdatePRCache) {
-          debouncedSaveCache(get())
         }
         const linkedPRWorktree =
           options?.worktreeId && linkedPRNumber != null
@@ -215,7 +210,7 @@ export function startPullRequestLookup(args: {
           // Why: only clear the durable link that produced this exact probe; drift means the stale result no longer owns the worktree.
           void get().updateWorktreeMeta(
             options.worktreeId,
-            { linkedPR: null },
+            CLEARED_HOSTED_REVIEW_SELECTION_UPDATES,
             {
               shouldApply: () =>
                 shouldApplyDivergedLinkedPRClear({
@@ -246,7 +241,7 @@ export function startPullRequestLookup(args: {
         ) {
           void get().updateWorktreeMeta(
             options.worktreeId,
-            { linkedPR: null },
+            CLEARED_HOSTED_REVIEW_SELECTION_UPDATES,
             {
               // Why: the branch-scoped PR refetch below updates both caches; the generic metadata refresh would duplicate provider work.
               suppressHostedReviewRefresh: true,

@@ -241,6 +241,7 @@ it.each(['/model', '/effort'])(
 function localAnswerArgs() {
   return {
     agent: 'omp' as const,
+    draftScopeKey: 'terminal-test-scope',
     disabled: false,
     isDispatchingSessionOption: false,
     resolveTarget: () => ({ ptyId: 'pty-a', settings: null }),
@@ -404,8 +405,8 @@ it('reveals a structured prompt answer at the press, before the host accepts it'
           pause: null,
           resume: async () => false,
           clear: async () => true,
-          queueBusy: false,
-          busy: () => false,
+          queuePending: null,
+          pending: () => null,
           steer: async () => {},
           remove: async () => {},
           edit: async () => {},

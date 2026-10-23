@@ -7,7 +7,7 @@ import {
   compareWorktreeSortLabel,
   getWorktreeSortLabel,
   type SortBy
-} from './smart-sort'
+} from '../../../../shared/sidebar-list/smart-sort'
 import { compareCodePoints, compareSidebarText } from '../../../../shared/sidebar-list/text-order'
 import { getWorktreeHostIdentity } from '../../../../shared/worktree/host-qualified-identity'
 

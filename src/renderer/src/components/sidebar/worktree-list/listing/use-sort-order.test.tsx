@@ -8,7 +8,7 @@ import { act, cleanup, renderHook } from '@testing-library/react'
 import { useAppStore } from '@/store'
 import type { Worktree } from '../../../../../../shared/worktree/types'
 import { makeRepo, makeWorktree } from '../../../worktree-jump-palette-test-fixtures'
-import type { SortBy } from '../../smart-sort'
+import type { SortBy } from '../../../../../../shared/sidebar-list/smart-sort'
 import { useSidebarWorktreeSortOrder } from './use-sort-order'
 import { makeTerminalTab } from '../../../../store/slices/worktrees-slice-test-fixtures'
 

@@ -32,11 +32,14 @@ import {
   type QueuedMessageCard
 } from './structured-agent-session-queued-cards'
 import { NativeChatAgentMessageSenders } from './NativeChatAgentMessageSenders'
+import { NativeChatPendingIcon } from './NativeChatPendingIcon'
+import type { QueuedMessagesPendingAction } from './use-structured-agent-session-queued-messages'
 import { useNativeChatClippedLine } from './use-native-chat-clipped-line'
 import { agentSessionFailureStatedByStartRow } from './structured-agent-session-delivery-notices'
 import type { AgentSessionFailureFact } from '../../../../shared/agent-session-failure'
 import { agentSessionWriteNotDoneParts } from '../../../../shared/agent-session-refusal-notice'
 import { NativeChatQueuedMessageEditor } from './NativeChatQueuedMessageEditor'
+import type { QueuedEditAttachTarget } from './use-native-chat-queued-edit-image-intake'
 import type { QueuedMessageInlineEditor } from './use-structured-agent-session-queued-edit'
 import { nativeChatImageLabel } from './native-chat-image-label'
 
@@ -151,11 +154,12 @@ export function NativeChatQueuedMessageCard({
   statedFailures,
   showsSteerShortcut,
   steerHeld = false,
-  busy = false,
+  pending = null,
   onSteer,
   onDelete,
   onEdit,
   editor,
+  editAttachTo,
   editDisabled = false,
   onTurnOffQueueing
 }: {
@@ -168,14 +172,17 @@ export function NativeChatQueuedMessageCard({
   showsSteerShortcut: boolean
   /** The chat reads Stopping: the card waits for the stop (`NativeChatQueuedMessageList`). */
   steerHeld?: boolean
-  /** Its own action, or a Clear all deleting it, is still on its way to the host. */
-  busy?: boolean
+  /** Its own action, or a Clear all deleting it, still on its way to the host: the card greys,
+   *  and the button that was pressed spins. */
+  pending?: QueuedMessagesPendingAction | null
   onSteer: () => void
   onDelete: () => void
   /** Absent when the host cannot edit in place: the card then offers no Edit at all. */
   onEdit?: () => void
   /** This card is being edited here: the editor replaces its text and its actions. */
   editor?: QueuedMessageInlineEditor
+  /** The chat files added in the editor attach to. */
+  editAttachTo?: QueuedEditAttachTarget
   /** Another card in this pane is being edited. */
   editDisabled?: boolean
   /** Absent when the host does not queue sends, so there is nothing to turn off. */
@@ -185,6 +192,7 @@ export function NativeChatQueuedMessageCard({
   const line = queuedMessageCardLine(card)
   const returned = card.state === 'returned'
   const sendNow = queuedMessageCardSendNow(card)
+  const busy = pending !== null
   const isMac = isMacPlatform()
   // A clipped line opens below the row, at the card's full width: a card can hold text the person
   // never typed (another agent's message), and Steer or Delete must not be a blind choice.
@@ -197,13 +205,11 @@ export function NativeChatQueuedMessageCard({
   if (editor) {
     // The editor's own header stands in for the icon, the actions and the caption.
     return (
-      <li
-        data-queued-message-id={card.messageId}
-        data-queued-message-state={card.state}
-        className="px-2.5 py-1.5"
-      >
+      // The editor fills the row, so a drop anywhere on the card reaches it.
+      <li data-queued-message-id={card.messageId} data-queued-message-state={card.state}>
         <NativeChatQueuedMessageEditor
           editor={editor}
+          attachTo={editAttachTo}
           sender={sender}
           images={card.images ? <QueuedMessageImageCount images={card.images} /> : null}
         />
@@ -263,11 +269,13 @@ export function NativeChatQueuedMessageCard({
                     onClick={onSteer}
                     disabled={steerHeld || busy}
                   >
-                    {sendNow.steers ? (
-                      <CornerDownRight className="size-3" />
-                    ) : (
-                      <Send className="size-3" />
-                    )}
+                    <NativeChatPendingIcon pending={pending === 'send'} className="size-3">
+                      {sendNow.steers ? (
+                        <CornerDownRight className="size-3" />
+                      ) : (
+                        <Send className="size-3" />
+                      )}
+                    </NativeChatPendingIcon>
                     {sendNow.label}
                   </Button>
                 </TooltipTrigger>
@@ -291,7 +299,9 @@ export function NativeChatQueuedMessageCard({
                   disabled={busy}
                   onClick={onDelete}
                 >
-                  <Trash2 className="size-3.5" />
+                  <NativeChatPendingIcon pending={pending === 'delete'} className="size-3.5">
+                    <Trash2 className="size-3.5" />
+                  </NativeChatPendingIcon>
                 </Button>
               </TooltipTrigger>
               <TooltipContent side="top" sideOffset={4}>

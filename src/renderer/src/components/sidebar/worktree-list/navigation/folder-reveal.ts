@@ -111,12 +111,17 @@ export function getFolderWorkspaceRevealGroupKeys(
       )
       .map((group) => [group.id, group])
   )
+  // Why unfiltered: same-id host copies render under the last copy's parents, whichever host's row
+  // the folder is (getDistinctProjectGroups); header keys carry no host.
+  const renderedGroupsById = new Map(projectGroups.map((group) => [group.id, group]))
   const keys: string[] = []
   const seen = new Set<string>()
-  let groupId: string | null = folderWorkspace.projectGroupId
+  let groupId: string | null = groupsById.has(folderWorkspace.projectGroupId)
+    ? folderWorkspace.projectGroupId
+    : null
   while (groupId && !seen.has(groupId)) {
     seen.add(groupId)
-    const group = groupsById.get(groupId)
+    const group = renderedGroupsById.get(groupId)
     if (!group) {
       break
     }

@@ -15,6 +15,7 @@ import {
   TEST_WORKTREE_ID,
   TEST_WORKTREE_PATH,
   makeRuntimeStoreWithWorkspaceSession,
+  spawnedPtyEnv,
   store
 } from '../orca-runtime-test-fixtures.spec'
 import type { RuntimeStore } from '../runtime-store-contract'
@@ -57,7 +58,6 @@ describe('OrcaRuntimeService', () => {
       renameTerminal: vi.fn(),
       focusTerminal: vi.fn(),
       closeTerminal: vi.fn(),
-      sleepWorktree: vi.fn(),
       terminalFitOverrideChanged: vi.fn(),
       terminalDriverChanged: vi.fn()
     })
@@ -148,7 +148,6 @@ describe('OrcaRuntimeService', () => {
       renameTerminal: vi.fn(),
       focusTerminal: vi.fn(),
       closeTerminal: vi.fn(),
-      sleepWorktree: vi.fn(),
       terminalFitOverrideChanged: vi.fn(),
       terminalDriverChanged: vi.fn()
     })
@@ -205,8 +204,7 @@ describe('OrcaRuntimeService', () => {
       }
     })
 
-    const spawnedEnv =
-      (spawn.mock.calls[0]?.[0] as { env?: Record<string, string> } | undefined)?.env ?? {}
+    const spawnedEnv = spawnedPtyEnv(spawn.mock.calls[0]?.[0])
     expect(spawnedEnv.ORCA_TAB_ID).toBe(tabId)
     expect(spawnedEnv.ORCA_PANE_KEY).toBe(`${tabId}:${leafId}`)
   })
@@ -229,8 +227,7 @@ describe('OrcaRuntimeService', () => {
       leafId
     })
 
-    const spawnedEnv =
-      (spawn.mock.calls[0]?.[0] as { env?: Record<string, string> } | undefined)?.env ?? {}
+    const spawnedEnv = spawnedPtyEnv(spawn.mock.calls[0]?.[0])
     expect(spawnedEnv.ORCA_TAB_ID).not.toBe(tabId)
     expect(spawnedEnv.ORCA_TAB_ID).not.toMatch(/^web-terminal-/)
     expect(spawnedEnv.ORCA_PANE_KEY).toMatch(`${spawnedEnv.ORCA_TAB_ID}:`)
@@ -304,7 +301,6 @@ describe('OrcaRuntimeService', () => {
       renameTerminal: vi.fn(),
       focusTerminal: vi.fn(),
       closeTerminal: vi.fn(),
-      sleepWorktree: vi.fn(),
       resumeSleepingAgents: vi.fn(),
       terminalFitOverrideChanged: vi.fn(),
       terminalDriverChanged: vi.fn()
@@ -462,7 +458,6 @@ describe('OrcaRuntimeService', () => {
         renameTerminal: vi.fn(),
         focusTerminal: vi.fn(),
         closeTerminal: vi.fn(),
-        sleepWorktree: vi.fn(),
         terminalFitOverrideChanged: vi.fn(),
         terminalDriverChanged: vi.fn()
       })
@@ -504,7 +499,9 @@ describe('OrcaRuntimeService', () => {
 
   it.each([
     ['the named group', { targetGroupId: 'group-named' }, { cols: 90, rows: 30 }],
-    ['the active group when none is named', {}, { cols: 63, rows: 60 }]
+    ['the active group when none is named', {}, { cols: 63, rows: 60 }],
+    // A caller that measured its own pane beats any group size.
+    ["the caller's own pane", { initialSize: { cols: 101, rows: 33 } }, { cols: 101, rows: 33 }]
   ])('starts a host terminal at the measured size of %s', async (_case, opts, expected) => {
     const spawn = vi.fn().mockResolvedValue({ id: 'pty-cli' })
     const { runtimeStore } = makeRuntimeStoreWithWorkspaceSession({

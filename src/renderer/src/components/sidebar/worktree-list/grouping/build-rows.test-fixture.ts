@@ -21,6 +21,7 @@ import type {
   WorktreeGroupBy
 } from '../../../../../../shared/sidebar-list/row-types'
 import { planSidebarRows } from '../../../../../../shared/sidebar-list/sidebar-row-plan'
+import type { PRCacheView } from '../../../../../../shared/sidebar-list/workspace-review-facts'
 import { createSidebarPRGroupReader } from './pr-group-key'
 
 /** Test-only positional entry to the shared row builder, with the window's defaults. */
@@ -28,7 +29,7 @@ export function buildSidebarRowPlan(
   groupBy: WorktreeGroupBy,
   worktrees: Worktree[],
   repoMap: Map<string, Repo>,
-  prCache: Record<string, unknown> | null,
+  prCache: PRCacheView | null,
   _collapsedGroups: Set<string>,
   repoOrder?: Map<string, number>,
   workspaceStatuses: readonly WorkspaceStatusDefinition[] = cloneDefaultWorkspaceStatuses(),
@@ -56,7 +57,7 @@ export function buildSidebarRowPlan(
     groupBy,
     worktrees,
     repoMap,
-    prGroupOf: createSidebarPRGroupReader(repoMap, prCache, settings),
+    prGroupOf: createSidebarPRGroupReader(repoMap, prCache),
     repoOrder,
     workspaceStatuses,
     projectOrderBy,

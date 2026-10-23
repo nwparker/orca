@@ -140,9 +140,7 @@ describe('rewind behind a clear boundary', () => {
     const target = agentJournalSubmissionKey(later)
     const newer = await journal().queuedMessages.insert({
       messageId: 'queued-after-stop',
-      body: { kind: 'message', role: 'user', blocks: [{ type: 'text', text: 'newer card' }] },
-      fingerprint: 'newer-card',
-      hostInstance: 'test'
+      body: { kind: 'message', role: 'user', blocks: [{ type: 'text', text: 'newer card' }] }
     })
     const originalPause = structuredQueuePauses(journal()).find(
       (entry) => entry.reason === 'stopped'
@@ -194,11 +192,8 @@ describe('rewind behind a clear boundary', () => {
       expect(prepared.contextClearOperationId).toBe(
         rig.store.getRecord(SESSION)!.providerContextBoundary!.operationId
       )
-      expect(prepared.retained).toHaveLength(1)
-      expect(prepared.retained[0].body).toMatchObject({
-        kind: 'message',
-        blocks: [{ text: 'kept after clear' }]
-      })
+      // The record names the cut; the journal keeps the rows it keeps.
+      expect(prepared).not.toHaveProperty('retained')
       return { ok: true }
     })
     const result = await rig.host.rewind(CALLER, params)
@@ -206,6 +201,14 @@ describe('rewind behind a clear boundary', () => {
       ok: true,
       value: { epoch: floor.epoch, sequence: journal().cursor().sequence }
     })
+    expect(
+      journal()
+        .snapshot()
+        .items.filter((item) => item.sequence > floor.sequence)
+        .map((item) => item.body)
+    ).toContainEqual(
+      expect.objectContaining({ blocks: [expect.objectContaining({ text: 'kept after clear' })] })
+    )
     expect(
       journal()
         .snapshot()

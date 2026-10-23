@@ -1,4 +1,4 @@
-import { tabHasLivePty } from '@/lib/tab-has-live-pty'
+import { tabHasLivePty } from '../../../shared/tab-has-live-pty'
 import type { TerminalTab } from '../../../shared/terminal-tab-types'
 import {
   isFreshNonDoneAgentStatus,

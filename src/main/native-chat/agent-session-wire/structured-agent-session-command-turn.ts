@@ -146,6 +146,8 @@ export type StructuredAgentSessionCommandHandoverContext = {
   /** Who a failure the handover meets names, as the start's own row does. */
   failureTextContext?: AgentSessionFailureWordsContext
   record: () => AgentSessionRecord | null
+  /** Read the execution host's ownership again at admission and handover. */
+  currentWork?: () => StructuredAgentSessionCurrentWork | null
   /** The session's child records, the same read the strip uses; they word a refusal. */
   childWork: () => readonly AgentChildWorkView[] | undefined
   /** Child work the provider reported running and not over: what refuses the command. */

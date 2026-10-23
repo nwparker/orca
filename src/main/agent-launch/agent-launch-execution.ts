@@ -11,7 +11,11 @@ import type {
   AgentLaunchTarget
 } from '../../shared/agent-launch-intent'
 import type { OrcaRuntimeService } from '../runtime/orca-runtime'
-import type { AgentLaunchModeReceipt, AgentLaunchModeVocabulary } from './agent-launch-mode'
+import type {
+  readAgentLaunchModeSettings,
+  AgentLaunchModeReceipt,
+  AgentLaunchModeVocabulary
+} from './agent-launch-mode'
 import type {
   AgentLaunchSurfaceFactory,
   AgentLaunchWorkspaceFactory
@@ -26,7 +30,8 @@ import type {
 export type AgentLaunchPublishedSurface = AgentLaunchResult
 
 type AgentLaunchExecutionBase = {
-  runtime: Pick<OrcaRuntimeService, 'getStructuredAgentSessionCreateSupport' | 'getClientSettings'>
+  runtime: Pick<OrcaRuntimeService, 'getStructuredAgentSessionCreateSupport'> &
+    Parameters<typeof readAgentLaunchModeSettings>[0]
   vocabulary?: AgentLaunchModeVocabulary
   /** False when the calling client cannot show the agent's chat; absent for the host's own callers. */
   callerRendersStructured?: boolean
@@ -34,6 +39,9 @@ type AgentLaunchExecutionBase = {
   onStage?: (stage: 'worktree_create' | 'mode_settle' | 'surface_create') => void
   /** The surface exists and its tab is published; runs before any prompt delivery. Must not throw. */
   onSurfacePublished?: (surface: AgentLaunchPublishedSurface) => void
+  /** Aborting stops the launch at its next boundary: before any effect it throws `request_aborted`;
+   *  once the agent exists it is still returned, and its prompt is pasted only if not yet aborted. */
+  signal?: AbortSignal
 }
 
 /** Every launch but a `legacy-host` create: it builds the surface itself when the create gave none. */

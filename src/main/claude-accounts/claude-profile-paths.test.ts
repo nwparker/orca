@@ -15,7 +15,8 @@ import {
   describeClaudeProfile,
   prepareClaudeProfileDirectory,
   readClaudeProfileObject,
-  readUserClaudeConfigDir
+  readUserClaudeConfigDir,
+  readUserClaudeConfigDirAsSet
 } from './claude-profile-paths'
 
 // Case-only aliases exist only on a case-insensitive filesystem (default APFS, NTFS).
@@ -42,6 +43,44 @@ afterEach(() => {
 const local = { runtime: 'host', executionHostId: 'local' } as const
 
 describe('Claude profile namespace', () => {
+  it.skipIf(process.platform === 'win32')(
+    'accepts a WSL casing alias while retaining the original marker and rejecting other owners',
+    () => {
+      const dir = root()
+      const userHome = root()
+      const profile = describeClaudeProfile(dir, 'a', {
+        ...local,
+        runtime: 'wsl',
+        distro: 'Ubuntu'
+      })
+      prepareClaudeProfileDirectory(dir, profile, userHome)()
+      const marker = join(dir, 'claude-profiles/a/profile.json')
+      const original = readFileSync(marker, 'utf8')
+      prepareClaudeProfileDirectory(
+        dir,
+        { ...profile, target: { ...profile.target, runtime: 'wsl', distro: 'ubuntu' } },
+        userHome
+      )()
+      expect(readFileSync(marker, 'utf8')).toBe(original)
+      for (const distro of ['Debian', 'Ubuntu-24.04']) {
+        expect(() =>
+          prepareClaudeProfileDirectory(
+            dir,
+            { ...profile, target: { ...local, runtime: 'wsl', distro } },
+            userHome
+          )
+        ).toThrow('another account or target')
+      }
+      writeFileSync(
+        marker,
+        JSON.stringify({ version: 1, accountId: 'b', runtime: 'wsl', distro: 'ubuntu' })
+      )
+      expect(() => prepareClaudeProfileDirectory(dir, profile, userHome)).toThrow(
+        'another account or target'
+      )
+    }
+  )
+
   // A WSL profile's data root is a POSIX path; a Windows temp dir cannot be one.
   it.skipIf(process.platform === 'win32')(
     'binds the new namespace to an account and execution target without touching legacy auth',
@@ -149,6 +188,17 @@ describe('Claude profile namespace', () => {
         ORCA_CLAUDE_INJECTED_CONFIG_DIR: '/data/claude-profiles/a/home'
       })
     ).toBe(resolve('/cfg/claude'))
+  })
+  it("keeps the user's own CLAUDE_CONFIG_DIR spelled as set, through an outer Orca too", () => {
+    expect(readUserClaudeConfigDirAsSet({ CLAUDE_CONFIG_DIR: '/cfg/claude/' })).toBe('/cfg/claude/')
+    const outer = {
+      CLAUDE_CONFIG_DIR: '/data/claude-profiles/a/home',
+      ORCA_CLAUDE_INJECTED_CONFIG_DIR: '/data/claude-profiles/a/home'
+    }
+    expect(readUserClaudeConfigDirAsSet(outer)).toBeUndefined()
+    expect(
+      readUserClaudeConfigDirAsSet({ ...outer, ORCA_CLAUDE_USER_CONFIG_DIR: 'C:/Claude Config/' })
+    ).toBe('C:/Claude Config/')
   })
   it("refuses a profile at or around the user's own CLAUDE_CONFIG_DIR", () => {
     const userHome = root()

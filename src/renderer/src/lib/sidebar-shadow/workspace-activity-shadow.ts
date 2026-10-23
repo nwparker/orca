@@ -1,22 +1,19 @@
-import { useAppStore, type AppState } from '@/store'
+import type { AppState } from '@/store'
 import { getAllWorktreesFromState, getRepoMapFromState } from '@/store/selectors'
 import { getLiveAgentStatusByWorktreeId } from '@/lib/worktree-activity-state'
-import { tabHasLivePty } from '@/lib/tab-has-live-pty'
+import { tabHasLivePty } from '../../../../shared/tab-has-live-pty'
 import { getWorktreeIdsWithStructuredChat } from '@/components/sidebar/visible-worktree-activity-inputs'
 import {
   getRepoExecutionHostId,
   parseExecutionHostId,
   type ExecutionHostId
 } from '../../../../shared/execution-host'
-import { parseWorkspaceKey } from '../../../../shared/workspace-scope'
+import { folderWorkspaceKey } from '../../../../shared/workspace-scope'
 import {
-  IDLE_WORKSPACE_ACTIVITY,
   isIdleWorkspaceActivity,
-  workspaceActivityFactsEqual,
-  WorkspaceActivityFactsSnapshotSchema,
   type WorkspaceActivityFacts
 } from '../../../../shared/sidebar-list/workspace-activity-facts'
-import { defineSidebarShadowDomain } from './sidebar-shadow-comparison'
+import { selectFolderWorkspaces } from '@/store/workspace-record-selectors'
 
 /** The window's own activity facts, from the same store slices the sidebar filter reads. */
 export function readWindowWorkspaceActivityFacts(
@@ -27,10 +24,14 @@ export function readWindowWorkspaceActivityFacts(
     | 'browserTabsByWorktree'
     | 'unifiedTabsByWorktree'
     | 'agentStatusByPaneKey'
-  >,
+  > &
+    Partial<Pick<AppState, 'structuredChatSleptAtByPaneKey'>>,
   now: number
 ): Map<string, WorkspaceActivityFacts> {
-  const structuredChatIds = getWorktreeIdsWithStructuredChat(state.unifiedTabsByWorktree)
+  const structuredChatIds = getWorktreeIdsWithStructuredChat(
+    state.unifiedTabsByWorktree,
+    state.structuredChatSleptAtByPaneKey
+  )
   const agentById = getLiveAgentStatusByWorktreeId(
     state.agentStatusByPaneKey,
     state.tabsByWorktree,
@@ -61,58 +62,35 @@ export function readWindowWorkspaceActivityFacts(
   return facts
 }
 
-// The local runtime answers for the rows it owns. A paired server owns and publishes its own rows'
-// facts, which the server-row producer compares; an id with no owner in the catalog is no row.
-function toLocallyOwnedRows<Value>(
+// The local runtime answers for the rows it owns; a paired server publishes its own rows' facts.
+// The window keys activity by bare id, so an id a paired server also lists cannot be attributed
+// to one host and is left out; an id with no owner in the catalog is no row.
+export function toLocallyOwnedRows<Value>(
   state: AppState,
   values: ReadonlyMap<string, Value>
 ): Map<string, Value> {
-  const worktreeById = new Map(getAllWorktreesFromState(state).map((row) => [row.id, row]))
-  const folderById = new Map((state.folderWorkspaces ?? []).map((folder) => [folder.id, folder]))
   const repoById = getRepoMapFromState(state)
-  const ownerOf = (id: string): ExecutionHostId | null => {
-    const worktree = worktreeById.get(id)
-    const scope = parseWorkspaceKey(id)
-    const hostFields = worktree
-      ? repoById.get(worktree.repoId)
-      : scope?.type === 'folder'
-        ? folderById.get(scope.folderWorkspaceId)
-        : undefined
-    return worktree?.hostId ?? (hostFields ? getRepoExecutionHostId(hostFields) : null)
+  const ownersById = new Map<string, Set<'local' | 'server'>>()
+  const own = (id: string, owner: ExecutionHostId | null | undefined): void => {
+    if (owner) {
+      const owners = ownersById.get(id) ?? new Set()
+      owners.add(parseExecutionHostId(owner)?.kind === 'runtime' ? 'server' : 'local')
+      ownersById.set(id, owners)
+    }
+  }
+  for (const worktree of getAllWorktreesFromState(state)) {
+    const repo = repoById.get(worktree.repoId)
+    own(worktree.id, worktree.hostId ?? (repo ? getRepoExecutionHostId(repo) : null))
+  }
+  for (const folder of selectFolderWorkspaces(state) ?? []) {
+    own(folderWorkspaceKey(folder.id), getRepoExecutionHostId(folder))
   }
   const scoped = new Map<string, Value>()
   for (const [id, value] of values) {
-    const owner = ownerOf(id)
-    if (owner !== null && parseExecutionHostId(owner)?.kind !== 'runtime') {
+    const owners = ownersById.get(id)
+    if (owners?.has('local') && !owners.has('server')) {
       scoped.set(id, value)
     }
   }
   return scoped
 }
-
-export const workspaceActivityShadow = defineSidebarShadowDomain<WorkspaceActivityFacts>({
-  name: 'workspace-activity',
-  readWindow: () => {
-    const state = useAppStore.getState()
-    return toLocallyOwnedRows(state, readWindowWorkspaceActivityFacts(state, Date.now()))
-  },
-  readMain: async () => {
-    const response = await window.api.runtime.call({ method: 'sidebarInputs.activityFacts' })
-    const parsed = response.ok
-      ? WorkspaceActivityFactsSnapshotSchema.safeParse(response.result)
-      : null
-    if (!parsed?.success) {
-      return null
-    }
-    return {
-      revision: parsed.data.revision,
-      values: toLocallyOwnedRows(useAppStore.getState(), new Map(Object.entries(parsed.data.facts)))
-    }
-  },
-  // The window has no unverifiable state: a terminal whose host lost contact still reads live there.
-  equals: (window, main) =>
-    workspaceActivityFactsEqual(window ?? IDLE_WORKSPACE_ACTIVITY, {
-      ...(main ?? IDLE_WORKSPACE_ACTIVITY),
-      terminal: main?.terminal ? 'live' : null
-    })
-})

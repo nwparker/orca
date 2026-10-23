@@ -5,7 +5,9 @@ import {
   getExecutionHostIdFromWorktreeHostIdentity,
   getWorktreeHostIdentity,
   getWorktreeIdFromHostIdentity,
-  type HostScopedWorktreeKey
+  hostWorktreeTarget,
+  type HostScopedWorktreeKey,
+  type HostWorktreeTarget
 } from './host-qualified-identity'
 
 const WORKTREE_ID = 'repo-1::/work/orca'
@@ -118,5 +120,20 @@ describe('worktree host identity golden bytes', () => {
     // @ts-expect-error a raw string is not a host-scoped key
     const forged: HostScopedWorktreeKey = WORKTREE_ID
     expect([raw, forged]).toEqual([key, WORKTREE_ID])
+  })
+})
+
+describe('host worktree target', () => {
+  it('carries the row id and its concrete host', () => {
+    const target = hostWorktreeTarget({ id: WORKTREE_ID, hostId: toSshExecutionHostId('box') })
+    expect(target).toEqual({ id: WORKTREE_ID, hostId: 'ssh:box' })
+  })
+
+  it('cannot be forged from a plain object or built without a host', () => {
+    // @ts-expect-error only hostWorktreeTarget mints the brand
+    const forged: HostWorktreeTarget = { id: WORKTREE_ID, hostId: 'local' }
+    // @ts-expect-error an unqualified row has no host to scope to
+    hostWorktreeTarget({ id: WORKTREE_ID, hostId: undefined })
+    expect(forged.id).toBe(WORKTREE_ID)
   })
 })

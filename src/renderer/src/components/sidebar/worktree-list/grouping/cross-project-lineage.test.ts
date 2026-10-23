@@ -184,7 +184,6 @@ describe('cross-project sidebar lineage', () => {
         pinnedDisplayPolicy: policy,
         prCache: null,
         workspaceStatuses: [],
-        settings: null,
         projectGroups: [group]
       })
       for (const key of keys) {

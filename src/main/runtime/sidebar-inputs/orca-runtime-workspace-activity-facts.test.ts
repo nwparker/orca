@@ -4,12 +4,18 @@ import type { RuntimeMobileSessionTabsSnapshot } from '../../../shared/runtime-t
 import { AgentHookServer } from '../../agent-hooks/server'
 import { OrcaRuntimeService } from '../orca-runtime'
 
+vi.mock('../../../shared/sidebar-inputs-switch', () => ({ ORCA_SIDEBAR_INPUTS_IS_MAIN: true }))
+
 const WT = 'repo-1::/tmp/worktree-a'
 const FOLDER = 'folder:11111111-1111-4111-8111-111111111111'
 const LEAF = '22222222-2222-4222-8222-222222222222'
 
-function createRuntime(): OrcaRuntimeService {
-  return new OrcaRuntimeService()
+function createRuntime() {
+  const runtime = new OrcaRuntimeService().sidebarFacts
+  if (!runtime) {
+    throw new Error('built without the sidebar facts layer')
+  }
+  return runtime
 }
 
 function snapshot(

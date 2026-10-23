@@ -5,7 +5,7 @@ import {
 } from './folder-workspace-lanes'
 import type { ProjectGroup } from '../project-group-types'
 import type { ProjectOrderBy } from '../ui-chrome-types'
-import { getEffectiveProjectGroupManualRank } from '../project-groups'
+import { getDistinctProjectGroups, getEffectiveProjectGroupManualRank } from '../project-groups'
 import { getProjectGroupHeaderKey } from './group-keys'
 import { appendOrderedGroups } from './group-sections'
 import { compareCodePoints, compareSidebarText } from './text-order'
@@ -76,7 +76,8 @@ export function appendProjectGroupSections(
     )
   }
   const childGroupsByParentId = new Map<string | null, ProjectGroup[]>()
-  for (const group of projectGroups) {
+  // Why distinct: membership is id-keyed, so a same-id copy's header would sit empty (#30045).
+  for (const group of getDistinctProjectGroups(projectGroups)) {
     const parentId =
       group.parentGroupId && projectGroupsById.has(group.parentGroupId) ? group.parentGroupId : null
     const children = childGroupsByParentId.get(parentId) ?? []
@@ -152,7 +153,7 @@ export function appendProjectGroupSections(
 export function getProjectGroupOccurrencePaths(projectGroups: readonly ProjectGroup[]) {
   const groupsById = new Map(projectGroups.map((group) => [group.id, group]))
   const paths = new Map<string, OccurrenceSectionPath>()
-  for (const group of projectGroups) {
+  for (const group of getDistinctProjectGroups(projectGroups)) {
     const pending: ProjectGroup[] = []
     const seen = new Set<string>()
     let current: ProjectGroup | undefined = group

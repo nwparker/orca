@@ -8,7 +8,10 @@ import type { ProjectOrderBy } from '../../../../../../shared/ui-chrome-types'
 import type { Repo } from '../../../../../../shared/repo-types'
 import type { WorkspaceStatusDefinition, Worktree } from '../../../../../../shared/worktree/types'
 import type { WorktreeLineage } from '../../../../../../shared/worktree/lineage-types'
-import type { ExecutionHostId } from '../../../../../../shared/execution-host'
+import {
+  getLocalExecutionHostLabel,
+  type ExecutionHostId
+} from '../../../../../../shared/execution-host'
 import { getHostDisplayLabelOverrides } from '../../../../../../shared/host-setting-overrides'
 import { planSidebarRows } from '../../../../../../shared/sidebar-list/sidebar-row-plan'
 import { createSidebarPRGroupReader } from '../grouping/pr-group-key'
@@ -29,9 +32,14 @@ import {
 } from '../../../../../../shared/sidebar-list/host-section-collapse'
 import { addHostSectionRows } from '../../../../../../shared/sidebar-list/host-section-rows'
 import { collectRenderedSidebarRowKeys } from './rendered-row-keys'
-import { orderHostSectionOptions } from '../../../../../../shared/sidebar-list/host-section-order'
+import {
+  mergeDraggedHostSectionOrder,
+  orderHostSectionOptions
+} from '../../../../../../shared/sidebar-list/host-section-order'
+import type { ExecutionHostRegistryEntry } from '../../../../../../shared/execution-host-registry'
 import { buildSidebarHostOptions } from '../../sidebar-host-options'
 import { selectPendingWorktreeCreationKeys } from './pending-worktree-creation-keys'
+import { selectWorktreesByRepo } from '@/store/workspace-record-selectors'
 
 type SectionRowsArgs = {
   agentSendTargetWorktreeId?: string | null
@@ -63,7 +71,7 @@ type SectionRowsArgs = {
 // tier wrapped around them.
 export function useSidebarSectionRows(args: SectionRowsArgs) {
   const { repos, worktrees, repoMap, defaultHostId } = args
-  const worktreesByRepo = useAppStore((s) => s.worktreesByRepo)
+  const worktreesByRepo = useAppStore((s) => selectWorktreesByRepo(s))
   const sshTargetLabels = useAppStore((s) => s.sshTargetLabels)
   const sshConnectionStates = useAppStore((s) => s.sshConnectionStates)
   const runtimeEnvironments = useAppStore((s) => s.runtimeEnvironments)
@@ -149,7 +157,7 @@ export function useSidebarSectionRows(args: SectionRowsArgs) {
         groupBy: args.groupBy,
         worktrees,
         repoMap,
-        prGroupOf: createSidebarPRGroupReader(repoMap, args.prCache, args.settings),
+        prGroupOf: createSidebarPRGroupReader(repoMap, args.prCache),
         repoOrder,
         workspaceStatuses: args.workspaceStatuses,
         projectOrderBy: args.projectOrderBy,
@@ -179,7 +187,6 @@ export function useSidebarSectionRows(args: SectionRowsArgs) {
       args.projectOrderBy,
       args.worktreeLineageById,
       args.worktreeMap,
-      args.settings,
       args.projectGrouping,
       args.visibleProjectGroupsForRows,
       args.visibleFolderWorkspacesForRows,
@@ -207,7 +214,6 @@ export function useSidebarSectionRows(args: SectionRowsArgs) {
     worktreeLineageById: args.worktreeLineageById,
     prCache: args.prCache,
     workspaceStatuses: args.workspaceStatuses,
-    settings: args.settings,
     projectGroups: args.visibleProjectGroupsForRows,
     projectGrouping: args.projectGrouping,
     folderWorkspaces: args.visibleFolderWorkspacesForRows,
@@ -230,22 +236,14 @@ export function useSidebarSectionRows(args: SectionRowsArgs) {
   )
   const [hostDragActive, setHostDragActive] = useState(false)
   const handleReorderHostSections = useCallback(
-    (orderedVisibleHostIds: ExecutionHostId[]) => {
-      const visibleHostIds = new Set(orderedVisibleHostIds)
-      const hostOptionIds = orderedHostOptions.map((host) => host.id)
-      const knownHostIds = new Set(hostOptionIds)
-      const nextOrder: ExecutionHostId[] = [...orderedVisibleHostIds]
-      const seen = new Set(nextOrder)
-      // Why: dragging only covers rendered hosts; keep non-rendered SSH/runtime hosts in the saved order so they return in place.
-      for (const hostId of [...workspaceHostOrder, ...hostOptionIds]) {
-        if (!knownHostIds.has(hostId) || visibleHostIds.has(hostId) || seen.has(hostId)) {
-          continue
-        }
-        nextOrder.push(hostId)
-        seen.add(hostId)
-      }
-      setWorkspaceHostOrder(nextOrder)
-    },
+    (orderedVisibleHostIds: ExecutionHostId[]) =>
+      setWorkspaceHostOrder(
+        mergeDraggedHostSectionOrder(
+          orderedVisibleHostIds,
+          workspaceHostOrder,
+          orderedHostOptions.map((host) => host.id)
+        )
+      ),
     [orderedHostOptions, setWorkspaceHostOrder, workspaceHostOrder]
   )
   const sectionRows = useMemo(() => {
@@ -255,6 +253,7 @@ export function useSidebarSectionRows(args: SectionRowsArgs) {
       workspaceHostScope: args.workspaceHostScope,
       visibleWorkspaceHostIds: args.visibleWorkspaceHostIds,
       defaultHostId,
+      localHostLabel: getLocalExecutionHostLabel(),
       collapsedHostKeys: effectiveCollapsedGroups,
       forceCollapseHosts: hostDragActive,
       // Why: projects/workspaces are the primary sidebar object; host sections are only an explicit host-filter view.
@@ -281,8 +280,10 @@ export function useSidebarSectionRows(args: SectionRowsArgs) {
     [sectionRows]
   )
 
+  const headerHostOptions: readonly ExecutionHostRegistryEntry[] = hostOptions
   return {
     occurrencePlan: rowPlan.occurrencePlan,
+    hostOptions: headerHostOptions,
     effectiveCollapsedGroups,
     rows,
     sectionRows,
