@@ -3,10 +3,18 @@ import { join, sep } from 'node:path'
 import type { GlobalSettings } from '../../shared/global-settings-types'
 import type { Repo } from '../../shared/repo-types'
 
-const { readFileMock, realpathMock, statMock } = vi.hoisted(() => ({
+const { readFileMock, realpathMock, statMock, wslHomeMock, wslHomeAsyncMock } = vi.hoisted(() => ({
   readFileMock: vi.fn(),
   realpathMock: vi.fn(),
-  statMock: vi.fn()
+  statMock: vi.fn(),
+  wslHomeMock: vi.fn((): string | null => null),
+  wslHomeAsyncMock: vi.fn(async (): Promise<string | null> => null)
+}))
+
+vi.mock('../wsl', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  getWslHome: wslHomeMock,
+  getWslHomeAsync: wslHomeAsyncMock
 }))
 
 vi.mock('node:fs/promises', () => ({
@@ -170,6 +178,23 @@ describe('worktree base directory watch target resolution', () => {
 
     expect(targets.size).toBe(0)
     expect(statMock).not.toHaveBeenCalled()
+  })
+
+  // Real host (win-lowspec): the synchronous probe blocked main 5 s on a cold distro and killed its boot.
+  it('never probes a WSL repo distro home, and never synchronously', async () => {
+    const wsl = makeRepo(0, { path: '\\\\wsl.localhost\\Ubuntu\\home\\alice\\project' })
+    const mirrored = makeRepo(1, { path: 'C:\\Users\\alice\\orca' })
+
+    const platform = process.platform
+    // A WSL path is only recognized on Windows.
+    Object.defineProperty(process, 'platform', { configurable: true, value: 'win32' })
+    try {
+      await buildWorktreeBaseDirectoryWatchTargets(makeStore([wsl, mirrored]) as never)
+    } finally {
+      Object.defineProperty(process, 'platform', { configurable: true, value: platform })
+    }
+
+    expect(wslHomeMock).not.toHaveBeenCalled()
   })
 
   // WSL-mirrored worktrees can have Windows Git metadata; UNC root refusal must preserve that watcher.

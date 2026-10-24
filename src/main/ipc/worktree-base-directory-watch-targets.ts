@@ -12,7 +12,7 @@ import {
 import { isWslUncPath } from '../../shared/wsl-paths'
 import { mapWithConcurrency } from '../../shared/map-with-concurrency'
 import { getWorktreeMirrorDistro } from '../project-runtime-git-options'
-import { computeWorkspaceRoot, getWorktreePathSettings } from './worktree-logic'
+import { computeWorkspaceRootAsync, getWorktreePathSettings } from './worktree-logic'
 import { shouldEmitBoundedWarning } from './bounded-warning-dedupe'
 import { resolveWorktreeCommonGitDirectory } from './worktree-common-git-directory'
 import type {
@@ -71,17 +71,19 @@ async function maybeAddBaseTarget(
   settings: GlobalSettings,
   mirrorDistro: string | undefined
 ): Promise<void> {
+  // UNC watching is unreliable; distro repos have no native target, but mirrored Windows repos retain their Git-common watch.
+  // Why before the root: resolving it probes the distro's home, which boots a stopped distro.
+  if (isWslUncPath(repo.path)) {
+    warnSkippedWslRoot(repo.id, repo.path)
+    return
+  }
   const pathSettings = getWorktreePathSettings(repo, settings, mirrorDistro)
-  const workspaceRoot = computeWorkspaceRoot(repo.path, pathSettings)
+  // Why async: the synchronous home probe blocks main for up to 5 s and kills a still-booting distro.
+  const workspaceRoot = await computeWorkspaceRootAsync(repo.path, pathSettings)
   const config = {
     repoId: repo.id,
     repoName: getRuntimePathBasename(repo.path).replace(/\.git$/, ''),
     nestWorkspaces: pathSettings.nestWorkspaces
-  }
-  // UNC watching is unreliable; distro repos have no native target, but mirrored Windows repos retain their Git-common watch.
-  if (isWslUncPath(repo.path)) {
-    warnSkippedWslRoot(repo.id, workspaceRoot)
-    return
   }
   if (isWslUncPath(workspaceRoot)) {
     warnSkippedWslRoot(repo.id, workspaceRoot)
