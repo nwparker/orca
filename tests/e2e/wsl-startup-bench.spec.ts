@@ -231,6 +231,10 @@ async function measure(run: number, kind: string): Promise<void> {
       () => (window as unknown as { __d3: Record<string, unknown> }).__d3
     )
     const processStart = await app.evaluate(() => Date.now() - performance.now())
+    const wslEnvAtEnd = await app.evaluate(() => ({
+      WSLENV: process.env.WSLENV ?? null,
+      keys: Object.keys(process.env).filter((key) => /WSL|ORCA_|HOME|PROFILE|PATH/.test(key))
+    }))
     const rel = (value: unknown): number | null =>
       typeof value === 'number' ? value - t0 : null
     const row = {
@@ -251,6 +255,7 @@ async function measure(run: number, kind: string): Promise<void> {
       launchToWindowMs: tWindow - t0,
       processStartOffsetMs: Math.round(processStart - t0),
       sends: probe.sends,
+      wslEnvAtEnd,
       pty: probe.pty,
       log
     }
