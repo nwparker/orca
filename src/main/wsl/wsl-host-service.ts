@@ -5,6 +5,9 @@
  */
 import { logStartupMilestone as d3m } from '../startup/startup-diagnostics'
 import { errorMessage } from '../../shared/error-message'
+import { RemoteRuntimeClientError } from '../../shared/remote-runtime-client-error'
+import { OrcadHostUnsupportedError } from '../orcad/orcad-host-unavailable'
+import { WslOrcadLaunchDeferredError } from './wsl-orcad-connection-errors'
 import { removeWslHostEnvironment } from '../../shared/runtime-environment-wsl-host-store'
 import {
   readWslHostDeployments,
@@ -250,7 +253,9 @@ export class WslHostService {
     if (!this.visible.has(environmentId)) {
       throw new Error(wslHostNotConnectedMessage(record.distro))
     }
-    await connector.connect(record.distro)
+    await connector.connect(record.distro).catch((error: unknown) => {
+      throw retryableConnectFailure(record.distro, error)
+    })
     d3m('d3-ensure-connected')
   }
 
@@ -349,4 +354,20 @@ export class WslHostService {
   recordForEnvironment(environmentId: string): WslHostDeploymentRecord | null {
     return this.records().find((record) => record.environmentId === environmentId) ?? null
   }
+}
+
+/**
+ * Open work keeps liveness reconnecting a host whose connect failed, so a call that met the
+ * failure must read as "not reachable yet" and retry, not dead-end its pane. A deferred update
+ * or an unsupported distro waits on the user, so those stay final.
+ */
+function retryableConnectFailure(distro: string, error: unknown): unknown {
+  if (error instanceof WslOrcadLaunchDeferredError || error instanceof OrcadHostUnsupportedError) {
+    return error
+  }
+  return new RemoteRuntimeClientError(
+    'remote_runtime_unavailable',
+    // Why this wording: subscriptions cross IPC as a message, and renderers match this phrase.
+    `Could not connect to the remote Orca runtime in ${distro} yet: ${errorMessage(error)}`
+  )
 }

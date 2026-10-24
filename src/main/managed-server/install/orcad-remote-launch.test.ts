@@ -1,3 +1,7 @@
+import { spawn, spawnSync } from 'node:child_process'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { ORCAD_MANAGED_ACTIVATION_ROOT_ENV } from '../../../shared/orcad-managed-launch-env'
 
@@ -112,6 +116,34 @@ describe('liveness', () => {
     expect(parseOrcadLiveness(output)).toBe(expected)
     expect(orcadLivenessBlocksGc(parseOrcadLiveness(output))).toBe(blocks)
   })
+
+  // Real host (win-lowspec): after a distro reboot the probe's own shell took the recorded PID.
+  it.skipIf(process.platform === 'win32')(
+    'calls a recorded PID held by the probe shell itself dead, and a live orcad live',
+    async () => {
+      const slot = mkdtempSync(join(tmpdir(), 'orcad-liveness-'))
+      const probe = orcadLivenessProbeCommand(posix, slot)
+      try {
+        const self = spawnSync('sh', ['-c', `echo $$ > '${slot}/.orcad-pid'; ${probe}`], {
+          encoding: 'utf8'
+        })
+        expect(parseOrcadLiveness(self.stdout)).toBe('DEAD')
+
+        writeFileSync(join(slot, 'orcad.js'), 'setInterval(() => {}, 1000)\n')
+        const orcad = spawn(process.execPath, [join(slot, 'orcad.js')], { stdio: 'ignore' })
+        try {
+          writeFileSync(join(slot, '.orcad-pid'), `${orcad.pid}\n`)
+          await new Promise((resolve) => setTimeout(resolve, 200))
+          const live = spawnSync('sh', ['-c', probe], { encoding: 'utf8' })
+          expect(parseOrcadLiveness(live.stdout)).toBe('LIVE')
+        } finally {
+          orcad.kill()
+        }
+      } finally {
+        rmSync(slot, { recursive: true, force: true })
+      }
+    }
+  )
 
   it.each([
     ['DEAD', true],
