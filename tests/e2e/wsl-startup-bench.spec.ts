@@ -81,6 +81,13 @@ async function launch(): Promise<{ app: ElectronApplication; page: Page; t0: num
     }
   })
   const page = await app.firstWindow({ timeout: 120_000 })
+  page.on('console', (message) => {
+    const text = message.text()
+    if (text.startsWith('[d3r]')) {
+      const [, at, ...rest] = text.split(' ')
+      log.push(`${Number(at) - t0} [renderer] ${rest.join(' ')}`)
+    }
+  })
   await page.waitForFunction(() => Boolean(window.__store), null, { timeout: 60_000 })
   return { app, page, t0, log }
 }

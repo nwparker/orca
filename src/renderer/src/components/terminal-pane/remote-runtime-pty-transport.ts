@@ -371,7 +371,9 @@ export function createRemoteRuntimePtyTransport(
           }
           // Why: a ready control socket proves sign-in finished, whatever the replay meets next.
           setAwaitingSshSignIn(false)
-          return recovery.retryNow() || (transport.retryRecovery?.() ?? false)
+          const d3revived = recovery.retryNow() || (transport.retryRecovery?.() ?? false)
+          console.info(`[d3r] ${Date.now()} reviver retried=${d3revived}`)
+          return d3revived
         }
       )
     } else if (!wantsRevival && unregisterControlReadyReviver) {
@@ -1114,6 +1116,7 @@ export function createRemoteRuntimePtyTransport(
   // Why: schedule() both auto-retries inside the window and leaves the retry parked when the deadline
   // latches, so online/resume and the Reconnect button always find something to fire.
   function scheduleConnectRetryAfterRecoverableFailure(): void {
+    console.info(`[d3r] ${Date.now()} retry-scheduled phase=${recovery.currentPhase}`)
     if (destroyed) {
       return
     }
@@ -1465,6 +1468,7 @@ export function createRemoteRuntimePtyTransport(
       return { kind: 'unavailable' }
     }
     let terminal: RuntimeTerminalResolvePane
+    console.info(`[d3r] ${Date.now()} resolvePane-start`)
     try {
       const resolved = await callRuntime<{ terminal: RuntimeTerminalResolvePane }>(
         'terminal.resolvePane',
@@ -2872,6 +2876,7 @@ export function createRemoteRuntimePtyTransport(
     if (!handle) {
       return
     }
+    console.info(`[d3r] ${Date.now()} subscribe-start`)
     const subscribedHandle = handle
     const subscribedPtyId = remotePtyId
     const generation = ++subscriptionGeneration
@@ -2977,6 +2982,7 @@ export function createRemoteRuntimePtyTransport(
                 return
               }
             }
+            console.info(`[d3r] ${Date.now()} input-ready`)
             releaseHeldInput()
           }
         },

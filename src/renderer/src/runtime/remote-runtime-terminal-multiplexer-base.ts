@@ -84,8 +84,12 @@ export abstract class RemoteRuntimeTerminalMultiplexerBase {
     if (this.connectPromise) {
       return this.connectPromise
     }
+    console.info(`[d3r] ${Date.now()} multiplex-connect-start`)
     const connectPromise = new Promise<void>((resolve, reject) => {
-      this.readyResolver = resolve
+      this.readyResolver = (value) => {
+        console.info(`[d3r] ${Date.now()} multiplex-ready`)
+        resolve(value)
+      }
       this.readyRejecter = reject
       recordE2eRemoteTransportSubscribe()
       void window.api.runtimeEnvironments

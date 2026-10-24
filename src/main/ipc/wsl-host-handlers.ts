@@ -1,3 +1,4 @@
+import { logStartupMilestone as d3m } from '../startup/startup-diagnostics'
 import { BrowserWindow, ipcMain } from 'electron'
 import {
   WSL_HOST_STATUS_CHANNEL,
@@ -117,9 +118,12 @@ function createService(args: WslHostHandlerArgs): WslHostService | null {
     publish,
     pairingChanged: (environmentId) => void args.invalidateTransport(environmentId),
     ready: (environmentId) => {
+      d3m('d3-status-reconnect-start')
       void getRuntimeEnvironmentStatus(args.getUserDataPath(), environmentId, undefined, {
         reconnect: true
-      }).catch(() => {})
+      })
+        .then(() => d3m('d3-status-reconnect-done'))
+        .catch(() => {})
       const distro = created.recordForEnvironment(environmentId)?.distro
       if (distro) {
         pushHostAccounts(args.getUserDataPath, environmentId, distro)
