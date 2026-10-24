@@ -1,3 +1,4 @@
+import { logStartupMilestone as d3m } from '../../../startup/startup-diagnostics'
 import { getPtyIpc } from '../../pty-host-bindings'
 import { runPtyIpcSpawn } from './spawn-run'
 import type { PtySpawnIpcArgs, PtySpawnIpcDeps } from './spawn-types'
@@ -9,6 +10,7 @@ export function installPtySpawnIpcHandler(deps: PtySpawnIpcDeps): void {
   const { getLocalPtyStartupPromise } = deps
 
   ipcMain.handle('pty:spawn', async (_event, args: PtySpawnIpcArgs) => {
+    d3m('d3-pty-spawn-ipc', { conn: args.connectionId ?? null })
     const startupPromise = getLocalPtyStartupPromise(
       getConnectionExecutionHostId(args.connectionId)
     )
