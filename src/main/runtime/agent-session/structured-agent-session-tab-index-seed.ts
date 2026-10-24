@@ -2,10 +2,10 @@
 // Those chats are recorded once, all together: an index written part way would read as complete at
 // the next launch and drop the rest. With an index present, every restored chat is already listed.
 
-import type { StructuredAgentSessionHost } from '../native-chat/agent-session-wire/structured-agent-session-host'
-import type { Tab } from '../../shared/tab-types'
+import type { StructuredAgentSessionHost } from '../../native-chat/agent-session-wire/structured-agent-session-host'
+import type { Tab } from '../../../shared/tab-types'
 import type { ChatTabChange } from './agent-session-tab-layout'
-import { savedSessionId } from './saved-structured-agent-session-restoration'
+import { savedSessionId } from '../saved-structured-agent-session-restoration'
 
 type TabIndexHost = Pick<
   StructuredAgentSessionHost,

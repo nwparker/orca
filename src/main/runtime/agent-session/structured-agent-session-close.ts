@@ -11,14 +11,14 @@
  * longer live is proven gone. Anything else is retained rather than settled.
  */
 
-import type { StructuredAgentSessionHost } from '../native-chat/agent-session-wire/structured-agent-session-host'
-import { getStructuredAgentSessionHost } from '../native-chat/agent-session-wire/structured-agent-session-registry'
-import type { OrcaRuntimeService } from './orca-runtime'
+import type { StructuredAgentSessionHost } from '../../native-chat/agent-session-wire/structured-agent-session-host'
+import { getStructuredAgentSessionHost } from '../../native-chat/agent-session-wire/structured-agent-session-registry'
+import type { OrcaRuntimeService } from '../orca-runtime'
 import { retireSettledStructuredWorkerTab } from './structured-agent-session-tab-retirement'
 import {
   observeStructuredSession,
   structuredSessionCloseSettled
-} from './structured-worker-authority'
+} from '../structured-worker-authority'
 
 export type StructuredAgentSessionCloseOutcome = {
   stopped: boolean

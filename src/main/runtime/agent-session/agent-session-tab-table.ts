@@ -1,6 +1,6 @@
-import { agentSessionRefusalError } from '../../shared/agent-session-wire-refusals'
-import { structuredAgentSessionTabId } from '../../shared/structured-agent-session-projection'
-import type { AgentSessionStoreState } from './agent-session-store-state'
+import { agentSessionRefusalError } from '../../../shared/agent-session-wire-refusals'
+import { structuredAgentSessionTabId } from '../../../shared/structured-agent-session-projection'
+import type { AgentSessionStoreState } from '../agent-session-store-state'
 
 /**
  * Which conversation each structured chat tab shows, keyed by the host tab id.

@@ -6,11 +6,9 @@
  * than orchestration leaving a dead chat tab behind that re-attaches the session when opened.
  */
 
-import type {
-  RuntimeMobileSessionSnapshotTab,
-  RuntimeMobileSessionTabsSnapshot
-} from '../../shared/runtime-types'
-import { structuredAgentSessionTabId } from '../../shared/structured-agent-session-projection'
+import type { RuntimeMobileSessionSnapshotTab } from '../../../shared/runtime-mobile-session-tab-contracts'
+import type { RuntimeMobileSessionTabsSnapshot } from '../../../shared/runtime-session-contracts'
+import { structuredAgentSessionTabId } from '../../../shared/structured-agent-session-projection'
 
 /** The snapshot's tab for a structured session, matched by session id and by published tab id. */
 export function findStructuredAgentSessionTab(

@@ -4,10 +4,10 @@
 // are separate concerns that share only the handle below — and because that module had no room
 // left to grow.
 
-import type { AgentSessionResumeTrigger } from '../../shared/agent-session-resume-marker'
-import type { StructuredAgentSessionHost } from '../native-chat/agent-session-wire/structured-agent-session-host'
-import type { JournalHostDatabase } from '../native-chat/agent-session-journal/journal-host-database'
-import { recordAgentSessionRuntimeEnd } from './agent-session-runtime-end-record'
+import type { AgentSessionResumeTrigger } from '../../../shared/agent-session-resume-marker'
+import type { StructuredAgentSessionHost } from '../../native-chat/agent-session-wire/structured-agent-session-host'
+import type { JournalHostDatabase } from '../../native-chat/agent-session-journal/journal-host-database'
+import { recordAgentSessionRuntimeEnd } from '../agent-session-runtime-end-record'
 
 export type InstalledRuntime = {
   host: StructuredAgentSessionHost

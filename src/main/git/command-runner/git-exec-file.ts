@@ -7,7 +7,7 @@ import {
 } from '../../../shared/git-fetch-head-lock'
 import { pendingWslDriveCheckoutGitRouting } from '../wsl-drive-checkout-git-routing'
 import { resolveCommand, type ResolvedCommand } from './wsl-command-resolution'
-import { annotateWslHostFailure } from './wsl-host-failure'
+import { annotateWslHostFailure, isTransientWslFailure, retryWslRead } from './wsl-host-failure'
 import type { GitAdmissionTier, GitExecOptions } from './git-exec-options'
 import { execFileCapture, execFileCaptureToTermination } from './exec-file-capture'
 import {
@@ -118,10 +118,12 @@ async function gitExecFileAsyncUnlocked(
       const runCapturedCommand = async (): Promise<{ stdout: string; stderr: string }> => {
         let result: { stdout: string | Buffer; stderr: string | Buffer }
         try {
-          result = await capture(resolved)
+          result = await retryWslRead(args, options, () => capture(resolved))
         } catch (error) {
           if (
             directWslGitExitCode(error, resolved) !== null &&
+            // A WSL service hiccup says nothing about the direct git environment.
+            !isTransientWslFailure(error) &&
             !isQuietGitControlFlowExit(error) &&
             !options.signal?.aborted
           ) {

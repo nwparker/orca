@@ -25,7 +25,7 @@ const dependencies: Record<string, Record<string, unknown>> = {
     removeManagedAgentHooksAsync: vi.fn(async () => [])
   },
   '../runtime/structured-agent-session-runtime': { stopStructuredAgentSessionRuntime },
-  '../runtime/structured-agent-session-runtime-teardown': {
+  '../runtime/agent-session/structured-agent-session-runtime-teardown': {
     setStructuredAgentSessionTeardownTrigger: idle()
   },
   '../runtime/files/watch/file-watcher-leases': { awaitRuntimeFileWatcherUnsubscribes: settled() },

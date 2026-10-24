@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { Tab } from '../../shared/tab-types'
-import type { WorkspaceSessionState } from '../../shared/workspace-session-state-types'
+import type { Tab } from '../../../shared/tab-types'
+import type { WorkspaceSessionState } from '../../../shared/workspace-session-state-types'
 import { withChatTabChanges, type ChatTabChange } from './agent-session-tab-layout'
 
 // rollback build (switch-off) — delete with the switch-off code post-flip
-vi.mock('../../shared/layout-owner-switch', () => ({ ORCA_LAYOUT_OWNER_IS_MAIN: false }))
+vi.mock('../../../shared/layout-owner-switch', () => ({ ORCA_LAYOUT_OWNER_IS_MAIN: false }))
 
 const WT = 'repo-1::/tmp/worktree-a'
 

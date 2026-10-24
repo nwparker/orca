@@ -83,7 +83,7 @@ it.each([true, false])(
       makeRuntimeStoreWithWorkspaceSession,
       makeWorkspaceSessionWithHeadlessTerminal
     } = await import('../../orca-runtime-test-fixtures.spec')
-    const { withChatTabChanges } = await import('../../agent-session-tab-layout')
+    const { withChatTabChanges } = await import('../../agent-session/agent-session-tab-layout')
     const source = 'source-chat',
       row = `agent-session:${source}`,
       canonical = 'custom-chat-tab'

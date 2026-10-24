@@ -1,18 +1,18 @@
 // A chat tab a host with no window shows, saved in its layout as a window saves its own, so the
 // layout is a complete record of the host's tabs.
 
-import type { AgentType } from '../../shared/agent-status-types'
-import type { ExecutionHostId } from '../../shared/execution-host'
-import { applyLayoutCommand } from '../../shared/workspace-layout/workspace-layout-commands'
-import { loadWorkspaceLayout } from '../../shared/workspace-layout/workspace-layout-load'
-import { nameBasedLoadContext } from '../../shared/workspace-layout/workspace-layout-minted-ids'
-import type { CommandOf } from '../../shared/workspace-layout/workspace-layout-command-types'
-import type { WorkspaceLayout } from '../../shared/workspace-layout/workspace-layout-model'
-import { saveWorkspaceLayout } from '../../shared/workspace-layout/workspace-layout-save'
-import type { WorkspaceSessionState } from '../../shared/workspace-session-state-types'
+import type { AgentType } from '../../../shared/agent-status-types'
+import type { ExecutionHostId } from '../../../shared/execution-host'
+import { applyLayoutCommand } from '../../../shared/workspace-layout/workspace-layout-commands'
+import { loadWorkspaceLayout } from '../../../shared/workspace-layout/workspace-layout-load'
+import { nameBasedLoadContext } from '../../../shared/workspace-layout/workspace-layout-minted-ids'
+import type { CommandOf } from '../../../shared/workspace-layout/workspace-layout-command-types'
+import type { WorkspaceLayout } from '../../../shared/workspace-layout/workspace-layout-model'
+import { saveWorkspaceLayout } from '../../../shared/workspace-layout/workspace-layout-save'
+import type { WorkspaceSessionState } from '../../../shared/workspace-session-state-types'
 import { randomUUID } from 'node:crypto'
-import { getStructuredAgentSessionHost } from '../native-chat/agent-session-wire/structured-agent-session-registry'
-import { structuredAgentSessionTabId } from '../../shared/structured-agent-session-projection'
+import { getStructuredAgentSessionHost } from '../../native-chat/agent-session-wire/structured-agent-session-registry'
+import { structuredAgentSessionTabId } from '../../../shared/structured-agent-session-projection'
 
 /** Where a paired client asked a chat it created to open, in this host's own group and tab ids. */
 export type ChatTabPlacement = { groupId?: string; afterTabId?: string }

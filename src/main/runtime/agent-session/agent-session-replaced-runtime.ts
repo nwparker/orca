@@ -4,8 +4,8 @@
 // That is the execution host's own proof that a turn those runtimes left running is over, whether or
 // not the provider process itself can still be proven gone.
 
-import type { AgentSessionOrcaStopCause } from '../../shared/agent-session-orca-stop'
-import type { AgentSessionStoreState } from './agent-session-store-state'
+import type { AgentSessionOrcaStopCause } from '../../../shared/agent-session-orca-stop'
+import type { AgentSessionStoreState } from '../agent-session-store-state'
 
 export type AgentSessionReplacedRuntime = {
   /** The highest fence a replaced runtime granted; every lower fence was granted before it. */
