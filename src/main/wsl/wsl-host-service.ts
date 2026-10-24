@@ -3,6 +3,7 @@
  * reports, and connect only for the user. A stopped distro boots on an explicit add or connect,
  * or while a project or terminal the user has open needs it; never for background work.
  */
+import { logStartupMilestone as d3m } from '../startup/startup-diagnostics'
 import { errorMessage } from '../../shared/error-message'
 import { removeWslHostEnvironment } from '../../shared/runtime-environment-wsl-host-store'
 import {
@@ -100,6 +101,7 @@ export class WslHostService {
       this.deps.pairingChanged(record.environmentId)
     }
     this.setStatus(record, status, connection)
+    d3m('d3-conn-status', { state: status.state })
     if (status.state === 'ready' && connection) {
       this.deps.ready(record.environmentId)
     }
@@ -228,11 +230,14 @@ export class WslHostService {
    * work, and say why not instead of letting the call fail as an unreachable network server.
    */
   async ensureForRuntimeCall(environmentId: string): Promise<void> {
+    d3m('d3-ensure-start')
     const record = this.recordForEnvironment(environmentId)
     const connector = this.connector
     if (!record || !connector || (await connector.isReachable(record.distro, environmentId))) {
+      d3m('d3-ensure-reachable')
       return
     }
+    d3m('d3-ensure-probed')
     const refusal = wslHostRunRefusal(this.deps)
     if (refusal || this.removing.has(environmentId)) {
       throw new Error(refusal?.message ?? WSL_HOST_REMOVING_MESSAGE)
@@ -241,6 +246,7 @@ export class WslHostService {
       throw new Error(wslHostNotConnectedMessage(record.distro))
     }
     await connector.connect(record.distro)
+    d3m('d3-ensure-connected')
   }
 
   /** Whether anything may still be started for this distro (spawn guard). */
@@ -249,6 +255,7 @@ export class WslHostService {
   }
 
   setVisibleWork(environmentIds: readonly string[], previous = this.visible): void {
+    d3m('d3-visible-work', { n: environmentIds.length })
     this.visible = new Set(environmentIds.filter((id) => !this.removing.has(id)))
     if (!this.connector || !this.canRun()) {
       return

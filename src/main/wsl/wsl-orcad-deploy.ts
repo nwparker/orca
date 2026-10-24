@@ -3,6 +3,7 @@
  * install, activation fence/journal and version admission over the `wsl.exe` transport.
  * No pairing here: the stdio bridge (C5) connects to the loopback port this reports.
  */
+import { logStartupMilestone as d3m } from '../startup/startup-diagnostics'
 import { getAppEnvironment } from '../../shared/app-environment'
 import type { PairingOffer } from '../../shared/pairing'
 import { ORCAD_MANAGED_REMOTE_PORT } from '../../shared/orcad-managed-runtime'
@@ -130,6 +131,7 @@ async function launchOverTransport(
   options: WslOrcadDeployOptions
 ): Promise<WslOrcadLaunch> {
   const { signal } = options
+  d3m('d3-deploy-start')
   const kernel = await execCommand(conn, 'uname -r', { signal })
   if (isWsl1KernelRelease(kernel)) {
     throw new OrcadHostUnsupportedError(
@@ -139,10 +141,13 @@ async function launchOverTransport(
   }
   // Before the launch: without a holder WSL stops an idle distro and orcad with it.
   const holder = options.holder ?? createWslDistroHolder({ userDataPath: userDataPath() })
+  d3m('d3-deploy-uname')
   const held = await holder.ensureHeld(name)
+  d3m('d3-deploy-held')
   // Read alongside the deploy; a failed read only leaves the record without a GUID.
   const distroId = (options.readRegistryId ?? readWslDistroRegistryIdShared)(name).catch(() => null)
   let context = await resolveOrcadRemoteContext(target, conn, signal)
+  d3m('d3-deploy-context')
   const slot = managedOrcadSlot(context, ORCAD_MANAGED_REMOTE_PORT, signal)
   const recovery = await recoverInterruptedOrcadActivation(slot)
   if (recovery.outcome === 'pending' || recovery.outcome === 'refused') {
@@ -156,11 +161,13 @@ async function launchOverTransport(
   if (adoption.outcome === 'adopted') {
     context = { ...context, activationRecord: adoption.record }
   }
+  d3m('d3-deploy-recovered')
   const localOrcadDir = await materializeOrcadArtifact(context.serverTarget, {
     signal,
     trustVerificationRecord: true,
     ...(options.templateDir ? { templateDir: options.templateDir } : {})
   })
+  d3m('d3-deploy-materialized')
   const appVersion = getAppEnvironment().getVersion()
   const candidateVersion = readLocalFullVersion(localOrcadDir)
   const failureHost = { kind: 'wsl', id: target.id } as const
@@ -186,6 +193,7 @@ async function launchOverTransport(
           paired: options.pairedOffer ?? null
         })
       : null
+  d3m('d3-deploy-admitted')
   const deployed = await deployOrcad({
     ...slot,
     conn,
@@ -246,6 +254,7 @@ async function launchOverTransport(
     }
     return { outcome: 'deferred', distro: name, ...deferredUpdate }
   }
+  d3m('d3-deploy-deployed', { outcome: deployed.outcome })
   clearOrcadUpdateFailedThisLaunch(failureHost)
   if (deployed.outcome === 'already-active') {
     // A stopped distro ended the active slot with it.
@@ -257,12 +266,14 @@ async function launchOverTransport(
     deployed.fullVersion,
     signal
   )
+  d3m('d3-deploy-readiness')
   await pruneManagedOrcadVersions({
     slot,
     serverTarget: context.serverTarget,
     activeVersion: deployed.fullVersion,
     readiness
   })
+  d3m('d3-deploy-pruned')
   return readyLaunch({ fullVersion: deployed.fullVersion, readiness })
 
   /** The record only once the incumbent is back and no journal awaits recovery; else null. */

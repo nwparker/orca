@@ -4,6 +4,7 @@
  * distro; a relaunch that moved orcad's port moves the bridge with it. In memory only: the
  * deployment record (C7) persists what `onChange` reports.
  */
+import { logStartupMilestone as d3m } from '../startup/startup-diagnostics'
 import type {
   WslOrcadConnection,
   WslOrcadConnectionDependencies
@@ -241,6 +242,7 @@ export class WslOrcadConnectionManager {
       await this.drop(key, current)
       this.dependencies.onChange?.(distro, null, status.pending)
     }
+    d3m('d3-conn-launched')
     const forward = await listenWslOrcadStdioBridgeOnPreferredPort(
       transport,
       {
@@ -255,6 +257,7 @@ export class WslOrcadConnectionManager {
       if (this.generation(key) !== generation) {
         throw new WslOrcadConnectionSupersededError(distro)
       }
+      d3m('d3-conn-bridge')
       const pairingOffer = await resolveWslOrcadPairing(
         launch,
         forward.entry.localPort,
@@ -265,6 +268,7 @@ export class WslOrcadConnectionManager {
       if (this.generation(key) !== generation) {
         throw new WslOrcadConnectionSupersededError(distro)
       }
+      d3m('d3-conn-paired')
       const entry: ActiveWslOrcadConnection = {
         forward,
         connection: {
