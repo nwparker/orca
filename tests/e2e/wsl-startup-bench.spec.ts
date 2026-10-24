@@ -29,6 +29,7 @@ const OUT = process.env.D3_OUT ?? path.join(PROFILE, '..', 'd3-results.jsonl')
 const PROJECT = MODE === 'host' ? 'hproj' : 'bproj'
 const GUEST_PROJECT = `/home/orca/${PROJECT}`
 const ENV_ID = `wsl:${DISTRO.toLowerCase()}`
+const noise: string[] = []
 
 async function wsl(args: string[], timeoutMs = 120_000): Promise<string> {
   const result = await runProcess({
@@ -68,6 +69,7 @@ async function launch(): Promise<{ app: ElectronApplication; page: Page; t0: num
     userDataDir: PROFILE
   })
   const log: string[] = []
+  noise.length = 0
   const t0 = Date.now()
   const app = await electron.launch({
     args: getOrcaElectronLaunchArgs(path.join(process.cwd(), 'out', 'main', 'index.js'), false),
@@ -77,6 +79,8 @@ async function launch(): Promise<{ app: ElectronApplication; page: Page; t0: num
     for (const line of chunk.toString().split(/\r?\n/)) {
       if (line.includes('[startup]') || line.includes('[wsl-hosts]')) {
         log.push(`${Date.now() - t0} ${line}`)
+      } else if (/worktree|git|wsl|repo|error|warn/i.test(line)) {
+        noise.push(`${Date.now() - t0} ${line.slice(0, 300)}`)
       }
     }
   })
@@ -220,6 +224,7 @@ async function measure(run: number, kind: string): Promise<void> {
         })
         console.log(`[d3] FAIL dump ${dump}`)
         console.log(log.join('\n'))
+        console.log(`[d3] NOISE\n${noise.slice(-120).join('\n')}`)
         throw error
       })
     const probe = await page.evaluate(
