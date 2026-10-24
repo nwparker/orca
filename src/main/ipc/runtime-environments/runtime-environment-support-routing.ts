@@ -1,3 +1,4 @@
+import { logStartupMilestone as d3m } from '../../startup/startup-diagnostics'
 import { isOrchestrationMutation } from '../../../shared/orchestration-rpc-contract'
 import { waitForPromiseWithSignal } from '../../../shared/abort-signal-reason'
 import type { PairedRuntimeConnection } from '../../../shared/paired-runtime-connection'
@@ -210,10 +211,13 @@ export async function routeRuntimeEnvironmentCallBySupport(args: {
       return revisionFailure
     }
     const connection = getPreferredPairedRuntimeConnection(environment)
+    const d3q = args.method.startsWith('session.tabs') || args.method === 'terminal.resolvePane'
+    if (d3q) d3m('d3-support-probe-start', { m: args.method, attempt })
     const outcome = await waitForPromiseWithSignal(
       supportsSharedControl(args.userDataPath, environment, connection, args.timeoutMs),
       args.signal
     )
+    if (d3q) d3m('d3-support-probe-done', { m: args.method, kind: outcome.kind })
     if (
       outcome.kind !== 'stale_incarnation' &&
       isRuntimeEnvironmentCapabilityOutcomeCurrent(outcome)
@@ -226,6 +230,7 @@ export async function routeRuntimeEnvironmentCallBySupport(args: {
       const response = await (outcome.kind === 'supported'
         ? args.supported(route)
         : args.unsupported(route))
+      if (d3q) d3m('d3-support-sent-done', { m: args.method })
       if (isRuntimeEnvironmentCapabilityOutcomeCurrent(outcome)) {
         args.markUsed(environment.id, response)
       }

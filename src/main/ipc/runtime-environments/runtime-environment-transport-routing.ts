@@ -1,3 +1,4 @@
+import { logStartupMilestone as d3m } from '../../startup/startup-diagnostics'
 import { getRuntimeEnvironmentStatus } from './runtime-environment-status-probe'
 import { getPreferredPairedRuntimeConnection } from '../../../shared/runtime-environments'
 import { ELECTRON_REMOTE_RUNTIME_CLIENT_CAPABILITIES } from '../../../shared/electron-remote-runtime-client-capabilities'
@@ -66,10 +67,13 @@ export async function callRuntimeEnvironment(
       environment.id,
       method,
       async () => {
+        const d3q = method.startsWith('session.tabs') || method === 'terminal.resolvePane'
+        if (d3q) d3m('d3-route-dequeued', { m: method })
         const currentEnvironment = await resolveManagedRuntimeEnvironment(
           userDataPath,
           environment.id
         )
+        if (d3q) d3m('d3-route-ensured', { m: method })
         const revisionFailure = runtimeEnvironmentRevisionFailure(
           currentEnvironment,
           expectedEnvironmentPairingRevision,
@@ -96,6 +100,13 @@ export async function callRuntimeEnvironment(
           markEnvironmentUsedFromResponse(userDataPath, currentEnvironment.id, response)
           return response
         }
+        if (d3q)
+          d3m('d3-route-path', {
+            m: method,
+            cached: shouldUseCachedRequestConnection(method),
+            support: shouldRouteCallBySupport(method, currentEnvironment.id),
+            env: Boolean(envelope)
+          })
         if (shouldUseCachedRequestConnection(method)) {
           const response = await sendRemoteRuntimeConnectionRequestAbortable(
             currentEnvironment.id,
