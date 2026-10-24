@@ -1,4 +1,4 @@
-import type { TaskPageGitHubIssueDraftModel } from './use-task-page-github-issue-draft'
+import type { TaskPageGitHubIssueDraftModel } from './task-page/github/use-task-page-github-issue-draft'
 import { useState, useMemo, useCallback } from 'react'
 import type { LinearIssue } from '../../../shared/linear/issue-types'
 import type { JiraIssue } from '../../../shared/jira/jira-types'

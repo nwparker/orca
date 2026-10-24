@@ -3823,16 +3823,28 @@
             "removeWorkspaceButton": "Remove workspace"
           },
           "TerminalRemoteRuntimeReconnectBanner": {
-            "retryingTitle": "Reconnecting to remote runtime",
             "pairingRefusedTitle": "This host no longer accepts this computer",
             "pairingRefusedBody": "Orca couldn't pair with it again over SSH. Nothing on the host was stopped. Reconnect to try again.",
             "disconnectedTitle": "Remote runtime disconnected",
-            "retryingBody": "Orca is retrying automatically. This terminal will resume if the connection returns.",
             "disconnectedBody": "Automatic retries stopped. Reconnect to resume this terminal session.",
             "reconnectButton": "Reconnect",
             "signInTitle": "Waiting for SSH sign-in",
             "signInBody": "This terminal continues by itself once you sign in to the host.",
-            "signInButton": "Sign in"
+            "signInButton": "Sign in",
+            "serverRestartingTitle": "{{server}} is restarting",
+            "serverRestartingBody": "Orca reconnects when the server is back, and terminals resume then.",
+            "streamStalledTitle": "Terminal stopped responding",
+            "streamStalledBody": "{{server}} stopped sending this terminal's output. Orca is reattaching it automatically.",
+            "sessionEndedTitle": "Reattaching terminal",
+            "sessionEndedBody": "{{server}} closed this terminal's stream. Orca is reattaching it automatically.",
+            "waitingTitle": "Waiting for {{server}}",
+            "waitingBody": "Orca reattaches this terminal when the server offers it again or the connection changes. Reconnect to try now.",
+            "downFor": "Down for {{duration}}",
+            "tailscaleHint": "Check the Tailscale path:",
+            "fallbackServerName": "the server",
+            "connectionLostTitle": "Reconnecting to {{server}}",
+            "connectionLostBody": "The connection to the server dropped. Orca is retrying automatically, and terminals resume when it returns.",
+            "reattachingBody": "Orca is reattaching this terminal to {{server}} automatically."
           },
           "TerminalQuickCommandsSubmenu": {
             "3ccc7981bb": "Host unavailable",

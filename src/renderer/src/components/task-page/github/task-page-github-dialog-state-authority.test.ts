@@ -1,27 +1,27 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import type { GitHubWorkItem } from '../../../shared/github/work-item-types'
-import { getTaskSourceCacheScope } from '../../../shared/task-source-context'
+import type { GitHubWorkItem } from '../../../../../shared/github/work-item-types'
+import { getTaskSourceCacheScope } from '../../../../../shared/task-source-context'
 import { assertTaskPageGitHubDialogStateAuthority } from './task-page-github-dialog-state-authority'
-import { adoptQuietSearchFieldsForItem } from './task-page/github/task-page-github-work-item-quiet-adopt'
+import { adoptQuietSearchFieldsForItem } from './task-page-github-work-item-quiet-adopt'
 import {
   applyPendingTaskPageGitHubMutationsToItems,
   materializeTaskPageItemList,
   reapplyPendingTaskPageGitHubMutationsToCache
-} from './task-page/github/task-page-github-work-item-mutation-pages'
+} from './task-page-github-work-item-mutation-pages'
 import {
   deleteLastConfirmedClientValue,
   getLastConfirmedClientValue
 } from './task-page-github-confirmed-client-values'
-import { getOrCreateQuietRevalidateState } from './task-page/github/task-page-github-work-item-quiet-state'
+import { getOrCreateQuietRevalidateState } from './task-page-github-work-item-quiet-state'
 import {
   resetTaskPageGitHubMutationRegistryForTests,
   setLastConfirmedClientValue,
   setTaskPageGitHubMutationQueryKey
-} from './task-page/github/task-page-github-work-item-mutation-registry'
+} from './task-page-github-work-item-mutation-registry'
 import {
   taskPageGitHubFamilyDirtyKey,
   taskPageGitHubItemKey
-} from './task-page/github/task-page-github-work-item-mutation-keys'
+} from './task-page-github-work-item-mutation-keys'
 
 function item(overrides: Partial<GitHubWorkItem> = {}): GitHubWorkItem {
   return {

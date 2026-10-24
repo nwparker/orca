@@ -13,7 +13,8 @@ import {
   writeFileSync
 } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { spawnSync } from 'node:child_process'
+import { join, sep } from 'node:path'
 import type * as osModule from 'node:os'
 
 let isolatedUserDataDir = ''
@@ -158,9 +159,37 @@ describe('managed hook script refresh', () => {
         }
         await new ClaudeHookService().refreshManagedScripts()
         for (const name of ['claude-hook.sh', 'claude-statusline.sh']) {
-          const script = readFileSync(join(hooksDir, name), 'utf8')
-          expect(script).toContain('| LC_ALL= LC_NUMERIC=C curl -sS')
-          expect(script).not.toMatch(/\|\s+curl\b/)
+          const observed = join(home, `${name}.locale`)
+          const result = spawnSync(
+            '/bin/sh',
+            [
+              '-c',
+              'curl() { printf "%s|%s" "$LC_ALL" "$LC_NUMERIC" > "$ORCA_TEST_CURL_LOCALE"; command -p cat >/dev/null; }; . "$1"',
+              'hook',
+              join(hooksDir, name)
+            ],
+            {
+              input: '{"hook_event_name":"Stop","rate_limits":{},"total_duration_ms":1000}',
+              encoding: 'utf8',
+              timeout: 5_000,
+              env: {
+                ...process.env,
+                LC_ALL: 'de_DE.UTF-8',
+                LC_NUMERIC: 'de_DE.UTF-8',
+                TMPDIR: home,
+                CLAUDE_JOB_DIR: '',
+                ORCA_AGENT_HOOK_ENDPOINT: '',
+                ORCA_AGENT_HOOK_PORT: '1',
+                ORCA_AGENT_HOOK_TOKEN: 'test-token',
+                ORCA_PANE_KEY: 'pane-1',
+                ORCA_TEST_CURL_LOCALE: observed
+              }
+            }
+          )
+          expect(result.error, name).toBeUndefined()
+          expect(result.status, name).toBe(0)
+          expect(existsSync(observed), `${name} delivered to curl`).toBe(true)
+          expect(readFileSync(observed, 'utf8'), name).toBe('|C')
           expect(statSync(join(hooksDir, name)).mode & 0o777).toBe(0o755)
         }
         expect(existsSync(join(home, '.claude'))).toBe(false)
@@ -172,7 +201,7 @@ describe('managed hook script refresh', () => {
     }
   )
 
-  it('covers every shared launcher script with a refresher', async () => {
+  it('restores every installed shared launcher through its registered refresher', async () => {
     const home = mkdtempSync(join(tmpdir(), 'orca-hook-refresh-coverage-'))
     homedirMock.mockReturnValue(home)
     const previousGrokHome = process.env.GROK_HOME
@@ -190,6 +219,36 @@ describe('managed hook script refresh', () => {
       const hooksDir = join(home, '.orca', 'agent-hooks')
       const files = readdirSync(hooksDir)
       expect(files.length).toBeGreaterThan(0)
+      const installed = new Map(
+        readdirSync(hooksDir, { recursive: true, encoding: 'utf8' })
+          .filter((file) => statSync(join(hooksDir, file)).isFile())
+          .map((file) => [file, readFileSync(join(hooksDir, file))])
+      )
+      const homeEntries = readdirSync(home, { recursive: true, encoding: 'utf8' }).sort()
+      const configs = new Map(
+        homeEntries
+          .filter((file) => !file.startsWith(join('.orca', 'agent-hooks') + sep))
+          .filter((file) => statSync(join(home, file)).isFile())
+          .map((file) => [file, readFileSync(join(home, file))])
+      )
+      for (const [file] of installed) {
+        if (/\.(?:cmd|ps1|sh|cjs|exe)$/.test(file)) {
+          writeFileSync(join(hooksDir, file), 'stale')
+        }
+      }
+      await withPlatform('win32', async () => {
+        for (const [agent, refresh] of MANAGED_AGENT_HOOK_SCRIPT_REFRESHERS) {
+          await expect(refresh(), `${agent} refresh on installed home`).resolves.toBeUndefined()
+        }
+      })
+      expect(readdirSync(hooksDir).sort()).toEqual([...files].sort())
+      for (const [file, content] of installed) {
+        expect(readFileSync(join(hooksDir, file)), `${file} restored`).toEqual(content)
+      }
+      expect(readdirSync(home, { recursive: true, encoding: 'utf8' }).sort()).toEqual(homeEntries)
+      for (const [file, content] of configs) {
+        expect(readFileSync(join(home, file)), `${file} config preserved`).toEqual(content)
+      }
       const refresherAgents = MANAGED_AGENT_HOOK_SCRIPT_REFRESHERS.map(([agent]) => agent)
       for (const file of files) {
         expect(

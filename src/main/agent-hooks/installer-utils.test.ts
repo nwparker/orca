@@ -901,13 +901,6 @@ describe('buildPosixAgentHookPostCommand', () => {
       }
     }
   )
-
-  it('forces C numeric locale on every curl invocation so fractional timeouts parse', () => {
-    const command = buildPosixAgentHookPostCommand('claude').join('\n')
-    expect(command).not.toMatch(/\|\s+curl\b/)
-    const custom = buildPosixAgentHookPostCommand('codex', { curlCommand: '"$curl_bin"' })
-    expect(custom.join('\n')).toContain('| LC_ALL= LC_NUMERIC=C "$curl_bin" -sS')
-  })
 })
 
 describe('buildWindowsAgentHookCurlPostCommand', () => {

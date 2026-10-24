@@ -20,7 +20,7 @@ import {
   setStickyHideEntry,
   updateSoftHiddenItemKey
 } from './task-page-github-work-item-mutation-registry'
-import { getLastConfirmedClientValue } from '../../task-page-github-confirmed-client-values'
+import { getLastConfirmedClientValue } from './task-page-github-confirmed-client-values'
 import { taskPageGitHubItemKey } from './task-page-github-work-item-mutation-keys'
 import type {
   PendingListOp,

@@ -1,11 +1,11 @@
 import type {
   GitHubOwnerRepo,
   GitHubAssignableUser
-} from '../../../shared/github/pull-request-types'
-import type { GitHubWorkItem } from '../../../shared/github/work-item-types'
+} from '../../../../../shared/github/pull-request-types'
+import type { GitHubWorkItem } from '../../../../../shared/github/work-item-types'
 import { sameGitHubOwnerRepo } from '@/components/github/IssueSourceIndicator'
-import { parseGitHubIssueOrPRLink } from '@/lib/github-links'
-import { githubProjectHost } from '../../../shared/github/project-identity'
+import { parseGitHubIssueOrPRLink } from '../../../../../shared/github/links'
+import { githubProjectHost } from '../../../../../shared/github/project-identity'
 export function sameOptionalGitHubOwnerRepo(
   left: GitHubOwnerRepo | null | undefined,
   right: GitHubOwnerRepo | null | undefined

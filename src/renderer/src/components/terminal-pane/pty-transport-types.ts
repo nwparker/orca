@@ -153,8 +153,14 @@ type PtyCallbacks = {
   onSpawnDeferred?: (reason: SpawnDeferralReason) => void
 }
 
+/** What started a pane's recovery: the server connection, or only this pane's stream. */
+export type PtyRecoveryCause = 'connection' | 'stream-stalled' | 'stream-ended'
+
 export type PtyTransportRecoveryState = {
   reason?: 'ownership' | 'ssh-sign-in'
+  cause?: PtyRecoveryCause
+  /** A retry is parked for an outside trigger; nothing retries on its own until then. */
+  waiting?: true
   phase:
     | 'connecting'
     | 'connected'

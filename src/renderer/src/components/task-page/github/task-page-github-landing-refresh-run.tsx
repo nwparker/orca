@@ -1,13 +1,13 @@
 import type { TaskPageGitHubSearchPaginationModel } from './use-task-page-github-search-pagination'
-import { stripRepoQualifiers } from '../../../shared/task-query'
-import { useAppStore } from '@/store'
+import { stripRepoQualifiers } from '../../../../../shared/task-query'
+import { useAppStore } from '@/store/index'
 import {
   taskPageGitHubResumeCache,
   TASK_PAGE_GITHUB_RESUME_FRESH_MS
-} from '@/components/task-page-github-resume-cache'
-import type { GitHubWorkItem } from '../../../shared/github/work-item-types'
-import { getTaskPageRepoSourceContext } from './task-page-source-context'
-import { sortWorkItemsByNumber, taskPageToGitHubApiPage } from '../../../shared/work-items'
+} from '@/components/task-page/github/task-page-github-resume-cache'
+import type { GitHubWorkItem } from '../../../../../shared/github/work-item-types'
+import { getTaskPageRepoSourceContext } from '../../task-page-source-context'
+import { sortWorkItemsByNumber, taskPageToGitHubApiPage } from '../../../../../shared/work-items'
 import {
   materializeTaskPageItemList,
   overlayPendingOnTaskPagePages,

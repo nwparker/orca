@@ -25,11 +25,11 @@ import {
   MAX_LAG_TRAILS,
   LAG_BACKOFF_MS
 } from '@/components/task-page/github/task-page-github-work-item-quiet-adopt'
-import { stripRepoQualifiers } from '../../../shared/task-query'
-import { getTaskPageRepoSourceContext } from './task-page-source-context'
-import type { GitHubWorkItem } from '../../../shared/github/work-item-types'
-import { taskPageToGitHubApiPage } from '../../../shared/work-items'
-import { useAppStore } from '@/store'
+import { stripRepoQualifiers } from '../../../../../shared/task-query'
+import { getTaskPageRepoSourceContext } from '../../task-page-source-context'
+import type { GitHubWorkItem } from '../../../../../shared/github/work-item-types'
+import { taskPageToGitHubApiPage } from '../../../../../shared/work-items'
+import { useAppStore } from '@/store/index'
 export function runTaskPageGitHubQuietRefresh(model: TaskPageGitHubQuietRefreshPreludeModel) {
   const {
     fetchWorkItemsAcrossRepos,

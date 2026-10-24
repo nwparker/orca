@@ -24,7 +24,7 @@ import {
   getTaskPageGitHubSoftHiddenItemKeys,
   resetTaskPageGitHubMutationRegistryForTests
 } from './task-page-github-work-item-mutation-registry'
-import { getLastConfirmedClientValue } from '../../task-page-github-confirmed-client-values'
+import { getLastConfirmedClientValue } from './task-page-github-confirmed-client-values'
 import { getOrCreateQuietRevalidateState } from './task-page-github-work-item-quiet-state'
 import { taskPageGitHubItemKey } from './task-page-github-work-item-mutation-keys'
 

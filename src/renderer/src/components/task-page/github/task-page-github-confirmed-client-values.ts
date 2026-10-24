@@ -1,6 +1,6 @@
-import type { GitHubOwnerRepo } from '../../../shared/github/pull-request-types'
-import { githubRepoIdentityKey } from '../../../shared/github/repository-identity-key'
-import { taskPageGitHubLastConfirmedKey } from './task-page/github/task-page-github-work-item-mutation-keys'
+import type { GitHubOwnerRepo } from '../../../../../shared/github/pull-request-types'
+import { githubRepoIdentityKey } from '../../../../../shared/github/repository-identity-key'
+import { taskPageGitHubLastConfirmedKey } from './task-page-github-work-item-mutation-keys'
 
 const lastConfirmedClientValues = new Map<
   string,

@@ -1,9 +1,9 @@
-import type { GitHubWorkItem } from '../../../shared/github/work-item-types'
-import type { GitHubOwnerRepo } from '../../../shared/github/pull-request-types'
+import type { GitHubWorkItem } from '../../../../../shared/github/work-item-types'
+import type { GitHubOwnerRepo } from '../../../../../shared/github/pull-request-types'
 import {
   getTaskSourceCacheScope,
   type TaskSourceContext
-} from '../../../shared/task-source-context'
+} from '../../../../../shared/task-source-context'
 import {
   deleteLastConfirmedClientValue,
   getLastConfirmedClientValue
@@ -12,9 +12,9 @@ import {
   getTaskPageGitHubMutationQueryKey,
   notifyTaskPageGitHubMutationRegistry,
   setLastConfirmedClientValue
-} from './task-page/github/task-page-github-work-item-mutation-registry'
-import { markTaskPageGitHubFamiliesDirty } from './task-page/github/task-page-github-work-item-quiet-state'
-import { taskPageGitHubItemKey } from './task-page/github/task-page-github-work-item-mutation-keys'
+} from './task-page-github-work-item-mutation-registry'
+import { markTaskPageGitHubFamiliesDirty } from './task-page-github-work-item-quiet-state'
+import { taskPageGitHubItemKey } from './task-page-github-work-item-mutation-keys'
 
 function markStateFamilyDirty(repoId: string, itemId: string): void {
   const queryKey = getTaskPageGitHubMutationQueryKey()

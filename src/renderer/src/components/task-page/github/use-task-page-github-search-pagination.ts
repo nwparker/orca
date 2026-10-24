@@ -1,7 +1,7 @@
 import type { TaskPageGitHubListProjectionModel } from './use-task-page-github-list-projection'
 import { useCallback, useEffect } from 'react'
-import { stripRepoQualifiers } from '../../../shared/task-query'
-import { taskPageToGitHubApiPage } from '../../../shared/work-items'
+import { stripRepoQualifiers } from '../../../../../shared/task-query'
+import { taskPageToGitHubApiPage } from '../../../../../shared/work-items'
 import {
   resolveEmptyPageOutcome,
   applyWindowPageLimit,
@@ -10,9 +10,9 @@ import {
 import { toast } from 'sonner'
 import { translate } from '@/i18n/i18n'
 import { overlayPendingOnTaskPagePages } from '@/components/task-page/github/task-page-github-work-item-mutation-pages'
-import { scopeGitHubTaskSearch } from '@/components/task-page-github-task-kind'
+import { scopeGitHubTaskSearch } from '../../../../../shared/task-github-search'
 import { useGitHubTaskSearchCommit } from '@/components/use-github-task-search-commit'
-import { getTaskPageRepoSourceContext } from './task-page-source-context'
+import { getTaskPageRepoSourceContext } from '../../task-page-source-context'
 export function useTaskPageGitHubSearchPagination(model: TaskPageGitHubListProjectionModel) {
   const {
     setTaskResumeState,

@@ -3689,16 +3689,28 @@
             "removeWorkspaceButton": "Supprimer l'espace de travail"
           },
           "TerminalRemoteRuntimeReconnectBanner": {
-            "retryingTitle": "Reconnexion au runtime distant",
             "pairingRefusedTitle": "Cet hôte n'accepte plus cet ordinateur",
             "pairingRefusedBody": "Orca n'a pas pu s'associer de nouveau à lui via SSH. Rien n'a été arrêté sur l'hôte. Reconnectez-vous pour réessayer.",
             "disconnectedTitle": "Runtime distant déconnecté",
-            "retryingBody": "Orca réessaie automatiquement. Ce terminal reprendra si la connexion revient.",
             "disconnectedBody": "Les tentatives automatiques sont interrompues. Reconnectez-vous pour reprendre cette session de terminal.",
             "reconnectButton": "Reconnecter",
             "signInTitle": "En attente de la connexion SSH",
             "signInBody": "Ce terminal reprend tout seul dès que vous vous connectez à l’hôte.",
-            "signInButton": "Se connecter"
+            "signInButton": "Se connecter",
+            "serverRestartingTitle": "{{server}} redémarre",
+            "serverRestartingBody": "Orca se reconnectera au retour du serveur, et les terminaux reprendront alors.",
+            "streamStalledTitle": "Le terminal ne répond plus",
+            "streamStalledBody": "{{server}} n'envoie plus la sortie de ce terminal. Orca le reconnecte automatiquement.",
+            "sessionEndedTitle": "Reconnexion du terminal",
+            "sessionEndedBody": "{{server}} a fermé le flux de ce terminal. Orca le reconnecte automatiquement.",
+            "waitingTitle": "En attente de {{server}}",
+            "waitingBody": "Orca reconnectera ce terminal quand le serveur le proposera de nouveau ou que la connexion changera. Cliquez sur Reconnecter pour réessayer maintenant.",
+            "downFor": "Coupé depuis {{duration}}",
+            "tailscaleHint": "Vérifiez le chemin Tailscale :",
+            "fallbackServerName": "le serveur",
+            "connectionLostTitle": "Reconnexion à {{server}}",
+            "connectionLostBody": "La connexion au serveur a été perdue. Orca réessaie automatiquement et les terminaux reprendront à son retour.",
+            "reattachingBody": "Orca reconnecte automatiquement ce terminal à {{server}}."
           },
           "TerminalQuickCommandsSubmenu": {
             "3ccc7981bb": "Hôte indisponible",

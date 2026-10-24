@@ -6,7 +6,7 @@ import {
   isPRFocusedTaskView,
   normalizeGitHubTaskPreset,
   scopeGitHubTaskSearch
-} from './task-page-github-task-kind'
+} from '../../../../../shared/task-github-search'
 
 describe('isPRFocusedTaskView', () => {
   const presetCases = [

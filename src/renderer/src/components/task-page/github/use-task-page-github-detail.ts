@@ -1,17 +1,20 @@
 import type { TaskPageGitHubListStateModel } from './use-task-page-github-list-state'
-import { useAppStore } from '@/store'
+import { useAppStore } from '@/store/index'
 import { getWorkItemRepo } from '@/lib/work-item-repo-row'
 import { useState, useMemo, useLayoutEffect, useCallback, useEffect } from 'react'
-import type { ItemDialogTab } from '@/components/GitHubItemDialog'
-import { stripRepoQualifiers } from '../../../shared/task-query'
+import type { ItemDialogTab } from '@/components/github/github-work-item-identity'
+import { stripRepoQualifiers } from '../../../../../shared/task-query'
 import { useShallow } from 'zustand/react/shallow'
 import {
   selectTaskPageWorkItemsCacheEntries,
   findTaskPageDialogWorkItem
 } from '@/components/task-page-cache-selectors'
-import type { GitHubWorkItem } from '../../../shared/github/work-item-types'
-import type { GitLabWorkItem } from '../../../shared/gitlab-types'
-import { getTaskPageRepoCacheInput, getTaskPageRepoSourceContext } from './task-page-source-context'
+import type { GitHubWorkItem } from '../../../../../shared/github/work-item-types'
+import type { GitLabWorkItem } from '../../../../../shared/gitlab-types'
+import {
+  getTaskPageRepoCacheInput,
+  getTaskPageRepoSourceContext
+} from '../../task-page-source-context'
 import { startGitHubListScrollRestore } from './task-page-github-list-scroll-restore'
 
 function getTaskPageScrollTop(

@@ -1,16 +1,20 @@
-import type { TaskPageProviderStateModel } from './use-task-page-provider-state'
+import type { TaskPageProviderStateModel } from '../../use-task-page-provider-state'
 import { useState, useRef, useEffect, useLayoutEffect } from 'react'
-import type { TaskViewPresetId } from '../../../shared/ui-chrome-types'
-import type { GitHubWorkItem } from '../../../shared/github/work-item-types'
-import { PER_REPO_FETCH_LIMIT, CROSS_REPO_DISPLAY_LIMIT } from '@/lib/new-workspace'
+import type { TaskViewPresetId } from '../../../../../shared/ui-chrome-types'
+import type { GitHubWorkItem } from '../../../../../shared/github/work-item-types'
+import {
+  PER_REPO_FETCH_LIMIT,
+  CROSS_REPO_DISPLAY_LIMIT,
+  getTaskPagePerRepoLimit,
+  sortWorkItemsByNumber
+} from '../../../../../shared/work-items'
 import {
   buildTaskPageGitHubResumeContextKey,
   taskPageGitHubResumeCache
-} from '@/components/task-page-github-resume-cache'
-import { getTaskPagePerRepoLimit, sortWorkItemsByNumber } from '../../../shared/work-items'
-import { useAppStore } from '@/store'
+} from '@/components/task-page/github/task-page-github-resume-cache'
+import { useAppStore } from '@/store/index'
 import type { GitHubListRestoreWrite } from './task-page-github-list-scroll-restore'
-import { getTaskPageRepoSourceContext } from './task-page-source-context'
+import { getTaskPageRepoSourceContext } from '../../task-page-source-context'
 export function useTaskPageGitHubListState(model: TaskPageProviderStateModel) {
   const {
     pageData,

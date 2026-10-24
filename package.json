@@ -382,7 +382,7 @@
         },
         {
           "files": [
-            "src/renderer/src/components/use-task-page-github-issue-draft.ts",
+            "src/renderer/src/components/task-page/github/use-task-page-github-issue-draft.ts",
             "src/renderer/src/components/use-task-page-jira-creation-state.ts"
           ],
           "rules": [

@@ -14,7 +14,7 @@ import {
 import {
   getLastConfirmedClientValue,
   deleteLastConfirmedClientValue
-} from '../../task-page-github-confirmed-client-values'
+} from './task-page-github-confirmed-client-values'
 import { getOrCreateQuietRevalidateState } from './task-page-github-work-item-quiet-state'
 import {
   taskPageGitHubFamilyDirtyKey,

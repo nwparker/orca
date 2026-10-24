@@ -27,7 +27,7 @@ import {
   getTaskPageGitHubRevalidatableAuthorityItemKeys
 } from './task-page-github-work-item-authority-refresh'
 import { confirmTaskPageGitHubWorkItemMutation } from './task-page-github-work-item-mutation-lifecycle'
-import { getLastConfirmedClientValue } from '../../task-page-github-confirmed-client-values'
+import { getLastConfirmedClientValue } from './task-page-github-confirmed-client-values'
 import {
   getOrCreateQuietRevalidateState,
   beginTaskPageQuietRevalidateRun,

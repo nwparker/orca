@@ -3520,16 +3520,28 @@
             "removeWorkspaceButton": "Eliminar espacio de trabajo"
           },
           "TerminalRemoteRuntimeReconnectBanner": {
-            "retryingTitle": "Reconectando con el entorno de ejecución remoto",
             "pairingRefusedTitle": "Este host ya no acepta este equipo",
             "pairingRefusedBody": "Orca no pudo volver a emparejarse con él por SSH. No se detuvo nada en el host. Vuelve a conectar para intentarlo de nuevo.",
             "disconnectedTitle": "Remote runtime disconnected",
-            "retryingBody": "Orca está reintentando automáticamente. Este terminal se reanudará si vuelve la conexión.",
             "disconnectedBody": "Se detuvieron los reintentos automáticos. Vuelva a conectarse para reanudar esta sesión de terminal.",
-            "reconnectButton": "Reconnect",
+            "reconnectButton": "Reconectar",
             "signInTitle": "Esperando el inicio de sesión SSH",
             "signInBody": "Este terminal continuará por sí solo cuando inicie sesión en el host.",
-            "signInButton": "Iniciar sesión"
+            "signInButton": "Iniciar sesión",
+            "serverRestartingTitle": "{{server}} se está reiniciando",
+            "serverRestartingBody": "Orca se reconectará cuando el servidor vuelva, y los terminales se reanudarán entonces.",
+            "streamStalledTitle": "El terminal dejó de responder",
+            "streamStalledBody": "{{server}} dejó de enviar la salida de este terminal. Orca lo está reconectando automáticamente.",
+            "sessionEndedTitle": "Reconectando el terminal",
+            "sessionEndedBody": "{{server}} cerró el flujo de este terminal. Orca lo está reconectando automáticamente.",
+            "waitingTitle": "Esperando a {{server}}",
+            "waitingBody": "Orca reconectará este terminal cuando el servidor vuelva a ofrecerlo o cambie la conexión. Pulsa Reconectar para intentarlo ahora.",
+            "downFor": "Sin conexión desde hace {{duration}}",
+            "tailscaleHint": "Comprueba la ruta de Tailscale:",
+            "fallbackServerName": "el servidor",
+            "connectionLostTitle": "Reconectando con {{server}}",
+            "connectionLostBody": "Se perdió la conexión con el servidor. Orca está reintentando automáticamente y los terminales se reanudarán cuando vuelva.",
+            "reattachingBody": "Orca está reconectando automáticamente este terminal a {{server}}."
           },
           "TerminalRestoringPlaceholder": {
             "restoring": "Restaurando terminal…"

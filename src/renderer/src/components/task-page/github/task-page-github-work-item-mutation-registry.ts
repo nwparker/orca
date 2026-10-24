@@ -3,7 +3,7 @@ import {
   deleteLastConfirmedClientValue,
   getLastConfirmedClientValue,
   setLastConfirmedClientValue as storeLastConfirmedClientValue
-} from '../../task-page-github-confirmed-client-values'
+} from './task-page-github-confirmed-client-values'
 import type {
   GitHubAssignableUser,
   GitHubOwnerRepo

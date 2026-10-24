@@ -1,9 +1,9 @@
-import type { TaskPageWorkspaceActionsModel } from './use-task-page-workspace-actions'
+import type { TaskPageWorkspaceActionsModel } from '../../use-task-page-workspace-actions'
 import { useCallback } from 'react'
 import { callRuntimeRpc } from '@/runtime/runtime-rpc-client'
 import { toast } from 'sonner'
 import { translate } from '@/i18n/i18n'
-import type { GitHubWorkItem } from '../../../shared/github/work-item-types'
+import type { GitHubWorkItem } from '../../../../../shared/github/work-item-types'
 export function useTaskPageGitHubIssueCreation(model: TaskPageWorkspaceActionsModel) {
   const {
     setTaskRefreshNonce,

@@ -15647,16 +15647,28 @@
             "c337c9d75c": "Fechar"
           },
           "TerminalRemoteRuntimeReconnectBanner": {
-            "retryingTitle": "Reconectando ao runtime remoto",
             "disconnectedTitle": "Runtime remoto desconectado",
-            "retryingBody": "O Orca vai tentar novamente por até um minuto. Este terminal vai retomar se a conexão voltar.",
             "disconnectedBody": "As tentativas automáticas foram interrompidas. Reconecte para retomar esta sessão de terminal.",
             "reconnectButton": "Reconectar",
             "pairingRefusedTitle": "Este host não aceita mais este computador",
             "pairingRefusedBody": "O Orca não conseguiu parear com ele novamente via SSH. Nada no host foi interrompido. Reconecte para tentar novamente.",
             "signInTitle": "Aguardando login SSH",
             "signInBody": "Este terminal continua sozinho quando você entrar no host.",
-            "signInButton": "Entrar"
+            "signInButton": "Entrar",
+            "serverRestartingTitle": "{{server}} está reiniciando",
+            "serverRestartingBody": "O Orca se reconecta quando o servidor voltar, e os terminais são retomados nesse momento.",
+            "streamStalledTitle": "O terminal parou de responder",
+            "streamStalledBody": "{{server}} parou de enviar a saída deste terminal. O Orca está reconectando-o automaticamente.",
+            "sessionEndedTitle": "Reconectando o terminal",
+            "sessionEndedBody": "{{server}} fechou o fluxo deste terminal. O Orca está reconectando-o automaticamente.",
+            "waitingTitle": "Aguardando {{server}}",
+            "waitingBody": "O Orca reconecta este terminal quando o servidor o oferecer de novo ou a conexão mudar. Clique em Reconectar para tentar agora.",
+            "downFor": "Sem conexão há {{duration}}",
+            "tailscaleHint": "Verifique o caminho do Tailscale:",
+            "fallbackServerName": "o servidor",
+            "connectionLostTitle": "Reconectando a {{server}}",
+            "connectionLostBody": "A conexão com o servidor caiu. O Orca está tentando novamente de forma automática, e os terminais serão retomados quando ela voltar.",
+            "reattachingBody": "O Orca está reconectando este terminal a {{server}} automaticamente."
           },
           "TerminalPane": {
             "ac112e9036": "Remover título",

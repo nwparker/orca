@@ -15,7 +15,7 @@ import {
 import {
   deleteLastConfirmedClientValue,
   getLastConfirmedClientValue
-} from '../../task-page-github-confirmed-client-values'
+} from './task-page-github-confirmed-client-values'
 import { getQuietRevalidateState } from './task-page-github-work-item-quiet-state'
 import { MAX_LAG_TRAILS } from './task-page-github-work-item-quiet-adopt'
 

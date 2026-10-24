@@ -3505,16 +3505,28 @@
             "removeWorkspaceButton": "ワークスペースを削除"
           },
           "TerminalRemoteRuntimeReconnectBanner": {
-            "retryingTitle": "リモートランタイムに再接続中",
             "pairingRefusedTitle": "このホストはこのコンピューターを受け付けなくなりました",
             "pairingRefusedBody": "Orca は SSH 経由で再ペアリングできませんでした。ホスト上では何も停止していません。再接続してもう一度お試しください。",
             "disconnectedTitle": "リモートランタイムが切断されました",
-            "retryingBody": "Orca は自動的に再試行します。接続が復元されると、このターミナルが再開されます。",
             "disconnectedBody": "自動再試行が停止しました。このターミナルセッションを再開するには再接続してください。",
             "reconnectButton": "再接続",
             "signInTitle": "SSH のサインインを待っています",
             "signInBody": "ホストにサインインすると、このターミナルは自動的に続行します。",
-            "signInButton": "サインイン"
+            "signInButton": "サインイン",
+            "serverRestartingTitle": "{{server}} を再起動しています",
+            "serverRestartingBody": "サーバーが復帰すると Orca が再接続し、ターミナルも再開します。",
+            "streamStalledTitle": "ターミナルが応答していません",
+            "streamStalledBody": "{{server}} からこのターミナルの出力が届かなくなりました。Orca が自動的に再接続しています。",
+            "sessionEndedTitle": "ターミナルを再接続しています",
+            "sessionEndedBody": "{{server}} がこのターミナルのストリームを閉じました。Orca が自動的に再接続しています。",
+            "waitingTitle": "{{server}} を待っています",
+            "waitingBody": "サーバーがこのターミナルを再び提供するか接続が変わると、Orca が再接続します。今すぐ試すには「再接続」を押してください。",
+            "downFor": "切断から {{duration}}",
+            "tailscaleHint": "Tailscale の経路を確認:",
+            "fallbackServerName": "サーバー",
+            "connectionLostTitle": "{{server}} に再接続しています",
+            "connectionLostBody": "サーバーとの接続が切断されました。Orca が自動的に再試行しており、接続が戻るとターミナルは再開します。",
+            "reattachingBody": "Orca がこのターミナルを {{server}} に自動的に再接続しています。"
           },
           "TerminalLinkActionPopover": {
             "openLink": "リンクを開く",
