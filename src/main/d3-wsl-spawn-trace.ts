@@ -38,3 +38,29 @@ for (const name of ['spawn', 'execFile'] as const) {
     }
   })
 }
+
+for (const name of ['spawnSync', 'execFileSync'] as const) {
+  const original = childProcess[name] as (...args: unknown[]) => unknown
+  Object.defineProperty(childProcess, name, {
+    configurable: true,
+    writable: true,
+    value: (...args: unknown[]) => {
+      if (!isWsl(args[0])) {
+        return original(...args)
+      }
+      const id = ++seq
+      const start = Date.now()
+      log(`#${id} ${name} ${brief(args[1])}`)
+      try {
+        const result = original(...args) as { status?: number; error?: Error; stdout?: unknown } | Buffer | string
+        const status = typeof result === 'object' && result && 'status' in result ? result.status : 'ok'
+        const err = typeof result === 'object' && result && 'error' in result ? result.error?.message : ''
+        log(`#${id} sync-exit=${String(status)} ms=${Date.now() - start} ${err ?? ''}`)
+        return result
+      } catch (error) {
+        log(`#${id} sync-throw ms=${Date.now() - start} ${String(error).slice(0, 120)}`)
+        throw error
+      }
+    }
+  })
+}
