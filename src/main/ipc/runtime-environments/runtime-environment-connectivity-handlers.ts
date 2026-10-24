@@ -1,3 +1,4 @@
+import { logStartupMilestone as d3m } from '../../startup/startup-diagnostics'
 import { ipcMain } from 'electron'
 import {
   addEnvironmentFromPairingCode,
@@ -246,6 +247,7 @@ function registerPassiveCallHandler(getUserDataPath: () => string): void {
       }
     ): Promise<RuntimeRpcResponse<unknown>> => {
       const environment = resolveEnvironment(getUserDataPath(), args.selector)
+      d3m('d3-call-recv', { m: args.method })
       if (isRuntimeEnvironmentManuallyDisconnected(environment.id)) {
         return manuallyDisconnectedResponse(environment)
       }
@@ -267,6 +269,7 @@ function registerPassiveCallHandler(getUserDataPath: () => string): void {
           _meta: { runtimeId: environment.runtimeId }
         }
       }
+      d3m('d3-call-accounts-done', { m: args.method })
       let response: RuntimeRpcResponse<unknown>
       try {
         response = await callRuntimeEnvironment(
@@ -286,6 +289,7 @@ function registerPassiveCallHandler(getUserDataPath: () => string): void {
         }
         throw error
       }
+      d3m('d3-call-done', { m: args.method, ok: response.ok })
       observeWslOrcadHostResponse(environment.id, args.method, response)
       return isRuntimeEnvironmentManuallyDisconnected(environment.id)
         ? manuallyDisconnectedResponse(environment)
