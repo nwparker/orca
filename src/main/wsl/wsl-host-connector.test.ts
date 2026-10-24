@@ -8,7 +8,16 @@ const mocks = vi.hoisted(() => ({
   connect: vi.fn(),
   stopServer: vi.fn(async () => ({ stopped: true })),
   verify: vi.fn(),
-  ready: vi.fn(() => false)
+  ready: vi.fn(() => false),
+  managerGet: vi.fn((): unknown => null),
+  managerEnsure: vi.fn()
+}))
+vi.mock('./wsl-orcad-connection', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  WslOrcadConnectionManager: class {
+    get = mocks.managerGet
+    ensure = mocks.managerEnsure
+  }
 }))
 vi.mock('../wsl-background-distro-gate', () => ({
   readConfirmedRunningWslDistros: mocks.readRunning,
@@ -70,4 +79,40 @@ it('answers unreachable without probing WSL while this process has no bridge to 
   })
   await expect(connector.isReachable('Ubuntu', 'wsl:ubuntu')).resolves.toBe(false)
   expect(mocks.readRunning).not.toHaveBeenCalled()
+})
+
+it('joins a plain connect already in flight instead of re-arming liveness for it', async () => {
+  mocks.connect.mockReset()
+  mocks.managerGet.mockReset().mockReturnValue(null)
+  mocks.managerEnsure.mockReset()
+  let finish!: (connection: unknown) => void
+  mocks.connect.mockReturnValueOnce(new Promise((resolve) => (finish = resolve)))
+  const bridge = { distro: 'Ubuntu', localPort: 41000 }
+  mocks.managerEnsure.mockResolvedValue(bridge)
+  const connector = createWslHostConnector({
+    userDataPath: '/unused',
+    onChange: vi.fn(),
+    hasUserVisibleWork: () => true,
+    isKnownDistro: () => true,
+    runtime: { isReady: () => false, call: vi.fn(), census: vi.fn() }
+  })
+
+  const first = connector.connect('Ubuntu')
+  // A runtime call while the first connect deploys: it rides the same bridge connect.
+  await expect(connector.connect('Ubuntu')).resolves.toBe(bridge)
+  expect(mocks.connect).toHaveBeenCalledOnce()
+  // Once the bridge is up the call needs no wait at all, even while liveness still arms.
+  mocks.managerGet.mockReturnValue(bridge)
+  await expect(connector.connect('ubuntu')).resolves.toBe(bridge)
+  expect(mocks.managerEnsure).toHaveBeenCalledOnce()
+  // An Update or Force intent still runs through liveness.
+  mocks.connect.mockResolvedValueOnce(bridge)
+  await connector.connect('Ubuntu', { intent: 'update' })
+  expect(mocks.connect).toHaveBeenCalledTimes(2)
+
+  finish(bridge)
+  await first
+  mocks.connect.mockResolvedValueOnce(bridge)
+  await connector.connect('Ubuntu')
+  expect(mocks.connect).toHaveBeenCalledTimes(3)
 })

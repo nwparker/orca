@@ -85,6 +85,8 @@ export function createWslHostConnector(options: {
     hasUserVisibleWork: options.hasUserVisibleWork
   })
   supervisor = liveness
+  // Liveness connects in flight, per distro; a plain connect meanwhile joins rather than re-arms.
+  const connecting = new Map<string, Promise<WslOrcadConnection>>()
   const coldProbes = new Map<
     string,
     {
@@ -145,7 +147,21 @@ export function createWslHostConnector(options: {
   return {
     listDistros: () => listWslHostDistros(),
     readOrcadPublicKey: (distro) => readWslDistroOrcadPublicKey(transportFor(distro)),
-    connect: (distro, connectOptions) => liveness.connect(distro, connectOptions),
+    connect: (distro, connectOptions) => {
+      const key = wslDistroHolderKey(distro)
+      // Why join: a second plain connect re-arms the liveness watch (an identity read and a
+      // watch channel) and waits for it, which held a pane's first call about 1 s after ready.
+      if (!connectOptions?.intent && connecting.has(key)) {
+        return Promise.resolve(manager.get(distro) ?? manager.ensure(distro))
+      }
+      const connected = liveness.connect(distro, connectOptions).finally(() => {
+        if (connecting.get(key) === connected) {
+          connecting.delete(key)
+        }
+      })
+      connecting.set(key, connected)
+      return connected
+    },
     forgetPairingFailures: (environmentId) => pairingRecovery.repairs.forgetFailures(environmentId),
     get: (distro) => manager.get(distro),
     isReachable: async (distro, environmentId) =>
