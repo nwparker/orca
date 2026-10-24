@@ -77,7 +77,7 @@ async function launch(): Promise<{ app: ElectronApplication; page: Page; t0: num
   })
   app.process().stderr?.on('data', (chunk: Buffer) => {
     for (const line of chunk.toString().split(/\r?\n/)) {
-      if (line.includes('[startup]') || line.includes('[wsl-hosts]')) {
+      if (line.includes('[startup]') || line.includes('[wsl-hosts]') || line.includes('[d3-retry]')) {
         log.push(`${Date.now() - t0} ${line}`)
       } else if (/worktree|git|wsl|repo|error|warn/i.test(line)) {
         noise.push(`${Date.now() - t0} ${line.slice(0, 300)}`)
