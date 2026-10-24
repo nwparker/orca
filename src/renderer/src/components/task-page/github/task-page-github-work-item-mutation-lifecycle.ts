@@ -1,6 +1,6 @@
-import type { ParsedTaskQuery } from '../../../shared/task-query'
-import type { GitHubWorkItem } from '../../../shared/github/work-item-types'
-import type { TaskSourceContext } from '../../../shared/task-source-context'
+import type { ParsedTaskQuery } from '../../../../../shared/task-query'
+import type { GitHubWorkItem } from '../../../../../shared/github/work-item-types'
+import type { TaskSourceContext } from '../../../../../shared/task-source-context'
 import { applyTaskPageGitHubListOps } from './task-page-github-work-item-mutation-patches'
 import {
   familiesFromPendingOp,
@@ -17,11 +17,11 @@ import {
   notifyTaskPageGitHubMutationRegistry,
   setConfirmedListSnapshot,
   setLastConfirmedClientValue,
-  markTaskPageGitHubFamiliesDirty,
-  isTaskPageGitHubMutationQueryKeyCurrent,
-  taskPageGitHubItemKey,
-  type TaskPageGitHubMutationKey
+  isTaskPageGitHubMutationQueryKeyCurrent
 } from './task-page-github-work-item-mutation-registry'
+import { markTaskPageGitHubFamiliesDirty } from './task-page-github-work-item-quiet-state'
+import { taskPageGitHubItemKey } from './task-page-github-work-item-mutation-keys'
+import type { TaskPageGitHubMutationKey } from './task-page-github-work-item-registry-types'
 import type { TaskPageGitHubPatchWorkItem } from './task-page-github-work-item-mutation-types'
 function applyServerEntityIfPresent(
   key: TaskPageGitHubMutationKey,

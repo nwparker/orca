@@ -4,7 +4,7 @@ import {
   getTaskPageGitHubWorkItemStateLabel,
   getTaskPageGitHubWorkItemStateTone,
   type GitHubWorkItemStatusItem
-} from '@/components/task-page-github-work-item-status'
+} from '@/components/task-page/github/task-page-github-work-item-status'
 
 export function TaskPageGitHubWorkItemStateBadge({
   item,

@@ -11,10 +11,10 @@ import { sortWorkItemsByNumber, taskPageToGitHubApiPage } from '../../../shared/
 import {
   materializeTaskPageItemList,
   overlayPendingOnTaskPagePages,
-  clearTaskPageGitHubAuthorityThroughGeneration,
   reapplyPendingTaskPageGitHubMutationsToCache
-} from '@/components/task-page-github-work-item-mutations'
-import { getOrCreateQuietRevalidateState } from '@/components/task-page-github-work-item-mutation-registry'
+} from '@/components/task-page/github/task-page-github-work-item-mutation-pages'
+import { clearTaskPageGitHubAuthorityThroughGeneration } from '@/components/task-page/github/task-page-github-work-item-authority-refresh'
+import { getOrCreateQuietRevalidateState } from '@/components/task-page/github/task-page-github-work-item-quiet-state'
 import { resolveEmptyPageOutcome } from '@/components/task-page-work-item-pagination'
 import {
   deriveTaskPageGitHubWorkItemsFetchOptions,

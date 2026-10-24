@@ -1,8 +1,8 @@
-import type { GitHubWorkItem } from '../../../shared/github/work-item-types'
+import type { GitHubWorkItem } from '../../../../../shared/github/work-item-types'
 import {
   getTaskSourceCacheScope,
   type TaskSourceContext
-} from '../../../shared/task-source-context'
+} from '../../../../../shared/task-source-context'
 import {
   buildTaskPageGitHubWorkItemMutationPatch,
   type TaskPageGitHubMutationIntent
@@ -23,67 +23,18 @@ import {
   notifyTaskPageGitHubMutationRegistry,
   setConfirmedListSnapshot,
   setPendingTaskPageGitHubOp,
-  setTaskPageGitHubMutationQueryKey,
-  taskPageGitHubItemKey,
-  type PendingOp,
-  type TaskPageGitHubMutationKey
+  setTaskPageGitHubMutationQueryKey
 } from './task-page-github-work-item-mutation-registry'
+import { taskPageGitHubItemKey } from './task-page-github-work-item-mutation-keys'
+import type {
+  PendingOp,
+  TaskPageGitHubMutationKey
+} from './task-page-github-work-item-registry-types'
 import type {
   BeginTaskPageGitHubWorkItemMutationArgs,
   BeginTaskPageGitHubWorkItemMutationResult
 } from './task-page-github-work-item-mutation-types'
-import type { ParsedTaskQuery } from '../../../shared/task-query'
-
-export type {
-  BeginTaskPageGitHubWorkItemMutationArgs,
-  BeginTaskPageGitHubWorkItemMutationResult,
-  TaskPageGitHubPatchWorkItem
-} from './task-page-github-work-item-mutation-types'
-
-export {
-  applyPendingTaskPageGitHubMutationsToItems,
-  materializeTaskPageItemList,
-  overlayPendingOnTaskPagePages,
-  patchTaskPageGitHubWorkItemPages,
-  reapplyPendingTaskPageGitHubMutationsToCache,
-  reconcileTaskPagePagesAfterQuietRefresh
-} from './task-page-github-work-item-mutation-pages'
-
-export {
-  adoptQuietSearchFieldsForItem,
-  advanceTaskPageQuietRevalidateScope,
-  getTaskPageQuietRevalidateBackoffAttempt,
-  isTaskPageQuietRevalidateRunCurrent,
-  isTaskPageQuietRevalidateScopeCurrent,
-  processTaskPageQuietRevalidateSettle,
-  settleQuietSearchRevalidate,
-  LAG_BACKOFF_MS,
-  LAG_WALL_BUDGET_MS,
-  MAX_LAG_TRAILS
-} from './task-page-github-work-item-quiet-revalidate'
-
-export type { TaskPageQuietRevalidateScope } from './task-page-github-work-item-quiet-revalidate'
-
-export {
-  clearTaskPageGitHubAuthorityAbsentFromLoadedItems,
-  clearTaskPageGitHubAuthorityThroughGeneration,
-  getTaskPageGitHubRevalidatableAuthorityItemKeys
-} from './task-page-github-work-item-authority-refresh'
-
-export {
-  clearTaskPageGitHubConfirmedAuthority,
-  resolveItemSourceScope
-} from './task-page-github-work-item-mutation-registry'
-
-export {
-  confirmTaskPageGitHubWorkItemMutation,
-  rollbackTaskPageGitHubWorkItemMutation
-} from './task-page-github-work-item-mutation-lifecycle'
-
-export { getRegistryMergedTaskPageGitHubWorkItem } from './task-page-github-work-item-mutation-composition'
-export { rebuildSoftHiddenKeysFromPendingAndSticky } from './task-page-github-work-item-mutation-composition'
-
-export { setTaskPageGitHubMutationQueryKey, taskPageGitHubItemKey }
+import type { ParsedTaskQuery } from '../../../../../shared/task-query'
 
 function resolveSourceScope(sourceContext?: TaskSourceContext | null): string | null {
   if (sourceContext?.provider === 'github') {

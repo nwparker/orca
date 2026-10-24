@@ -1,25 +1,21 @@
-import type { GitHubWorkItem } from '../../../shared/github/work-item-types'
-import type { TaskSourceContext } from '../../../shared/task-source-context'
+import type { GitHubWorkItem } from '../../../../../shared/github/work-item-types'
+import type { TaskSourceContext } from '../../../../../shared/task-source-context'
 import {
   adoptQuietSearchFieldsForItem,
-  LAG_BACKOFF_MS,
-  LAG_WALL_BUDGET_MS,
   MAX_LAG_TRAILS
 } from './task-page-github-work-item-quiet-adopt'
 import {
   clearConfirmedAuthorityForItem,
   gcStickyHidesAbsentFromPages,
   getAllStickyHideEntries,
-  getOrCreateQuietRevalidateState,
   hasConfirmedAuthorityForItem,
   hasPendingTaskPageGitHubOpsForItem,
   notifyTaskPageGitHubMutationRegistry,
-  resolveItemSourceScope,
-  taskPageGitHubItemKey
+  resolveItemSourceScope
 } from './task-page-github-work-item-mutation-registry'
+import { getOrCreateQuietRevalidateState } from './task-page-github-work-item-quiet-state'
+import { taskPageGitHubItemKey } from './task-page-github-work-item-mutation-keys'
 import type { TaskPageGitHubPatchWorkItem } from './task-page-github-work-item-mutation-types'
-
-export { adoptQuietSearchFieldsForItem, LAG_BACKOFF_MS, LAG_WALL_BUDGET_MS, MAX_LAG_TRAILS }
 
 export type TaskPageQuietRevalidateScope = { queryKey: string; generation: number }
 

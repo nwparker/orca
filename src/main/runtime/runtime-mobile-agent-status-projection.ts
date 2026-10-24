@@ -12,6 +12,24 @@ import { terminalTitleBlocksExplicitAgentStatus } from './runtime-worktree-statu
 import type { HookLiveAgentRow } from './runtime-terminal-contracts'
 import type { RuntimePtyWorktreeRecord } from './runtime-terminal-state-records'
 
+function workingHookOwnsIdleTitleInterval(
+  state: AgentStatusEntry['state'],
+  observedAt: number,
+  pty: RuntimePtyWorktreeRecord | null
+): boolean {
+  return (
+    state === 'working' &&
+    pty?.lastAgentStatus === 'idle' &&
+    !terminalTitleBlocksExplicitAgentStatus(pty.lastOscTitle) &&
+    observedAt >
+      Math.max(
+        pty.lastAgentStatusRichInvalidatedAtEpochMs ?? 0,
+        pty.lastAgentStatusStartedAtEpochMs ?? 0
+      ) &&
+    Date.now() - observedAt <= AGENT_STATUS_STALE_AFTER_MS
+  )
+}
+
 // Why: only a completed turn's reply is final; mid-turn hook snapshots carry tool stdout.
 function completedTurnFields(
   status: AgentStatusEntry
@@ -107,6 +125,12 @@ export function renewRuntimeMobileAgentStatusFromPtyTitle(
     (pty.lastAgentStatus === 'permission' &&
       (status.state === 'blocked' || status.state === 'waiting'))
   if (!titleConfirmsState) {
+    // A repaint of the idle interval preceding this hook is not a new turn boundary.
+    if (
+      workingHookOwnsIdleTitleInterval(status.state, agentStatusAuthorityObservedAt(status), pty)
+    ) {
+      return status
+    }
     if (
       richStatusCanOwnTitleInterval &&
       agentStatusAuthorityObservedAt(status) >= titleEvidenceAt
@@ -251,6 +275,11 @@ export function resolveRuntimeHookLiveAgentRow(
     return null
   }
   if (live.payload.interactivePrompt != null) {
+    return live
+  }
+  if (
+    workingHookOwnsIdleTitleInterval(live.payload.state, agentStatusAuthorityObservedAt(live), pty)
+  ) {
     return live
   }
   // This is the pane's only wall-clock title timestamp comparable to when the hook evidence

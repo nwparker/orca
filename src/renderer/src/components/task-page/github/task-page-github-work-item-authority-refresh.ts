@@ -2,10 +2,8 @@ import { taskPageGitHubFamilyDirtyKey } from './task-page-github-work-item-mutat
 import {
   clearConfirmedAuthorityForItem,
   deleteConfirmedListSnapshot,
-  deleteLastConfirmedClientValue,
   deleteStickyHideEntry,
   getConfirmedListSnapshot,
-  getLastConfirmedClientValue,
   getStickyHideEntry,
   getTaskPageGitHubConfirmedAuthorityItemKeys,
   hasPendingTaskPageGitHubOpsForItem,
@@ -14,6 +12,10 @@ import {
   resolveItemSourceScope,
   updateSoftHiddenItemKey
 } from './task-page-github-work-item-mutation-registry'
+import {
+  deleteLastConfirmedClientValue,
+  getLastConfirmedClientValue
+} from '../../task-page-github-confirmed-client-values'
 import { getQuietRevalidateState } from './task-page-github-work-item-quiet-state'
 import { MAX_LAG_TRAILS } from './task-page-github-work-item-quiet-adopt'
 

@@ -1,18 +1,18 @@
-import type { TaskPageLinearCreationStateModel } from './task-page/linear/use-task-page-linear-creation-state'
-import { getGitHubTaskKind } from '@/components/task-page-github-task-kind'
+import type { TaskPageLinearCreationStateModel } from '../linear/use-task-page-linear-creation-state'
+import { getGitHubTaskKind } from '../../../../../shared/task-github-search'
 import { useMemo, useLayoutEffect, useEffect, useCallback, useRef } from 'react'
-import { parseTaskQuery } from '../../../shared/task-query'
+import { parseTaskQuery } from '../../../../../shared/task-query'
 import {
   setTaskPageGitHubMutationQueryKey,
-  getOrCreateQuietRevalidateState,
   getTaskPageGitHubConfirmedAuthorityItemKeys
-} from '@/components/task-page-github-work-item-mutation-registry'
-import type { TaskPageGitHubPatchWorkItem } from '@/components/task-page-github-work-item-mutation-types'
-import { useAppStore } from '@/store'
+} from '@/components/task-page/github/task-page-github-work-item-mutation-registry'
+import { getOrCreateQuietRevalidateState } from '@/components/task-page/github/task-page-github-work-item-quiet-state'
+import type { TaskPageGitHubPatchWorkItem } from '@/components/task-page/github/task-page-github-work-item-mutation-types'
+import { useAppStore } from '@/store/index'
 import { useTaskPageGitHubWorkItemMutation } from '@/hooks/useTaskPageGitHubWorkItemMutation'
-import { rebuildSoftHiddenKeysFromPendingAndSticky } from '@/components/task-page-github-work-item-mutations'
-import { buildGitHubRepoUrl } from '@/lib/github-links'
-import { getTaskPageRepoSourceContext } from './task-page-source-context'
+import { rebuildSoftHiddenKeysFromPendingAndSticky } from '@/components/task-page/github/task-page-github-work-item-mutation-composition'
+import { buildGitHubRepoUrl } from '../../../../../shared/github/links'
+import { getTaskPageRepoSourceContext } from '../../task-page-source-context'
 export function useTaskPageGitHubMutationState(model: TaskPageLinearCreationStateModel) {
   const {
     selectedRepos,

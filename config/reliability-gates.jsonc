@@ -11,6 +11,246 @@
   },
   "gates": [
     {
+      "id": "terminal-output.resize-parse-barrier",
+      "title": "Resize preserves queued parse barriers and following terminal output",
+      "maturity": "experimental",
+      "protection": "partial",
+      "owner": "terminal-rendering",
+      "layer": "renderer-unit-real-xterm",
+      "surfaces": [
+        "replay parse waits",
+        "output scheduler parse waits",
+        "write-pipeline health probes",
+        "xterm resize"
+      ],
+      "platforms": ["macos", "linux", "windows"],
+      "providers": ["local", "daemon", "ssh", "remote-runtime"],
+      "coveredPlatforms": ["macos"],
+      "coveredProviders": [],
+      "coverageNotes": "Both installed browser and headless xterm packages run real parsing and resize with production replay, scheduler and health code. The shared renderer boundary applies to every provider and workspace kind; native Linux/Windows, live providers, mobile and rendered Electron acceptance are not exercised.",
+      "motivatingLinks": [
+        "https://github.com/stablyai/orca/issues/26950",
+        "https://github.com/stablyai/orca/pull/26956",
+        "https://github.com/xtermjs/xterm.js/pull/6201"
+      ],
+      "invariant": "A resize must preserve every queued byte and invoke parse-barrier callbacks once in FIFO order. Replay and scheduler waits must finish from real parse progress, and a resized live parser must not be certified dead.",
+      "oracle": "Queue a barrier between before and after output, resize synchronously, and require both lines and ordered callbacks. Require replay and scheduler waits before timers advance; require live health after the probe deadline. Preserve partial UTF-8 and escape sequences, repeated no-resize barriers and subsequent writes.",
+      "commands": [
+        "ORCA_BACKGROUND_LAUNCH=1 node node_modules/vitest/vitest.mjs run --config config/vitest.config.ts src/renderer/src/lib/pane-manager/xterm-parse-barrier.test.ts"
+      ],
+      "testFiles": ["src/renderer/src/lib/pane-manager/xterm-parse-barrier.test.ts"],
+      "assertionRefs": [
+        {
+          "file": "src/renderer/src/lib/pane-manager/xterm-parse-barrier.test.ts",
+          "assertions": [
+            "fires its callback and keeps the writes queued behind it",
+            "lets a replay wait settle without falling back to its stall probe",
+            "settles the output scheduler wait before its fallback timer",
+            "keeps a resized live terminal healthy after the probe deadline",
+            "preserves partial UTF-8 and escape sequences without writing marker bytes",
+            "completes repeated barriers without a resize and permits subsequent writes"
+          ]
+        }
+      ],
+      "evidenceRuns": [
+        {
+          "date": "2026-10-23",
+          "runner": "local",
+          "platform": "macos",
+          "result": "passed",
+          "command": "ORCA_BACKGROUND_LAUNCH=1 node node_modules/vitest/vitest.mjs run --config config/vitest.config.ts src/renderer/src/lib/pane-manager/xterm-parse-barrier.test.ts",
+          "durationSeconds": 0.257,
+          "summary": "12 tests pass against installed browser6.1.0-beta.304 and headless6.1.0-beta.303. Replacing only the helper marker with an empty string fails10 tests; the two no-resize controls still pass."
+        }
+      ],
+      "runtimeBudget": {
+        "p95Seconds": 5,
+        "scope": "Focused installed-xterm renderer unit suite"
+      },
+      "flakeHistory": {
+        "status": "not-started",
+        "evidence": "One local focused green run; no soak or cross-platform runtime history."
+      },
+      "redGreenEvidence": {
+        "status": "complete",
+        "evidence": "Current-main production replay, scheduler and health consumers independently fail six real-runtime boundary checks. In the refreshed candidate, replacing only the singleton byte marker with an empty string fails10 of12 checked-in assertions; restoring it passes all12."
+      },
+      "performanceBudget": {
+        "required": true,
+        "evidence": "One shared zero-byte array; no new timers, polling, subprocesses or output bytes. One hundred repeated barriers preserve FIFO without per-call marker allocations."
+      },
+      "promotionCriteria": [
+        "Collect stable CI and soak history across macOS, Linux and Windows.",
+        "Exercise real local, daemon, SSH and paired-runtime panes through resize and restore."
+      ],
+      "knownGaps": [
+        "No DOM, GPU or rendered Electron validation.",
+        "No native Linux/Windows or live provider exercise; mobile terminal implementation is unchanged.",
+        "Daemon headless-emulator async fallback empty-string marker is outside this renderer change; its normal synchronous path bypasses that marker.",
+        "Separate upstream consumed-prefix replay and async-parser resize defects remain outside this workaround."
+      ],
+      "demotionRule": "Keep experimental until runtime history supports promotion; demote if callback ordering, byte preservation or health certification regresses."
+    },
+    {
+      "id": "terminal-provider.windows-daemon-registry-package",
+      "title": "Relocated Windows daemon retains the registry package runtime",
+      "maturity": "experimental",
+      "protection": "partial",
+      "owner": "terminal-runtime",
+      "layer": "package-copy-and-native-loader-contract",
+      "surfaces": ["Windows daemon relocation", "Windows PATH registry refresh"],
+      "platforms": ["macos", "linux", "windows"],
+      "providers": ["local-daemon"],
+      "coveredPlatforms": ["macos"],
+      "coveredProviders": ["local-daemon"],
+      "coverageNotes": "On macOS, simulated win32 relocation copies the real workspace package manifest and root JS, and a child Node resolves the binary after install-tree removal. The fixture binary deliberately fails native loading; a Windows-only test reads HKLM with the actual built addon. Native Windows execution and packaged updater survival remain unproved locally.",
+      "motivatingLinks": ["https://github.com/stablyai/orca/issues/19522"],
+      "invariant": "The relocated Windows daemon must retain the registry package root JS and native binary independently of its install tree, reject incomplete source or mirror files, and preserve an existing mirror while repairing it.",
+      "oracle": "Run the real package JS from the relocated entry after deleting the install tree, reach its native loader, refuse each missing source file before staging, and replace each incomplete mirror without deleting its sentinel. Pin the real package name against the Windows packaging allowlist. On Windows, read ProductName through the built native addon from the mirror.",
+      "commands": [
+        "ORCA_BACKGROUND_LAUNCH=1 pnpm test src/main/daemon/daemon-host-process-package.test.ts src/main/daemon/daemon-host-file-hash-cache.test.ts config/scripts/pr-code-change-scope.test.mjs config/scripts/package-electron-runtime-contract.test.mjs"
+      ],
+      "testFiles": [
+        "src/main/daemon/daemon-host-process-package.test.ts",
+        "src/main/daemon/daemon-host-file-hash-cache.test.ts"
+      ],
+      "assertionRefs": [
+        {
+          "file": "src/main/daemon/daemon-host-process-package.test.ts",
+          "assertions": [
+            "loads the real root entry and reaches the native binary after the install tree disappears",
+            "refuses an incomplete registry source missing %s without staging a host",
+            "repairs a mirror missing registry %s without changing the old host",
+            "reads the Windows registry from the mirror with the built addon"
+          ]
+        }
+      ],
+      "evidenceRuns": [
+        {
+          "date": "2026-10-22",
+          "runner": "local",
+          "platform": "macos",
+          "command": "ORCA_BACKGROUND_LAUNCH=1 pnpm test src/main/daemon/daemon-host-process-package.test.ts src/main/daemon/daemon-host-file-hash-cache.test.ts config/scripts/pr-code-change-scope.test.mjs config/scripts/package-electron-runtime-contract.test.mjs",
+          "result": "passed",
+          "durationSeconds": 1.1,
+          "summary": "Gate files and packaging scope contracts: 76 tests passed in four files, one Windows native-read test skipped. Full daemon-host suite also passed 94 tests in eight files. Original implementation fails seven new registry regressions."
+        }
+      ],
+      "runtimeBudget": {
+        "p95Seconds": 15,
+        "scope": "focused package-copy and child Node loader contracts"
+      },
+      "flakeHistory": {
+        "status": "not-started",
+        "evidence": "No CI soak collected."
+      },
+      "redGreenEvidence": {
+        "status": "complete",
+        "evidence": "Original source fails seven new regressions: real package root missing, three incomplete sources accepted, three incomplete mirrors reused. Candidate passes locally; actual Windows native read remains skipped on macOS."
+      },
+      "performanceBudget": {
+        "required": true,
+        "evidence": "Three additional stat-validated cached hashes per source/mirror inventory; unchanged files do not reread bytes. Incomplete sources return before staging the Electron image. No polling, process enumeration, startup awaits or per-PTY work added."
+      },
+      "promotionCriteria": [
+        "Run the native Windows loader test with release-built addon and packaged daemon relocation.",
+        "Collect 100 CI passes or 14 days without unexplained flakes."
+      ],
+      "knownGaps": [
+        "macOS fixture uses actual package JS and manifest with a placeholder binary; it proves resolution rather than Windows native behavior.",
+        "No user PATH mutation, live Windows PTY spawn or NSIS update-survival replay.",
+        "SSH/remote, WSL, mobile, macOS and Linux daemon launch paths are unchanged."
+      ],
+      "demotionRule": "Keep experimental until native Windows and package evidence exists; demote if incomplete sources repeatedly copy the runtime or repairs mutate active mirrors."
+    },
+    {
+      "id": "terminal-lifecycle.closed-tab-create-admission",
+      "title": "A shipped runtime refuses stale create identities after a durable tab close",
+      "maturity": "experimental",
+      "protection": "partial",
+      "owner": "terminal-runtime",
+      "layer": "sqlite-runtime-rpc-provider-contract",
+      "surfaces": [
+        "legacy paired terminal.create",
+        "durable host close",
+        "runtime spill partitions"
+      ],
+      "platforms": ["macos", "linux", "windows"],
+      "providers": ["local-daemon", "paired-runtime", "ssh", "wsl", "mobile-relay"],
+      "coveredPlatforms": ["macos"],
+      "coveredProviders": ["paired-runtime"],
+      "coverageNotes": "Real SQLite Store, renderer close entry, cold reload and registered terminal.create handler with a synthetic PTY controller on macOS. The workspace resolver supplies a fixture scope; no physical paired client or PTY is launched. Unseen identities and missing-PTY recovery retain spawn behavior. Other provider/platform execution is an explicit gap.",
+      "motivatingLinks": ["https://github.com/stablyai/orca/issues/21341#issuecomment-5770157948"],
+      "invariant": "An unexpired durable tab-close record in any owning host partition must refuse a stale create of that tab in the same workspace before the PTY controller spawns. Unseen ids, panes with no tab-close record, expired records and split creation retain existing behavior; shipped layout ownership stays off.",
+      "oracle": "Invoke the renderer close entry through a real SQLite Store, freeze and reopen the database, then invoke the registered paired terminal.create handler with the original tab/leaf hints and no command. Both local and runtime-spill close records must return tab_not_found with zero controller spawns and zero inventory reads, and no restored layout. Fresh identities, existing panes without a close record and expired records must still spawn.",
+      "commands": [
+        "ORCA_BACKGROUND_LAUNCH=1 pnpm test src/main/runtime/terminal-create-closed-tab-durability.test.ts src/main/runtime/orca-runtime-terminal-create-replay-after-close.test.ts src/main/runtime/orca-runtime-terminal-close-records.test.ts src/main/runtime/orca-runtime-terminal-create-idempotency.test.ts src/main/runtime/runtime-pane-admission.test.ts src/main/persistence/terminal-topology/terminal-topology-commit.test.ts src/main/persistence/terminal-topology/terminal-pane-admission-taken-ids-switch-off.test.ts src/main/persistence/terminal-topology/terminal-layout-create-resend.test.ts src/main/persistence/terminal-topology/terminal-close-write-failure-switch-off.test.ts src/main/runtime/orca-runtime-terminal-close-no-widening.test.ts src/main/runtime/terminal-close-observed-exit.test.ts"
+      ],
+      "testFiles": [
+        "src/main/runtime/terminal-create-closed-tab-durability.test.ts",
+        "src/main/runtime/orca-runtime-terminal-create-replay-after-close.test.ts",
+        "src/main/runtime/orca-runtime-terminal-close-records.test.ts",
+        "src/main/runtime/orca-runtime-terminal-create-idempotency.test.ts",
+        "src/main/runtime/runtime-pane-admission.test.ts",
+        "src/main/persistence/terminal-topology/terminal-topology-commit.test.ts",
+        "src/main/persistence/terminal-topology/terminal-pane-admission-taken-ids-switch-off.test.ts",
+        "src/main/persistence/terminal-topology/terminal-layout-create-resend.test.ts",
+        "src/main/persistence/terminal-topology/terminal-close-write-failure-switch-off.test.ts",
+        "src/main/runtime/orca-runtime-terminal-close-no-widening.test.ts",
+        "src/main/runtime/terminal-close-observed-exit.test.ts"
+      ],
+      "assertionRefs": [
+        {
+          "file": "src/main/runtime/terminal-create-closed-tab-durability.test.ts",
+          "assertions": [
+            "refuses a stale id closed in %s before spawning, including after restart",
+            "still accepts a valid unseen identity",
+            "keeps recovery of a persisted pane without an explicit tab close",
+            "preserves the existing close-record expiry policy"
+          ]
+        }
+      ],
+      "evidenceRuns": [
+        {
+          "date": "2026-10-22",
+          "runner": "local",
+          "platform": "macos",
+          "command": "ORCA_BACKGROUND_LAUNCH=1 pnpm test src/main/runtime/terminal-create-closed-tab-durability.test.ts src/main/runtime/orca-runtime-terminal-create-replay-after-close.test.ts src/main/runtime/orca-runtime-terminal-close-records.test.ts src/main/runtime/orca-runtime-terminal-create-idempotency.test.ts src/main/runtime/runtime-pane-admission.test.ts src/main/persistence/terminal-topology/terminal-topology-commit.test.ts src/main/persistence/terminal-topology/terminal-pane-admission-taken-ids-switch-off.test.ts src/main/persistence/terminal-topology/terminal-layout-create-resend.test.ts src/main/persistence/terminal-topology/terminal-close-write-failure-switch-off.test.ts src/main/runtime/orca-runtime-terminal-close-no-widening.test.ts src/main/runtime/terminal-close-observed-exit.test.ts",
+          "result": "passed",
+          "durationSeconds": 23.76,
+          "summary": "100 tests pass across 11 files, including cold SQLite close-record replay, fresh/unknown/expired controls, split replay, close write failure, idempotency and close lifecycle controls."
+        }
+      ],
+      "runtimeBudget": {
+        "p95Seconds": 45,
+        "scope": "deterministic SQLite and runtime/provider contracts"
+      },
+      "flakeHistory": {
+        "status": "not-started",
+        "evidence": "One focused 11-file pass on macOS; CI soak not collected."
+      },
+      "redGreenEvidence": {
+        "status": "complete",
+        "evidence": "On unmodified production code both actual close/cold-reload/RPC stale-id cases resolve successfully after spawning a replacement PTY; the unseen-id control passes. Admission guard makes both cases reject before the controller is invoked."
+      },
+      "performanceBudget": {
+        "required": true,
+        "evidence": "One constant-time tombstone lookup per existing host partition inside the already serialized explicit pane-admission mutation. No terminal inventory, filesystem scan, network call, subprocess, timer, retry or polling is introduced. Negative RPC controls assert zero spawn and zero inventory reads."
+      },
+      "promotionCriteria": [
+        "Collect 100 CI passes or 14 days without unexplained flakes.",
+        "Exercise live paired desktop wake and host restart on macOS, Linux and Windows."
+      ],
+      "knownGaps": [
+        "No live sleep/wake, network RPC socket, actual PTY spawn or physical peer convergence was exercised; the registered handler and controller boundary are deterministic.",
+        "The actual terminal.close handle path and physical renderer close delivery are covered by adjacent suites rather than this cold-reload oracle.",
+        "Natural process exit and Sleep are not new close authority; only already-existing unexpired tab-close records gate creation. Live reconnects using mustExist continue to bypass fresh admission.",
+        "Windows, Linux, WSL, SSH and phone execution were not physically run. Folder-workspace creation is unchanged but this new end-to-end fixture uses a repository workspace.",
+        "Close records retain their existing 30-day TTL and per-partition cap of 500. No claim of permanent replay protection or complete issue resolution."
+      ],
+      "demotionRule": "Keep experimental or demote if stale replay can spawn, unrelated/fresh panes are refused, the guard adds terminal inventory calls, a close loses durability, or focused ordering tests flake without an explained harness or product defect."
+    },
+    {
       "id": "agent-status.codex-hook-child-transcript-completion",
       "title": "Completed hook-only Codex children do not keep an idle pane working",
       "maturity": "experimental",

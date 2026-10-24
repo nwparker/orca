@@ -1,5 +1,5 @@
-import type { GitHubAssignableUser } from '../../../shared/github/pull-request-types'
-import type { GitHubWorkItem } from '../../../shared/github/work-item-types'
+import type { GitHubAssignableUser } from '../../../../../shared/github/pull-request-types'
+import type { GitHubWorkItem } from '../../../../../shared/github/work-item-types'
 
 export type TaskPageGitHubListFamily = 'assignees' | 'reviewRequests'
 export type TaskPageGitHubMutationKey = {

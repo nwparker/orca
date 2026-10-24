@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { ParsedTaskQuery } from '../../../shared/task-query'
+import type { ParsedTaskQuery } from '../../../../../shared/task-query'
 import {
   recomputeTaskPageGitHubItemSoftHide,
   shouldSoftHideTaskPageGitHubWorkItem

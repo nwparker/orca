@@ -1,11 +1,11 @@
-import type { GitHubAssignableUser } from '../../../shared/github/pull-request-types'
-import type { GitHubWorkItem } from '../../../shared/github/work-item-types'
+import type { GitHubAssignableUser } from '../../../../../shared/github/pull-request-types'
+import type { GitHubWorkItem } from '../../../../../shared/github/work-item-types'
 import type { TaskPageGitHubCloseAction } from './task-page-github-status-actions'
-import {
-  taskPageGitHubListOpKey,
-  type PendingListOp,
-  type TaskPageGitHubListFamily
-} from './task-page-github-work-item-mutation-registry'
+import { taskPageGitHubListOpKey } from './task-page-github-work-item-mutation-keys'
+import type {
+  PendingListOp,
+  TaskPageGitHubListFamily
+} from './task-page-github-work-item-registry-types'
 
 export type TaskPageGitHubMutationIntent =
   | { type: 'setState'; state: 'open' | 'closed'; closeAction?: TaskPageGitHubCloseAction }

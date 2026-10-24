@@ -1,7 +1,7 @@
-import type { ParsedTaskQuery } from '../../../shared/task-query'
-import type { GitHubAssignableUser } from '../../../shared/github/pull-request-types'
-import type { GitHubWorkItem } from '../../../shared/github/work-item-types'
-import { parseGitHubIssueOrPRLink } from '../../../shared/github/links'
+import type { ParsedTaskQuery } from '../../../../../shared/task-query'
+import type { GitHubAssignableUser } from '../../../../../shared/github/pull-request-types'
+import type { GitHubWorkItem } from '../../../../../shared/github/work-item-types'
+import { parseGitHubIssueOrPRLink } from '../../../../../shared/github/links'
 import {
   recomputeTaskPageGitHubItemSoftHide,
   shouldSoftHideTaskPageGitHubWorkItem
@@ -11,7 +11,6 @@ import {
   deleteStickyHideEntry,
   getAllStickyHideEntries,
   getConfirmedListSnapshot,
-  getLastConfirmedClientValue,
   getTaskPageGitHubSoftHiddenItemKeys,
   hasConfirmedAuthorityForItem,
   listPendingTaskPageGitHubOpsForItem,
@@ -19,12 +18,15 @@ import {
   notifyTaskPageGitHubMutationRegistry,
   setSoftHiddenItemKeys,
   setStickyHideEntry,
-  taskPageGitHubItemKey,
-  updateSoftHiddenItemKey,
-  type PendingListOp,
-  type PendingOp,
-  type TaskPageGitHubListFamily
+  updateSoftHiddenItemKey
 } from './task-page-github-work-item-mutation-registry'
+import { getLastConfirmedClientValue } from '../../task-page-github-confirmed-client-values'
+import { taskPageGitHubItemKey } from './task-page-github-work-item-mutation-keys'
+import type {
+  PendingListOp,
+  PendingOp,
+  TaskPageGitHubListFamily
+} from './task-page-github-work-item-registry-types'
 
 export function freezeTaskPageGitHubUsers(
   users: readonly GitHubAssignableUser[]

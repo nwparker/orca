@@ -1,14 +1,14 @@
-import type { GitHubWorkItem } from '../../../shared/github/work-item-types'
-import type { TaskSourceContext } from '../../../shared/task-source-context'
-import { parseGitHubIssueOrPRLink } from '../../../shared/github/links'
+import type { GitHubWorkItem } from '../../../../../shared/github/work-item-types'
+import type { TaskSourceContext } from '../../../../../shared/task-source-context'
+import { parseGitHubIssueOrPRLink } from '../../../../../shared/github/links'
 import { getRegistryMergedTaskPageGitHubWorkItem } from './task-page-github-work-item-mutation-composition'
 import {
   getStickyHideEntry,
   hasConfirmedAuthorityForItem,
   hasPendingTaskPageGitHubOpsForItem,
-  resolveItemSourceScope,
-  taskPageGitHubItemKey
+  resolveItemSourceScope
 } from './task-page-github-work-item-mutation-registry'
+import { taskPageGitHubItemKey } from './task-page-github-work-item-mutation-keys'
 import type { TaskPageGitHubPatchWorkItem } from './task-page-github-work-item-mutation-types'
 
 export function patchTaskPageGitHubWorkItemPages(

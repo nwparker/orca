@@ -9,7 +9,7 @@ import {
 } from '@/components/task-page-work-item-pagination'
 import { toast } from 'sonner'
 import { translate } from '@/i18n/i18n'
-import { overlayPendingOnTaskPagePages } from '@/components/task-page-github-work-item-mutations'
+import { overlayPendingOnTaskPagePages } from '@/components/task-page/github/task-page-github-work-item-mutation-pages'
 import { scopeGitHubTaskSearch } from '@/components/task-page-github-task-kind'
 import { useGitHubTaskSearchCommit } from '@/components/use-github-task-search-commit'
 import { getTaskPageRepoSourceContext } from './task-page-source-context'

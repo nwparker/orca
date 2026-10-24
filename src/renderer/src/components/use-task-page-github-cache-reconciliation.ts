@@ -5,7 +5,7 @@ import type { GitHubAssignableUser } from '../../../shared/github/pull-request-t
 import {
   patchTaskPageGitHubWorkItemPages,
   overlayPendingOnTaskPagePages
-} from '@/components/task-page-github-work-item-mutations'
+} from '@/components/task-page/github/task-page-github-work-item-mutation-pages'
 import {
   type TaskPageRepoSourceState,
   buildTaskPageRepoSourceState,

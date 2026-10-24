@@ -19,7 +19,7 @@ import { useTaskPageLinearListProjection } from './linear/use-task-page-linear-l
 import { useTaskPageLinearBoard } from './linear/use-task-page-linear-board'
 import { useTaskPageJiraListProjection } from '../use-task-page-jira-list-projection'
 import { useTaskPageLinearCreationState } from './linear/use-task-page-linear-creation-state'
-import { useTaskPageGitHubMutationState } from '../use-task-page-github-mutation-state'
+import { useTaskPageGitHubMutationState } from './github/use-task-page-github-mutation-state'
 import { useTaskPageJiraCreationState } from '../use-task-page-jira-creation-state'
 import { useTaskPageJiraCreationMetadata } from '../use-task-page-jira-creation-metadata'
 import { useTaskPageGitHubListProjection } from '../use-task-page-github-list-projection'

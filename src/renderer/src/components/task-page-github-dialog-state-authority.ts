@@ -6,13 +6,15 @@ import {
 } from '../../../shared/task-source-context'
 import {
   deleteLastConfirmedClientValue,
-  getLastConfirmedClientValue,
+  getLastConfirmedClientValue
+} from './task-page-github-confirmed-client-values'
+import {
   getTaskPageGitHubMutationQueryKey,
-  markTaskPageGitHubFamiliesDirty,
   notifyTaskPageGitHubMutationRegistry,
-  setLastConfirmedClientValue,
-  taskPageGitHubItemKey
-} from './task-page-github-work-item-mutation-registry'
+  setLastConfirmedClientValue
+} from './task-page/github/task-page-github-work-item-mutation-registry'
+import { markTaskPageGitHubFamiliesDirty } from './task-page/github/task-page-github-work-item-quiet-state'
+import { taskPageGitHubItemKey } from './task-page/github/task-page-github-work-item-mutation-keys'
 
 function markStateFamilyDirty(repoId: string, itemId: string): void {
   const queryKey = getTaskPageGitHubMutationQueryKey()

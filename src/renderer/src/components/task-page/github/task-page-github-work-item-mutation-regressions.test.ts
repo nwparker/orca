@@ -1,38 +1,48 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import type { ParsedTaskQuery } from '../../../shared/task-query'
-import type { GitHubWorkItem } from '../../../shared/github/work-item-types'
+import type { ParsedTaskQuery } from '../../../../../shared/task-query'
+import type { GitHubWorkItem } from '../../../../../shared/github/work-item-types'
 import {
   adoptQuietSearchFieldsForItem,
+  MAX_LAG_TRAILS
+} from './task-page-github-work-item-quiet-adopt'
+import {
   advanceTaskPageQuietRevalidateScope,
+  getTaskPageQuietRevalidateBackoffAttempt,
+  isTaskPageQuietRevalidateRunCurrent,
+  isTaskPageQuietRevalidateScopeCurrent
+} from './task-page-github-work-item-quiet-revalidate'
+import {
   applyPendingTaskPageGitHubMutationsToItems,
+  patchTaskPageGitHubWorkItemPages,
+  reconcileTaskPagePagesAfterQuietRefresh
+} from './task-page-github-work-item-mutation-pages'
+import {
   beginTaskPageGitHubWorkItemMutation,
   canStartTaskPageGitHubWorkItemMutation,
-  clearTaskPageGitHubAuthorityAbsentFromLoadedItems,
-  clearTaskPageGitHubAuthorityThroughGeneration,
-  confirmTaskPageGitHubWorkItemMutation,
-  getTaskPageQuietRevalidateBackoffAttempt,
-  getTaskPageGitHubRevalidatableAuthorityItemKeys,
-  isTaskPageQuietRevalidateRunCurrent,
-  isTaskPageQuietRevalidateScopeCurrent,
-  MAX_LAG_TRAILS,
-  patchTaskPageGitHubWorkItemPages,
-  reconcileTaskPagePagesAfterQuietRefresh,
   rebuildSoftHiddenFromItemsForTests
 } from './task-page-github-work-item-mutations'
 import {
-  getLastConfirmedClientValue,
-  getOrCreateQuietRevalidateState,
-  getTaskPageGitHubSoftHiddenItemKeys,
-  resetTaskPageGitHubMutationRegistryForTests,
-  setTaskPageGitHubMutationQueryKey,
-  subscribeTaskPageGitHubMutationRegistry,
-  taskPageGitHubFamilyDirtyKey,
-  taskPageGitHubItemKey
-} from './task-page-github-work-item-mutation-registry'
+  clearTaskPageGitHubAuthorityAbsentFromLoadedItems,
+  clearTaskPageGitHubAuthorityThroughGeneration,
+  getTaskPageGitHubRevalidatableAuthorityItemKeys
+} from './task-page-github-work-item-authority-refresh'
+import { confirmTaskPageGitHubWorkItemMutation } from './task-page-github-work-item-mutation-lifecycle'
+import { getLastConfirmedClientValue } from '../../task-page-github-confirmed-client-values'
 import {
+  getOrCreateQuietRevalidateState,
   beginTaskPageQuietRevalidateRun,
   finishTaskPageQuietRevalidateRun
 } from './task-page-github-work-item-quiet-state'
+import {
+  getTaskPageGitHubSoftHiddenItemKeys,
+  resetTaskPageGitHubMutationRegistryForTests,
+  setTaskPageGitHubMutationQueryKey,
+  subscribeTaskPageGitHubMutationRegistry
+} from './task-page-github-work-item-mutation-registry'
+import {
+  taskPageGitHubFamilyDirtyKey,
+  taskPageGitHubItemKey
+} from './task-page-github-work-item-mutation-keys'
 
 function query(): ParsedTaskQuery {
   return {

@@ -1,28 +1,32 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ParsedTaskQuery } from '../../../shared/task-query'
-import type { GitHubWorkItem } from '../../../shared/github/work-item-types'
+import type { ParsedTaskQuery } from '../../../../../shared/task-query'
+import type { GitHubWorkItem } from '../../../../../shared/github/work-item-types'
+import { adoptQuietSearchFieldsForItem } from './task-page-github-work-item-quiet-adopt'
 import {
-  adoptQuietSearchFieldsForItem,
   applyPendingTaskPageGitHubMutationsToItems,
-  beginTaskPageGitHubWorkItemMutation,
-  confirmTaskPageGitHubWorkItemMutation,
-  getRegistryMergedTaskPageGitHubWorkItem,
   materializeTaskPageItemList,
   overlayPendingOnTaskPagePages,
-  rollbackTaskPageGitHubWorkItemMutation,
-  settleQuietSearchRevalidate,
-  reapplyPendingTaskPageGitHubMutationsToCache,
-  clearTaskPageGitHubConfirmedAuthority,
+  reapplyPendingTaskPageGitHubMutationsToCache
+} from './task-page-github-work-item-mutation-pages'
+import {
+  beginTaskPageGitHubWorkItemMutation,
   getTaskPageGitHubStickyHideForTests
 } from './task-page-github-work-item-mutations'
 import {
+  confirmTaskPageGitHubWorkItemMutation,
+  rollbackTaskPageGitHubWorkItemMutation
+} from './task-page-github-work-item-mutation-lifecycle'
+import { getRegistryMergedTaskPageGitHubWorkItem } from './task-page-github-work-item-mutation-composition'
+import { settleQuietSearchRevalidate } from './task-page-github-work-item-quiet-revalidate'
+import {
+  clearTaskPageGitHubConfirmedAuthority,
   getConfirmedListSnapshot,
-  getLastConfirmedClientValue,
-  getOrCreateQuietRevalidateState,
   getTaskPageGitHubSoftHiddenItemKeys,
-  resetTaskPageGitHubMutationRegistryForTests,
-  taskPageGitHubItemKey
+  resetTaskPageGitHubMutationRegistryForTests
 } from './task-page-github-work-item-mutation-registry'
+import { getLastConfirmedClientValue } from '../../task-page-github-confirmed-client-values'
+import { getOrCreateQuietRevalidateState } from './task-page-github-work-item-quiet-state'
+import { taskPageGitHubItemKey } from './task-page-github-work-item-mutation-keys'
 
 function query(overrides: Partial<ParsedTaskQuery> = {}): ParsedTaskQuery {
   return {

@@ -3,23 +3,12 @@ import {
   deleteLastConfirmedClientValue,
   getLastConfirmedClientValue,
   setLastConfirmedClientValue as storeLastConfirmedClientValue
-} from './task-page-github-confirmed-client-values'
-export {
-  deleteLastConfirmedClientValue,
-  getLastConfirmedClientValue
-} from './task-page-github-confirmed-client-values'
+} from '../../task-page-github-confirmed-client-values'
 import type {
   GitHubAssignableUser,
   GitHubOwnerRepo
-} from '../../../shared/github/pull-request-types'
+} from '../../../../../shared/github/pull-request-types'
 import type {
-  PendingOp,
-  StickyHideEntry,
-  TaskPageGitHubListFamily,
-  TaskPageGitHubMutationKey
-} from './task-page-github-work-item-registry-types'
-export type {
-  PendingListOp,
   PendingOp,
   StickyHideEntry,
   TaskPageGitHubListFamily,
@@ -31,19 +20,6 @@ import {
   taskPageGitHubSnapshotKey
 } from './task-page-github-work-item-mutation-keys'
 import { clearTaskPageGitHubQuietStates } from './task-page-github-work-item-quiet-state'
-export {
-  getOrCreateQuietRevalidateState,
-  markTaskPageGitHubFamiliesDirty,
-  type QuietRevalidateState
-} from './task-page-github-work-item-quiet-state'
-export {
-  serializeTaskPageGitHubMutationKey,
-  taskPageGitHubFamilyDirtyKey,
-  taskPageGitHubItemKey,
-  taskPageGitHubLastConfirmedKey,
-  taskPageGitHubListOpKey,
-  taskPageGitHubSnapshotKey
-} from './task-page-github-work-item-mutation-keys'
 type Listener = () => void
 const listeners = new Set<Listener>()
 const pendingByKey = new Map<string, PendingOp>()

@@ -1,26 +1,30 @@
 import type { TaskPageGitHubQuietRefreshPreludeModel } from './use-task-page-github-quiet-refresh'
 import {
   getOrCreateQuietRevalidateState,
-  taskPageGitHubItemKey,
-  getTaskPageGitHubConfirmedAuthorityItemKeys
-} from '@/components/task-page-github-work-item-mutation-registry'
+  beginTaskPageQuietRevalidateRun,
+  finishTaskPageQuietRevalidateRun
+} from '@/components/task-page/github/task-page-github-work-item-quiet-state'
+import { taskPageGitHubItemKey } from '@/components/task-page/github/task-page-github-work-item-mutation-keys'
+import { getTaskPageGitHubConfirmedAuthorityItemKeys } from '@/components/task-page/github/task-page-github-work-item-mutation-registry'
 import {
   clearTaskPageGitHubAuthorityAbsentFromLoadedItems,
+  getTaskPageGitHubRevalidatableAuthorityItemKeys
+} from '@/components/task-page/github/task-page-github-work-item-authority-refresh'
+import {
   isTaskPageQuietRevalidateScopeCurrent,
   isTaskPageQuietRevalidateRunCurrent,
-  getTaskPageGitHubRevalidatableAuthorityItemKeys,
-  reapplyPendingTaskPageGitHubMutationsToCache,
   processTaskPageQuietRevalidateSettle,
-  reconcileTaskPagePagesAfterQuietRefresh,
-  getTaskPageQuietRevalidateBackoffAttempt,
+  getTaskPageQuietRevalidateBackoffAttempt
+} from '@/components/task-page/github/task-page-github-work-item-quiet-revalidate'
+import {
+  reapplyPendingTaskPageGitHubMutationsToCache,
+  reconcileTaskPagePagesAfterQuietRefresh
+} from '@/components/task-page/github/task-page-github-work-item-mutation-pages'
+import {
   LAG_WALL_BUDGET_MS,
   MAX_LAG_TRAILS,
   LAG_BACKOFF_MS
-} from '@/components/task-page-github-work-item-mutations'
-import {
-  beginTaskPageQuietRevalidateRun,
-  finishTaskPageQuietRevalidateRun
-} from '@/components/task-page-github-work-item-quiet-state'
+} from '@/components/task-page/github/task-page-github-work-item-quiet-adopt'
 import { stripRepoQualifiers } from '../../../shared/task-query'
 import { getTaskPageRepoSourceContext } from './task-page-source-context'
 import type { GitHubWorkItem } from '../../../shared/github/work-item-types'

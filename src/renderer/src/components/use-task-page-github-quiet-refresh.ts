@@ -1,8 +1,8 @@
 import type { TaskPageGitHubLandingRefreshModel } from './use-task-page-github-landing-refresh'
 import { useMountedRef } from '@/hooks/useMountedRef'
 import { useRef } from 'react'
-import type { QuietRevalidateRunOwner } from '@/components/task-page-github-work-item-quiet-state'
-import { advanceTaskPageQuietRevalidateScope } from '@/components/task-page-github-work-item-mutations'
+import type { QuietRevalidateRunOwner } from '@/components/task-page/github/task-page-github-work-item-quiet-state'
+import { advanceTaskPageQuietRevalidateScope } from '@/components/task-page/github/task-page-github-work-item-quiet-revalidate'
 import { useTaskPageGitHubQuietRefreshEffect } from './use-task-page-github-quiet-refresh-effect'
 export type TaskPageGitHubQuietRefreshPreludeModel = ReturnType<
   typeof useTaskPageGitHubQuietRefreshPrelude

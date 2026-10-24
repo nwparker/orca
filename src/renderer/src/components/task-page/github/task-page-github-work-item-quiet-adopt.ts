@@ -1,6 +1,6 @@
-import type { GitHubWorkItem } from '../../../shared/github/work-item-types'
-import type { TaskSourceContext } from '../../../shared/task-source-context'
-import { parseGitHubIssueOrPRLink } from '../../../shared/github/links'
+import type { GitHubWorkItem } from '../../../../../shared/github/work-item-types'
+import type { TaskSourceContext } from '../../../../../shared/task-source-context'
+import { parseGitHubIssueOrPRLink } from '../../../../../shared/github/links'
 import { loginSetOfUsers, loginSetsEqual } from './task-page-github-work-item-mutation-patches'
 import {
   familiesFromPendingOp,
@@ -8,14 +8,18 @@ import {
 } from './task-page-github-work-item-mutation-composition'
 import {
   getConfirmedListSnapshot,
-  getLastConfirmedClientValue,
-  getOrCreateQuietRevalidateState,
   listPendingTaskPageGitHubOpsForItem,
-  deleteConfirmedListSnapshot,
-  deleteLastConfirmedClientValue,
+  deleteConfirmedListSnapshot
+} from './task-page-github-work-item-mutation-registry'
+import {
+  getLastConfirmedClientValue,
+  deleteLastConfirmedClientValue
+} from '../../task-page-github-confirmed-client-values'
+import { getOrCreateQuietRevalidateState } from './task-page-github-work-item-quiet-state'
+import {
   taskPageGitHubFamilyDirtyKey,
   taskPageGitHubItemKey
-} from './task-page-github-work-item-mutation-registry'
+} from './task-page-github-work-item-mutation-keys'
 import type { TaskPageGitHubPatchWorkItem } from './task-page-github-work-item-mutation-types'
 
 export const MAX_LAG_TRAILS = 5

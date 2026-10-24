@@ -1,7 +1,7 @@
-import type { ParsedTaskQuery } from '../../../shared/task-query'
-import type { GitHubAssignableUser } from '../../../shared/github/pull-request-types'
-import type { GitHubWorkItem } from '../../../shared/github/work-item-types'
-import type { StickyHideEntry } from './task-page-github-work-item-mutation-registry'
+import type { ParsedTaskQuery } from '../../../../../shared/task-query'
+import type { GitHubAssignableUser } from '../../../../../shared/github/pull-request-types'
+import type { GitHubWorkItem } from '../../../../../shared/github/work-item-types'
+import type { StickyHideEntry } from './task-page-github-work-item-registry-types'
 
 function includesLogin(users: readonly GitHubAssignableUser[] | undefined, login: string): boolean {
   const target = login.toLowerCase()
