@@ -2876,7 +2876,7 @@ export function createRemoteRuntimePtyTransport(
     if (!handle) {
       return
     }
-    console.info(`[d3r] ${Date.now()} subscribe-start`)
+    console.info(`[d3r] ${Date.now()} subscribe-start ${(new Error().stack ?? '').split('\n').slice(2, 4).map((l) => l.trim().slice(0, 60)).join(' < ')}`)
     const subscribedHandle = handle
     const subscribedPtyId = remotePtyId
     const generation = ++subscriptionGeneration
@@ -3668,6 +3668,7 @@ export function createRemoteRuntimePtyTransport(
     connect: connectHoldingRestoredInput,
 
     attach(options) {
+      console.info(`[d3r] ${Date.now()} attach ${String(options.existingPtyId).slice(0, 40)}`)
       settleSignInConnectWait()
       recoveryInputHold.expect(null)
       attachPane(options, false)

@@ -22,6 +22,7 @@ export function useRemoteRuntimeRecoveryTriggers(): void {
         ? window.api.runtimeEnvironments.onSharedControlDiagnostics(
             ({ environmentId, diagnostics }) => {
               const ready = diagnostics.state === 'ready'
+              console.info(`[d3r] ${Date.now()} control-diag ${environmentId} ${diagnostics.state}`)
               const wasReady = readyByEnvironment.get(environmentId) ?? false
               readyByEnvironment.set(environmentId, ready)
               if (ready && !wasReady) {
