@@ -49,7 +49,7 @@ export function annotateWslHostFailure(error: unknown, command: ResolvedCommand)
 // Measured on a cold systemd distro: concurrent first launches intermittently fail before the
 // guest command starts; a retry a moment later succeeds once the distro is up.
 const TRANSIENT_WSL_SERVICE_ERROR = /Wsl\/Service\/E_UNEXPECTED\b/
-const TRANSIENT_WSL_SERVICE_RETRY_DELAYS_MS = [250, 750, 1500] as const
+const TRANSIENT_WSL_SERVICE_RETRY_DELAYS_MS = [250, 500, 1000, 2000, 4000, 4000] as const
 // After one call spends its retries, others on that distro fail fast instead of each sleeping.
 const TRANSIENT_WSL_SERVICE_BREAKER_MS = 5_000
 const brokenUntilByDistro = new Map<string, number>()
@@ -109,6 +109,7 @@ export async function retryTransientWslServiceFailure<T>(
       if (!options.retryable || !isTransientWslFailure(error) || distro === null) {
         throw error
       }
+      console.warn(`[d3-retry] transient wsl failure attempt=${attempt} at=${Date.now()}`)
       const delay = delays[attempt]
       if (delay === undefined || (brokenUntilByDistro.get(distro) ?? 0) > now()) {
         brokenUntilByDistro.set(distro, now() + TRANSIENT_WSL_SERVICE_BREAKER_MS)
