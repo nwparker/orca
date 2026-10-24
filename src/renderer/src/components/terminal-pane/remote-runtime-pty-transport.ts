@@ -816,8 +816,11 @@ export function createRemoteRuntimePtyTransport(
     let activated: RuntimeMobileSessionTabsResult | undefined
     try {
       // Why: this runs when the pane itself is opened/attached — the user's wake gesture.
+      console.info(`[d3r] ${Date.now()} activate-start`)
       activated = await activateHostSessionSurface(hostTabId, worktree, 'user')
+      console.info(`[d3r] ${Date.now()} activate-done`)
     } catch (error) {
+      console.info(`[d3r] ${Date.now()} activate-error ${String(error).slice(0, 120)}`)
       // Why: activation answers absence from the host's own in-flight bookkeeping — a worktree snapshot
       // it has not hydrated yet answers the same way as one it really dropped (#21852). Only the
       // inventory below carries removal evidence, so fall through and let it adjudicate.
@@ -826,6 +829,7 @@ export function createRemoteRuntimePtyTransport(
       }
     }
     const immediate = activated ? findReadyHostSessionHandle(activated, hostTabId) : undefined
+    console.info(`[d3r] ${Date.now()} activate-immediate=${Boolean(immediate)}`)
     if (immediate) {
       return immediate
     }
@@ -841,6 +845,7 @@ export function createRemoteRuntimePtyTransport(
       }
       // Why: host mirrors can publish before their PTY handle is ready, but a stuck pending surface must not poll forever.
       await new Promise((resolve) => setTimeout(resolve, Math.min(pollMs, remainingMs)))
+      console.info(`[d3r] ${Date.now()} poll ${nextRequest} after=${pollMs}`)
       pollMs = Math.min(pollMs * 2, HOST_SESSION_POLL_MAX_MS)
       // Why: an RPC left on its own 15s default would stretch this bounded wait to ~30s before the pane reports any terminal state.
       const requestRemainingMs = HOST_SESSION_ATTACH_TIMEOUT_MS - (Date.now() - startedAt)
@@ -954,6 +959,7 @@ export function createRemoteRuntimePtyTransport(
         }
         return hostHandle
       } catch (error) {
+        console.info(`[d3r] ${Date.now()} hostwait-error ${String(error).slice(0, 120)}`)
         if (!isRecoverablePaneBindingError(error) || !isCurrent()) {
           throw error
         }
