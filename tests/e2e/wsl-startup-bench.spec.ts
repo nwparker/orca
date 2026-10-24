@@ -212,6 +212,9 @@ async function measure(run: number, kind: string): Promise<void> {
             tabs: st.tabsByWorktree,
             ptys: st.ptyIdsByTabId,
             wsl: (st as unknown as { wslHostStatuses: unknown }).wslHostStatuses,
+            view: (st as unknown as { activeView: unknown }).activeView,
+            tabType: (st as unknown as { activeTabType: unknown }).activeTabType,
+            text: document.body.innerText.slice(0, 800),
             panes
           })
         })
