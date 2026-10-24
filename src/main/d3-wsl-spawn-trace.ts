@@ -50,7 +50,7 @@ for (const name of ['spawnSync', 'execFileSync'] as const) {
       }
       const id = ++seq
       const start = Date.now()
-      log(`#${id} ${name} ${brief(args[1])}`)
+      log(`#${id} ${name} ${brief(args[1])} STACK ${(new Error().stack ?? '').split('\n').slice(2, 14).map((l) => l.trim().replace(/\(.*[\\/]/, '(')).join(' < ')}`)
       try {
         const result = original(...args) as { status?: number; error?: Error; stdout?: unknown } | Buffer | string
         const status = typeof result === 'object' && result && 'status' in result ? result.status : 'ok'
