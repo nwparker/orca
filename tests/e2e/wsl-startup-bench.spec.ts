@@ -190,6 +190,12 @@ async function measure(run: number, kind: string): Promise<void> {
   try {
     const tWindow = Date.now()
     await installProbe(page, marker)
+    await new Promise((resolve) => setTimeout(resolve, 8000))
+    const wslEnvAtEnd = await app.evaluate(() => ({
+      WSLENV: process.env.WSLENV ?? null,
+      keys: Object.keys(process.env).filter((key) => /WSL|ORCA_|HOME|PROFILE|PATH/.test(key))
+    }))
+    console.log(`[d3] ENV ${JSON.stringify(wslEnvAtEnd)}`)
     await page
       .waitForFunction(
         () => Boolean((window as unknown as { __d3: { tUsable: number | null } }).__d3.tUsable),
@@ -231,10 +237,6 @@ async function measure(run: number, kind: string): Promise<void> {
       () => (window as unknown as { __d3: Record<string, unknown> }).__d3
     )
     const processStart = await app.evaluate(() => Date.now() - performance.now())
-    const wslEnvAtEnd = await app.evaluate(() => ({
-      WSLENV: process.env.WSLENV ?? null,
-      keys: Object.keys(process.env).filter((key) => /WSL|ORCA_|HOME|PROFILE|PATH/.test(key))
-    }))
     const rel = (value: unknown): number | null =>
       typeof value === 'number' ? value - t0 : null
     const row = {
