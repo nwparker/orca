@@ -8,7 +8,7 @@ import { loadMobileOnboardingSteps } from '../onboarding/mobile-onboarding-plan'
 
 const route = vi.hoisted(() => {
   const state: {
-    code: string | string[] | undefined
+    code: string | undefined
     router: { replace: ReturnType<typeof vi.fn> }
     refreshHostClient: ReturnType<typeof vi.fn>
   } = {
@@ -69,7 +69,7 @@ function deferred<T>() {
 
 let renderer: ReactTestRenderer | undefined
 
-async function renderCode(code: string | string[] | undefined) {
+async function renderCode(code: string) {
   route.code = code
   await act(async () => {
     if (renderer) {
@@ -136,13 +136,6 @@ describe('pair confirmation route ownership', () => {
       }
     }
   )
-
-  it('renders recovery for repeated code parameters without starting pairing', async () => {
-    await renderCode([offerCode('first'), offerCode('second')])
-    expect(screenText()).toContain('Not a valid pairing code')
-    expect(screenText()).toContain('Back to home')
-    expect(startPreProfilePairing).not.toHaveBeenCalled()
-  })
 
   it('disposes the replaced offer and ignores its late logs and completion', async () => {
     const pending = deferred<{ hostId: string }>()

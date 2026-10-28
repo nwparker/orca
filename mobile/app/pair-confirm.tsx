@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from 'react'
-import { View, Text, Pressable, ActivityIndicator, BackHandler, ScrollView } from 'react-native'
+import { View, Text, Pressable, ActivityIndicator, BackHandler } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router'
 import { ChevronLeft } from 'lucide-react-native'
@@ -160,11 +160,7 @@ function PairConfirmContent({ routeState }: { routeState: PairConfirmRouteState 
         <ChevronLeft size={22} color={colors.textSecondary} />
       </Pressable>
 
-      <ScrollView
-        style={styles.scrollContainer}
-        contentContainerStyle={[styles.content, { paddingBottom: spacing.xl * 2 + insets.bottom }]}
-        nestedScrollEnabled
-      >
+      <View style={styles.content}>
         {offer && resolvedStatus === 'awaiting-confirm' && (
           <>
             <Text style={styles.title}>Pair with this desktop?</Text>
@@ -207,7 +203,7 @@ function PairConfirmContent({ routeState }: { routeState: PairConfirmRouteState 
             </View>
           </>
         )}
-      </ScrollView>
+      </View>
     </View>
   )
 }
@@ -226,13 +222,12 @@ const styles = themedStyleSheet(() => ({
     justifyContent: 'center',
     marginBottom: spacing.sm
   },
-  scrollContainer: {
-    flex: 1
-  },
   content: {
-    flexGrow: 1,
+    flex: 1,
     justifyContent: 'center',
-    paddingHorizontal: spacing.sm
+    paddingHorizontal: spacing.sm,
+    // Offset above geometric center to balance home-indicator/nav-bar space.
+    paddingBottom: spacing.xl * 2
   },
   title: {
     fontSize: typography.titleSize,
