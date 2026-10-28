@@ -35,7 +35,7 @@ function settledValue(
 }
 
 type OwnedRuntimeContext = {
-  owner: { client: RpcClient | null; hostId: string | undefined }
+  owner: { hostId: string | undefined; serverId: string | undefined }
   runtimeSettings: NewWorktreeRuntimeSettings | null
   trustedOrcaHooks: PersistedTrustedOrcaHooks
   availableProviders: TaskProvider[]
@@ -44,7 +44,8 @@ type OwnedRuntimeContext = {
 export function useNewWorkspaceRuntimeContext(
   client: RpcClient | null,
   visible: boolean,
-  hostId?: string
+  hostId?: string,
+  serverId?: string
 ): {
   runtimeSettings: NewWorktreeRuntimeSettings | null
   setRuntimeSettings: (settings: NewWorktreeRuntimeSettings) => void
@@ -53,18 +54,19 @@ export function useNewWorkspaceRuntimeContext(
   availableProviders: TaskProvider[]
   jiraConnection: MobileJiraConnection
 } {
-  // A fresh owner per selection keeps A -> B -> A from reviving the first A's callbacks.
+  // Owned by the selected host, not the client object, which is rebuilt when any server's relay
+  // changes. A fresh owner per selection keeps A -> B -> A from reviving the first A's callbacks.
   const [context, setContext] = useState<OwnedRuntimeContext>(() => ({
-    owner: { client, hostId },
+    owner: { hostId, serverId },
     runtimeSettings: null,
     trustedOrcaHooks: {},
     availableProviders: []
   }))
   const { owner } = context
-  const matchesOwner = owner.client === client && owner.hostId === hostId
+  const matchesOwner = owner.hostId === hostId && owner.serverId === serverId
   if (!matchesOwner) {
     setContext({
-      owner: { client, hostId },
+      owner: { hostId, serverId },
       runtimeSettings: null,
       trustedOrcaHooks: {},
       availableProviders: []
