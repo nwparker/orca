@@ -59,7 +59,6 @@ export function useMobileSessionAccessorySelection(scope: MobileSessionTerminalI
   const [accessoryRepeat] = useState(() =>
     createTerminalAccessoryRepeatController<ReturnType<typeof createTerminalLiveAccessoryInput>>()
   )
-  const appStateRef = useRef(AppState.currentState)
   const focusedRef = useRef(false)
   const repeatOwnerRevisionRef = useRef(0)
   // Repeats read the latest live-input mode; press-time ownership is fenced by the sender below.
@@ -82,7 +81,6 @@ export function useMobileSessionAccessorySelection(scope: MobileSessionTerminalI
   )
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (state) => {
-      appStateRef.current = state
       if (state !== 'active') {
         cancelAccessoryRepeat()
       }
@@ -105,7 +103,7 @@ export function useMobileSessionAccessorySelection(scope: MobileSessionTerminalI
         (handle) =>
           repeatOwnerRevisionRef.current === pressedRevision &&
           focusedRef.current &&
-          appStateRef.current === 'active' &&
+          AppState.currentState === 'active' &&
           clientRef.current === pressedClient &&
           (pressedClient?.getGeneration?.() ?? 0) === pressedGeneration &&
           connStateRef.current === 'connected' &&
