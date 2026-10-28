@@ -37,11 +37,13 @@ describe('main-process watcher event stat budget', () => {
     const rootPath = resolve(name)
     const { key } = getLocalWatcherRoot(rootPath)
     const root = await createLocalWatcher(key, rootPath)
-    const sender = createWatcherSender(roots.length + 1)
+    const send = vi.fn<(channel: string, payload: FsChangedPayload) => void>()
+    const sender = createWatcherSender(roots.length + 1, send)
+    // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: batch delivery only calls isDestroyed and send on this sender double.
     root.listeners.set(sender.id, sender as never)
     watcherLifecycleState.watchedRoots.set(key, root)
     roots.push(root)
-    return { root, sender }
+    return { root, sender, send }
   }
 
   function emit(root: WatchedRoot, count: number, type: WatcherEvent['type'] = 'update') {
@@ -125,7 +127,7 @@ describe('main-process watcher event stat budget', () => {
       [second, secondEvents]
     ] as const) {
       expect(watcher.sender.send).toHaveBeenCalledTimes(1)
-      const payload = watcher.sender.send.mock.calls[0][1] as FsChangedPayload
+      const payload = watcher.send.mock.calls[0][1]
       expect(payload.events).toEqual(
         events.map((event, index) => ({
           kind: event.type,

@@ -58,7 +58,9 @@ describe('watcher stat lifecycle across reuse and failed removal', () => {
   })
 
   it('drains an expired queued flush after unwatch clears a newer timer and rewatch reuses the root', async () => {
-    const sender = createWatcherSender(1)
+    const send = vi.fn<(channel: string, payload: FsChangedPayload) => void>()
+    const sender = createWatcherSender(1, send)
+    // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: watcher lifetimes and delivery use only id, isDestroyed, on, removeListener and send from the sender double.
     await subscribeLocalWatcher(worktreePath, sender as never)
     const root = watcherLifecycleState.watchedRoots.get(key)!
     statMock.mockReturnValueOnce(firstStat.promise)
@@ -73,13 +75,14 @@ describe('watcher stat lifecycle across reuse and failed removal', () => {
     expect(root.batch.timer).not.toBeNull()
     unsubscribeLocalWatcher(worktreePath, sender.id)
     expect(root.batch.timer).toBeNull()
+    // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: rewatch uses the same sender double's lifetime and delivery methods.
     await subscribeLocalWatcher(worktreePath, sender as never)
     expect(watcherLifecycleState.watchedRoots.get(key)).toBe(root)
 
     firstStat.resolve({ isDirectory: () => false })
     await vi.advanceTimersByTimeAsync(0)
     expect(sender.send).toHaveBeenCalledTimes(2)
-    const payloads = sender.send.mock.calls.map(([, payload]) => payload as FsChangedPayload)
+    const payloads = send.mock.calls.map(([, payload]) => payload)
     expect(payloads.map(({ events }) => events.map(({ absolutePath }) => absolutePath))).toEqual([
       [join(worktreePath, 'first.ts')],
       [join(worktreePath, 'queued.ts'), join(worktreePath, 'tail.ts')]
@@ -92,6 +95,7 @@ describe('watcher stat lifecycle across reuse and failed removal', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
     const oldUnsubscribe = Promise.withResolvers<void>()
     const first = createWatcherSender(1)
+    // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: watcher lifetimes and delivery use only id, isDestroyed, on, removeListener and send from the sender double.
     await subscribeLocalWatcher(worktreePath, first as never)
     watcherLifecycleState.watchedRoots.get(key)!.subscription.unsubscribe = () =>
       oldUnsubscribe.promise
@@ -100,6 +104,7 @@ describe('watcher stat lifecycle across reuse and failed removal', () => {
     expect(watcherLifecycleState.pendingLocalUnsubscribesByRoot.get(key)?.size).toBe(1)
 
     const replacement = createWatcherSender(2)
+    // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: the replacement sender supplies the same lifetime and delivery methods as the original.
     await subscribeLocalWatcher(worktreePath, replacement as never)
     const root = watcherLifecycleState.watchedRoots.get(key)!
     const close = closeLocalWatcherForWorktreePath(worktreePath)

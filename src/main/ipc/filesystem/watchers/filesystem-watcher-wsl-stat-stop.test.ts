@@ -40,7 +40,7 @@ function snapshotFrame(mtime: string): string {
 function listen(root: WatchedRoot, id: number) {
   const send = vi.fn<(channel: string, payload: FsChangedPayload) => void>()
   const sender = createWatcherSender(id, send)
-  // SAFETY: batch delivery only calls the fake sender's isDestroyed and send methods.
+  // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: batch delivery only calls the fake sender's isDestroyed and send methods.
   root.listeners.set(id, sender as never)
   return send
 }
