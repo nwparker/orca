@@ -159,10 +159,8 @@ function MobileFilePreviewDocument({ route }: Props) {
             ? ''
             : null
       if (loadedContent !== null) {
-        if (!preserveDirtyDraft) {
-          setDraftContent(loadedContent)
-          setSavedContent(loadedContent)
-        }
+        setDraftContent(loadedContent)
+        setSavedContent(loadedContent)
         draftSourceKeyRef.current = previewSourceKey
       }
       setPreview(result)
