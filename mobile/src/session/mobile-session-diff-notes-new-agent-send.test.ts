@@ -50,7 +50,7 @@ function launchReply(promptOutcome: 'handed-to-terminal' | 'not-delivered'): Rpc
   }
 }
 
-/** Launch replies answered by hand; the notes reader never answers, so the seeded notes stand. */
+/** Launch replies answered by hand; the notes read answers with the seeded note. */
 function launchClient() {
   const replies: ((reply: RpcResponse) => void)[] = []
   const sendRequest = vi.fn(
@@ -58,6 +58,13 @@ function launchClient() {
       new Promise<RpcResponse>((resolve) => {
         if (method === 'agent.launchReplay') {
           replies.push(resolve)
+        } else if (method === 'worktree.show') {
+          resolve({
+            id: 'notes',
+            ok: true,
+            result: { worktree: { diffComments: [NOTE] } },
+            _meta: { runtimeId: 'r' }
+          })
         } else if (method === 'worktree.set') {
           resolve({ id: 'save', ok: true, result: {}, _meta: { runtimeId: 'r' } })
         }

@@ -30,8 +30,9 @@ type SetParams = { diffComments: DiffComment[]; diffCommentsBase?: DiffComment[]
 
 /** A host holding the stored notes; `merges: false` is a host from before the base field. */
 function fakeHost(initial: DiffComment[], options: { merges: boolean }) {
-  const host = { notes: initial, holdShow: false, failNextSet: false }
+  const host = { notes: initial, holdShow: false, holdSets: false, failNextSet: false }
   const heldShows: (() => void)[] = []
+  const heldSets: (() => void)[] = []
   const reply = (result: unknown): RpcResponse => ({
     id: 'x',
     ok: true,
@@ -57,11 +58,20 @@ function fakeHost(initial: DiffComment[], options: { merges: boolean }) {
       }
       // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: the hooks under test send only this shape to worktree.set.
       const { diffComments, diffCommentsBase } = params as SetParams
-      host.notes =
-        options.merges && diffCommentsBase
-          ? mergeDiffCommentMutation(diffCommentsBase, host.notes, diffComments)
-          : diffComments
-      return Promise.resolve(reply({ worktree: { diffComments: host.notes } }))
+      return new Promise((resolve) => {
+        const apply = () => {
+          host.notes =
+            options.merges && diffCommentsBase
+              ? mergeDiffCommentMutation(diffCommentsBase, host.notes, diffComments)
+              : diffComments
+          resolve(reply({ worktree: { diffComments: host.notes } }))
+        }
+        if (host.holdSets) {
+          heldSets.push(apply)
+        } else {
+          apply()
+        }
+      })
     }
     return new Promise<RpcResponse>(() => {})
   })
@@ -76,7 +86,7 @@ function fakeHost(initial: DiffComment[], options: { merges: boolean }) {
     notifyForeground: () => {},
     close: () => {}
   }
-  return { host, client, heldShows, sendRequest }
+  return { host, client, heldShows, heldSets, sendRequest }
 }
 
 type Notes = ReturnType<typeof useMobileSessionDiffComments>
@@ -181,9 +191,10 @@ describe('mobile review notes saved against the host', () => {
     await mountNotes(client)
 
     await act(async () => {
-      await hook().addDiffCommentForFile('src/a.ts', 2, 'early')
+      const adding = hook().addDiffCommentForFile('src/a.ts', 2, 'early')
+      heldShows.forEach((answer) => answer())
+      await adding
     })
-    await act(async () => heldShows.forEach((answer) => answer()))
 
     expect(shown.map((comment) => comment.body)).toEqual(['note a', 'early'])
   })
@@ -195,11 +206,36 @@ describe('mobile review notes saved against the host', () => {
     await mountNotes(client)
 
     await act(async () => {
-      await hook().addDiffCommentForFile('src/a.ts', 2, 'refused')
+      const adding = hook().addDiffCommentForFile('src/a.ts', 2, 'refused')
+      heldShows.forEach((answer) => answer())
+      await adding
     })
-    await act(async () => heldShows.forEach((answer) => answer()))
 
     expect(ids(shown)).toEqual(['a'])
+  })
+
+  it('keeps a saved note when a delivered-note cleanup is made while its save is in flight', async () => {
+    const { host, client, heldSets } = fakeHost([note('a')], { merges: true })
+    await mountNotes(client)
+    host.holdSets = true
+
+    let adding: Promise<boolean> = Promise.resolve(false)
+    let clearing: Promise<void> = Promise.resolve()
+    await act(async () => {
+      adding = hook().addDiffCommentForFile('src/a.ts', 2, 'kept')
+      clearing = hook().clearDeliveredDiffComments(shown.filter((comment) => comment.id === 'a'))
+    })
+    await act(async () => {
+      // Answer the newest held write first, the order a host can apply two in-flight writes in.
+      for (let turn = 0; turn < 4; turn += 1) {
+        heldSets.pop()?.()
+        await new Promise((resolve) => setTimeout(resolve, 0))
+      }
+      await Promise.all([adding, clearing])
+    })
+
+    expect(host.notes.map((comment) => comment.body)).toEqual(['kept'])
+    expect(ids(shown)).toEqual(ids(host.notes))
   })
 
   it('still sends the full list, so a host without the merge replaces it as before', async () => {

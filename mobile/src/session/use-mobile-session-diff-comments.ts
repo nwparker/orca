@@ -36,9 +36,15 @@ export function useMobileSessionDiffComments(scope: MobileSessionDocumentReaders
   const [sendingDiffCommentIds, setSendingDiffCommentIds] = useState<ReadonlySet<string>>(
     sendingDiffCommentIdsRef.current
   )
-  // Why: a reply reflects the host only if no later read (or save) of the same kind has started.
-  const loadSeqRef = useRef(0)
-  const saveSeqRef = useRef(0)
+  // Why: one notes request at a time, so each reply already holds this phone's earlier saves.
+  const notesQueueRef = useRef<Promise<unknown>>(Promise.resolve())
+  const enqueueNotesRequest = useCallback(function enqueueNotesRequest<T>(
+    run: () => Promise<T>
+  ): Promise<T> {
+    const result = notesQueueRef.current.then(run)
+    notesQueueRef.current = result.catch(() => undefined)
+    return result
+  }, [])
   const publishDiffComments = useCallback(
     (comments: DiffComment[]): void => {
       // Why: a second tap in the same frame must build on this list, not the last rendered one.
@@ -47,53 +53,79 @@ export function useMobileSessionDiffComments(scope: MobileSessionDocumentReaders
     },
     [diffCommentsRef, setDiffComments]
   )
+  // Shows the host's notes plus whatever the phone changed after `sent` was current.
+  const adoptHostDiffComments = useCallback(
+    (sent: readonly DiffComment[], host: unknown): void => {
+      const hostComments = normalizeMobileDiffComments(host, worktreeId)
+      publishDiffComments(mergeDiffCommentMutation(sent, hostComments, diffCommentsRef.current))
+    },
+    [diffCommentsRef, publishDiffComments, worktreeId]
+  )
 
-  const loadDiffComments = useCallback(async (): Promise<void> => {
-    const seq = ++loadSeqRef.current
-    const start = diffCommentsRef.current
-    if (!client || connState !== 'connected' || !worktreeId || isFloatingWorkspaceRoute) {
-      publishDiffComments([])
-      return
-    }
-    const response = sessionWorktreeRecordRead.interpret(
-      await sessionWorktreeRecordRead.request(client, { worktree: `id:${worktreeId}` })
-    )
-    if (!response.accepted || seq !== loadSeqRef.current) {
-      return
-    }
-    const hostComments = normalizeMobileDiffComments(response.value?.diffComments, worktreeId)
-    // Why: keep the adds and deletes made on the phone while this read was in flight.
-    publishDiffComments(mergeDiffCommentMutation(start, hostComments, diffCommentsRef.current))
-  }, [client, connState, worktreeId, isFloatingWorkspaceRoute, publishDiffComments])
+  const loadDiffComments = useCallback(
+    (): Promise<void> =>
+      enqueueNotesRequest(async () => {
+        if (!client || connState !== 'connected' || !worktreeId || isFloatingWorkspaceRoute) {
+          publishDiffComments([])
+          return
+        }
+        const start = diffCommentsRef.current
+        const response = sessionWorktreeRecordRead.interpret(
+          await sessionWorktreeRecordRead.request(client, { worktree: `id:${worktreeId}` })
+        )
+        if (response.accepted) {
+          adoptHostDiffComments(start, response.value?.diffComments)
+        }
+      }),
+    [
+      client,
+      connState,
+      worktreeId,
+      isFloatingWorkspaceRoute,
+      diffCommentsRef,
+      enqueueNotesRequest,
+      publishDiffComments,
+      adoptHostDiffComments
+    ]
+  )
 
   // Shows `next` at once, then the host's merged list; on failure undoes only this change.
   const saveDiffComments = useCallback(
     async (next: DiffComment[]): Promise<void> => {
       const base = diffCommentsRef.current
-      const seq = ++saveSeqRef.current
       publishDiffComments(next)
       try {
-        if (!client || connState !== 'connected') {
-          throw new Error('Waiting for desktop...')
-        }
-        const response = await sessionWorktreeNotesWrite.request(client, {
-          worktree: `id:${worktreeId}`,
-          diffComments: [...next],
-          diffCommentsBase: [...base]
+        await enqueueNotesRequest(async () => {
+          if (!client || connState !== 'connected') {
+            throw new Error('Waiting for desktop...')
+          }
+          const response = await sessionWorktreeNotesWrite.request(client, {
+            worktree: `id:${worktreeId}`,
+            diffComments: [...next],
+            diffCommentsBase: [...base]
+          })
+          const saved = interpretOrThrowRefusalMessage(
+            () => sessionWorktreeNotesWrite.interpret(response),
+            'Failed to save review notes'
+          )
+          if (saved?.diffComments !== undefined) {
+            adoptHostDiffComments(next, saved.diffComments)
+          }
         })
-        const saved = interpretOrThrowRefusalMessage(
-          () => sessionWorktreeNotesWrite.interpret(response),
-          'Failed to save review notes'
-        )
-        if (seq === saveSeqRef.current && saved?.diffComments !== undefined) {
-          publishDiffComments(normalizeMobileDiffComments(saved.diffComments, worktreeId))
-        }
       } catch (err) {
         publishDiffComments(mergeDiffCommentMutation(next, diffCommentsRef.current, base))
         throw err
       }
     },
-    [client, connState, worktreeId, publishDiffComments]
+    [
+      client,
+      connState,
+      worktreeId,
+      diffCommentsRef,
+      enqueueNotesRequest,
+      publishDiffComments,
+      adoptHostDiffComments
+    ]
   )
 
   useEffect(() => {
