@@ -5,6 +5,8 @@ import { mergeDiffCommentMutation } from '../../../src/shared/diff-comment-mutat
 import type { DiffComment } from '../../../src/shared/diff-comment-types'
 import type { RpcClient } from '../transport/rpc-client'
 import type { RpcResponse } from '../transport/types'
+import type { ReviewScreenState } from './mobile-diff-review-screen-model'
+import { useMobileDiffReviewCommentActions } from './use-mobile-diff-review-comment-actions'
 import { useMobileSessionDiffComments } from './use-mobile-session-diff-comments'
 
 vi.mock('../platform/haptics', () => ({
@@ -238,6 +240,33 @@ describe('mobile review notes saved against the host', () => {
     expect(ids(shown).toSorted()).toEqual(['a', 'b'])
   })
 
+  it('hides a note desktop deleted while a later phone save was still queued', async () => {
+    const { host, client, heldSets } = fakeHost([note('a')], { merges: true })
+    await mountNotes(client)
+    host.holdSets = true
+
+    let adding: Promise<boolean> = Promise.resolve(false)
+    let clearing: Promise<void> = Promise.resolve()
+    await act(async () => {
+      adding = hook().addDiffCommentForFile('src/a.ts', 2, 'kept')
+      clearing = hook().clearDeliveredDiffComments(shown.filter((comment) => comment.id === 'a'))
+    })
+    host.notes = [...host.notes, note('desktop')]
+    await act(async () => {
+      heldSets.shift()?.()
+      await adding
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+    host.notes = host.notes.filter((comment) => comment.id !== 'desktop')
+    await act(async () => {
+      heldSets.shift()?.()
+      await clearing
+    })
+
+    expect(host.notes.map((comment) => comment.body)).toEqual(['kept'])
+    expect(ids(shown)).toEqual(ids(host.notes))
+  })
+
   it('still sends the full list, so a host without the merge replaces it as before', async () => {
     const { host, client, sendRequest } = fakeHost([note('a')], { merges: false })
     await mountNotes(client)
@@ -250,5 +279,46 @@ describe('mobile review notes saved against the host', () => {
     expect(sent).toMatchObject({ diffComments: [note('a'), { body: 'phone' }] })
     expect(host.notes.map((comment) => comment.body)).toEqual(['note a', 'phone'])
     expect(shown).toEqual(host.notes)
+  })
+})
+
+describe('review screen notes saved against the host', () => {
+  it('shows the host list after a save, so an edit to a note desktop deleted does not look saved', async () => {
+    const { host, client } = fakeHost([note('a'), note('b')], { merges: true })
+    let state: ReviewScreenState = {
+      kind: 'ready',
+      status: { entries: [] },
+      branchCompare: null,
+      comments: [note('a'), note('b')],
+      reviewState: { version: 1, files: {} }
+    }
+    let actions: ReturnType<typeof useMobileDiffReviewCommentActions> | undefined
+    function Harness() {
+      const [screenState, setScreenState] = useState(state)
+      state = screenState
+      // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: the save path reads only these members.
+      actions = useMobileDiffReviewCommentActions({
+        client,
+        connState: 'connected',
+        worktreeId: 'workspace-1',
+        screenState,
+        setScreenState,
+        setActionError: () => {},
+        sheets: {}
+      } as never)
+      return null
+    }
+    await act(async () => {
+      renderer = create(createElement(Harness))
+    })
+    host.notes = [note('b')]
+
+    const edited = { ...note('a'), body: 'edited' }
+    await act(async () => {
+      await actions?.saveCommentsAndReviewState([edited, note('b')], { version: 1, files: {} })
+    })
+
+    expect(ids(host.notes)).toEqual(['b'])
+    expect(state.kind === 'ready' ? ids(state.comments) : []).toEqual(['b'])
   })
 })

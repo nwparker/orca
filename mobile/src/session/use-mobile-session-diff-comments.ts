@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useRef, useState } from 'react'
+import { useEffect, useCallback, useMemo, useRef, useState } from 'react'
 import { formatDiffComments } from '../../../src/shared/diff-comments-format'
 import { useClipboardWriter } from '../platform/clipboard'
 import { interpretOrThrowRefusalMessage } from '../transport/rpc-refusal-message'
@@ -13,6 +13,12 @@ import {
   sendableMobileDiffComments
 } from './mobile-diff-comments'
 import { mergeDiffCommentMutation } from '../../../src/shared/diff-comment-mutation'
+import {
+  createReviewNotesSync,
+  enqueueReviewNotesRequest,
+  reviewNotesView,
+  type ReviewNotesSync
+} from './mobile-review-notes-sync'
 import type { DiffComment } from '../../../src/shared/diff-comment-types'
 import type { DiffNotesDelivery } from './mobile-session-route-types'
 import type { MobileSessionDocumentReadersModel } from './use-mobile-session-document-readers'
@@ -36,70 +42,51 @@ export function useMobileSessionDiffComments(scope: MobileSessionDocumentReaders
   const [sendingDiffCommentIds, setSendingDiffCommentIds] = useState<ReadonlySet<string>>(
     sendingDiffCommentIdsRef.current
   )
-  // Why: one notes request at a time, so each reply already holds this phone's earlier saves.
-  const notesQueueRef = useRef<Promise<unknown>>(Promise.resolve())
-  const failedSavesRef = useRef(0)
-  const enqueueNotesRequest = useCallback(function enqueueNotesRequest<T>(
-    run: () => Promise<T>
-  ): Promise<T> {
-    const result = notesQueueRef.current.then(run)
-    notesQueueRef.current = result.catch(() => undefined)
-    return result
-  }, [])
-  const publishDiffComments = useCallback(
-    (comments: DiffComment[]): void => {
+  // Why: a reply or failure for another workspace or connection must not touch these notes.
+  const notesSync = useMemo(() => createReviewNotesSync(), [client, worktreeId])
+  const showDiffComments = useCallback(
+    (sync: ReviewNotesSync): void => {
+      if (!sync.active) {
+        return
+      }
+      const comments = reviewNotesView(sync)
       // Why: a second tap in the same frame must build on this list, not the last rendered one.
       diffCommentsRef.current = comments
       setDiffComments(comments)
     },
     [diffCommentsRef, setDiffComments]
   )
-  // Shows the host's notes plus whatever the phone changed after `sent` was current.
-  const adoptHostDiffComments = useCallback(
-    (sent: readonly DiffComment[], host: unknown): void => {
-      const hostComments = normalizeMobileDiffComments(host, worktreeId)
-      publishDiffComments(mergeDiffCommentMutation(sent, hostComments, diffCommentsRef.current))
-    },
-    [diffCommentsRef, publishDiffComments, worktreeId]
-  )
 
-  const loadDiffComments = useCallback(
-    (): Promise<void> =>
-      enqueueNotesRequest(async () => {
-        if (!client || connState !== 'connected' || !worktreeId || isFloatingWorkspaceRoute) {
-          publishDiffComments([])
-          return
-        }
-        const start = diffCommentsRef.current
-        const response = sessionWorktreeRecordRead.interpret(
-          await sessionWorktreeRecordRead.request(client, { worktree: `id:${worktreeId}` })
-        )
-        if (response.accepted) {
-          adoptHostDiffComments(start, response.value?.diffComments)
-        }
-      }),
-    [
-      client,
-      connState,
-      worktreeId,
-      isFloatingWorkspaceRoute,
-      diffCommentsRef,
-      enqueueNotesRequest,
-      publishDiffComments,
-      adoptHostDiffComments
-    ]
-  )
+  const loadDiffComments = useCallback((): Promise<void> => {
+    const sync = notesSync
+    return enqueueReviewNotesRequest(sync, async () => {
+      if (!client || connState !== 'connected' || !worktreeId || isFloatingWorkspaceRoute) {
+        sync.host = []
+        showDiffComments(sync)
+        return
+      }
+      const response = sessionWorktreeRecordRead.interpret(
+        await sessionWorktreeRecordRead.request(client, { worktree: `id:${worktreeId}` })
+      )
+      if (response.accepted) {
+        sync.host = normalizeMobileDiffComments(response.value?.diffComments, worktreeId)
+        showDiffComments(sync)
+      }
+    })
+  }, [client, connState, worktreeId, isFloatingWorkspaceRoute, notesSync, showDiffComments])
 
-  // Shows `next` at once, then the host's merged list; on failure undoes only this change.
+  // Shows `next` at once, then the host's merged list; on failure drops only this change.
   const saveDiffComments = useCallback(
     async (next: DiffComment[]): Promise<void> => {
-      const base = diffCommentsRef.current
-      const failedSaves = failedSavesRef.current
-      publishDiffComments(next)
+      const sync = notesSync
+      const save = { base: diffCommentsRef.current, next }
+      const failedSaves = sync.failedSaves
+      sync.pending = [...sync.pending, save]
+      showDiffComments(sync)
       try {
-        await enqueueNotesRequest(async () => {
+        await enqueueReviewNotesRequest(sync, async () => {
           // Why: this list was built on a change that failed; an older host would store it whole.
-          if (failedSaves !== failedSavesRef.current) {
+          if (failedSaves !== sync.failedSaves) {
             throw new Error('Failed to save review notes')
           }
           if (!client || connState !== 'connected') {
@@ -107,35 +94,38 @@ export function useMobileSessionDiffComments(scope: MobileSessionDocumentReaders
           }
           const response = await sessionWorktreeNotesWrite.request(client, {
             worktree: `id:${worktreeId}`,
-            diffComments: [...next],
-            diffCommentsBase: [...base]
+            diffComments: [...save.next],
+            diffCommentsBase: [...save.base]
           })
           const saved = interpretOrThrowRefusalMessage(
             () => sessionWorktreeNotesWrite.interpret(response),
             'Failed to save review notes'
           )
-          if (saved?.diffComments !== undefined) {
-            adoptHostDiffComments(next, saved.diffComments)
-          }
+          sync.pending = sync.pending.filter((pending) => pending !== save)
+          sync.host =
+            saved?.diffComments !== undefined
+              ? normalizeMobileDiffComments(saved.diffComments, worktreeId)
+              : mergeDiffCommentMutation(save.base, sync.host, save.next)
+          showDiffComments(sync)
         })
       } catch (err) {
-        if (failedSaves === failedSavesRef.current) {
-          failedSavesRef.current += 1
+        if (failedSaves === sync.failedSaves) {
+          sync.failedSaves += 1
         }
-        publishDiffComments(mergeDiffCommentMutation(next, diffCommentsRef.current, base))
+        sync.pending = sync.pending.filter((pending) => pending !== save)
+        showDiffComments(sync)
         throw err
       }
     },
-    [
-      client,
-      connState,
-      worktreeId,
-      diffCommentsRef,
-      enqueueNotesRequest,
-      publishDiffComments,
-      adoptHostDiffComments
-    ]
+    [client, connState, worktreeId, diffCommentsRef, notesSync, showDiffComments]
   )
+
+  useEffect(() => {
+    notesSync.active = true
+    return () => {
+      notesSync.active = false
+    }
+  }, [notesSync])
 
   useEffect(() => {
     // Catch at the fire-and-forget mount caller; the recording adapter still needs the loader’s rejection.

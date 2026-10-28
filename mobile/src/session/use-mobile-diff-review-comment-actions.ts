@@ -5,7 +5,11 @@ import type { ConnectionState } from '../transport/types'
 import type { RpcClient } from '../transport/rpc-client'
 import { interpretOrThrowRefusalMessage } from '../transport/rpc-refusal-message'
 import { sessionWorktreeNotesWrite } from './mobile-session-write-operations'
-import { addMobileDiffComment, removeMobileDiffComments } from './mobile-diff-comments'
+import {
+  addMobileDiffComment,
+  normalizeMobileDiffComments,
+  removeMobileDiffComments
+} from './mobile-diff-comments'
 import { updateMobileDiffComment } from './mobile-diff-comment-edit'
 import {
   clearMobileDiffReviewFileReviewed,
@@ -78,10 +82,10 @@ export function useMobileDiffReviewCommentActions(input: CommentActionsInput) {
         diffCommentsBase: [...base],
         mobileDiffReview: reviewState
       })
-      interpretOrThrowRefusalMessage(
+      return interpretOrThrowRefusalMessage(
         () => sessionWorktreeNotesWrite.interpret(response),
         'Failed to save review state'
-      )
+      )?.diffComments
     },
     [client, connState, worktreeId]
   )
@@ -98,11 +102,19 @@ export function useMobileDiffReviewCommentActions(input: CommentActionsInput) {
       const previous = screenState
       updateReadyState((state) => ({ ...state, comments, reviewState }))
       try {
-        await persistMetadata(
+        const saved = await persistMetadata(
           comments,
           previous.kind === 'ready' ? previous.comments : comments,
           reviewState
         )
+        if (saved !== undefined) {
+          // Why: the host kept notes other devices changed; show its list unless a later save moved on.
+          updateReadyState((state) =>
+            state.comments === comments
+              ? { ...state, comments: normalizeMobileDiffComments(saved, worktreeId) }
+              : state
+          )
+        }
         triggerSuccess()
       } catch (err) {
         if (previous.kind === 'ready') {
@@ -113,7 +125,7 @@ export function useMobileDiffReviewCommentActions(input: CommentActionsInput) {
         throw err
       }
     },
-    [persistMetadata, screenState, setActionError, setScreenState, updateReadyState]
+    [persistMetadata, screenState, setActionError, setScreenState, updateReadyState, worktreeId]
   )
 
   const openComposer = useCallback(
