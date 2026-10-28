@@ -92,7 +92,7 @@ describe('browser keyboard draft delivery', () => {
         })
         expect(keyboard.draft()).toBe(accepted ? 'new typing' : 'first draftnew typing')
         expect(keyboard.toast.mock.calls).toEqual([
-          [accepted ? 'Sent' : 'Could not confirm delivery. Check the page before retrying.']
+          [accepted ? 'Sent' : 'Delivery unconfirmed — check page before retrying']
         ])
       } finally {
         keyboard.unmount()
@@ -116,7 +116,7 @@ describe('browser keyboard draft delivery', () => {
       await pending
     })
     expect(keyboard.draft()).toBe('first draftnew draft')
-    expect(keyboard.toast).not.toHaveBeenCalledWith('Sent')
+    expect(keyboard.toast).not.toHaveBeenCalled()
     keyboard.unmount()
   })
 

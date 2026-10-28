@@ -37,6 +37,13 @@
         }
       }
     },
+    "1f06b7937642": {
+      "name": "toast",
+      "ordinal": 3,
+      "value": {
+        "message": "Delivery unconfirmed — check page before retrying"
+      }
+    },
     "2dcee9ba2dde": {
       "name": "browser.keyboardInsertText#1",
       "ordinal": 1,
@@ -185,6 +192,42 @@
         }
       }
     },
+    "603446637f11": {
+      "name": "browser.keypress#1",
+      "ordinal": 3,
+      "args": [
+        {
+          "name": "method",
+          "value": "browser.keypress"
+        },
+        {
+          "name": "params",
+          "value": {
+            "key": "Enter",
+            "page": "page-1",
+            "worktree": "id:worktree-1"
+          }
+        },
+        {
+          "name": "options",
+          "value": {
+            "timeoutMs": 15000
+          }
+        }
+      ],
+      "settlement": {
+        "status": "fulfilled",
+        "startedAt": 0,
+        "settledAt": 0,
+        "value": {
+          "id": "frame-2",
+          "ok": true,
+          "result": {
+            "pressed": true
+          }
+        }
+      }
+    },
     "6104536ec606": {
       "name": "browser.keypress#1",
       "ordinal": 5,
@@ -329,12 +372,10 @@
         }
       }
     },
-    "c33041d31ebb": {
-      "name": "toast",
-      "ordinal": 3,
-      "value": {
-        "message": "Could not confirm delivery. Check the page before retrying."
-      }
+    "b6f10f9bd5b0": {
+      "name": "browser.keypress#1",
+      "ordinal": 4,
+      "json": "{\"id\":\"frame-2\",\"deviceToken\":\"recording-device\",\"method\":\"browser.keypress\",\"params\":{\"worktree\":\"id:worktree-1\",\"page\":\"page-1\",\"key\":\"Enter\"}}"
     },
     "d1075b8afeb6": {
       "name": "browser.keyboardInsertText#1",
@@ -581,43 +622,43 @@
       {
         "id": "browser-keyboard-input.outer-refused:typed",
         "observation": {
-          "sender": ["7fcc7d1c7325", "e6c97e728698"],
-          "payloads": ["86b725378b3b", "6104536ec606"],
+          "sender": ["7fcc7d1c7325", "603446637f11"],
+          "payloads": ["86b725378b3b", "b6f10f9bd5b0"],
           "settlements": {
             "mount": "eb79a9b3682a",
             "text": "eb79a9b3682a",
             "keypress": "eb79a9b3682a"
           },
           "state": "9855d4ec3415",
-          "effects": ["c33041d31ebb"]
+          "effects": []
         }
       },
       {
         "id": "browser-keyboard-input.outer-refused-no-message:typed",
         "observation": {
-          "sender": ["4a2e49194369", "e6c97e728698"],
-          "payloads": ["86b725378b3b", "6104536ec606"],
+          "sender": ["4a2e49194369", "603446637f11"],
+          "payloads": ["86b725378b3b", "b6f10f9bd5b0"],
           "settlements": {
             "mount": "eb79a9b3682a",
             "text": "eb79a9b3682a",
             "keypress": "eb79a9b3682a"
           },
           "state": "9855d4ec3415",
-          "effects": ["c33041d31ebb"]
+          "effects": []
         }
       },
       {
         "id": "browser-keyboard-input.method-not-found:typed",
         "observation": {
-          "sender": ["d64bbe5629c2", "e6c97e728698"],
-          "payloads": ["86b725378b3b", "6104536ec606"],
+          "sender": ["d64bbe5629c2", "603446637f11"],
+          "payloads": ["86b725378b3b", "b6f10f9bd5b0"],
           "settlements": {
             "mount": "eb79a9b3682a",
             "text": "eb79a9b3682a",
             "keypress": "eb79a9b3682a"
           },
           "state": "9855d4ec3415",
-          "effects": ["c33041d31ebb"]
+          "effects": []
         }
       },
       {
@@ -631,7 +672,7 @@
             "keypress": "eb79a9b3682a"
           },
           "state": "9855d4ec3415",
-          "effects": ["c33041d31ebb"]
+          "effects": ["1f06b7937642"]
         }
       },
       {
@@ -645,7 +686,7 @@
             "keypress": "eb79a9b3682a"
           },
           "state": "9855d4ec3415",
-          "effects": ["c33041d31ebb"]
+          "effects": ["1f06b7937642"]
         }
       }
     ]

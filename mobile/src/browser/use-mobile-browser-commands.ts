@@ -1,6 +1,7 @@
 import { useCallback, useLayoutEffect, useRef, type Dispatch, type SetStateAction } from 'react'
 import type { RpcClient } from '../transport/rpc-client'
 import { isRpcDeliveryUnknown } from '../transport/rpc-delivery-ambiguity'
+import { isLogicalClientCutoverError } from '../transport/stable-logical-rpc-client'
 import type { BrowserScreencastFrameMetadata } from '../transport/browser-screencast-protocol'
 import {
   browserDialogAccept,
@@ -74,14 +75,12 @@ export function useMobileBrowserCommands(args: MobileBrowserCommandArgs) {
 
   const pendingWheelCommandRef = useRef<PendingWheelCommand | null>(null)
   const dialogAnswerTokenRef = useRef(0)
-  const keyboardOwnerRef = useRef({ client, pageParams, sending: false })
+  // A send's reply may only touch the draft of the page and client that sent it.
+  const keyboardSendOwnerRef = useRef({ sending: false })
   useLayoutEffect(() => {
-    const owner = { client, pageParams, sending: false }
-    keyboardOwnerRef.current = owner
+    keyboardSendOwnerRef.current = { sending: false }
     return () => {
-      if (keyboardOwnerRef.current === owner) {
-        keyboardOwnerRef.current = { client: null, pageParams, sending: false }
-      }
+      keyboardSendOwnerRef.current = { sending: false }
     }
   }, [client, pageParams])
 
@@ -225,8 +224,8 @@ export function useMobileBrowserCommands(args: MobileBrowserCommandArgs) {
 
   const sendKeyboardText = useCallback(async () => {
     const text = keyboardValue
-    const owner = keyboardOwnerRef.current
-    if (!text || owner.sending || owner.client !== client || owner.pageParams !== pageParams) {
+    const owner = keyboardSendOwnerRef.current
+    if (!text || owner.sending) {
       return
     }
     owner.sending = true
@@ -234,26 +233,35 @@ export function useMobileBrowserCommands(args: MobileBrowserCommandArgs) {
     try {
       const result = await sendBrowserRequest(
         async (rpc, page, options) => {
-          browserInsertText.interpret(
-            await browserInsertText.request(rpc, { ...page, text }, options)
-          )
-          return true
+          try {
+            browserInsertText.interpret(
+              await browserInsertText.request(rpc, { ...page, text }, options)
+            )
+            return 'sent'
+          } catch (error) {
+            if (isRpcDeliveryUnknown(error) || isLogicalClientCutoverError(error)) {
+              return 'unconfirmed'
+            }
+            throw error
+          }
         },
         { suppressError: true }
       )
-      if (keyboardOwnerRef.current !== owner) {
+      if (keyboardSendOwnerRef.current !== owner) {
         return
       }
-      if (result !== null) {
+      if (result === 'sent') {
         onToast('Sent')
-      } else {
-        setKeyboardValue((current) => text + current)
-        onToast('Could not confirm delivery. Check the page before retrying.')
+        return
+      }
+      setKeyboardValue((current) => text + current)
+      if (result === 'unconfirmed') {
+        onToast('Delivery unconfirmed — check page before retrying')
       }
     } finally {
       owner.sending = false
     }
-  }, [client, keyboardValue, onToast, pageParams, sendBrowserRequest])
+  }, [keyboardValue, onToast, sendBrowserRequest])
 
   const sendKeypress = useCallback(
     async (key: string) => {
