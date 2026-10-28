@@ -87,7 +87,7 @@ describe('browser keyboard draft delivery', () => {
           if (accepted) {
             request.resolve(rpcSuccess('send', null))
           } else {
-            request.reject(new Error('Connection migrated'))
+            request.reject(markRpcDeliveryUnknown(new Error('Connection migrated')))
           }
           await pending
         })

@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, type Dispatch, type SetStateAction } from 'react'
 import type { RpcClient } from '../transport/rpc-client'
 import { isRpcDeliveryUnknown } from '../transport/rpc-delivery-ambiguity'
-import { isLogicalClientCutoverError } from '../transport/stable-logical-rpc-client'
 import type { BrowserScreencastFrameMetadata } from '../transport/browser-screencast-protocol'
 import {
   browserDialogAccept,
@@ -231,6 +230,7 @@ export function useMobileBrowserCommands(args: MobileBrowserCommandArgs) {
     }
     send.sending = true
     setKeyboardValue('')
+    let unconfirmed = false
     try {
       const result = await sendBrowserRequest(
         async (rpc, page, options) => {
@@ -238,11 +238,9 @@ export function useMobileBrowserCommands(args: MobileBrowserCommandArgs) {
             browserInsertText.interpret(
               await browserInsertText.request(rpc, { ...page, text }, options)
             )
-            return 'sent'
+            return true
           } catch (error) {
-            if (isRpcDeliveryUnknown(error) || isLogicalClientCutoverError(error)) {
-              return 'unconfirmed'
-            }
+            unconfirmed = isRpcDeliveryUnknown(error)
             throw error
           }
         },
@@ -251,12 +249,12 @@ export function useMobileBrowserCommands(args: MobileBrowserCommandArgs) {
       if (!send.mounted) {
         return
       }
-      if (result === 'sent') {
+      if (result !== null) {
         onToast('Sent')
         return
       }
       setKeyboardValue((current) => text + current)
-      if (result === 'unconfirmed') {
+      if (unconfirmed) {
         onToast('Delivery unconfirmed — check page before retrying')
       }
     } finally {
