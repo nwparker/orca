@@ -242,6 +242,46 @@ describe('shared settings screen state', () => {
       })
       expect(renderer.root.findByType(VoiceModelList).props.setup.selectedModelId).toBe('')
     })
+    it('waits for it before re-reading for an older save', async () => {
+      let deleteFinished = false
+      const reads: (() => void)[] = []
+      const pendingSave = Promise.withResolvers<MobileSpeechSetup>()
+      const pendingDelete = Promise.withResolvers<MobileSpeechSetup>()
+      const operations: VoiceSettingsOperations = {
+        load: vi
+          .fn()
+          .mockResolvedValueOnce(selected)
+          .mockImplementation(() => {
+            const snapshot = deleteFinished ? deleted : selected
+            return new Promise<MobileSpeechSetup>((resolve) => reads.push(() => resolve(snapshot)))
+          }),
+        configure: vi.fn(() => pendingSave.promise),
+        download: vi.fn(),
+        delete: vi.fn(() => pendingDelete.promise)
+      }
+      await act(async () => {
+        renderer = create(
+          createElement(VoiceSettingsScreen, { operations, focused: true, onBack: vi.fn() })
+        )
+      })
+      await act(async () => {
+        renderer.root.findByProps({ testIDPrefix: 'voice-mode-' }).props.onSelect('hold')
+      })
+      await act(async () => {
+        renderer.root.findByType(VoiceModelList).props.onDelete(model)
+      })
+      await act(async () => {
+        pendingSave.resolve({ ...selected, dictationMode: 'hold' })
+      })
+      await act(async () => {
+        deleteFinished = true
+        pendingDelete.resolve(deleted)
+      })
+      await act(async () => {
+        reads.forEach((finishRead) => finishRead())
+      })
+      expect(renderer.root.findByType(VoiceModelList).props.setup.selectedModelId).toBe('')
+    })
     it('still shows its error when it fails', async () => {
       const pendingDelete = await deleteThenChangeMode()
       await act(async () => {

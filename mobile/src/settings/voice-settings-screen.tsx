@@ -41,10 +41,16 @@ export default function VoiceSettingsScreen({
   const [error, setError] = useState<string | null>(null)
   const [busyAction, setBusyAction] = useState<ModelBusyAction | null>(null)
   const requestEpoch = useRef(0)
+  const pendingChanges = useRef(0)
+  const rereadWhenSettled = useRef(false)
   const [modelDrawerOpen, setModelDrawerOpen] = useState(false)
   const refresh = useCallback(async (): Promise<boolean | undefined> => {
     if (!operations) {
       return false
+    }
+    // A read sent during a change can predate it: the host clears a deleted model only after removing its files.
+    if (pendingChanges.current > 0) {
+      return undefined
     }
     const epoch = requestEpoch.current
     // The serialized read owns its spinner so retries hide stale errors and no competing read clears it.
@@ -75,12 +81,39 @@ export default function VoiceSettingsScreen({
     intervalMs: POLL_INTERVAL_MS
   })
 
+  // Only the newest change's reply is applied; if any reply was skipped, re-read once all changes settle.
+  const sendChange = useCallback(
+    async <T,>(
+      send: () => Promise<T>
+    ): Promise<
+      { ok: true; reply: T; latest: boolean } | { ok: false; error: unknown; latest: boolean }
+    > => {
+      const epoch = ++requestEpoch.current
+      pendingChanges.current += 1
+      try {
+        const reply = await send()
+        const latest = epoch === requestEpoch.current
+        rereadWhenSettled.current ||= !latest
+        return { ok: true, reply, latest }
+      } catch (error) {
+        rereadWhenSettled.current = true
+        return { ok: false, error, latest: epoch === requestEpoch.current }
+      } finally {
+        pendingChanges.current -= 1
+        if (pendingChanges.current === 0 && rereadWhenSettled.current) {
+          rereadWhenSettled.current = false
+          void refreshSetup()
+        }
+      }
+    },
+    [refreshSetup]
+  )
+
   const configure = useCallback(
     async (params: Parameters<VoiceSettingsOperations['configure']>[0]) => {
       if (!operations) {
         return
       }
-      const epoch = ++requestEpoch.current
       setError(null)
       const { enabled, dictationMode } = params
       setSetup((prev) =>
@@ -92,23 +125,17 @@ export default function VoiceSettingsScreen({
             }
           : prev
       )
-      try {
-        const next = await operations.configure(params)
-        // Apply only the newest reply. An older success re-reads instead: a newer reply can
-        // predate it, because the host finishes a model delete only after removing its files.
-        if (epoch === requestEpoch.current) {
-          setSetup(next)
-        } else {
-          void refreshSetup()
-        }
-      } catch (err) {
-        if (epoch === requestEpoch.current) {
-          setError(err instanceof Error ? err.message : 'Could not update')
-        }
-        void refreshSetup()
+      const result = await sendChange(() => operations.configure(params))
+      if (!result.latest) {
+        return
+      }
+      if (result.ok) {
+        setSetup(result.reply)
+      } else {
+        setError(result.error instanceof Error ? result.error.message : 'Could not update')
       }
     },
-    [operations, refreshSetup]
+    [operations, sendChange]
   )
 
   const handleUseModel = useCallback(
@@ -116,24 +143,20 @@ export default function VoiceSettingsScreen({
       if (!operations) {
         return
       }
-      const epoch = ++requestEpoch.current
       setBusyAction({ modelId: model.id, type: 'select' })
       setError(null)
-      try {
-        const next = await operations.configure({ enabled: true, modelId: model.id })
-        if (epoch === requestEpoch.current) {
-          setSetup(next)
-          setModelDrawerOpen(false)
-        } else {
-          void refreshSetup()
-        }
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Could not select model')
-      } finally {
-        setBusyAction(null)
+      const result = await sendChange(() =>
+        operations.configure({ enabled: true, modelId: model.id })
+      )
+      if (!result.ok) {
+        setError(result.error instanceof Error ? result.error.message : 'Could not select model')
+      } else if (result.latest) {
+        setSetup(result.reply)
+        setModelDrawerOpen(false)
       }
+      setBusyAction(null)
     },
-    [operations, refreshSetup]
+    [operations, sendChange]
   )
 
   const handleDownload = useCallback(
@@ -162,26 +185,20 @@ export default function VoiceSettingsScreen({
         return
       }
       const deletedSelectedModel = setup?.selectedModelId === model.id
-      const epoch = ++requestEpoch.current
       setBusyAction({ modelId: model.id, type: 'delete' })
       setError(null)
-      try {
-        const next = await operations.delete(model.id)
-        if (epoch === requestEpoch.current) {
-          setSetup(next)
-          if (deletedSelectedModel) {
-            setModelDrawerOpen(false)
-          }
-        } else {
-          void refreshSetup()
+      const result = await sendChange(() => operations.delete(model.id))
+      if (!result.ok) {
+        setError(result.error instanceof Error ? result.error.message : 'Delete failed')
+      } else if (result.latest) {
+        setSetup(result.reply)
+        if (deletedSelectedModel) {
+          setModelDrawerOpen(false)
         }
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Delete failed')
-      } finally {
-        setBusyAction(null)
       }
+      setBusyAction(null)
     },
-    [operations, refreshSetup, setup?.selectedModelId]
+    [operations, sendChange, setup?.selectedModelId]
   )
 
   const enabled = setup?.enabled ?? false
