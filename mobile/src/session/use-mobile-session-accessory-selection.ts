@@ -98,7 +98,9 @@ export function useMobileSessionAccessorySelection(scope: MobileSessionTerminalI
       const pressedClient = clientRef.current
       const pressedGeneration = pressedClient?.getGeneration?.() ?? 0
       const pressedRevision = repeatOwnerRevisionRef.current
-      const sender = createTerminalAccessoryRepeatSender(
+      const sender = createTerminalAccessoryRepeatSender<
+        ReturnType<typeof createTerminalLiveAccessoryInput>
+      >(
         activeHandleRef.current,
         (handle) =>
           repeatOwnerRevisionRef.current === pressedRevision &&
