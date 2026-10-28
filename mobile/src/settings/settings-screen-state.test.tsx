@@ -193,7 +193,7 @@ describe('shared settings screen state', () => {
     })
     expect(switchProps().value).toBe(true)
   })
-  it('re-reads when a model delete finishes after a newer change replied', async () => {
+  describe('a model delete that settles after a newer change', () => {
     const model: MobileSpeechModel = {
       id: 'base',
       label: 'Base',
@@ -214,33 +214,41 @@ describe('shared settings screen state', () => {
       selectedModelId: '',
       models: [{ ...model, status: 'not-downloaded' }]
     }
-    let finishDelete: (value: MobileSpeechSetup) => void = () => {}
-    const operations: VoiceSettingsOperations = {
-      load: vi.fn().mockResolvedValueOnce(selected).mockResolvedValue(deleted),
-      configure: vi.fn().mockResolvedValue({ ...selected, dictationMode: 'hold' }),
-      download: vi.fn(),
-      delete: vi.fn(
-        () =>
-          new Promise<MobileSpeechSetup>((resolve) => {
-            finishDelete = resolve
-          })
-      )
+    async function deleteThenChangeMode(): Promise<PromiseWithResolvers<MobileSpeechSetup>> {
+      const pendingDelete = Promise.withResolvers<MobileSpeechSetup>()
+      const operations: VoiceSettingsOperations = {
+        load: vi.fn().mockResolvedValueOnce(selected).mockResolvedValue(deleted),
+        configure: vi.fn().mockResolvedValue({ ...selected, dictationMode: 'hold' }),
+        download: vi.fn(),
+        delete: vi.fn(() => pendingDelete.promise)
+      }
+      await act(async () => {
+        renderer = create(
+          createElement(VoiceSettingsScreen, { operations, focused: true, onBack: vi.fn() })
+        )
+      })
+      await act(async () => {
+        renderer.root.findByType(VoiceModelList).props.onDelete(model)
+      })
+      await act(async () => {
+        renderer.root.findByProps({ testIDPrefix: 'voice-mode-' }).props.onSelect('hold')
+      })
+      return pendingDelete
     }
-    await act(async () => {
-      renderer = create(
-        createElement(VoiceSettingsScreen, { operations, focused: true, onBack: vi.fn() })
-      )
+    it('re-reads when it succeeds', async () => {
+      const pendingDelete = await deleteThenChangeMode()
+      await act(async () => {
+        pendingDelete.resolve(deleted)
+      })
+      expect(renderer.root.findByType(VoiceModelList).props.setup.selectedModelId).toBe('')
     })
-    await act(async () => {
-      renderer.root.findByType(VoiceModelList).props.onDelete(model)
+    it('still shows its error when it fails', async () => {
+      const pendingDelete = await deleteThenChangeMode()
+      await act(async () => {
+        pendingDelete.reject(new Error('voice_model_in_use'))
+      })
+      expect(JSON.stringify(renderer.toJSON())).toContain('voice_model_in_use')
     })
-    await act(async () => {
-      renderer.root.findByProps({ testIDPrefix: 'voice-mode-' }).props.onSelect('hold')
-    })
-    await act(async () => {
-      finishDelete(deleted)
-    })
-    expect(renderer.root.findByType(VoiceModelList).props.setup.selectedModelId).toBe('')
   })
   it('does not enable notifications when permission is not granted', async () => {
     const denied = {
