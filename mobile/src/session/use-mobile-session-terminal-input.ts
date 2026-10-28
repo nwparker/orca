@@ -45,7 +45,6 @@ export function useMobileSessionTerminalInput(scope: MobileSessionFileActionsMod
     sendLiveInputClick,
     sendLiveTerminalInputRef,
     showToast,
-    getTerminalRef,
     hostQueryReplyInputSupportedRef,
     hostProgramStatusSupportedRef,
     unsubscribeTerminal,
@@ -244,12 +243,8 @@ export function useMobileSessionTerminalInput(scope: MobileSessionFileActionsMod
     if (!client) {
       return
     }
-    const generation = client.getGeneration?.() ?? 0
-    const terminal = getTerminalRef(target.handle)
-    const isCurrent = () =>
-      clientRef.current === client &&
-      (client.getGeneration?.() ?? 0) === generation &&
-      getTerminalRef(target.handle) === terminal
+    // Why: only a different client is stale; the WebView handle is rebuilt on re-render and a path cutover keeps the same host.
+    const isCurrent = () => clientRef.current === client
     try {
       const response = await terminalBufferClear.request(
         client,

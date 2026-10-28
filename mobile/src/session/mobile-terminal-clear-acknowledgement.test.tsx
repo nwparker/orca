@@ -131,8 +131,8 @@ describe('mobile terminal buffer clear acknowledgement', () => {
     }
   })
 
-  it.each(['replaceTerminal', 'migrateAuthority', 'replaceClient'] as const)(
-    'ignores a clear acknowledgement after %s',
+  it.each(['replaceTerminal', 'migrateAuthority'] as const)(
+    'still refreshes when the clear is accepted after %s',
     async (change) => {
       const reply = deferredReply()
       const view = mountClear(() => reply.promise)
@@ -141,12 +141,27 @@ describe('mobile terminal buffer clear acknowledgement', () => {
         view[change]()
         reply.resolve(cleared)
         await pending
-        expect(view.clear).not.toHaveBeenCalled()
-        expect(view.subscribeToTerminal).not.toHaveBeenCalled()
-        expect(view.showToast).not.toHaveBeenCalled()
+        expect(view.subscribeToTerminal).toHaveBeenCalledWith('term')
+        expect(view.showToast.mock.calls).toEqual([['Terminal cleared']])
       } finally {
         view.dispose()
       }
     }
   )
+
+  it('ignores a clear acknowledgement after the client is replaced', async () => {
+    const reply = deferredReply()
+    const view = mountClear(() => reply.promise)
+    try {
+      const pending = view.clearHost()
+      view.replaceClient()
+      reply.resolve(cleared)
+      await pending
+      expect(view.clear).not.toHaveBeenCalled()
+      expect(view.subscribeToTerminal).not.toHaveBeenCalled()
+      expect(view.showToast).not.toHaveBeenCalled()
+    } finally {
+      view.dispose()
+    }
+  })
 })
