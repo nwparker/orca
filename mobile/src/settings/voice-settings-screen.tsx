@@ -58,7 +58,9 @@ export default function VoiceSettingsScreen({
       setError(null)
       return next.models.some(isModelInFlight)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load voice settings')
+      if (epoch === requestEpoch.current) {
+        setError(err instanceof Error ? err.message : 'Failed to load voice settings')
+      }
       return undefined
     } finally {
       setLoading(false)
@@ -78,7 +80,7 @@ export default function VoiceSettingsScreen({
       if (!operations) {
         return
       }
-      requestEpoch.current += 1
+      const epoch = ++requestEpoch.current
       setError(null)
       const { enabled, dictationMode } = params
       setSetup((prev) =>
@@ -91,10 +93,15 @@ export default function VoiceSettingsScreen({
           : prev
       )
       try {
-        setSetup(await operations.configure(params))
+        const next = await operations.configure(params)
+        if (epoch === requestEpoch.current) {
+          setSetup(next)
+        }
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Could not update')
-        void refreshSetup()
+        if (epoch === requestEpoch.current) {
+          setError(err instanceof Error ? err.message : 'Could not update')
+          void refreshSetup()
+        }
       }
     },
     [operations, refreshSetup]
@@ -105,14 +112,19 @@ export default function VoiceSettingsScreen({
       if (!operations) {
         return
       }
-      requestEpoch.current += 1
+      const epoch = ++requestEpoch.current
       setBusyAction({ modelId: model.id, type: 'select' })
       setError(null)
       try {
-        setSetup(await operations.configure({ enabled: true, modelId: model.id }))
-        setModelDrawerOpen(false)
+        const next = await operations.configure({ enabled: true, modelId: model.id })
+        if (epoch === requestEpoch.current) {
+          setSetup(next)
+          setModelDrawerOpen(false)
+        }
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Could not select model')
+        if (epoch === requestEpoch.current) {
+          setError(err instanceof Error ? err.message : 'Could not select model')
+        }
       } finally {
         setBusyAction(null)
       }
@@ -125,14 +137,18 @@ export default function VoiceSettingsScreen({
       if (!operations) {
         return
       }
-      requestEpoch.current += 1
+      const epoch = ++requestEpoch.current
       setBusyAction({ modelId: model.id, type: 'download' })
       setError(null)
       try {
         await operations.download(model.id)
-        await refreshSetup()
+        if (epoch === requestEpoch.current) {
+          await refreshSetup()
+        }
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Download failed')
+        if (epoch === requestEpoch.current) {
+          setError(err instanceof Error ? err.message : 'Download failed')
+        }
       } finally {
         setBusyAction(null)
       }
@@ -146,16 +162,21 @@ export default function VoiceSettingsScreen({
         return
       }
       const deletedSelectedModel = setup?.selectedModelId === model.id
-      requestEpoch.current += 1
+      const epoch = ++requestEpoch.current
       setBusyAction({ modelId: model.id, type: 'delete' })
       setError(null)
       try {
-        setSetup(await operations.delete(model.id))
-        if (deletedSelectedModel) {
-          setModelDrawerOpen(false)
+        const next = await operations.delete(model.id)
+        if (epoch === requestEpoch.current) {
+          setSetup(next)
+          if (deletedSelectedModel) {
+            setModelDrawerOpen(false)
+          }
         }
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Delete failed')
+        if (epoch === requestEpoch.current) {
+          setError(err instanceof Error ? err.message : 'Delete failed')
+        }
       } finally {
         setBusyAction(null)
       }

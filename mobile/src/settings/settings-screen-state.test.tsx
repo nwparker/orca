@@ -154,6 +154,40 @@ describe('shared settings screen state', () => {
     // Without the request-epoch fence the stale read would flip the switch back on.
     expect(switchProps().value).toBe(false)
   })
+  it('keeps the latest Voice switch choice when an older save replies last', async () => {
+    const loaded = {
+      enabled: true,
+      dictationMode: 'toggle',
+      selectedModelId: '',
+      models: []
+    }
+    const replies: ((value: typeof loaded) => void)[] = []
+    const operations: VoiceSettingsOperations = {
+      load: vi.fn().mockResolvedValue(loaded),
+      configure: vi.fn(() => new Promise<typeof loaded>((resolve) => replies.push(resolve))),
+      download: vi.fn(),
+      delete: vi.fn()
+    }
+    await act(async () => {
+      renderer = create(
+        createElement(VoiceSettingsScreen, { operations, focused: true, onBack: vi.fn() })
+      )
+    })
+    const switchProps = () => renderer.root.findByProps({ testID: 'voice-enabled' }).props
+    await act(async () => {
+      switchProps().onValueChange(false)
+    })
+    await act(async () => {
+      switchProps().onValueChange(true)
+    })
+    await act(async () => {
+      replies[1]({ ...loaded, enabled: true })
+    })
+    await act(async () => {
+      replies[0]({ ...loaded, enabled: false })
+    })
+    expect(switchProps().value).toBe(true)
+  })
   it('does not enable notifications when permission is not granted', async () => {
     const denied = {
       granted: false,
