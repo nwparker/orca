@@ -36,8 +36,9 @@ export function useMobileSessionDiffComments(scope: MobileSessionDocumentReaders
   const [sendingDiffCommentIds, setSendingDiffCommentIds] = useState<ReadonlySet<string>>(
     sendingDiffCommentIdsRef.current
   )
-  // Why: a reply reflects the host only if no later load or save for these notes has started.
-  const notesGenerationRef = useRef(0)
+  // Why: a reply reflects the host only if no later read (or save) of the same kind has started.
+  const loadSeqRef = useRef(0)
+  const saveSeqRef = useRef(0)
   const publishDiffComments = useCallback(
     (comments: DiffComment[]): void => {
       // Why: a second tap in the same frame must build on this list, not the last rendered one.
@@ -48,7 +49,8 @@ export function useMobileSessionDiffComments(scope: MobileSessionDocumentReaders
   )
 
   const loadDiffComments = useCallback(async (): Promise<void> => {
-    const generation = ++notesGenerationRef.current
+    const seq = ++loadSeqRef.current
+    const start = diffCommentsRef.current
     if (!client || connState !== 'connected' || !worktreeId || isFloatingWorkspaceRoute) {
       publishDiffComments([])
       return
@@ -56,17 +58,19 @@ export function useMobileSessionDiffComments(scope: MobileSessionDocumentReaders
     const response = sessionWorktreeRecordRead.interpret(
       await sessionWorktreeRecordRead.request(client, { worktree: `id:${worktreeId}` })
     )
-    if (!response.accepted || generation !== notesGenerationRef.current) {
+    if (!response.accepted || seq !== loadSeqRef.current) {
       return
     }
-    publishDiffComments(normalizeMobileDiffComments(response.value?.diffComments, worktreeId))
+    const hostComments = normalizeMobileDiffComments(response.value?.diffComments, worktreeId)
+    // Why: keep the adds and deletes made on the phone while this read was in flight.
+    publishDiffComments(mergeDiffCommentMutation(start, hostComments, diffCommentsRef.current))
   }, [client, connState, worktreeId, isFloatingWorkspaceRoute, publishDiffComments])
 
   // Shows `next` at once, then the host's merged list; on failure undoes only this change.
   const saveDiffComments = useCallback(
     async (next: DiffComment[]): Promise<void> => {
       const base = diffCommentsRef.current
-      const generation = ++notesGenerationRef.current
+      const seq = ++saveSeqRef.current
       publishDiffComments(next)
       try {
         if (!client || connState !== 'connected') {
@@ -81,7 +85,7 @@ export function useMobileSessionDiffComments(scope: MobileSessionDocumentReaders
           () => sessionWorktreeNotesWrite.interpret(response),
           'Failed to save review notes'
         )
-        if (generation === notesGenerationRef.current && saved?.diffComments !== undefined) {
+        if (seq === saveSeqRef.current && saved?.diffComments !== undefined) {
           publishDiffComments(normalizeMobileDiffComments(saved.diffComments, worktreeId))
         }
       } catch (err) {

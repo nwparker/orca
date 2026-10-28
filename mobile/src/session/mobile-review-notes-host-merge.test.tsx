@@ -188,6 +188,20 @@ describe('mobile review notes saved against the host', () => {
     expect(shown.map((comment) => comment.body)).toEqual(['note a', 'early'])
   })
 
+  it('still shows the loaded notes when a save made before the first load fails', async () => {
+    const { host, client, heldShows } = fakeHost([note('a')], { merges: true })
+    host.holdShow = true
+    host.failNextSet = true
+    await mountNotes(client)
+
+    await act(async () => {
+      await hook().addDiffCommentForFile('src/a.ts', 2, 'refused')
+    })
+    await act(async () => heldShows.forEach((answer) => answer()))
+
+    expect(ids(shown)).toEqual(['a'])
+  })
+
   it('still sends the full list, so a host without the merge replaces it as before', async () => {
     const { host, client, sendRequest } = fakeHost([note('a')], { merges: false })
     await mountNotes(client)
