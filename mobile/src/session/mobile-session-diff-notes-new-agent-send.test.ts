@@ -213,7 +213,7 @@ describe('sending review notes to a new agent session', () => {
     await act(async () => replies[0]?.(launchReply('handed-to-terminal')))
     expect(screen().sendingIds.size).toBe(0)
     expect(sendRequest.mock.calls.filter(([method]) => method === 'worktree.set')).toEqual([
-      ['worktree.set', { worktree: 'id:workspace-1', diffComments: [] }]
+      ['worktree.set', { worktree: 'id:workspace-1', diffComments: [], diffCommentsBase: [NOTE] }]
     ])
     await act(async () => screen().send())
     expect(screen().pendingDelivery).toBeNull()

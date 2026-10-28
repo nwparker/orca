@@ -1,6 +1,6 @@
 import { bindDeferredRpcOperation, defineRpcOperation } from '../transport/rpc-operation'
 import { rpcResultVariant } from '../transport/rpc-operation-result-reader'
-import { markdownTabDocumentSchema } from './session-read-reply-schema'
+import { markdownTabDocumentSchema, sessionWorktreeRecordSchema } from './session-read-reply-schema'
 import { terminalSendAcceptedSchema } from '../terminal/terminal-reply-schema'
 import {
   sessionCreatedTerminalTabSchema,
@@ -92,14 +92,15 @@ export const sessionTabActivate = bindDeferredRpcOperation(
   })
 )
 
-// Preserve host refusal text for optimistic rollback; review-note partial updates have a separate contract from source-control link writes.
+// Preserve host refusal text for optimistic rollback; the reply's record carries the host's merged notes.
 export const sessionWorktreeNotesWrite = bindDeferredRpcOperation(
   defineRpcOperation({
     name: 'worktree.set-review-notes',
     method: 'worktree.set',
     acceptance: 'require-result-or-throw-message',
     barrier: 'after-caller-barrier',
-    read: rpcResultVariant('worktree-notes-written', sessionWriteUnreadReplySchema)
+    // Acceptance stays as before; an unreadable record only means no merged notes to show.
+    read: rpcResultVariant('worktree-notes-written', sessionWorktreeRecordSchema.catch(undefined))
   })
 )
 

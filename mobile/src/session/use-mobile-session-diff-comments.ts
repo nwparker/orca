@@ -12,6 +12,7 @@ import {
   removeMobileDiffComments,
   sendableMobileDiffComments
 } from './mobile-diff-comments'
+import { mergeDiffCommentMutation } from '../../../src/shared/diff-comment-mutation'
 import type { DiffComment } from '../../../src/shared/diff-comment-types'
 import type { DiffNotesDelivery } from './mobile-session-route-types'
 import type { MobileSessionDocumentReadersModel } from './use-mobile-session-document-readers'
@@ -35,35 +36,60 @@ export function useMobileSessionDiffComments(scope: MobileSessionDocumentReaders
   const [sendingDiffCommentIds, setSendingDiffCommentIds] = useState<ReadonlySet<string>>(
     sendingDiffCommentIdsRef.current
   )
+  // Why: a reply reflects the host only if no later load or save for these notes has started.
+  const notesGenerationRef = useRef(0)
+  const publishDiffComments = useCallback(
+    (comments: DiffComment[]): void => {
+      // Why: a second tap in the same frame must build on this list, not the last rendered one.
+      diffCommentsRef.current = comments
+      setDiffComments(comments)
+    },
+    [diffCommentsRef, setDiffComments]
+  )
+
   const loadDiffComments = useCallback(async (): Promise<void> => {
+    const generation = ++notesGenerationRef.current
     if (!client || connState !== 'connected' || !worktreeId || isFloatingWorkspaceRoute) {
-      setDiffComments([])
+      publishDiffComments([])
       return
     }
     const response = sessionWorktreeRecordRead.interpret(
       await sessionWorktreeRecordRead.request(client, { worktree: `id:${worktreeId}` })
     )
-    if (!response.accepted) {
+    if (!response.accepted || generation !== notesGenerationRef.current) {
       return
     }
-    setDiffComments(normalizeMobileDiffComments(response.value?.diffComments, worktreeId))
-  }, [client, connState, worktreeId, isFloatingWorkspaceRoute])
+    publishDiffComments(normalizeMobileDiffComments(response.value?.diffComments, worktreeId))
+  }, [client, connState, worktreeId, isFloatingWorkspaceRoute, publishDiffComments])
 
-  const persistDiffComments = useCallback(
-    async (comments: readonly DiffComment[]): Promise<void> => {
-      if (!client || connState !== 'connected') {
-        throw new Error('Waiting for desktop...')
+  // Shows `next` at once, then the host's merged list; on failure undoes only this change.
+  const saveDiffComments = useCallback(
+    async (next: DiffComment[]): Promise<void> => {
+      const base = diffCommentsRef.current
+      const generation = ++notesGenerationRef.current
+      publishDiffComments(next)
+      try {
+        if (!client || connState !== 'connected') {
+          throw new Error('Waiting for desktop...')
+        }
+        const response = await sessionWorktreeNotesWrite.request(client, {
+          worktree: `id:${worktreeId}`,
+          diffComments: [...next],
+          diffCommentsBase: [...base]
+        })
+        const saved = interpretOrThrowRefusalMessage(
+          () => sessionWorktreeNotesWrite.interpret(response),
+          'Failed to save review notes'
+        )
+        if (generation === notesGenerationRef.current && saved?.diffComments !== undefined) {
+          publishDiffComments(normalizeMobileDiffComments(saved.diffComments, worktreeId))
+        }
+      } catch (err) {
+        publishDiffComments(mergeDiffCommentMutation(next, diffCommentsRef.current, base))
+        throw err
       }
-      const response = await sessionWorktreeNotesWrite.request(client, {
-        worktree: `id:${worktreeId}`,
-        diffComments: [...comments]
-      })
-      interpretOrThrowRefusalMessage(
-        () => sessionWorktreeNotesWrite.interpret(response),
-        'Failed to save review notes'
-      )
     },
-    [client, connState, worktreeId]
+    [client, connState, worktreeId, publishDiffComments]
   )
 
   useEffect(() => {
@@ -88,16 +114,13 @@ export function useMobileSessionDiffComments(scope: MobileSessionDocumentReaders
       if (!result.comment) {
         return false
       }
-      const previous = diffCommentsRef.current
       setDiffCommentBusy(true)
-      setDiffComments(result.comments)
       try {
-        await persistDiffComments(result.comments)
+        await saveDiffComments(result.comments)
         triggerSuccess()
         showToast('Note added')
         return true
       } catch (err) {
-        setDiffComments(previous)
         triggerError()
         showToast(err instanceof Error ? err.message : 'Failed to save note', 1600)
         return false
@@ -105,7 +128,7 @@ export function useMobileSessionDiffComments(scope: MobileSessionDocumentReaders
         setDiffCommentBusy(false)
       }
     },
-    [diffCommentBusy, persistDiffComments, showToast, worktreeId]
+    [diffCommentBusy, saveDiffComments, showToast, worktreeId]
   )
 
   const deleteDiffCommentForFile = useCallback(
@@ -119,19 +142,17 @@ export function useMobileSessionDiffComments(scope: MobileSessionDocumentReaders
         return
       }
       setDiffCommentBusy(true)
-      setDiffComments(next)
       try {
-        await persistDiffComments(next)
+        await saveDiffComments(next)
         triggerSelection()
       } catch (err) {
-        setDiffComments(previous)
         triggerError()
         showToast(err instanceof Error ? err.message : 'Failed to delete note', 1600)
       } finally {
         setDiffCommentBusy(false)
       }
     },
-    [diffCommentBusy, persistDiffComments, showToast]
+    [diffCommentBusy, saveDiffComments, showToast]
   )
 
   const copyDiffCommentsToClipboard = useCallback(async (): Promise<void> => {
@@ -195,20 +216,18 @@ export function useMobileSessionDiffComments(scope: MobileSessionDocumentReaders
         return
       }
       setDiffCommentBusy(true)
-      setDiffComments(next)
       try {
-        await persistDiffComments(next)
+        await saveDiffComments(next)
       } catch {
-        setDiffComments(previous)
+        // saveDiffComments already restored the delivered notes.
       } finally {
         setDiffCommentBusy(false)
       }
     },
-    [persistDiffComments]
+    [saveDiffComments]
   )
   return {
     loadDiffComments,
-    persistDiffComments,
     addDiffCommentForFile,
     deleteDiffCommentForFile,
     copyDiffCommentsToClipboard,
