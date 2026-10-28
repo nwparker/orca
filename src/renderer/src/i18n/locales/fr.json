@@ -6052,10 +6052,8 @@
           "oneWorkspace": "1 espace de travail",
           "manyWorkspaces": "{{count}} espaces de travail",
           "hostHasWorkspacesDefault": "Retire {{value0}} et ses identifiants de cet ordinateur. Ses {{value1}} restent dans Orca — les fichiers distants ne sont pas touchés.",
-          "alsoDeleteRemote": "Supprimer aussi ces {{value0}} sur {{value1}}",
           "alsoForgetLocal": "Retirer aussi ces {{value0}} d'Orca",
           "advanced": "Avancé",
-          "alsoDeleteRemoteHint": "Supprime définitivement les worktrees Git distants et leurs branches. Irréversible.",
           "alsoForgetLocalHint": "Les retire uniquement d'Orca. Les fichiers, worktrees et branches distants restent intacts.",
           "wslHostEndsTerminalsUnlessShared": "Retire {{value0}} d'Orca. Sauf si un autre Orca ouvert sur cet ordinateur l'utilise, cela ferme aussi ses terminaux ouverts et arrête le serveur d'Orca dans cette distro. Les fichiers de la distro restent intacts."
         },
@@ -6240,14 +6238,9 @@
           "sshImportSyncedSingular": "Ajout de {{count}} hôte à Orca."
         },
         "ForgetSshWorkspaceDialog": {
-          "reconnectFailed": "Échec de la reconnexion",
-          "forgetBody": "Retire uniquement cet espace de travail d'Orca. Les fichiers, le worktree Git et les branches sur {{host}} restent intacts.",
-          "title": "Supprimer « {{name}} » ?",
-          "disconnectedBody": "L'hôte SSH de cet espace de travail n'est pas connecté. Reconnectez-le pour le supprimer aussi à distance, ou retirez-le seulement d'Orca.",
           "ghostBody": "{{host}} n'est plus un hôte SSH enregistré ; cet espace de travail n'est donc plus connecté à un hôte actif. Il ne peut être que retiré d'Orca — les fichiers et branches distants restent intacts.",
           "cancel": "Annuler",
-          "forget": "Retirer d'Orca",
-          "reconnectAndDelete": "Reconnecter et supprimer"
+          "forget": "Retirer d'Orca"
         },
         "MarkdownImageLightbox": {
           "image": "Image",

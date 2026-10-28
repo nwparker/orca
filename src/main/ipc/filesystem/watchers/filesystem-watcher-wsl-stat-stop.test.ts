@@ -34,7 +34,7 @@ class SnapshotChild extends EventEmitter {
 }
 
 function snapshotFrame(mtime: string): string {
-  return `\x1ef\t${mtime}\t/home/me/repo/README.md\0\x1f`
+  return `\0\x1e\0f\t${mtime}\t/home/me/repo/README.md\0\0\x1f\0`
 }
 
 function listen(root: WatchedRoot, id: number) {
@@ -122,6 +122,17 @@ it('delivers overflow after a spontaneous WSL stop without starting queued metad
   child.emit('close', null, 'SIGTERM')
   expect(onUnexpectedStop).toHaveBeenCalledExactlyOnceWith(wsl, 'Ubuntu')
   expect(watchedRoots.has(wslPath)).toBe(false)
+  expect(wsl.batch.statAbortController.signal.aborted).toBe(true)
+  await vi.advanceTimersByTimeAsync(WATCH_BATCH_INTERVAL_MS)
+  expect(wsl.batch.flushInFlight).toBe(false)
+  expect(
+    wslSend.mock.calls.filter(([, payload]) =>
+      payload.events.some((event) => event.kind === 'overflow')
+    )
+  ).toEqual([
+    ['fs:changed', { worktreePath: wslPath, events: [{ kind: 'overflow', absolutePath: wslPath }] }]
+  ])
+  expect(statMock).toHaveBeenCalledTimes(8)
 
   for (const deferred of pendingStats.splice(0)) {
     deferred.resolve({ isDirectory: () => false })

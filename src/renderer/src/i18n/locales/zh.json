@@ -5928,10 +5928,8 @@
           "oneWorkspace": "1 个工作区",
           "manyWorkspaces": "{{count}} 个工作区",
           "hostHasWorkspacesDefault": "从此计算机移除 {{value0}} 及其凭据。其 {{value1}} 保留在 Orca 中 — 远程文件不会被删除。",
-          "alsoDeleteRemote": "同时在 {{value1}} 上删除这些 {{value0}}",
           "alsoForgetLocal": "同时从 Orca 中移除这些 {{value0}}",
           "advanced": "高级",
-          "alsoDeleteRemoteHint": "永久删除远程 Git 工作树及其分支。此操作不可撤销。",
           "alsoForgetLocalHint": "仅从 Orca 中清除。远程文件、工作树和分支均不受影响。",
           "wslHostEndsTerminalsUnlessShared": "从 Orca 中移除 {{value0}}。除非此计算机上打开的另一个 Orca 正在使用它，否则还会结束其打开的终端，并停止该发行版中的 Orca 服务器。发行版中的文件不受影响。"
         },
@@ -6087,14 +6085,9 @@
           "sshImportSyncedSingular": "已将 {{count}} 个主机添加到 Orca。"
         },
         "ForgetSshWorkspaceDialog": {
-          "reconnectFailed": "重新连接失败",
-          "forgetBody": "仅从 Orca 中移除此工作区。文件、Git 工作树和 {{host}} 上的分支保持不变。",
-          "title": "从 Orca 中移除“{{name}}”？",
-          "disconnectedBody": "此工作区的 SSH 主机未连接。重新连接以同时在远程删除，或仅从 Orca 中移除。",
           "ghostBody": "{{host}} 不再是已保存的 SSH 主机，因此此工作区不再连接到活跃主机。只能从 Orca 中移除 — 远程文件和分支保持不变。",
           "cancel": "取消",
-          "forget": "从 Orca 中移除",
-          "reconnectAndDelete": "重新连接并删除"
+          "forget": "从 Orca 中移除"
         },
         "MarkdownImageLightbox": {
           "image": "Image",

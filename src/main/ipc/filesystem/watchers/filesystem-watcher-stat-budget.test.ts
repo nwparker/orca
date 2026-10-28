@@ -17,6 +17,10 @@ vi.mock('../watcher-process/parcel-watcher-process', () => ({
 import { createLocalWatcher } from './filesystem-watcher-local-events'
 import { cancelLocalBatchFlush } from './filesystem-watcher-batch-control'
 import { closeLocalWatcherForWorktreePath } from './filesystem-watcher-local-removal'
+import {
+  subscribeLocalWatcher,
+  unsubscribeLocalWatcher
+} from './filesystem-watcher-local-subscription'
 import { getLocalWatcherRoot } from './filesystem-watcher-paths'
 import { watcherLifecycleState } from './filesystem-watcher-lifecycle-state'
 import { closeAllWatchers } from './filesystem-watcher-shutdown'
@@ -61,6 +65,7 @@ describe('main-process watcher event stat budget', () => {
 
   beforeEach(() => {
     vi.useFakeTimers()
+    watcherLifecycleState.localWatchersClosed = false
     callbacks.clear()
     pending.length = 0
     roots.length = 0
@@ -199,4 +204,71 @@ describe('main-process watcher event stat budget', () => {
     expect(live.sender.send).toHaveBeenCalledTimes(1)
     expect(active).toBe(0)
   })
+
+  it.each(['waiting', 'granted'] as const)(
+    'skips stats for an unwatched root with a %s slot and preserves grace-window reuse',
+    async (slotState) => {
+      const busy = await watch('unwatch-busy')
+      const unwatched = await watch('unwatch-idle')
+      const live = await watch('unwatch-live')
+      emit(busy.root, 8)
+      emit(unwatched.root, 1)
+      emit(live.root, 1)
+      await vi.advanceTimersByTimeAsync(WATCH_BATCH_INTERVAL_MS)
+      expect(statMock).toHaveBeenCalledTimes(8)
+
+      const unwatch = () => unsubscribeLocalWatcher(unwatched.root.rootPath, unwatched.sender.id)
+      if (slotState === 'waiting') {
+        unwatch()
+      }
+      pending.shift()!.resolve({
+        isDirectory: () => {
+          if (slotState === 'granted') {
+            queueMicrotask(unwatch)
+          }
+          return false
+        }
+      })
+      await settle()
+      expect(statMock).toHaveBeenCalledTimes(9)
+      expect(statMock.mock.calls[8][0]).toBe(join(live.root.rootPath, 'file-0.ts'))
+      expect(unwatched.root.batch.flushInFlight).toBe(false)
+      expect(unwatched.sender.send).not.toHaveBeenCalled()
+      for (const stat of pending.splice(0)) {
+        stat.resolve({ isDirectory: () => false })
+      }
+      await settle()
+      expect(live.sender.send).toHaveBeenCalledOnce()
+
+      // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: rewatch uses the sender double's lifetime and delivery methods.
+      await subscribeLocalWatcher(unwatched.root.rootPath, unwatched.sender as never)
+      const { key } = getLocalWatcherRoot(unwatched.root.rootPath)
+      expect(watcherLifecycleState.watchedRoots.get(key)).toBe(unwatched.root)
+      expect(unwatched.root.listeners.size).toBe(1)
+      expect(subscribeMock).toHaveBeenCalledTimes(3)
+      expect(unwatched.root.batch.statAbortController.signal.aborted).toBe(false)
+      emit(unwatched.root, 1)
+      await vi.advanceTimersByTimeAsync(WATCH_BATCH_INTERVAL_MS)
+      expect(statMock).toHaveBeenCalledTimes(10)
+      pending.shift()!.resolve({ isDirectory: () => true })
+      await settle()
+      expect(unwatched.send.mock.calls).toEqual([
+        [
+          'fs:changed',
+          {
+            worktreePath: unwatched.root.rootPath,
+            events: [
+              {
+                kind: 'update',
+                absolutePath: join(unwatched.root.rootPath, 'file-0.ts'),
+                isDirectory: true
+              }
+            ]
+          }
+        ]
+      ])
+      expect(peak).toBe(8)
+      expect(active).toBe(0)
+    }
+  )
 })

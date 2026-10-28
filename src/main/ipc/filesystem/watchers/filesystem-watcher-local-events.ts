@@ -71,13 +71,17 @@ function coalesceEvents(
 
 async function tryStatIsDirectory(
   filePath: string,
-  signal: AbortSignal
+  root: WatchedRoot
 ): Promise<boolean | undefined> {
+  const signal = root.batch.statAbortController.signal
   try {
     const release = await directoryStatSlots.acquire(0, signal)
     try {
       // Cancellation can race with a slot grant before this continuation resumes.
       signal.throwIfAborted()
+      if (root.listeners.size === 0) {
+        return undefined
+      }
       return (await stat(filePath)).isDirectory()
     } finally {
       release()
@@ -142,9 +146,9 @@ async function flushBatch(root: WatchedRoot): Promise<void> {
       async (evt) => {
         // Deleted paths cannot be statted; let the renderer infer from dirCache.
         const isDirectory =
-          root.batch.cancelled || evt.type === 'delete'
+          root.batch.cancelled || root.listeners.size === 0 || evt.type === 'delete'
             ? undefined
-            : await tryStatIsDirectory(evt.path, root.batch.statAbortController.signal)
+            : await tryStatIsDirectory(evt.path, root)
 
         return {
           kind: evt.type,

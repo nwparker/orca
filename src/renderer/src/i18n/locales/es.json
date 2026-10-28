@@ -5930,10 +5930,8 @@
           "oneWorkspace": "1 espacio de trabajo",
           "manyWorkspaces": "{{count}} espacios de trabajo",
           "hostHasWorkspacesDefault": "Elimina {{value0}} y sus credenciales de esta computadora. Sus {{value1}} permanecen en Orca — los archivos remotos no se tocan.",
-          "alsoDeleteRemote": "También eliminar estos {{value0}} en {{value1}}",
           "alsoForgetLocal": "También eliminar estos {{value0}} de Orca",
           "advanced": "Avanzado",
-          "alsoDeleteRemoteHint": "Elimina permanentemente los espacios de trabajo Git remotos y sus ramas. Esta acción no se puede deshacer.",
           "alsoForgetLocalHint": "Solo limpia de Orca. Los archivos, espacios de trabajo y ramas remotas permanecen intactos.",
           "wslHostEndsTerminalsUnlessShared": "Quita {{value0}} de Orca. Salvo que otro Orca abierto en este equipo lo esté usando, también cierra sus terminales abiertas y detiene el servidor de Orca en esa distro. Los archivos de la distro no se tocan."
         },
@@ -6089,14 +6087,9 @@
           "sshImportSyncedSingular": "Se agregó {{count}} host a Orca."
         },
         "ForgetSshWorkspaceDialog": {
-          "reconnectFailed": "Error de reconexión",
-          "forgetBody": "Elimina este espacio de trabajo solo de Orca. Los archivos, el worktree de Git y las ramas en {{host}} permanecen intactos.",
-          "title": "¿Eliminar “{{name}}”?",
-          "disconnectedBody": "El host SSH de este espacio de trabajo no está conectado. Reconéctalo para eliminarlo también en el remoto, o elimínalo solo de Orca.",
           "ghostBody": "{{host}} ya no es un host SSH guardado, por lo que este espacio de trabajo ya no está conectado a un host activo. Solo se puede eliminar de Orca — los archivos y ramas en el remoto permanecen intactos.",
           "cancel": "Cancelar",
-          "forget": "Eliminar de Orca",
-          "reconnectAndDelete": "Reconectar y eliminar"
+          "forget": "Eliminar de Orca"
         },
         "MarkdownImageLightbox": {
           "image": "Image",
