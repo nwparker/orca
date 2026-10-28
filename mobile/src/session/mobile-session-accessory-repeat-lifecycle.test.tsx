@@ -91,6 +91,7 @@ describe('mounted accessory-repeat delivery lifecycle', () => {
         sendLiveTerminalInputRef: { current: async () => false },
         sessionTabActionSheetKeyboardHideSubRef: { current: null },
         deviceTokenRef: { current: null },
+        ptyModesRef: { current: new Map() },
         commandInputRef: { current: null },
         liveInputRef: { current: null },
         handleLiveInputAccessoryBytes: preflight,
