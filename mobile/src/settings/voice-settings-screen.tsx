@@ -94,8 +94,12 @@ export default function VoiceSettingsScreen({
       )
       try {
         const next = await operations.configure(params)
+        // Apply only the newest reply. An older success re-reads instead: a newer reply can
+        // predate it, because the host finishes a model delete only after removing its files.
         if (epoch === requestEpoch.current) {
           setSetup(next)
+        } else {
+          void refreshSetup()
         }
       } catch (err) {
         if (epoch === requestEpoch.current) {
@@ -120,6 +124,8 @@ export default function VoiceSettingsScreen({
         if (epoch === requestEpoch.current) {
           setSetup(next)
           setModelDrawerOpen(false)
+        } else {
+          void refreshSetup()
         }
       } catch (err) {
         if (epoch === requestEpoch.current) {
@@ -129,7 +135,7 @@ export default function VoiceSettingsScreen({
         setBusyAction(null)
       }
     },
-    [operations]
+    [operations, refreshSetup]
   )
 
   const handleDownload = useCallback(
@@ -142,9 +148,7 @@ export default function VoiceSettingsScreen({
       setError(null)
       try {
         await operations.download(model.id)
-        if (epoch === requestEpoch.current) {
-          await refreshSetup()
-        }
+        await refreshSetup()
       } catch (err) {
         if (epoch === requestEpoch.current) {
           setError(err instanceof Error ? err.message : 'Download failed')
@@ -172,6 +176,8 @@ export default function VoiceSettingsScreen({
           if (deletedSelectedModel) {
             setModelDrawerOpen(false)
           }
+        } else {
+          void refreshSetup()
         }
       } catch (err) {
         if (epoch === requestEpoch.current) {
@@ -181,7 +187,7 @@ export default function VoiceSettingsScreen({
         setBusyAction(null)
       }
     },
-    [operations, setup?.selectedModelId]
+    [operations, refreshSetup, setup?.selectedModelId]
   )
 
   const enabled = setup?.enabled ?? false
