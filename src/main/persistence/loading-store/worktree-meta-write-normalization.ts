@@ -11,7 +11,7 @@ import type { WorkspaceAttachmentMutation } from '../../../shared/workspace-atta
 import { normalizeWorkspaceAttachmentUpdate } from '../../../shared/workspace-attachments'
 import {
   mergeDiffCommentMutation,
-  type DiffCommentMutation
+  type DiffCommentBaseMutation
 } from '../../../shared/diff-comment-mutation'
 
 type WorktreeMetaIdentity = {
@@ -35,7 +35,7 @@ function createDefaultWorktreeMeta(): WorktreeMeta {
 
 export function mergeWorktreeMetaForWrite(
   existing: WorktreeMeta | undefined,
-  updates: Partial<WorktreeMeta> & WorkspaceAttachmentMutation & DiffCommentMutation,
+  updates: Partial<WorktreeMeta> & WorkspaceAttachmentMutation & DiffCommentBaseMutation,
   identity?: WorktreeMetaIdentity
 ): WorktreeMeta {
   const { diffCommentsBase, ...metaUpdates } = updates

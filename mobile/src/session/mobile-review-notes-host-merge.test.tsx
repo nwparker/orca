@@ -169,22 +169,6 @@ describe('mobile review notes saved against the host', () => {
     expect(ids(shown)).toEqual(ids(host.notes))
   })
 
-  it('undoes only the failed change when a later save succeeded', async () => {
-    const { host, client } = fakeHost([note('a'), note('b')], { merges: true })
-    await mountNotes(client)
-    host.failNextSet = true
-
-    await act(async () => {
-      await Promise.all([
-        hook().deleteDiffCommentForFile('a'),
-        hook().addDiffCommentForFile('src/a.ts', 2, 'kept')
-      ])
-    })
-
-    expect(host.notes.map((comment) => comment.body)).toEqual(['note a', 'note b', 'kept'])
-    expect(ids(shown).toSorted()).toEqual(ids(host.notes).toSorted())
-  })
-
   it('does not let a slow first load replace a note saved after it', async () => {
     const { host, client, heldShows } = fakeHost([note('a')], { merges: true })
     host.holdShow = true
@@ -236,6 +220,22 @@ describe('mobile review notes saved against the host', () => {
 
     expect(host.notes.map((comment) => comment.body)).toEqual(['kept'])
     expect(ids(shown)).toEqual(ids(host.notes))
+  })
+
+  it('drops a save queued behind a failed one, so a host without the merge keeps the note', async () => {
+    const { host, client } = fakeHost([note('a'), note('b')], { merges: false })
+    await mountNotes(client)
+    host.failNextSet = true
+
+    await act(async () => {
+      await Promise.all([
+        hook().deleteDiffCommentForFile('a'),
+        hook().addDiffCommentForFile('src/a.ts', 2, 'dropped')
+      ])
+    })
+
+    expect(ids(host.notes)).toEqual(['a', 'b'])
+    expect(ids(shown).toSorted()).toEqual(['a', 'b'])
   })
 
   it('still sends the full list, so a host without the merge replaces it as before', async () => {

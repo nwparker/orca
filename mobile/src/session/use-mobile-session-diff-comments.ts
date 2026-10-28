@@ -38,6 +38,7 @@ export function useMobileSessionDiffComments(scope: MobileSessionDocumentReaders
   )
   // Why: one notes request at a time, so each reply already holds this phone's earlier saves.
   const notesQueueRef = useRef<Promise<unknown>>(Promise.resolve())
+  const failedSavesRef = useRef(0)
   const enqueueNotesRequest = useCallback(function enqueueNotesRequest<T>(
     run: () => Promise<T>
   ): Promise<T> {
@@ -93,9 +94,14 @@ export function useMobileSessionDiffComments(scope: MobileSessionDocumentReaders
   const saveDiffComments = useCallback(
     async (next: DiffComment[]): Promise<void> => {
       const base = diffCommentsRef.current
+      const failedSaves = failedSavesRef.current
       publishDiffComments(next)
       try {
         await enqueueNotesRequest(async () => {
+          // Why: this list was built on a change that failed; an older host would store it whole.
+          if (failedSaves !== failedSavesRef.current) {
+            throw new Error('Failed to save review notes')
+          }
           if (!client || connState !== 'connected') {
             throw new Error('Waiting for desktop...')
           }
@@ -113,6 +119,9 @@ export function useMobileSessionDiffComments(scope: MobileSessionDocumentReaders
           }
         })
       } catch (err) {
+        if (failedSaves === failedSavesRef.current) {
+          failedSavesRef.current += 1
+        }
         publishDiffComments(mergeDiffCommentMutation(next, diffCommentsRef.current, base))
         throw err
       }

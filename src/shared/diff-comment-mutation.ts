@@ -1,7 +1,7 @@
 import type { DiffComment } from './diff-comment-types'
 
 /** Mutation-only snapshot; never persisted with workspace metadata. */
-export type DiffCommentMutation = {
+export type DiffCommentBaseMutation = {
   diffCommentsBase?: DiffComment[]
 }
 
