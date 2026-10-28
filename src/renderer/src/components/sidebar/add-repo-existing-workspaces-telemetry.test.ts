@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { Worktree } from '../../../../shared/types'
+import type { Worktree } from '../../../../shared/worktree/types'
 import {
   buildAddRepoExistingWorkspacesDetectedEvent,
   buildAddRepoExistingWorkspacesTelemetry,
@@ -119,8 +119,7 @@ describe('add repo existing workspace telemetry', () => {
   })
 
   it('sorts without crashing when a detected worktree has no displayName (crash 99657ab1)', () => {
-    // Same lastActivityAt forces the displayName tie-break, where a runtime-undefined
-    // name used to throw during the add-repo sort before telemetry was built.
+    // Equal activity forces the name tie-break that crashed on undefined runtime names.
     expect(() =>
       buildAddRepoExistingWorkspacesDetectedEvent('local_folder_picker', [
         worktree({ id: 'repo::/a', path: '/a', displayName: 'Alpha', lastActivityAt: 5 }),

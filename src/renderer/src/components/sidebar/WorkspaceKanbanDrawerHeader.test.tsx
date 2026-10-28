@@ -1,7 +1,7 @@
 import React, { isValidElement } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { SheetHeader, SheetTitle } from '@/components/ui/sheet'
-import type { WorkspaceStatusDefinition } from '../../../../shared/types'
+import type { WorkspaceStatusDefinition } from '../../../../shared/worktree/types'
 import SidebarFilter from './SidebarFilter'
 import WorkspaceKanbanDrawerHeader from './WorkspaceKanbanDrawerHeader'
 import WorkspaceKanbanSearchField from './WorkspaceKanbanSearchField'
@@ -130,8 +130,6 @@ describe('WorkspaceKanbanDrawerHeader', () => {
   it('keeps the selected-count badge and the field clear of the control cluster', () => {
     const header = renderHeader(vi.fn(), { selectedCount: 3, query: 'orca' })
 
-    // The title (with its badge) never shrinks the field into the absolute cluster,
-    // which the header reserves space for with pr-32.
     expect(findByType(header, SheetTitle)?.props.className).toContain('shrink-0')
     expect(findByType(header, SheetHeader)?.props.className).toContain('pr-32')
     expect(

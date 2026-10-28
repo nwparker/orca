@@ -1,56 +1,54 @@
 import type React from 'react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, Apple, Loader2, RefreshCw } from 'lucide-react'
+import { AlertTriangle, Download, Loader2, RefreshCw } from 'lucide-react'
 import { toast } from 'sonner'
 import { useAppStore } from '../../store'
 import { Button } from '../ui/button'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select'
+import { ReleaseBuildPicker } from './ReleaseBuildPicker'
 import { SettingsSegmentedControl, SettingsSubsectionHeader } from './SettingsFormControls'
 import { Badge } from '../ui/badge'
 import { translate } from '@/i18n/i18n'
 import { getShortcutPlatform } from '@/lib/shortcut-platform'
 import {
+  DEV_CHANNEL_PLATFORM_LABEL,
   RELEASE_CHANNELS,
+  RELEASE_CHANNEL_LABELS,
   getVersionChannel,
+  hasDedicatedReleaseRepo,
   isChannelSupportedOnPlatform,
-  parseHourlyVersionStamp,
+  requiresManualDevChannelInstall,
+  type DedicatedRepoChannel,
   type ReleaseBuild,
   type ReleaseChannel
 } from '../../../../shared/release-channel'
 
-const CHANNEL_LABELS: Record<ReleaseChannel, string> = {
-  stable: 'Stable',
-  rc: 'RC',
-  hourly: 'Hourly'
-}
-
 const CHANNEL_DESCRIPTIONS: Record<ReleaseChannel, string> = {
   stable: 'Shipped releases. What everyone else is running.',
   rc: 'Release candidates cut ahead of each stable.',
-  hourly: 'macOS only. Unvetted builds from main, built every hour. No tests.'
+  hourly: 'macOS and Windows. Unvetted builds from main, built every hour. No tests.',
+  daily:
+    'macOS and Windows. Unvetted builds from main, cut once a day at 14:15 UTC (early morning Pacific). No tests.',
+  adhoc: 'macOS and Windows. One-off builds cut from a branch to try a feature before it lands.'
 }
 
-function formatBuildLabel(build: ReleaseBuild): string {
-  // Why the release's own title wins: the hourly workflow composes it
-  // (`1.4.163 • 01 • 07-31 13:54 • e698241`), so this row is the same string the
-  // GitHub releases list shows — one thing to search for in either place, rather
-  // than two renderings of the same build that have to be matched up by eye.
-  if (build.name) {
-    return build.name
+const DEDICATED_CHANNEL_WARNINGS: Record<DedicatedRepoChannel, { key: string; fallback: string }> =
+  {
+    hourly: {
+      key: 'auto.components.settings.ReleaseChannelSection.hourlyWarning',
+      fallback:
+        'Hourly builds ship straight from main with no test gate, and the Windows ones are unsigned. Keep a stable build handy.'
+    },
+    daily: {
+      key: 'auto.components.settings.ReleaseChannelSection.dailyWarning',
+      fallback:
+        'Daily builds ship straight from main with no test gate, and the Windows ones are unsigned. Keep a stable build handy.'
+    },
+    adhoc: {
+      key: 'auto.components.settings.ReleaseChannelSection.adhocWarning',
+      fallback:
+        'Adhoc builds come from a branch that has not landed, and the Windows ones are unsigned. Whoever cut one may abandon it — keep a stable build handy.'
+    }
   }
-  const stamp = parseHourlyVersionStamp(build.version)
-  if (!stamp) {
-    return build.version
-  }
-  // Fallback for hourlies cut before that naming; retention ages them out in ~3
-  // days. An hourly's semver tail is an opaque timestamp, so show it as a date.
-  return `${build.version.split('-')[0]} · ${stamp.toLocaleString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit'
-  })}`
-}
 
 export function ReleaseChannelSection(): React.JSX.Element {
   const updateStatus = useAppStore((s) => s.updateStatus)
@@ -66,9 +64,7 @@ export function ReleaseChannelSection(): React.JSX.Element {
   const platform = getShortcutPlatform()
   const runningChannel = appVersion ? getVersionChannel(appVersion) : null
   const requestedChannel = releaseChannelOverride ?? runningChannel ?? 'stable'
-  // Why: a persisted 'hourly' can arrive on Linux/Windows — settings sync, or a
-  // profile carried over from a Mac. Fall back rather than rendering a selected
-  // segment the user cannot act on and a build list that can never install.
+  // Synced Mac profiles can carry unsupported hourly channels; fall back instead of offering uninstallable builds.
   const activeChannel = isChannelSupportedOnPlatform(requestedChannel, platform)
     ? requestedChannel
     : 'stable'
@@ -86,52 +82,53 @@ export function ReleaseChannelSection(): React.JSX.Element {
     }
   }, [])
 
-  // Why: two loads can be in flight at once — activeChannel flips on mount when
-  // getVersion resolves, and rapid channel clicks stack requests. Without this
-  // guard a slower earlier request can land last and fill the list with builds
-  // from a channel the picker is no longer showing.
+  // Version resolution and rapid clicks can overlap loads; reject earlier requests that finish on the wrong channel.
   const latestRequestRef = useRef(0)
 
-  const loadBuilds = useCallback(async (channel: ReleaseChannel): Promise<void> => {
-    const requestId = latestRequestRef.current + 1
-    latestRequestRef.current = requestId
-    const isStale = (): boolean => latestRequestRef.current !== requestId
-    setLoading(true)
-    setLoadError(null)
-    try {
-      const result = await window.api.updater.listBuilds(channel)
-      if (isStale()) {
-        return
-      }
-      if (result.ok) {
-        setBuilds(result.builds)
-        setSelectedTag(result.builds[0]?.tag ?? null)
-      } else {
+  const loadBuilds = useCallback(
+    async (channel: ReleaseChannel, options?: { force?: boolean }): Promise<void> => {
+      const requestId = latestRequestRef.current + 1
+      latestRequestRef.current = requestId
+      const isStale = (): boolean => latestRequestRef.current !== requestId
+      setLoading(true)
+      setLoadError(null)
+      try {
+        const result = await window.api.updater.listBuilds(channel, options)
+        if (isStale()) {
+          return
+        }
+        if (result.ok) {
+          setBuilds(result.builds)
+          setSelectedTag(result.builds[0]?.tag ?? null)
+        } else {
+          setBuilds(null)
+          setLoadError(result.message)
+        }
+      } catch (error) {
+        if (isStale()) {
+          return
+        }
         setBuilds(null)
-        setLoadError(result.message)
+        setLoadError(String((error as Error)?.message ?? error))
+      } finally {
+        // Only the newest request may clear loading; old completions must not flash No builds.
+        if (!isStale()) {
+          setLoading(false)
+        }
       }
-    } catch (error) {
-      if (isStale()) {
-        return
-      }
-      setBuilds(null)
-      setLoadError(String((error as Error)?.message ?? error))
-    } finally {
-      // Why: only the newest request owns the spinner; a superseded one clearing
-      // it would show "no builds" while the current load is still running.
-      if (!isStale()) {
-        setLoading(false)
-      }
-    }
-  }, [])
+    },
+    []
+  )
 
-  // Why: reload whenever the channel changes so the picker never offers tags
-  // from the channel the user just switched away from.
+  // Wait for the running version/channel before loading; a stable-placeholder request would be discarded.
   useEffect(() => {
+    if (appVersion === null) {
+      return
+    }
     setBuilds(null)
     setSelectedTag(null)
     void loadBuilds(activeChannel)
-  }, [activeChannel, loadBuilds])
+  }, [activeChannel, appVersion, loadBuilds])
 
   const selectedBuild = useMemo(
     () => builds?.find((build) => build.tag === selectedTag) ?? null,
@@ -153,6 +150,17 @@ export function ReleaseChannelSection(): React.JSX.Element {
   }
 
   const isRunningBuild = selectedBuild?.version === appVersion
+  // Signed Windows builds reject unsigned dev installers through publisher validation; entry to dev requires manual download, while returns work normally.
+  const needsManualInstall = requiresManualDevChannelInstall({
+    platform,
+    runningChannel,
+    targetChannel: activeChannel
+  })
+
+  const handleDownloadInstaller = (build: ReleaseBuild): void => {
+    // Fall back to release assets when installer naming is unexpected.
+    void window.api.shell.openUrl(build.installerUrl ?? build.releaseUrl)
+  }
 
   return (
     <section className="space-y-4">
@@ -175,10 +183,7 @@ export function ReleaseChannelSection(): React.JSX.Element {
       <div className="space-y-2">
         <SettingsSegmentedControl<ReleaseChannel>
           value={activeChannel}
-          // Why: selecting the running build's own channel clears the override
-          // rather than pinning it. Without this there is no way back to "follow
-          // this build's channel", so a dev who merely looked at the panel would
-          // leave background checks pinned to whatever they last clicked.
+          // Selecting the running channel clears the override so browsing cannot permanently pin background checks.
           onChange={(channel) =>
             setReleaseChannelOverride(channel === runningChannel ? null : channel)
           }
@@ -186,33 +191,26 @@ export function ReleaseChannelSection(): React.JSX.Element {
             'auto.components.settings.ReleaseChannelSection.channelAriaLabel',
             'Update channel'
           )}
-          // Why disabled rather than hidden: a Linux/Windows dev who has heard
-          // about the hourly channel should see that it exists and why it is
-          // unavailable, instead of silently not finding it.
+          // Show unsupported channels disabled with reasons so users can discover why they are unavailable.
           options={RELEASE_CHANNELS.map((channel) => {
             const supported = isChannelSupportedOnPlatform(channel, platform)
             return {
               value: channel,
-              label: supported ? (
-                CHANNEL_LABELS[channel]
-              ) : (
-                <span className="inline-flex items-center gap-1">
-                  {CHANNEL_LABELS[channel]}
-                  <Apple className="size-3" aria-hidden="true" />
-                </span>
-              ),
+              label: RELEASE_CHANNEL_LABELS[channel],
               disabled: !supported,
               ariaLabel: supported
                 ? undefined
                 : translate(
-                    'auto.components.settings.ReleaseChannelSection.hourlyMacOnlyAria',
-                    'Hourly (macOS only)'
+                    'auto.components.settings.ReleaseChannelSection.devChannelUnsupportedAria',
+                    '{{value0}} ({{value1}} only)',
+                    { value0: RELEASE_CHANNEL_LABELS[channel], value1: DEV_CHANNEL_PLATFORM_LABEL }
                   ),
               tooltip: supported
                 ? undefined
                 : translate(
-                    'auto.components.settings.ReleaseChannelSection.hourlyMacOnly',
-                    'Hourly builds are produced only for macOS. Linux and Windows stay on Stable or RC.'
+                    'auto.components.settings.ReleaseChannelSection.devChannelUnsupported',
+                    '{{value0}} builds are produced only for {{value1}}. Linux stays on Stable or RC.',
+                    { value0: RELEASE_CHANNEL_LABELS[channel], value1: DEV_CHANNEL_PLATFORM_LABEL }
                   )
             }
           })}
@@ -220,13 +218,13 @@ export function ReleaseChannelSection(): React.JSX.Element {
         <p className="text-xs text-muted-foreground">{CHANNEL_DESCRIPTIONS[activeChannel]}</p>
       </div>
 
-      {activeChannel === 'hourly' ? (
+      {hasDedicatedReleaseRepo(activeChannel) ? (
         <div className="flex items-start gap-2 rounded-md border border-border bg-muted/40 p-3">
           <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
           <p className="text-xs text-muted-foreground">
             {translate(
-              'auto.components.settings.ReleaseChannelSection.hourlyWarning',
-              'Hourly builds are macOS-only and ship straight from main with no test gate. Keep a stable build handy.'
+              DEDICATED_CHANNEL_WARNINGS[activeChannel].key,
+              DEDICATED_CHANNEL_WARNINGS[activeChannel].fallback
             )}
           </p>
         </div>
@@ -234,34 +232,24 @@ export function ReleaseChannelSection(): React.JSX.Element {
 
       <div className="space-y-2">
         <div className="flex items-center gap-2">
-          <Select
-            value={selectedTag ?? undefined}
-            onValueChange={setSelectedTag}
+          <ReleaseBuildPicker
+            key={activeChannel}
+            builds={builds ?? []}
+            selectedTag={selectedTag}
+            onSelect={setSelectedTag}
             disabled={loading || !builds || builds.length === 0}
-          >
-            <SelectTrigger size="sm" className="min-w-64 flex-1">
-              <SelectValue
-                placeholder={
-                  loading
-                    ? translate(
-                        'auto.components.settings.ReleaseChannelSection.loadingBuilds',
-                        'Loading builds…'
-                      )
-                    : translate(
-                        'auto.components.settings.ReleaseChannelSection.noBuilds',
-                        'No builds found'
-                      )
-                }
-              />
-            </SelectTrigger>
-            <SelectContent>
-              {(builds ?? []).map((build) => (
-                <SelectItem key={build.tag} value={build.tag}>
-                  {formatBuildLabel(build)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+            placeholder={
+              loading || (builds === null && loadError === null)
+                ? translate(
+                    'auto.components.settings.ReleaseChannelSection.loadingBuilds',
+                    'Loading builds…'
+                  )
+                : translate(
+                    'auto.components.settings.ReleaseChannelSection.noBuilds',
+                    'No builds found'
+                  )
+            }
+          />
 
           <Button
             variant="ghost"
@@ -272,7 +260,7 @@ export function ReleaseChannelSection(): React.JSX.Element {
               'Refresh build list'
             )}
             disabled={loading}
-            onClick={() => void loadBuilds(activeChannel)}
+            onClick={() => void loadBuilds(activeChannel, { force: true })}
           >
             {loading ? (
               <Loader2 className="size-3.5 animate-spin" />
@@ -286,10 +274,27 @@ export function ReleaseChannelSection(): React.JSX.Element {
             size="sm"
             type="button"
             disabled={!selectedBuild || busy || isRunningBuild}
-            onClick={() => selectedBuild && handleSwitchTo(selectedBuild)}
+            onClick={() => {
+              if (!selectedBuild) {
+                return
+              }
+              if (needsManualInstall) {
+                handleDownloadInstaller(selectedBuild)
+                return
+              }
+              handleSwitchTo(selectedBuild)
+            }}
           >
             {busy ? (
               <Loader2 className="size-3.5 animate-spin" />
+            ) : needsManualInstall ? (
+              <span className="inline-flex items-center gap-1.5">
+                <Download className="size-3.5" aria-hidden="true" />
+                {translate(
+                  'auto.components.settings.ReleaseChannelSection.downloadInstaller',
+                  'Download installer'
+                )}
+              </span>
             ) : (
               translate(
                 'auto.components.settings.ReleaseChannelSection.switchTo',
@@ -299,8 +304,23 @@ export function ReleaseChannelSection(): React.JSX.Element {
           </Button>
         </div>
 
+        <p className="text-xs text-muted-foreground">
+          {translate(
+            'auto.components.settings.ReleaseChannelSection.cacheHint',
+            'Build lists are cached for 5 minutes. Refresh to check for new builds.'
+          )}
+        </p>
+
         {loadError ? (
           <p className="text-xs text-destructive">{loadError}</p>
+        ) : needsManualInstall && selectedBuild ? (
+          <p className="text-xs text-muted-foreground">
+            {translate(
+              'auto.components.settings.ReleaseChannelSection.manualInstallHint',
+              '{{value0}} builds are unsigned on Windows, so the in-app updater cannot install one over a signed build. Run the downloaded installer once — Windows will warn about an unknown publisher — and every later switch, including back to Stable, works from here.',
+              { value0: RELEASE_CHANNEL_LABELS[activeChannel] }
+            )}
+          </p>
         ) : isRunningBuild ? (
           <p className="text-xs text-muted-foreground">
             {translate(

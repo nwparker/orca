@@ -1,19 +1,24 @@
 import { memo, useState } from 'react'
-import { Image, Linking, Pressable, Text, View } from 'react-native'
+import { Image, Platform, Pressable, Text, View } from 'react-native'
+import { openExternalLink } from '../../platform/external-link'
 import { Check, CornerDownRight, ExternalLink, Pencil, Trash2, Undo2 } from 'lucide-react-native'
-import type { GitHubReaction, GitHubReactionContent, PRComment } from '../../../../src/shared/types'
+import type {
+  GitHubReaction,
+  GitHubReactionContent,
+  PRComment
+} from '../../../../src/shared/github/comment-types'
 import { colors } from '../../theme/mobile-theme'
+import { useMobileColorScheme } from '../../theme/use-mobile-color-scheme'
 import { canEditComment, isResolvableComment } from '../../session/pr-comment-actions'
 import { ConfirmModal } from '../ConfirmModal'
 import { CommentMarkdown } from './CommentMarkdown'
 import { PRCommentComposer } from './PRCommentComposer'
-import { formatPrCommentRelativeTime } from './pr-comment-time'
+import { formatPrCommentRelativeTime } from '../../../../src/shared/pr-comment-time'
 import { prCommentsStyles as styles } from './pr-comments-styles'
 
 export type PRCommentRepoSlug = { owner: string; repo: string; host?: string }
 
-// Action handlers are passed from the comment actions hook (stable callbacks), so
-// adding them keeps the memo'd card from re-rendering on unrelated timeline changes.
+// Keep hook callbacks stable so memoized cards skip unrelated timeline updates.
 export type PRCommentCardActions = {
   reply: (comment: PRComment, body: string) => Promise<boolean>
   toggleResolve: (comment: PRComment) => Promise<boolean>
@@ -39,6 +44,7 @@ const REACTION_EMOJI: Record<GitHubReactionContent, string> = {
 }
 
 function Reactions({ reactions }: { reactions?: GitHubReaction[] }) {
+  useMobileColorScheme()
   const visible = (reactions ?? []).filter((r) => r.count > 0)
   if (visible.length === 0) {
     return null
@@ -55,19 +61,19 @@ function Reactions({ reactions }: { reactions?: GitHubReaction[] }) {
   )
 }
 
-// One PR comment (or review-thread reply), mirroring the desktop comment card:
-// avatar + author + relative time + inline file:line + resolved chip + open-on-
-// GitHub, then the markdown body and reactions. When `actions` is provided the
-// card grows a Reply composer and (for review threads) a Resolve/Unresolve toggle.
+// Match desktop comment identity/file/resolved/body/reactions; optional actions add Reply and review-thread Resolve controls.
 export const PRCommentCard = memo(function PRCommentCard({
   comment,
   isReply = false,
-  actions
+  actions,
+  now
 }: {
   comment: PRComment
   isReply?: boolean
   actions?: PRCommentCardActions
+  now: number
 }) {
+  useMobileColorScheme()
   const [replyOpen, setReplyOpen] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
@@ -78,8 +84,7 @@ export const PRCommentCard = memo(function PRCommentCard({
   const resolveBusy =
     canResolve && actions ? actions.isResolveBusy(comment.threadId as string) : false
   const replyBusy = actions ? actions.isReplyBusy(comment.id) : false
-  // Edit/delete are offered only on mutable root conversation comments with a repo
-  // slug; GitHub enforces authorship server-side (no client viewer-identity field).
+  // Offer edit/delete only for mutable root comments with repo slug; GitHub enforces authorship without client viewer identity.
   const canMutate = actions ? canEditComment(comment, actions.prRepo) : false
   const editBusy = actions ? actions.isEditBusy(comment.id) : false
   const deleteBusy = actions ? actions.isDeleteBusy(comment.id) : false
@@ -109,7 +114,8 @@ export const PRCommentCard = memo(function PRCommentCard({
   return (
     <View style={[styles.card, isReply && styles.reply, comment.isResolved && styles.cardResolved]}>
       <View style={styles.header}>
-        {comment.authorAvatarUrl ? (
+        {/* Page avatars remain deferred (ruling 26); https is now permitted, so skip reflects missing capability rather than CSP refusal. */}
+        {comment.authorAvatarUrl && Platform.OS !== 'web' ? (
           <Image source={{ uri: comment.authorAvatarUrl }} style={styles.avatar} />
         ) : (
           <View style={styles.avatar} />
@@ -120,9 +126,7 @@ export const PRCommentCard = memo(function PRCommentCard({
         >
           {comment.author}
         </Text>
-        <Text style={styles.time}>
-          · {formatPrCommentRelativeTime(comment.createdAt, Date.now())}
-        </Text>
+        <Text style={styles.time}>· {formatPrCommentRelativeTime(comment.createdAt, now)}</Text>
         {fileLabel ? (
           <Text style={styles.path} numberOfLines={1}>
             {fileLabel}
@@ -136,7 +140,7 @@ export const PRCommentCard = memo(function PRCommentCard({
         {comment.url ? (
           <Pressable
             style={styles.openButton}
-            onPress={() => void Linking.openURL(comment.url).catch(() => {})}
+            onPress={() => openExternalLink(comment.url)}
             hitSlop={8}
             accessibilityRole="button"
             accessibilityLabel="Open comment on GitHub"

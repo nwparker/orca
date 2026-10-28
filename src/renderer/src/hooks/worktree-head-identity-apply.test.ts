@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { Worktree } from '../../../shared/types'
+import type { Worktree } from '../../../shared/worktree/types'
 import { applyWorktreeHeadIdentities } from './worktree-head-identity-apply'
 
 function makeWorktree(overrides: Partial<Worktree>): Worktree {
@@ -30,10 +30,14 @@ describe('applyWorktreeHeadIdentities', () => {
       }
     )
     expect(updateWorktreeGitIdentity).toHaveBeenCalledTimes(1)
-    expect(updateWorktreeGitIdentity).toHaveBeenCalledWith('repo-1::/repos/project/wt-a', {
-      head: 'bbb222',
-      branch: 'refs/heads/feature'
-    })
+    expect(updateWorktreeGitIdentity).toHaveBeenCalledWith(
+      'repo-1::/repos/project/wt-a',
+      {
+        head: 'bbb222',
+        branch: 'refs/heads/feature'
+      },
+      'local'
+    )
   })
 
   it('matches Windows-flavored paths that differ only by separators and casing', () => {
@@ -50,10 +54,14 @@ describe('applyWorktreeHeadIdentities', () => {
         updateWorktreeGitIdentity
       }
     )
-    expect(updateWorktreeGitIdentity).toHaveBeenCalledWith('repo-1::C:/repos/project/wt-a', {
-      head: 'bbb222',
-      branch: null
-    })
+    expect(updateWorktreeGitIdentity).toHaveBeenCalledWith(
+      'repo-1::C:/repos/project/wt-a',
+      {
+        head: 'bbb222',
+        branch: null
+      },
+      'local'
+    )
   })
 
   it('skips identities whose worktree row does not exist', () => {

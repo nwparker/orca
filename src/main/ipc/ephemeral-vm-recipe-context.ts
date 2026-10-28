@@ -4,7 +4,7 @@ import type { EphemeralVmRecipeDoctorResult } from '../../shared/ephemeral-vm-re
 import { listEphemeralVmRuntimes } from '../../shared/ephemeral-vm-runtime-store'
 import type { EphemeralVmRuntimeRecord } from '../../shared/ephemeral-vm-runtimes'
 import { isFolderRepo, isGitRepoKind } from '../../shared/repo-kind'
-import type { OrcaVmRecipe } from '../../shared/types'
+import type { OrcaVmRecipe } from '../../shared/orca-yaml-hook-types'
 
 export type EphemeralVmRecipeListResult = {
   status: 'ok' | 'error'
@@ -110,8 +110,7 @@ export function getRuntimeRecipeContext(
   if (!repo.ok) {
     throw new Error(repo.message)
   }
-  // Pre-snapshot runtimes can only be attributed to repo-owned recipes. Never
-  // substitute a later same-id plugin recipe for an older runtime lifecycle.
+  // Legacy runtimes lack snapshots; never substitute a newer same-ID plugin recipe for their repo-owned recipe.
   const recipe =
     runtime.recipe ??
     (loadHooks(repo.repo.path)?.environmentRecipes ?? []).find(

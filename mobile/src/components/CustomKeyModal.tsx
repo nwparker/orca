@@ -1,8 +1,8 @@
 import { useCallback, useMemo, useState } from 'react'
-import { View, Text, Pressable, TextInput, StyleSheet, Switch } from 'react-native'
+import { View, Text, Pressable, TextInput, Switch } from 'react-native'
 import { ChevronLeft } from 'lucide-react-native'
-import AsyncStorage from '@react-native-async-storage/async-storage'
-import { colors, spacing, radii, typography } from '../theme/mobile-theme'
+import { colors } from '../theme/mobile-theme'
+import { useMobileColorScheme } from '../theme/use-mobile-color-scheme'
 import { BottomDrawer } from './BottomDrawer'
 import {
   buildTerminalShortcutKey,
@@ -11,30 +11,19 @@ import {
   type TerminalShortcutModifier,
   type TerminalShortcutSpecialKey
 } from '../terminal/terminal-accessory-keys'
-
-const CUSTOM_ACCESSORY_KEYS_STORAGE_KEY = 'orca:custom-accessory-keys'
-
-export type CustomKey = {
-  id: string
-  label: string
-  bytes: string
-  enter: boolean
-}
+import { customKeyModalStyles as styles } from './CustomKeyModal.styles'
+import { updateStoredCustomKeys, type CustomKey } from '../terminal/terminal-custom-keys'
 
 type Step = 'choose-type' | 'shortcut-combo' | 'special-keys' | 'text-macro'
 
-// Why: Alt is rendered with the ⌥ glyph because on macOS hosts the Option key
-// is the only modifier that produces an ESC-prefixed byte sequence terminals
-// can read. Cmd is intentionally absent — macOS swallows it before keystrokes
-// reach the shell, so there's nothing to encode.
+// Alt/Option emits terminal-readable ESC prefix; Cmd is absent because macOS swallows it before shell. Render Alt as ⌥.
 const SHORTCUT_MODIFIERS: { id: TerminalShortcutModifier; label: string; glyph?: string }[] = [
   { id: 'ctrl', label: 'Ctrl' },
   { id: 'alt', label: 'Alt', glyph: '⌥' },
   { id: 'shift', label: 'Shift' }
 ]
 
-// Why: special keys are grouped by purpose so the picker reads as three small
-// fixed grids rather than one ragged wrap row that clipped F7-F12.
+// Group keys into three fixed grids; ragged wrapping clipped F7–F12.
 const SPECIAL_KEY_GROUPS: { title: string; ids: string[]; columns: number }[] = [
   {
     title: 'Editing',
@@ -64,20 +53,8 @@ type Props = {
   onManageShortcuts?: () => void
 }
 
-export async function loadCustomKeys(): Promise<CustomKey[]> {
-  try {
-    const raw = await AsyncStorage.getItem(CUSTOM_ACCESSORY_KEYS_STORAGE_KEY)
-    return raw ? (JSON.parse(raw) as CustomKey[]) : []
-  } catch {
-    return []
-  }
-}
-
-export async function saveCustomKeys(keys: CustomKey[]): Promise<void> {
-  await AsyncStorage.setItem(CUSTOM_ACCESSORY_KEYS_STORAGE_KEY, JSON.stringify(keys))
-}
-
 export function CustomKeyModal({ visible, onClose, onKeysChanged, onManageShortcuts }: Props) {
+  useMobileColorScheme()
   const [step, setStep] = useState<Step>('choose-type')
   const [shortcutKey, setShortcutKey] = useState('c')
   const [shortcutModifiers, setShortcutModifiers] = useState<TerminalShortcutModifier[]>(['ctrl'])
@@ -86,8 +63,7 @@ export function CustomKeyModal({ visible, onClose, onKeysChanged, onManageShortc
   const [macroEnter, setMacroEnter] = useState(true)
   const [previousVisible, setPreviousVisible] = useState(visible)
 
-  // Why: reset before the opening commit so the drawer does not flash the last
-  // custom-key draft; keep close state unchanged for the slide-out animation.
+  // Reset draft before opening commit to avoid old-key flash; retain close state through slide-out.
   if (visible !== previousVisible) {
     setPreviousVisible(visible)
     if (visible) {
@@ -102,10 +78,17 @@ export function CustomKeyModal({ visible, onClose, onKeysChanged, onManageShortc
 
   const addKey = useCallback(
     async (key: Omit<CustomKey, 'id'>) => {
-      const existing = await loadCustomKeys()
       const newKey: CustomKey = { ...key, id: `custom-${Date.now()}` }
-      const updated = [...existing, newKey]
-      await saveCustomKeys(updated)
+      let updated: CustomKey[]
+      // Catch both void addKey callers: page storage can refuse size/unseeded-key writes (ruling 33.6), and uncaught rejection would fault/drop generation.
+      // Other allowlisted writers in this closure already catch saves.
+      try {
+        updated = await updateStoredCustomKeys((keys) => [...keys, newKey])
+      } catch (error) {
+        // Keep failed-save drawer open without announcing success; otherwise accessory row would lack persisted key.
+        console.warn('[custom-keys] the store would not take this key', error)
+        return
+      }
       onKeysChanged(updated)
       onClose()
     },
@@ -140,8 +123,7 @@ export function CustomKeyModal({ visible, onClose, onKeysChanged, onManageShortc
 
   const handleShortcutKeyInput = useCallback((value: string) => {
     if (value === '') {
-      // Why: allow the field to go empty so backspace works; the Save button
-      // stays disabled until a valid key is entered.
+      // Allow empty field for backspace; Save still requires valid key.
       setShortcutKey('')
       return
     }
@@ -190,6 +172,7 @@ export function CustomKeyModal({ visible, onClose, onKeysChanged, onManageShortc
           <Pressable
             style={({ pressed }) => [styles.backButton, pressed && styles.backButtonPressed]}
             onPress={onBack}
+            accessibilityRole="button"
             accessibilityLabel="Back"
           >
             <ChevronLeft size={18} color={colors.textSecondary} />
@@ -409,277 +392,3 @@ export function CustomKeyModal({ visible, onClose, onKeysChanged, onManageShortc
     </BottomDrawer>
   )
 }
-
-const styles = StyleSheet.create({
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingBottom: spacing.sm
-  },
-  backButton: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    alignItems: 'center',
-    justifyContent: 'center'
-  },
-  backButtonPressed: {
-    backgroundColor: colors.bgRaised
-  },
-  backSpacer: {
-    width: 30
-  },
-  title: {
-    flex: 1,
-    fontSize: 15,
-    fontWeight: '600',
-    color: colors.textPrimary,
-    textAlign: 'center'
-  },
-  group: {
-    backgroundColor: colors.bgPanel,
-    borderRadius: 12,
-    overflow: 'hidden'
-  },
-  separator: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: colors.borderSubtle,
-    marginHorizontal: spacing.md
-  },
-  row: {
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.md + 2
-  },
-  rowPressed: {
-    backgroundColor: colors.bgRaised
-  },
-  rowLabel: {
-    fontSize: typography.bodySize,
-    fontWeight: '500',
-    color: colors.textPrimary,
-    marginBottom: 1
-  },
-  rowHint: {
-    fontSize: 12,
-    color: colors.textMuted
-  },
-  shortcutForm: {
-    paddingTop: spacing.sm
-  },
-  preview: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.sm,
-    paddingVertical: spacing.lg + spacing.xs,
-    flexWrap: 'wrap'
-  },
-  previewKeycapRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm
-  },
-  previewPlus: {
-    color: colors.textMuted,
-    fontSize: 16
-  },
-  keycap: {
-    minWidth: 48,
-    height: 48,
-    paddingHorizontal: spacing.md,
-    borderRadius: 10,
-    backgroundColor: colors.bgPanel,
-    borderWidth: 1,
-    borderColor: colors.borderSubtle,
-    alignItems: 'center',
-    justifyContent: 'center'
-  },
-  keycapModifier: {
-    minWidth: 0
-  },
-  keycapWarn: {
-    borderColor: colors.statusAmber
-  },
-  keycapText: {
-    color: colors.textPrimary,
-    fontFamily: typography.monoFamily,
-    fontSize: 17,
-    fontWeight: '600'
-  },
-  keycapTextWarn: {
-    color: colors.statusAmber
-  },
-  keycapModifierText: {
-    color: colors.textSecondary,
-    fontFamily: typography.monoFamily,
-    fontSize: 14,
-    fontWeight: '600'
-  },
-  section: {
-    marginTop: spacing.md
-  },
-  sectionLabel: {
-    fontSize: 11,
-    color: colors.textMuted,
-    textTransform: 'uppercase',
-    letterSpacing: 0.8,
-    marginBottom: spacing.sm,
-    paddingLeft: 2
-  },
-  mods: {
-    flexDirection: 'row',
-    gap: spacing.sm
-  },
-  chip: {
-    flex: 1,
-    height: 40,
-    borderRadius: 8,
-    backgroundColor: colors.bgPanel,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 4
-  },
-  chipSelected: {
-    backgroundColor: colors.textPrimary
-  },
-  chipPressed: {
-    backgroundColor: colors.bgRaised
-  },
-  chipText: {
-    color: colors.textSecondary,
-    fontSize: 14,
-    fontWeight: '500'
-  },
-  chipTextSelected: {
-    color: colors.bgBase
-  },
-  chipGlyph: {
-    color: colors.textMuted,
-    fontSize: 13,
-    fontFamily: typography.monoFamily
-  },
-  chipGlyphSelected: {
-    color: 'rgba(10,10,10,0.5)'
-  },
-  keyInput: {
-    width: '100%',
-    height: 56,
-    borderRadius: 10,
-    backgroundColor: colors.bgPanel,
-    borderWidth: 1,
-    borderColor: colors.borderSubtle,
-    color: colors.textPrimary,
-    fontFamily: typography.monoFamily,
-    fontSize: 22,
-    fontWeight: '600',
-    textAlign: 'center'
-  },
-  moreLink: {
-    paddingVertical: spacing.sm,
-    alignItems: 'center'
-  },
-  moreLinkPressed: {
-    opacity: 0.6
-  },
-  moreLinkText: {
-    color: colors.textSecondary,
-    fontSize: 13,
-    textDecorationLine: 'underline'
-  },
-  specialKeysForm: {
-    paddingTop: spacing.xs,
-    paddingBottom: spacing.md,
-    gap: spacing.md
-  },
-  specialGroup: {
-    gap: spacing.xs
-  },
-  specialGroupTitle: {
-    fontSize: 11,
-    color: colors.textMuted,
-    textTransform: 'uppercase',
-    letterSpacing: 0.8,
-    paddingLeft: 2,
-    marginBottom: spacing.xs
-  },
-  keyGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    marginHorizontal: -spacing.xs / 2
-  },
-  keyCellWrap: {
-    paddingHorizontal: spacing.xs / 2,
-    paddingVertical: spacing.xs / 2
-  },
-  keyCell: {
-    height: 40,
-    borderRadius: 8,
-    backgroundColor: colors.bgPanel,
-    alignItems: 'center',
-    justifyContent: 'center'
-  },
-  keyCellPressed: {
-    backgroundColor: colors.bgRaised
-  },
-  keyCellSelected: {
-    backgroundColor: colors.textPrimary
-  },
-  keyCellText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.textPrimary,
-    fontFamily: typography.monoFamily
-  },
-  keyCellTextSelected: {
-    color: colors.bgBase
-  },
-  macroForm: {
-    padding: spacing.md,
-    gap: spacing.sm
-  },
-  fieldLabel: {
-    fontSize: 13,
-    fontWeight: '500',
-    color: colors.textSecondary
-  },
-  fieldInput: {
-    backgroundColor: colors.bgBase,
-    color: colors.textPrimary,
-    borderRadius: radii.input,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    fontSize: 14,
-    fontFamily: typography.monoFamily,
-    borderWidth: 1,
-    borderColor: colors.borderSubtle
-  },
-  switchRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: spacing.xs
-  },
-  switchLabel: {
-    fontSize: typography.bodySize,
-    color: colors.textPrimary
-  },
-  saveButton: {
-    marginTop: spacing.md,
-    backgroundColor: colors.textPrimary,
-    paddingVertical: spacing.md,
-    borderRadius: 10,
-    alignItems: 'center'
-  },
-  saveButtonDisabled: {
-    backgroundColor: colors.bgRaised
-  },
-  saveButtonText: {
-    color: colors.bgBase,
-    fontSize: 15,
-    fontWeight: '600'
-  },
-  saveButtonTextDisabled: {
-    color: colors.textMuted
-  }
-})

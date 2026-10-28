@@ -1,13 +1,24 @@
+import type { SourceControlPrimaryActionDecisionInputs } from '../../../src/shared/source-control-primary-action-decision-types'
 import {
-  resolveMobileSourceControlCommitAreaPrimaryActionDecision,
-  type MobileSourceControlPrimaryActionDecision,
-  type MobileSourceControlPrimaryActionKind,
-  type MobileSourceControlRemoteOpKind
-} from './mobile-source-control-primary-action-decision'
+  resolveSourceControlCommitAreaPrimaryActionDecision,
+  type SourceControlCommitAreaPrimaryActionDecision,
+  type SourceControlRemoteOpKind
+} from '../../../src/shared/source-control-primary-action-decision'
+import {
+  hasResolvableHostedReviewPushTargetLink,
+  resolveHostedReviewPushTargetForActions
+} from '../../../src/shared/hosted-review-push-target'
+import type { PRState } from '../../../src/shared/github/pull-request-types'
+import type { GitPushTarget } from '../../../src/shared/worktree/types'
+import type { PrSidebarState } from '../session/mobile-pr-sidebar-state'
 import type { MobileGitBranchCompareResult } from './mobile-branch-compare'
 import type { MobileGitStatusResult } from './mobile-git-status'
 
 type GitStep = { method: string; params?: Record<string, unknown> }
+
+type MobileSourceControlPrimaryActionKind = SourceControlCommitAreaPrimaryActionDecision['kind']
+type MobileSourceControlPrimaryActionDecision = SourceControlCommitAreaPrimaryActionDecision
+type MobileSourceControlRemoteOpKind = SourceControlRemoteOpKind
 
 export type MobileSourceControlPrimaryAction = {
   kind: MobileSourceControlPrimaryActionKind
@@ -27,6 +38,42 @@ export type MobileSourceControlPrimaryActionHandlers = {
   runActionSheetGitSync: () => Promise<void>
 }
 
+// The branch's review as the PR panel loaded it; desktop's commit area reads the same facts.
+export type MobileSourceControlReviewInputs = {
+  prState: PRState | null
+  isPRStateLoading: boolean
+  reviewNumber: number | null
+  pushTarget: GitPushTarget | null
+}
+
+const NO_REVIEW: MobileSourceControlReviewInputs = {
+  prState: null,
+  isPRStateLoading: false,
+  reviewNumber: null,
+  pushTarget: null
+}
+
+export function resolveMobileSourceControlReviewInputs(
+  state: PrSidebarState
+): MobileSourceControlReviewInputs {
+  if (state.kind === 'ready') {
+    return {
+      prState: state.data.pr.state,
+      isPRStateLoading: false,
+      reviewNumber: state.data.pr.number,
+      pushTarget: state.data.pushTarget
+    }
+  }
+  return state.kind === 'loading' ? { ...NO_REVIEW, isPRStateLoading: true } : NO_REVIEW
+}
+
+// Mobile pushes without a review's saved push target, so a force push there could overwrite the wrong branch.
+export function getMobileForcePushBlockedReason(
+  review: MobileSourceControlReviewInputs | undefined
+): string | undefined {
+  return review?.pushTarget ? "Force push this pull request's branch from desktop" : undefined
+}
+
 export type MobileSourceControlPrimaryActionArgs = {
   status: MobileGitStatusResult | null
   hasUnresolvedConflicts: boolean
@@ -38,37 +85,65 @@ export type MobileSourceControlPrimaryActionArgs = {
   openingPath: string | null
   openingBranchPath: string | null
   branchCompareResult: MobileGitBranchCompareResult | null
+  review?: MobileSourceControlReviewInputs
   handlers: MobileSourceControlPrimaryActionHandlers
 }
 
-export function buildMobileSourceControlPrimaryAction(
-  args: MobileSourceControlPrimaryActionArgs
-): MobileSourceControlPrimaryAction {
-  const decision = resolveMobileSourceControlCommitAreaPrimaryActionDecision({
+// The commit area's facts in desktop's decision shape; the primary action and the action sheet both read them.
+export function buildMobileSourceControlDecisionInputs(
+  args: Omit<MobileSourceControlPrimaryActionArgs, 'handlers'>
+): SourceControlPrimaryActionDecisionInputs {
+  const review = args.review ?? NO_REVIEW
+  // Mobile reads upstream status untargeted, so a review with its own push target (fork checkouts) is not gated here.
+  const hasReviewLink =
+    review.pushTarget === null &&
+    hasResolvableHostedReviewPushTargetLink({ linkedGitHubPR: review.reviewNumber })
+  const reviewTarget = resolveHostedReviewPushTargetForActions({
+    hasHostedReviewLink: hasReviewLink,
+    hasResolvableHostedReviewPushTargetLink: hasReviewLink,
+    hostedReviewState: review.prState,
+    isHostedReviewStateLoading: review.isPRStateLoading,
+    upstreamStatus: args.status?.upstreamStatus,
+    branchName: args.status?.branch?.replace(/^refs\/heads\//, '')
+  })
+  return {
     stagedCount: args.stagedCount,
     hasUnstagedChanges: args.unstagedCount > 0,
     hasStageableChanges: args.stageablePaths.length > 0,
-    // Why: the commit-area decision keeps the desktop input shape, but partial
-    // staging only matters to commit eligibility/dropdowns. Avoid an extra entry scan.
+    // Partial staging affects commit eligibility, not this area decision; avoid another entry scan.
     hasPartiallyStagedChanges: false,
     hasMessage: args.commitMessage.trim().length > 0,
     hasUnresolvedConflicts: args.hasUnresolvedConflicts,
     isCommitting: args.busyAction === 'commit',
     isRemoteOperationActive: isMobileRemoteOperationActive(args.busyAction),
     inFlightRemoteOpKind: getInFlightRemoteOpKind(args.busyAction),
-    upstreamStatus: args.status?.upstreamStatus,
+    upstreamStatus: reviewTarget.upstreamStatusForActions,
     branchCommitsAhead: getMobileBranchCommitsAhead(args),
-    hasCurrentBranch: Boolean(args.status?.branch)
-  })
+    hasCurrentBranch: Boolean(args.status?.branch),
+    prState: reviewTarget.hostedReviewStateForActions,
+    isPRStateLoading: review.isPRStateLoading,
+    canPushLinkedReviewWithoutUpstream: reviewTarget.canUseHostedReviewPushTarget
+  }
+}
+
+export function buildMobileSourceControlPrimaryAction(
+  args: MobileSourceControlPrimaryActionArgs
+): MobileSourceControlPrimaryAction {
+  const decision = resolveSourceControlCommitAreaPrimaryActionDecision(
+    buildMobileSourceControlDecisionInputs(args)
+  )
   const ioBusy =
     args.busyAction !== null || args.openingPath !== null || args.openingBranchPath !== null
-  const disabled = decision.disabled || ioBusy
+  const forcePushBlockedReason = decision.requiresForceWithLease
+    ? getMobileForcePushBlockedReason(args.review)
+    : undefined
+  const disabled = decision.disabled || ioBusy || forcePushBlockedReason !== undefined
 
   return {
     kind: decision.kind,
     label: getMobilePrimaryActionLabel(decision),
     accessibilityLabel: getMobilePrimaryActionLabel(decision),
-    accessibilityHint: getMobilePrimaryActionHint(decision),
+    accessibilityHint: forcePushBlockedReason ?? getMobilePrimaryActionHint(decision),
     disabled,
     loading: isLoadingDecision(decision, args.busyAction),
     requiresForceWithLease: decision.requiresForceWithLease,
@@ -113,8 +188,8 @@ function getInFlightRemoteOpKind(
   }
 }
 
-function getMobileBranchCommitsAhead(
-  args: MobileSourceControlPrimaryActionArgs
+export function getMobileBranchCommitsAhead(
+  args: Pick<MobileSourceControlPrimaryActionArgs, 'branchCompareResult' | 'status'>
 ): number | undefined {
   const summary = args.branchCompareResult?.summary
   if (summary?.status === 'ready' && summary.commitsAhead !== undefined) {
@@ -167,8 +242,16 @@ function getMobilePrimaryActionHint(decision: MobileSourceControlPrimaryActionDe
       return 'Stage at least one file to commit.'
     case 'checkout_branch_before_publish':
       return 'Check out a branch before publishing commits.'
+    case 'checking_review_status':
+      return 'Checking review status.'
+    case 'review_already_merged':
+      return 'Nothing to commit. The review is already merged.'
     case 'publish_branch':
       return 'Publish this branch to origin.'
+    case 'push_linked_review':
+      return 'Push updates to the linked review branch.'
+    case 'linked_review_target_unavailable':
+      return 'The linked review branch is unavailable.'
     case 'force_push_with_lease':
       return 'Force push with lease to update the remote branch.'
     case 'sync_counts':

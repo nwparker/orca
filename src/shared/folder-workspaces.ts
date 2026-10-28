@@ -1,8 +1,13 @@
-import type { FolderWorkspace, FolderWorkspaceLinkedTask, ProjectGroup } from './types'
+import type { FolderWorkspace } from './folder-workspace-types'
+import type { ProjectGroup } from './project-group-types'
 import { isTuiAgent } from './tui-agent-config'
 import { normalizeStoredTaskSourceContext } from './task-source-context'
 import { normalizeWorkspaceLinkedItem } from './workspace-linked-item'
 import { isWorkspaceLinkedItemSourceContextMatch } from './workspace-linked-item-source-context'
+import { normalizeWorkspaceCreatorProvenance } from './workspace-creator-provenance'
+import { getWorkspaceAttachments } from './workspace-attachments'
+import { isSmartTier } from './sidebar-list/sort-stamps'
+import { normalizeOrcadRetainedMarker } from './orcad-retained-marker'
 
 export function normalizeFolderWorkspaceName(
   name: string | null | undefined,
@@ -10,12 +15,6 @@ export function normalizeFolderWorkspaceName(
 ): string {
   const trimmed = typeof name === 'string' ? name.trim() : ''
   return trimmed.length > 0 ? trimmed : fallback
-}
-
-export function normalizeFolderWorkspaceLinkedTask(
-  value: unknown
-): FolderWorkspaceLinkedTask | null {
-  return normalizeWorkspaceLinkedItem(value)
 }
 
 export function normalizeFolderWorkspaces(
@@ -59,7 +58,11 @@ export function normalizeFolderWorkspaces(
     const now = Date.now()
     const linkedTask = normalizeWorkspaceLinkedItem(raw.linkedTask)
     const linkedTaskSourceContext = normalizeStoredTaskSourceContext(raw.linkedTaskSourceContext)
+    const creatorProvenance = normalizeWorkspaceCreatorProvenance(raw.creatorProvenance)
+    const orcadRetained = normalizeOrcadRetainedMarker(raw.orcadRetained)
     seen.add(raw.id)
+    // Do not persist fetch-time executionHostId: it may name an unowned runtime authority and lacks a generation fence.
+    // connectionId is the durable pin main projects from.
     workspaces.push({
       id: raw.id,
       projectGroupId: raw.projectGroupId,
@@ -71,7 +74,17 @@ export function normalizeFolderWorkspaces(
           : raw.connectionId === null
             ? null
             : (group?.connectionId ?? null),
+      ...(creatorProvenance ? { creatorProvenance } : {}),
       linkedTask,
+      ...(raw.linkedItems !== undefined
+        ? {
+            linkedItems: getWorkspaceAttachments({
+              linkedItems: raw.linkedItems,
+              linkedWorkItem: linkedTask,
+              linkedTaskSourceContext
+            })
+          }
+        : {}),
       linkedTaskSourceContext: isWorkspaceLinkedItemSourceContextMatch(
         linkedTask,
         linkedTaskSourceContext
@@ -103,10 +116,25 @@ export function normalizeFolderWorkspaces(
         typeof raw.lastActivityAt === 'number' && Number.isFinite(raw.lastActivityAt)
           ? raw.lastActivityAt
           : 0,
+      ...(isSmartTier(raw.smartTier) &&
+      typeof raw.smartAt === 'number' &&
+      Number.isFinite(raw.smartAt)
+        ? { smartTier: raw.smartTier, smartAt: raw.smartAt }
+        : {}),
+      ...(typeof raw.lastTerminalUseAt === 'number' && Number.isFinite(raw.lastTerminalUseAt)
+        ? { lastTerminalUseAt: raw.lastTerminalUseAt }
+        : {}),
       createdAt:
         typeof raw.createdAt === 'number' && Number.isFinite(raw.createdAt) ? raw.createdAt : now,
       updatedAt:
-        typeof raw.updatedAt === 'number' && Number.isFinite(raw.updatedAt) ? raw.updatedAt : now
+        typeof raw.updatedAt === 'number' && Number.isFinite(raw.updatedAt) ? raw.updatedAt : now,
+      // Legacy #14112 builds stored notes inline; canonical storage is PersistedState.folderWorkspaceDiffComments.
+      ...(Array.isArray(raw.diffComments) ? { diffComments: raw.diffComments } : {}),
+      // Entries are validated where they are read (external-conversation-links.ts).
+      ...(Array.isArray(raw.externalConversations)
+        ? { externalConversations: raw.externalConversations }
+        : {}),
+      ...(orcadRetained ? { orcadRetained } : {})
     })
   }
   return workspaces.sort(

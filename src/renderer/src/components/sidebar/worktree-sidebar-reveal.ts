@@ -1,4 +1,5 @@
-import { GROUP_HEADER_ROW_HEIGHT } from './worktree-list-virtual-rows'
+import { GROUP_HEADER_ROW_HEIGHT } from './worktree-list/viewport/virtual-rows'
+import { motionSafeScrollBehavior } from '@/hooks/usePrefersReducedMotion'
 
 const WORKTREE_REVEAL_TOP_CLEARANCE = 6
 export const WORKTREE_SIDEBAR_REVEAL_TOP_INSET =
@@ -38,7 +39,9 @@ export function getScrollTopToRevealBounds(
 export function revealElementInScrollContainer(
   container: HTMLElement,
   element: Element,
-  behavior: ScrollBehavior
+  behavior: ScrollBehavior,
+  // Notify guards to defer competing scrollTop writes until this smooth reveal finishes.
+  onScrollIssued?: (targetTop: number) => void
 ): boolean {
   if (!container.contains(element)) {
     return false
@@ -51,14 +54,8 @@ export function revealElementInScrollContainer(
   if (nextScrollTop === null) {
     return true
   }
-  // Why: honor the user's reduced-motion preference by jumping instantly instead of
-  // animating a smooth scroll (also makes the reveal deterministic in headless
-  // environments that never tick the smooth-scroll animation).
-  const prefersReducedMotion =
-    typeof window !== 'undefined' &&
-    window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true
-  const resolvedBehavior: ScrollBehavior =
-    behavior === 'smooth' && prefersReducedMotion ? 'auto' : behavior
-  container.scrollTo({ top: Math.max(0, nextScrollTop), behavior: resolvedBehavior })
+  const targetTop = Math.max(0, nextScrollTop)
+  onScrollIssued?.(targetTop)
+  container.scrollTo({ top: targetTop, behavior: motionSafeScrollBehavior(behavior) })
   return true
 }

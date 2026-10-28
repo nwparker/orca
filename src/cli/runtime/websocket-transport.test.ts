@@ -1,3 +1,5 @@
+import { SKILL_INSTALL_RESULT_V2_CAPABILITY } from '../../shared/skill-install-capability'
+import { AGENT_LAUNCH_RUNTIME_CAPABILITY } from '../../shared/agent-launch-runtime-capability'
 import { createServer, type Server } from 'node:http'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -5,6 +7,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { WebSocketServer } from 'ws'
 import { encodePairingOffer, type PairingOffer } from '../../shared/pairing'
+import type { RuntimeStatus } from '../../shared/runtime-types'
 import {
   decrypt,
   deriveSharedKey,
@@ -17,10 +20,25 @@ import { launchOrcaApp } from './launch'
 import { addEnvironmentFromPairingCode } from './environments'
 import { RuntimeClientError } from './types'
 import {
+  AGENT_SESSION_BACKGROUND_TASK_ROW_STOP_CAPABILITY,
+  AGENT_SESSION_TURN_ITEM_CAPABILITY,
+  AGENT_SESSION_BACKGROUND_TASK_STOP_CAPABILITY,
+  AGENT_SESSION_BOUNDARY_RUNTIME_CAPABILITY,
+  AUTOMATION_OWNER_FENCING_RUNTIME_CAPABILITY,
   MIN_COMPATIBLE_RUNTIME_CLIENT_VERSION,
+  REPO_SEARCH_QUALIFIED_REFS_RUNTIME_CAPABILITY,
   RUNTIME_PROTOCOL_VERSION,
-  SESSION_TAB_CLOSE_INTENT_RUNTIME_CAPABILITY
+  SESSION_TABS_AUTHORITATIVE_INVENTORY_RUNTIME_CAPABILITY,
+  SESSION_TAB_CLOSE_INTENT_RUNTIME_CAPABILITY,
+  WORKTREE_GITHUB_PR_SUPPRESSION_RUNTIME_CAPABILITY,
+  WORKTREE_VISIBILITY_DEFAULTS_RUNTIME_CAPABILITY,
+  WORKTREE_VISIBILITY_SOURCE_DEFAULTS_RUNTIME_CAPABILITY
 } from '../../shared/protocol-version'
+import {
+  TERMINAL_QUICK_COMMAND_LARGE_LISTS_RUNTIME_CAPABILITY,
+  TERMINAL_QUICK_COMMAND_LONG_PROMPTS_RUNTIME_CAPABILITY
+} from '../../shared/terminal-quick-command-capabilities'
+import { AGENT_SESSION_BACKGROUND_TASK_CHILD_VIEWS_CAPABILITY } from '../../shared/agent-session-background-task-child-views-capability'
 
 vi.mock('./launch', () => ({
   launchOrcaApp: vi.fn()
@@ -31,6 +49,8 @@ type TestRuntime = {
   publicKeyB64: string
   deviceToken: string
   authFrames: Record<string, unknown>[]
+  requestMethods: string[]
+  connectionCount: () => number
   close: () => Promise<void>
 }
 
@@ -59,7 +79,24 @@ describe('CLI remote WebSocket transport', () => {
     expect(response.result.runtimeId).toBe('runtime-ws-1')
     expect(runtime.authFrames).toContainEqual(
       expect.objectContaining({
-        clientCapabilities: [SESSION_TAB_CLOSE_INTENT_RUNTIME_CAPABILITY]
+        clientCapabilities: [
+          AGENT_SESSION_BACKGROUND_TASK_STOP_CAPABILITY,
+          AGENT_SESSION_BACKGROUND_TASK_ROW_STOP_CAPABILITY,
+          AGENT_SESSION_BACKGROUND_TASK_CHILD_VIEWS_CAPABILITY,
+          AGENT_SESSION_TURN_ITEM_CAPABILITY,
+          SESSION_TAB_CLOSE_INTENT_RUNTIME_CAPABILITY,
+          SESSION_TABS_AUTHORITATIVE_INVENTORY_RUNTIME_CAPABILITY,
+          AGENT_SESSION_BOUNDARY_RUNTIME_CAPABILITY,
+          SKILL_INSTALL_RESULT_V2_CAPABILITY,
+          WORKTREE_GITHUB_PR_SUPPRESSION_RUNTIME_CAPABILITY,
+          WORKTREE_VISIBILITY_DEFAULTS_RUNTIME_CAPABILITY,
+          WORKTREE_VISIBILITY_SOURCE_DEFAULTS_RUNTIME_CAPABILITY,
+          AUTOMATION_OWNER_FENCING_RUNTIME_CAPABILITY,
+          REPO_SEARCH_QUALIFIED_REFS_RUNTIME_CAPABILITY,
+          TERMINAL_QUICK_COMMAND_LONG_PROMPTS_RUNTIME_CAPABILITY,
+          TERMINAL_QUICK_COMMAND_LARGE_LISTS_RUNTIME_CAPABILITY,
+          AGENT_LAUNCH_RUNTIME_CAPABILITY
+        ]
       })
     )
   })
@@ -78,7 +115,14 @@ describe('CLI remote WebSocket transport', () => {
         automatic: false,
         reason: 'manual-service-update-required'
       },
-      capabilities: ['updater.remote-control.v1']
+      capabilities: ['updater.remote-control.v1'],
+      degradations: [
+        {
+          code: 'browser_unavailable',
+          capability: 'browser.headless.v1',
+          message: 'Browser automation is unavailable.'
+        }
+      ]
     })
     servers.push(runtime)
     const offer: PairingOffer = {
@@ -101,7 +145,8 @@ describe('CLI remote WebSocket transport', () => {
     expect(status.result.runtime).toMatchObject({
       appVersion: '1.5.0',
       remoteUpdateSupport: { automatic: false, reason: 'manual-service-update-required' },
-      capabilities: ['updater.remote-control.v1']
+      capabilities: ['updater.remote-control.v1'],
+      degradations: [expect.objectContaining({ code: 'browser_unavailable' })]
     })
   })
 
@@ -168,6 +213,30 @@ describe('CLI remote WebSocket transport', () => {
       code: 'incompatible_runtime',
       message: expect.stringContaining('server is too old')
     })
+    expect(runtime.connectionCount()).toBe(1)
+    expect(runtime.authFrames).toHaveLength(1)
+    expect(runtime.requestMethods).toEqual(['status.get'])
+  })
+
+  it('preflights and dispatches through one authenticated connection', async () => {
+    const runtime = await startTestRuntime('runtime-single-auth')
+    servers.push(runtime)
+    const client = new RuntimeClient(
+      '/tmp/unused',
+      5_000,
+      encodePairingOffer({
+        v: 2,
+        endpoint: runtime.endpoint,
+        deviceToken: runtime.deviceToken,
+        publicKeyB64: runtime.publicKeyB64
+      })
+    )
+
+    await expect(client.call('repo.list')).rejects.toMatchObject({ code: 'method_not_found' })
+
+    expect(runtime.connectionCount()).toBe(1)
+    expect(runtime.authFrames).toHaveLength(1)
+    expect(runtime.requestMethods).toEqual(['status.get', 'repo.list'])
   })
 
   it('blocks orchestration mutations when a remote runtime lacks the contract capability', async () => {
@@ -207,6 +276,7 @@ async function startTestRuntime(
       reason: 'manual-service-update-required'
     }
     capabilities?: string[]
+    degradations?: RuntimeStatus['degradations']
   } = {}
 ): Promise<TestRuntime> {
   const serverKeyPair = generateKeyPair()
@@ -214,8 +284,11 @@ async function startTestRuntime(
   const httpServer = createServer()
   const wss = new WebSocketServer({ server: httpServer })
   const authFrames: Record<string, unknown>[] = []
+  const requestMethods: string[] = []
+  let connectionCount = 0
 
   wss.on('connection', (ws) => {
+    connectionCount += 1
     let sharedKey: Uint8Array | null = null
     let authenticated = false
 
@@ -254,6 +327,7 @@ async function startTestRuntime(
       }
 
       const request = JSON.parse(plaintext) as { id: string; method: string }
+      requestMethods.push(request.method)
       const response =
         request.method === 'status.get'
           ? {
@@ -274,7 +348,8 @@ async function startTestRuntime(
                   MIN_COMPATIBLE_RUNTIME_CLIENT_VERSION,
                 appVersion: statusOverrides.appVersion,
                 remoteUpdateSupport: statusOverrides.remoteUpdateSupport,
-                capabilities: statusOverrides.capabilities
+                capabilities: statusOverrides.capabilities,
+                degradations: statusOverrides.degradations
               },
               _meta: { runtimeId }
             }
@@ -299,6 +374,8 @@ async function startTestRuntime(
     publicKeyB64: publicKeyToBase64(serverKeyPair.publicKey),
     deviceToken,
     authFrames,
+    requestMethods,
+    connectionCount: () => connectionCount,
     close: async () => {
       await new Promise<void>((resolve) => {
         wss.close(() => resolve())

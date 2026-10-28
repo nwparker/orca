@@ -37,8 +37,7 @@ function makeAttempt(
   }
 }
 
-// error code 5 == ERROR_ACCESS_DENIED from CreateProcessW inside ConPTY when a
-// bare/alias pwsh.exe is handed to node-pty.
+// ConPTY CreateProcessW rejects bare/alias pwsh.exe with ERROR_ACCESS_DENIED (5).
 const ACCESS_DENIED_5 = 'Cannot create process, error code: 5'
 
 describe('spawnShellWithFallback on Windows', () => {
@@ -70,7 +69,6 @@ describe('spawnShellWithFallback on Windows', () => {
       windowsFallbackAttempts: attempts
     })
 
-    // Falls back to the next real absolute executable instead of throwing.
     expect(result.shellPath).toBe(WINDOWS_POWERSHELL)
     expect(ptySpawn).toHaveBeenNthCalledWith(
       1,
@@ -133,18 +131,28 @@ describe('spawnShellWithFallback on Windows', () => {
     const ptySpawn = vi.fn(() => {
       throw new Error(ACCESS_DENIED_5)
     }) as unknown as typeof pty.spawn
+    const previousVersion = process.env.ORCA_APP_VERSION
+    process.env.ORCA_APP_VERSION = '1.4.178-test'
 
-    expect(() =>
-      spawnShellWithFallback({
-        shellPath: PWSH7,
-        shellArgs: attempts[0].shellArgs,
-        cols: 80,
-        rows: 24,
-        cwd: 'C:\\repo',
-        env: {},
-        ptySpawn,
-        windowsFallbackAttempts: attempts
-      })
-    ).toThrow(/Failed to spawn shell/)
+    try {
+      expect(() =>
+        spawnShellWithFallback({
+          shellPath: PWSH7,
+          shellArgs: attempts[0].shellArgs,
+          cols: 80,
+          rows: 24,
+          cwd: 'C:\\repo',
+          env: {},
+          ptySpawn,
+          windowsFallbackAttempts: attempts
+        })
+      ).toThrow(/Failed to spawn shell.*orca: 1\.4\.178-test/)
+    } finally {
+      if (previousVersion === undefined) {
+        delete process.env.ORCA_APP_VERSION
+      } else {
+        process.env.ORCA_APP_VERSION = previousVersion
+      }
+    }
   })
 })

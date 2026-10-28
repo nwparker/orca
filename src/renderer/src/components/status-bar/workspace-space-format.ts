@@ -3,29 +3,14 @@ import type {
   WorkspaceSpaceScanStatus,
   WorkspaceSpaceWorktree
 } from '../../../../shared/workspace-space-types'
+import { formatUiRelativeTime } from '@/i18n/relative-time-format'
 
-const BYTE_UNITS = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'] as const
-const relativeTimeFormatter = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' })
+export { formatBytes } from '../../../../shared/format-bytes'
+
 const fullDateTimeFormatter = new Intl.DateTimeFormat(undefined, {
   dateStyle: 'medium',
   timeStyle: 'short'
 })
-
-export function formatBytes(bytes: number): string {
-  if (!Number.isFinite(bytes) || bytes <= 0) {
-    return '0 B'
-  }
-
-  let value = bytes
-  let unitIndex = 0
-  while (value >= 1024 && unitIndex < BYTE_UNITS.length - 1) {
-    value /= 1024
-    unitIndex += 1
-  }
-
-  const precision = value >= 100 || unitIndex === 0 ? 0 : value >= 10 ? 1 : 2
-  return `${value.toFixed(precision)} ${BYTE_UNITS[unitIndex]}`
-}
 
 export function formatCompactCount(count: number): string {
   if (!Number.isFinite(count) || count <= 0) {
@@ -41,19 +26,7 @@ export function formatCompactCount(count: number): string {
 }
 
 export function getWorkspaceSpaceScanTimeLabel(scannedAt: number, now = Date.now()): string {
-  const diffMs = scannedAt - now
-  const diffMinutes = Math.round(diffMs / 60_000)
-  if (Math.abs(diffMinutes) < 60) {
-    return relativeTimeFormatter.format(diffMinutes, 'minute')
-  }
-
-  const diffHours = Math.round(diffMinutes / 60)
-  if (Math.abs(diffHours) < 24) {
-    return relativeTimeFormatter.format(diffHours, 'hour')
-  }
-
-  const diffDays = Math.round(diffHours / 24)
-  return relativeTimeFormatter.format(diffDays, 'day')
+  return formatUiRelativeTime(scannedAt - now)
 }
 
 export function getWorkspaceSpaceScanDateTimeLabel(scannedAt: number): string {

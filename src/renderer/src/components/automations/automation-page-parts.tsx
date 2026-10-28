@@ -3,16 +3,19 @@ import type { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 import type { AutomationRun } from '../../../../shared/automations-types'
 
+// Reuse one formatter across run cells; per-cell construction dominates large-history rendering.
+const automationDateTimeFormatter = new Intl.DateTimeFormat(undefined, {
+  month: 'short',
+  day: 'numeric',
+  hour: 'numeric',
+  minute: '2-digit'
+})
+
 export function formatAutomationDateTime(value: number | null | undefined): string {
   if (!value) {
     return 'Never'
   }
-  return new Intl.DateTimeFormat(undefined, {
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit'
-  }).format(value)
+  return automationDateTimeFormatter.format(value)
 }
 
 export function formatAutomationRelativeTime(
@@ -91,28 +94,46 @@ export function getAutomationRunStatusLabel(status: AutomationRun['status']): st
   }
 }
 
+export const AUTOMATION_EDITOR_SECTION_LABEL_CLASS =
+  'text-[11px] font-semibold uppercase tracking-[0.05em]'
+
 export function Field({
   label,
   children,
-  className
+  className,
+  labelClassName
 }: {
   label: React.ReactNode
   children: React.ReactNode
   className?: string
+  labelClassName?: string
 }): React.JSX.Element {
   return (
     <div className={cn('min-w-0 space-y-1.5', className)}>
-      <div className="text-xs text-muted-foreground">{label}</div>
+      <div className={cn('text-xs text-muted-foreground', labelClassName)}>{label}</div>
       {children}
     </div>
   )
 }
 
-export function Metric({ label, value }: { label: string; value: string }): React.JSX.Element {
+export function AutomationRunErrorNotice({
+  label,
+  error,
+  className
+}: {
+  label: string
+  error: string
+  className?: string
+}): React.JSX.Element {
   return (
-    <div className="min-w-0 rounded-md border border-border p-3">
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="mt-1 truncate text-sm font-medium">{value}</div>
+    <div
+      role="alert"
+      className={cn(
+        'rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive',
+        className
+      )}
+    >
+      <span className="font-medium">{label}</span> {error}
     </div>
   )
 }

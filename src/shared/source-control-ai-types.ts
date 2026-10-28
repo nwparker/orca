@@ -1,11 +1,16 @@
-import type { CommitMessageAiModelCapability, TuiAgent } from './types'
+import type { CommitMessageAiModelCapability } from './commit-message-ai-types'
+import type { TuiAgent } from './tui-agent'
 import type { CustomAgentId } from './commit-message-agent-spec'
 import type {
   SourceControlAiActionDefaults,
+  SourceControlActionLaunchPreferences,
+  SourceControlActionSurface,
   SourceControlActionId,
-  SourceControlTextActionId
+  SourceControlTextActionId,
+  AiTextActionId
 } from './source-control-ai-actions'
 
+export type AiTextOperation = AiTextActionId
 export type SourceControlAiOperation = SourceControlTextActionId
 
 export type SourceControlAiModelChoice = {
@@ -33,8 +38,8 @@ export type SourceControlAiSettings = {
   >
   selectedThinkingByModel: Record<string, string>
   customAgentCommand: string
-  instructionsByOperation: Partial<Record<SourceControlAiOperation, string>>
-  modelOverridesByOperation?: Partial<Record<SourceControlAiOperation, SourceControlAiModelChoice>>
+  instructionsByOperation: Partial<Record<AiTextOperation, string>>
+  modelOverridesByOperation?: Partial<Record<AiTextOperation, SourceControlAiModelChoice>>
   prCreationDefaults?: SourceControlAiPrCreationDefaults
   /** @deprecated use actions instead. Kept for automatic migration and rollback compatibility. */
   launchActionDefaults?: SourceControlAiActionDefaults
@@ -56,6 +61,8 @@ export type RepoSourceControlAiOverrides = {
         agentId?: TuiAgent | CustomAgentId | null
         commandInputTemplate?: string | null
         agentArgs?: string | null
+        launchPreferences?: SourceControlActionLaunchPreferences
+        surface?: SourceControlActionSurface
       }
     >
   >
@@ -71,6 +78,8 @@ export type CompleteSourceControlActionRecipe = {
   agentId: TuiAgent | CustomAgentId | null
   commandInputTemplate: string
   agentArgs?: string
+  launchPreferences?: SourceControlActionLaunchPreferences
+  surface?: SourceControlActionSurface
 }
 
 export type WritableRepoSourceControlAiOverrides = {
@@ -78,6 +87,6 @@ export type WritableRepoSourceControlAiOverrides = {
   customAgentCommand?: string
   modelOverridesByOperation?: Partial<Record<SourceControlAiOperation, SourceControlAiModelChoice>>
   instructionsByOperation?: Partial<Record<SourceControlAiOperation, string>>
-  actionOverrides?: Partial<Record<SourceControlActionId, CompleteSourceControlActionRecipe>>
+  actionOverrides?: RepoSourceControlAiOverrides['actionOverrides']
   prCreationDefaults?: SourceControlAiPrCreationDefaults
 }

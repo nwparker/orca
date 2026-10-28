@@ -1,36 +1,77 @@
 import { stripLeadingAgentTitleDecorationOrEmpty } from '../../../src/shared/agent-title-decoration'
-import { resolveExplicitTerminalTitleAgentType } from '../../../src/shared/terminal-title-agent-type'
+import { agentTypeToIconAgent } from '../../../src/shared/agent-type-icon-agent'
+import { resolveTabAgentFromSignalSnapshot } from '../../../src/shared/tab-agent-from-signals'
 import type { AgentStatusEntry } from '../../../src/shared/agent-status-types'
-import type { TuiAgent } from '../../../src/shared/types'
+import type { TuiAgent } from '../../../src/shared/tui-agent'
 import { isBlankBrowserUrl } from '../browser/browser-url'
-import type { MobileSessionTab } from '../../app/h/[hostId]/session/mobile-session-route-types'
+import type { MobileSessionTab } from './mobile-session-route-types'
 
-// Why: tab identity + title cleaning uses the same shared glyph/label maps as
-// desktop, so the two platforms do not drift on which titles identify agents.
-
-/**
- * Resolve which coding agent a mobile terminal tab is running, for its tab
- * icon. Hook-reported `agentType` is the authoritative signal; the OSC title is
- * the fallback for sessions without hook status or a host launch identity.
- * Returns null when no agent is identified (plain shell / unknown), so the tab
- * keeps its text-only label.
- */
-export function resolveMobileTerminalTabAgentId(tab: {
+type MobileTerminalTabAgentIdentity = {
   title: string
-  agentStatus?: AgentStatusEntry | null
-  launchAgent?: TuiAgent
-}): string | null {
+  agentStatus?: {
+    agentType?: AgentStatusEntry['agentType'] | null
+    state?: AgentStatusEntry['state']
+  } | null
+  launchAgent?: TuiAgent | null
+}
+
+export function getMobileTerminalTabHostAgentIdentity(
+  tab: MobileSessionTab,
+  terminals: readonly { handle: string; agentIdentity?: string }[]
+): string | undefined {
+  if (tab.type !== 'terminal' || !tab.terminal) {
+    return undefined
+  }
+  return terminals.find((terminal) => terminal.handle === tab.terminal)?.agentIdentity
+}
+
+// Cursor imports Claude hooks; older hosts still report them as claude, so the host identity corrects that.
+function correctCursorImportedHookAgent(
+  hookAgentType: string | null | undefined,
+  hostAgentIdentity: string | null | undefined
+): string | null | undefined {
+  return hookAgentType === 'claude' && hostAgentIdentity === 'cursor' ? 'cursor' : hookAgentType
+}
+
+export function resolveMobileTerminalTabOwnedAgentId(
+  tab: MobileTerminalTabAgentIdentity,
+  hostAgentIdentity?: string | null
+): string | null {
   const hookAgentType = tab.agentStatus?.agentType?.trim()
   if (hookAgentType && hookAgentType !== 'unknown') {
-    return hookAgentType
+    return correctCursorImportedHookAgent(hookAgentType, hostAgentIdentity) ?? null
   }
   if (tab.launchAgent) {
     return tab.launchAgent
   }
-  return resolveExplicitTerminalTitleAgentType(tab.title)
+  return null
 }
 
-export function getMobileSessionTabTitle(tab: MobileSessionTab): string {
+// Phones get no process, sleeping-session or sibling signals; host Cursor identity stands in for an unowned pane's process, since terminal.list can keep it after the pane is reused.
+export function resolveMobileTerminalTabAgentId(
+  tab: MobileTerminalTabAgentIdentity,
+  hostAgentIdentity?: string | null
+): string | null {
+  const status = tab.agentStatus
+  const hookAgent = agentTypeToIconAgent(
+    correctCursorImportedHookAgent(status?.agentType, hostAgentIdentity)
+  )
+  return resolveTabAgentFromSignalSnapshot({
+    title: tab.title,
+    hookAgent: status?.state === 'done' ? null : hookAgent,
+    focusedCompletedHookAgent: status?.state === 'done' ? hookAgent : null,
+    processAgent:
+      hostAgentIdentity === 'cursor' && !resolveMobileTerminalTabOwnedAgentId(tab)
+        ? 'cursor'
+        : null,
+    launchAgent: tab.launchAgent ?? undefined
+  })
+}
+
+export function getMobileSessionTabTitle(
+  tab: MobileSessionTab,
+  hostAgentIdentity?: string | null
+): string {
   if (tab.type === 'browser') {
     const title = tab.title.trim()
     if (title && !isBlankBrowserUrl(title)) {
@@ -47,10 +88,11 @@ export function getMobileSessionTabTitle(tab: MobileSessionTab): string {
   if (tab.type === 'file') {
     return tab.title || 'File'
   }
-  // Why: strip the leading agent status glyph (✳ etc.) once the tab shows the
-  // provider icon. Mobile falls back for glyph-only titles because iOS can
-  // render the bare status glyph as a stray colored box beside the icon.
-  if (resolveMobileTerminalTabAgentId(tab)) {
+  if (tab.type === 'agent-session') {
+    return tab.title || 'Chat'
+  }
+  // Strip status glyphs when showing provider icons; glyph-only iOS titles otherwise leave stray colored boxes.
+  if (resolveMobileTerminalTabAgentId(tab, hostAgentIdentity)) {
     return stripLeadingAgentTitleDecorationOrEmpty(tab.title) || 'Terminal'
   }
   return tab.title || 'Terminal'

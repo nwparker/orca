@@ -1,14 +1,18 @@
 import type { ClaimedAgentPtyOwnerRegistry } from '../../shared/claimed-agent-pty-owner'
 import type { AgentSessionOwnerBinding } from '../../shared/agent-session-host-authority'
+import type { SpawnIntent } from '../../shared/host-spawn-admission'
 import type { CreateOrAttachOptions, CreateOrAttachResult } from './terminal-host-create-contract'
 
 export type InternalCreateOrAttachOptions = CreateOrAttachOptions & {
   agentSessionGeneration?: string
-  attachOnly?: boolean
+  /** Request identity for the fork gate; absent for in-process callers. */
+  spawnAdmission?: { clientId: string; declaredIntent: SpawnIntent | null; deadlineAt: number }
+  isCanceled?: () => boolean
+  cancelSignal?: AbortSignal
 }
 
 export async function createOrAttachClaimedAgentSession(args: {
-  options: CreateOrAttachOptions
+  options: InternalCreateOrAttachOptions
   owners: ClaimedAgentPtyOwnerRegistry
   isLive: (owner: AgentSessionOwnerBinding) => boolean
   createOrAttach: (options: InternalCreateOrAttachOptions) => Promise<CreateOrAttachResult>

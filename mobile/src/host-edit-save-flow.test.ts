@@ -5,7 +5,7 @@ import EditHostScreen from '../app/h/[hostId]/edit'
 
 const dependencies = vi.hoisted(() => ({
   back: vi.fn(),
-  forceReconnectHost: vi.fn(),
+  refreshHostClient: vi.fn(),
   loadHosts: vi.fn(),
   primeHosts: vi.fn(),
   updateHostNameAndEndpoint: vi.fn(),
@@ -27,6 +27,9 @@ vi.mock('react-native', () => ({
 vi.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ bottom: 0, left: 0, right: 0, top: 0 })
 }))
+vi.mock('./layout/side-safe-area', () => ({
+  SideSafeArea: ({ children }: { children: unknown }) => children
+}))
 
 vi.mock('expo-router', () => ({
   useLocalSearchParams: () => ({ hostId: dependencies.hostId }),
@@ -42,9 +45,9 @@ vi.mock('./transport/host-store', () => ({
   updateHostNameAndEndpoint: dependencies.updateHostNameAndEndpoint
 }))
 
-vi.mock('./transport/client-context', () => ({
-  useForceReconnect: () => dependencies.forceReconnectHost,
-  usePrimeHosts: () => dependencies.primeHosts
+vi.mock('./transport/host-client-hooks', () => ({
+  usePrimeHosts: () => dependencies.primeHosts,
+  useRefreshHostClient: () => dependencies.refreshHostClient
 }))
 
 const HOST_FIXTURE = {
@@ -56,29 +59,12 @@ const HOST_FIXTURE = {
   lastConnected: 1
 }
 
-function suppressReactTestRendererDeprecationWarning(): () => void {
-  const originalConsoleError = console.error
-  const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation((...args) => {
-    const firstArg = args[0]
-    if (typeof firstArg === 'string' && firstArg.includes('react-test-renderer is deprecated')) {
-      return
-    }
-    originalConsoleError(...args)
-  })
-  return () => consoleErrorSpy.mockRestore()
-}
-
 async function renderEditHostRoute(): Promise<ReactTestRenderer> {
   let renderer: ReactTestRenderer | null = null
-  const restoreConsoleError = suppressReactTestRendererDeprecationWarning()
-  try {
-    await act(async () => {
-      renderer = create(createElement(EditHostScreen))
-      await Promise.resolve()
-    })
-  } finally {
-    restoreConsoleError()
-  }
+  await act(async () => {
+    renderer = create(createElement(EditHostScreen))
+    await Promise.resolve()
+  })
   if (!renderer) {
     throw new Error('Edit host route did not render')
   }
@@ -91,7 +77,7 @@ function setFieldValue(
   value: string
 ): void {
   const input = renderer.root
-    .findAllByType('TextInput')
+    .findAll((node) => String(node.type) === 'TextInput')
     .find((node) => node.props.accessibilityLabel === accessibilityLabel)
   if (!input) {
     throw new Error(`${accessibilityLabel} input not found`)
@@ -103,7 +89,7 @@ function setFieldValue(
 
 function findSaveButton(renderer: ReactTestRenderer) {
   const button = renderer.root
-    .findAllByType('Pressable')
+    .findAll((node) => String(node.type) === 'Pressable')
     .find((node) => node.props.accessibilityLabel === 'Save host')
   if (!button) {
     throw new Error('Save button not found')
@@ -121,24 +107,25 @@ async function pressSave(renderer: ReactTestRenderer): Promise<void> {
 }
 
 function findText(renderer: ReactTestRenderer, match: string): boolean {
-  return renderer.root.findAllByType('Text').some((node) => {
-    const children = node.props.children
-    if (typeof children === 'string') {
-      return children.includes(match)
-    }
-    if (Array.isArray(children)) {
-      return children.join('').includes(match)
-    }
-    return false
-  })
+  return renderer.root
+    .findAll((node) => String(node.type) === 'Text')
+    .some((node) => {
+      const children = node.props.children
+      if (typeof children === 'string') {
+        return children.includes(match)
+      }
+      if (Array.isArray(children)) {
+        return children.join('').includes(match)
+      }
+      return false
+    })
 }
 
 describe('edit host handleSave', () => {
   beforeEach(() => {
-    globalThis.IS_REACT_ACT_ENVIRONMENT = true
     dependencies.hostId = 'host-1'
     dependencies.back.mockReset()
-    dependencies.forceReconnectHost.mockReset().mockResolvedValue(undefined)
+    dependencies.refreshHostClient.mockReset()
     dependencies.loadHosts.mockReset().mockResolvedValue([HOST_FIXTURE])
     dependencies.primeHosts.mockReset()
     dependencies.updateHostNameAndEndpoint.mockReset().mockResolvedValue(undefined)
@@ -159,9 +146,9 @@ describe('edit host handleSave', () => {
     await pressSave(renderer)
 
     expect(dependencies.updateHostNameAndEndpoint).toHaveBeenCalledWith('host-1', {
-      name: 'Home Desk'
+      personalName: 'Home Desk'
     })
-    expect(dependencies.forceReconnectHost).not.toHaveBeenCalled()
+    expect(dependencies.refreshHostClient).not.toHaveBeenCalled()
     expect(dependencies.back).toHaveBeenCalledTimes(1)
 
     act(() => renderer.unmount())
@@ -175,9 +162,24 @@ describe('edit host handleSave', () => {
     expect(dependencies.updateHostNameAndEndpoint).toHaveBeenCalledWith('host-1', {
       endpoint: 'ws://192.168.1.20:6768'
     })
-    expect(dependencies.forceReconnectHost).toHaveBeenCalledWith('host-1')
+    expect(dependencies.refreshHostClient).toHaveBeenCalledWith('host-1')
     expect(dependencies.back).toHaveBeenCalledTimes(1)
 
+    act(() => renderer.unmount())
+  })
+
+  it('previews and saves the secure default port when switching a LAN host to WSS', async () => {
+    const renderer = await renderEditHostRoute()
+    setFieldValue(renderer, 'Address', 'wss://tunnel.example.com')
+
+    expect(findText(renderer, 'Connects to wss://tunnel.example.com:443')).toBe(true)
+    await pressSave(renderer)
+
+    expect(dependencies.updateHostNameAndEndpoint).toHaveBeenCalledWith('host-1', {
+      endpoint: 'wss://tunnel.example.com:443'
+    })
+    expect(dependencies.refreshHostClient).toHaveBeenCalledWith('host-1')
+    expect(dependencies.back).toHaveBeenCalledTimes(1)
     act(() => renderer.unmount())
   })
 
@@ -189,10 +191,10 @@ describe('edit host handleSave', () => {
 
     expect(dependencies.updateHostNameAndEndpoint).toHaveBeenCalledTimes(1)
     expect(dependencies.updateHostNameAndEndpoint).toHaveBeenCalledWith('host-1', {
-      name: 'Home Desk',
+      personalName: 'Home Desk',
       endpoint: 'ws://192.168.1.20:6768'
     })
-    expect(dependencies.forceReconnectHost).toHaveBeenCalledWith('host-1')
+    expect(dependencies.refreshHostClient).toHaveBeenCalledWith('host-1')
     expect(dependencies.back).toHaveBeenCalledTimes(1)
 
     act(() => renderer.unmount())
@@ -203,7 +205,7 @@ describe('edit host handleSave', () => {
     await pressSave(renderer)
 
     expect(dependencies.updateHostNameAndEndpoint).not.toHaveBeenCalled()
-    expect(dependencies.forceReconnectHost).not.toHaveBeenCalled()
+    expect(dependencies.refreshHostClient).not.toHaveBeenCalled()
     expect(dependencies.back).toHaveBeenCalledTimes(1)
 
     act(() => renderer.unmount())
@@ -216,7 +218,7 @@ describe('edit host handleSave', () => {
     await pressSave(renderer)
 
     expect(findText(renderer, 'Host not found')).toBe(true)
-    expect(dependencies.forceReconnectHost).not.toHaveBeenCalled()
+    expect(dependencies.refreshHostClient).not.toHaveBeenCalled()
     expect(dependencies.back).not.toHaveBeenCalled()
 
     act(() => renderer.unmount())
@@ -232,23 +234,6 @@ describe('edit host handleSave', () => {
 
     expect(dependencies.primeHosts).not.toHaveBeenCalled()
     expect(dependencies.back).toHaveBeenCalledTimes(1)
-
-    act(() => renderer.unmount())
-  })
-
-  it('still navigates back and shows no error when the post-save reconnect rejects', async () => {
-    dependencies.forceReconnectHost.mockRejectedValueOnce(new Error('connect failed'))
-    const renderer = await renderEditHostRoute()
-    setFieldValue(renderer, 'Address', '192.168.1.20:6768')
-    await pressSave(renderer)
-    await act(async () => {
-      await Promise.resolve()
-      await Promise.resolve()
-    })
-
-    expect(dependencies.forceReconnectHost).toHaveBeenCalledWith('host-1')
-    expect(dependencies.back).toHaveBeenCalledTimes(1)
-    expect(findText(renderer, 'connect failed')).toBe(false)
 
     act(() => renderer.unmount())
   })
@@ -281,14 +266,35 @@ describe('edit host handleSave', () => {
 
     act(() => renderer.unmount())
   })
+  it('does not navigate again if the user leaves while the save is pending', async () => {
+    let resolveSave = () => {}
+    dependencies.updateHostNameAndEndpoint.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveSave = resolve
+        })
+    )
+    const renderer = await renderEditHostRoute()
+    setFieldValue(renderer, 'Address', '192.168.1.20:6768')
+    await pressSave(renderer)
+    act(() => {
+      renderer.root.findByProps({ accessibilityLabel: 'Back' }).props.onPress()
+      renderer.unmount()
+    })
+    expect(dependencies.back).toHaveBeenCalledTimes(1)
+    await act(async () => {
+      resolveSave()
+    })
+    expect(dependencies.back).toHaveBeenCalledTimes(1)
+    expect(dependencies.refreshHostClient).toHaveBeenCalledWith('host-1')
+  })
 })
 
 describe('edit host load() error states', () => {
   beforeEach(() => {
-    globalThis.IS_REACT_ACT_ENVIRONMENT = true
     dependencies.hostId = 'host-1'
     dependencies.back.mockReset()
-    dependencies.forceReconnectHost.mockReset().mockResolvedValue(undefined)
+    dependencies.refreshHostClient.mockReset()
     dependencies.loadHosts.mockReset().mockResolvedValue([HOST_FIXTURE])
     dependencies.primeHosts.mockReset()
     dependencies.updateHostNameAndEndpoint.mockReset().mockResolvedValue(undefined)
@@ -303,7 +309,7 @@ describe('edit host load() error states', () => {
     const renderer = await renderEditHostRoute()
 
     expect(findText(renderer, 'Missing host.')).toBe(true)
-    expect(renderer.root.findAllByType('TextInput')).toHaveLength(0)
+    expect(renderer.root.findAll((node) => String(node.type) === 'TextInput')).toHaveLength(0)
 
     act(() => renderer.unmount())
   })
@@ -313,7 +319,7 @@ describe('edit host load() error states', () => {
     const renderer = await renderEditHostRoute()
 
     expect(findText(renderer, 'This host was removed from this phone.')).toBe(true)
-    expect(renderer.root.findAllByType('TextInput')).toHaveLength(0)
+    expect(renderer.root.findAll((node) => String(node.type) === 'TextInput')).toHaveLength(0)
 
     act(() => renderer.unmount())
   })
@@ -323,7 +329,7 @@ describe('edit host load() error states', () => {
     const renderer = await renderEditHostRoute()
 
     expect(findText(renderer, 'storage unreadable')).toBe(true)
-    expect(renderer.root.findAllByType('TextInput')).toHaveLength(0)
+    expect(renderer.root.findAll((node) => String(node.type) === 'TextInput')).toHaveLength(0)
 
     act(() => renderer.unmount())
   })

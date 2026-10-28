@@ -5,10 +5,14 @@ import process from 'node:process'
 
 // TypeScript 7 is a native CLI; AST consumers still need the legacy JavaScript API.
 import ts from 'typescript-api'
+import { isTestOnlySourcePath } from './test-only-source-path.mjs'
 
 const SOURCE_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mts', '.cts'])
 const SKIP_PATH_PARTS = new Set(['.git', 'dist', 'node_modules', 'out', '__snapshots__', 'assets'])
 const LOCALIZATION_CALL_NAMES = new Set(['t', 'translate'])
+const CLASS_PROPERTY_NAMES = new Set(['className', 'classNames'])
+// Why: the children of these elements are CSS or code, never copy a translator should see.
+const NON_COPY_JSX_ELEMENTS = new Set(['style', 'script'])
 const USER_VISIBLE_JSX_ATTRIBUTES = new Set([
   'ariaLabel',
   'aria-label',
@@ -60,19 +64,21 @@ const USER_VISIBLE_OBJECT_METHODS = new Set([
   'warning'
 ])
 const USER_VISIBLE_OBJECT_NAMES = new Set(['toast'])
+// Only comparison operands are non-copy; rejecting all non-+ operators hides guarded JSX and ?? fallback strings.
+const COPY_PRESERVING_BINARY_OPERATORS = new Set([
+  ts.SyntaxKind.PlusToken,
+  ts.SyntaxKind.QuestionQuestionToken,
+  ts.SyntaxKind.BarBarToken,
+  ts.SyntaxKind.AmpersandAmpersandToken
+])
 
 function normalizePath(root, filePath) {
   return path.relative(root, filePath).split(path.sep).join('/')
 }
 
-function isSkippedFile(root, filePath) {
+export function isSkippedFile(root, filePath) {
   const relative = normalizePath(root, filePath)
-  if (
-    relative.endsWith('.d.ts') ||
-    relative.includes('.test.') ||
-    relative.includes('.spec.') ||
-    relative.includes('/__tests__/')
-  ) {
+  if (relative.endsWith('.d.ts') || isTestOnlySourcePath(relative)) {
     return true
   }
   return relative.split('/').some((part) => SKIP_PATH_PARTS.has(part))
@@ -226,7 +232,7 @@ function isRenderedJsxExpression(node) {
       continue
     }
     if (ts.isBinaryExpression(current)) {
-      if (current.operatorToken.kind !== ts.SyntaxKind.PlusToken) {
+      if (!COPY_PRESERVING_BINARY_OPERATORS.has(current.operatorToken.kind)) {
         return false
       }
       current = current.parent
@@ -309,8 +315,16 @@ function isUserVisibleCallArgument(node) {
   )
 }
 
+function isInsideNonCopyJsxElement(node) {
+  const element = findAncestor(node, (ancestor) => ts.isJsxElement(ancestor))
+  return Boolean(element && NON_COPY_JSX_ELEMENTS.has(element.openingElement.tagName.getText()))
+}
+
 function classifyStringNode(node) {
-  if (hasAncestorObjectPropertyName(node, new Set(['className', 'classNames']))) {
+  if (
+    hasAncestorObjectPropertyName(node, CLASS_PROPERTY_NAMES) ||
+    isInsideNonCopyJsxElement(node)
+  ) {
     return undefined
   }
 
@@ -318,7 +332,8 @@ function classifyStringNode(node) {
     findAncestor(
       node,
       (ancestor) =>
-        ts.isBinaryExpression(ancestor) && ancestor.operatorToken.kind !== ts.SyntaxKind.PlusToken
+        ts.isBinaryExpression(ancestor) &&
+        !COPY_PRESERVING_BINARY_OPERATORS.has(ancestor.operatorToken.kind)
     )
   ) {
     return undefined
@@ -419,10 +434,16 @@ export function collectLocalizationCandidates(filePath, sourceText, root = proce
       return
     }
 
-    const kind = classifyStringNode(node)
-    if (kind) {
-      for (const part of stringParts(node)) {
-        pushReport(node, kind, part.text, part.dynamic)
+    if (
+      ts.isStringLiteralLike(node) ||
+      ts.isNoSubstitutionTemplateLiteral(node) ||
+      ts.isTemplateExpression(node)
+    ) {
+      const kind = classifyStringNode(node)
+      if (kind) {
+        for (const part of stringParts(node)) {
+          pushReport(node, kind, part.text, part.dynamic)
+        }
       }
     }
 

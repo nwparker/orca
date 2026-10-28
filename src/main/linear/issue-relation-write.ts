@@ -3,18 +3,20 @@ import { loadLinearSdk } from './linear-sdk'
 import type {
   LinearIssueRelationship,
   LinearIssueRelationWriteResult
-} from '../../shared/linear-issue-relation-write'
-import { LINEAR_ISSUE_API_PAGE_SIZE_MAX } from '../../shared/linear-issue-read-limits'
-import { acquire, clearToken, getClients, isAuthError, release } from './client'
-import { linearError } from './issue-context-errors'
+} from '../../shared/linear/issue-relation-write'
+import { LINEAR_ISSUE_API_PAGE_SIZE_MAX } from '../../shared/linear/issue-read-limits'
+import { acquire, release } from './linear-request-concurrency'
+import { clearToken } from './linear-token-store'
+import { getClients, isAuthError } from './client'
+import { linearError } from './issue-context/errors'
 import {
   INVERSE_RELATIONS_QUERY,
   RELATIONS_QUERY,
   type RawRelationNode,
   type RawRelationsResponse
-} from './issue-context-raw'
+} from './issue-context/raw'
 import { createLinearIssueRelation, deleteLinearIssueRelation } from './issue-relation-mutation'
-import { LinearWriteFailure } from './issues'
+import { LinearWriteFailure } from './linear-issue-write-support'
 
 const RELATION_WRITE_READ_CAP = 250
 

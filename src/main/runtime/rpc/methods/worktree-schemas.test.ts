@@ -1,7 +1,17 @@
 import { describe, expect, it } from 'vitest'
-import { WorktreeActivate, WorktreeCreate, WorktreeSet } from './worktree-schemas'
+import { WorktreeCreate } from '../../../../shared/rpc-contract/worktree-create-params'
+import { WorktreeActivate, WorktreeSet } from '../../../../shared/rpc-contract/worktree-params'
 
 describe('worktree RPC schemas', () => {
+  it('accepts optional display-name provenance values', () => {
+    expect(
+      WorktreeCreate.parse({ repo: 'repo-1', name: 'feature', displayNameKind: 'user' })
+    ).toMatchObject({ displayNameKind: 'user' })
+    expect(
+      WorktreeCreate.parse({ repo: 'repo-1', name: 'feature', displayNameKind: 'generated' })
+    ).toMatchObject({ displayNameKind: 'generated' })
+  })
+
   it('validates additive navigation intent', () => {
     expect(WorktreeActivate.parse({ worktree: 'id:wt-1', navigation: 'clients' }).navigation).toBe(
       'clients'
@@ -103,25 +113,36 @@ describe('worktree RPC schemas', () => {
   })
 
   it('keeps a blanked display name on remote hosts instead of dropping the clear', () => {
-    // Blanking sends displayName:'' meaning "fall back to the branch/folder name".
-    // Coercing it to undefined made updateManagedWorktreeMeta's omitUndefinedProperties
-    // drop the key, so an SSH/paired-web rename-to-blank silently kept the old name.
+    // Blank displayName must survive omitUndefinedProperties to restore branch/folder fallback on SSH and paired web.
     const parsed = WorktreeSet.parse({ worktree: 'id:r1::/repos/wt', displayName: '' })
 
     expect(parsed.displayName).toBe('')
-    expect(Object.prototype.hasOwnProperty.call(parsed, 'displayName')).toBe(true)
+    expect(Object.hasOwn(parsed, 'displayName')).toBe(true)
   })
 
   it('still omits a display name that was never sent', () => {
     const parsed = WorktreeSet.parse({ worktree: 'id:r1::/repos/wt', comment: 'note' })
 
     expect(parsed.displayName).toBeUndefined()
-    expect(Object.prototype.hasOwnProperty.call(parsed, 'displayName')).toBe(false)
+    expect(Object.hasOwn(parsed, 'displayName')).toBe(false)
   })
 
   it('ignores a non-string display name rather than persisting it', () => {
     const parsed = WorktreeSet.parse({ worktree: 'id:r1::/repos/wt', displayName: 42 })
 
     expect(parsed.displayName).toBeUndefined()
+  })
+
+  it('parses optional GitHub PR suppression writes and clears', () => {
+    expect(
+      WorktreeSet.parse({ worktree: 'id:r1::/repos/wt', suppressedGitHubPR: 42 }).suppressedGitHubPR
+    ).toBe(42)
+    expect(
+      WorktreeSet.parse({ worktree: 'id:r1::/repos/wt', suppressedGitHubPR: null })
+        .suppressedGitHubPR
+    ).toBeNull()
+    expect(
+      WorktreeSet.safeParse({ worktree: 'id:r1::/repos/wt', suppressedGitHubPR: 0 }).success
+    ).toBe(false)
   })
 })

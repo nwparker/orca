@@ -1,5 +1,5 @@
-// Pure tree projection for the mobile file explorer. Mobile mirrors desktop
-// browse semantics by flattening cached files.readDir results as folders open.
+import { MEDIA_FILE_MIME_TYPES } from '../../../src/shared/media-file-extensions'
+import { compareFileNames } from '../../../src/shared/file-name-sort'
 
 export type MobileDirEntry = {
   name: string
@@ -38,6 +38,7 @@ export type FileExplorerRow = TreeNode | InlineStatusNode
 
 const DESKTOP_EXCLUDED_NAMES = new Set(['.git', 'node_modules'])
 const BINARY_EXTENSIONS = new Set([
+  ...Object.keys(MEDIA_FILE_MIME_TYPES),
   '.avif',
   '.bmp',
   '.gif',
@@ -118,7 +119,7 @@ function compareDirectoryEntries(a: MobileDirEntry, b: MobileDirEntry): number {
   if (a.isDirectory !== b.isDirectory) {
     return a.isDirectory ? -1 : 1
   }
-  return a.name.localeCompare(b.name)
+  return compareFileNames(a.name, b.name)
 }
 
 export function shouldIncludeMobileFileExplorerEntry(entry: MobileDirEntry): boolean {
@@ -129,9 +130,8 @@ export function getDirectoryCacheState(
   cache: DirectoryCache,
   relativePath: string
 ): DirectoryState | undefined {
-  // Why: repository paths are arbitrary object keys; inherited keys like
-  // "constructor" must not masquerade as loaded directory state.
-  return Object.prototype.hasOwnProperty.call(cache, relativePath) ? cache[relativePath] : undefined
+  // Inherited keys such as constructor must not masquerade as cached directories.
+  return Object.hasOwn(cache, relativePath) ? cache[relativePath] : undefined
 }
 
 export function joinRelativePath(parentPath: string, name: string): string {

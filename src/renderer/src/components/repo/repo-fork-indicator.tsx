@@ -1,13 +1,10 @@
 import React from 'react'
 import { GitFork } from 'lucide-react'
-import type { GitHubRepositoryIdentity } from '../../../../shared/types'
+import type { GitHubRepositoryIdentity } from '../../../../shared/github/pull-request-types'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip'
 import { cn } from '@/lib/utils'
 
-/**
- * Small muted glyph marking a repo as a fork, with a "Fork of owner/repo"
- * tooltip. Renders nothing when the repo has no resolved upstream.
- */
+/** Show fork identity only after resolving an upstream, with its owner/repo tooltip. */
 export function RepoForkIndicator({
   upstream,
   className

@@ -25,7 +25,7 @@ type PluginPanelControllerOptions = {
     method: string,
     params: unknown
   ) => Promise<PluginPanelActionOutcome>
-  log: (pluginKey: string, line: string) => void
+  log: (pluginKey: string) => (line: string) => void
   panelAdmission?: PluginPanelCallAdmission
 }
 
@@ -50,10 +50,14 @@ export class PluginPanelController {
   async open(
     ownerKey: string,
     pluginKey: string,
-    panelId: string
+    panelId: string,
+    isCurrent?: () => boolean
   ): Promise<PluginPanelEntry | null> {
+    if (isCurrent?.() === false) {
+      return null
+    }
     const loaded = await this.load(pluginKey, panelId)
-    if (!loaded) {
+    if (!loaded || isCurrent?.() === false) {
       return null
     }
     return {
@@ -137,6 +141,7 @@ export class PluginPanelController {
     if (!plugin || !panel) {
       return null
     }
+    const log = this.options.log(pluginKey)
     try {
       await this.options.contentVerifier.verify(plugin)
       const html = buildPluginPanelShellHtml(
@@ -160,8 +165,7 @@ export class PluginPanelController {
         }
       }
     } catch (error) {
-      this.options.log(
-        pluginKey,
+      log(
         `panel entry ${panel.entry} rejected: ${error instanceof Error ? error.message : String(error)}`
       )
       return null

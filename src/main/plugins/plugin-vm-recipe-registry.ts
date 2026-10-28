@@ -1,4 +1,4 @@
-import type { OrcaVmRecipe } from '../../shared/types'
+import type { OrcaVmRecipe } from '../../shared/orca-yaml-hook-types'
 import { parsePluginVmRecipeArtifact } from '../../shared/plugins/plugin-vm-recipe-artifact'
 import {
   PLUGIN_VM_RECIPE_MAX_BYTES,
@@ -74,8 +74,7 @@ export class PluginVmRecipeRegistry {
             seen.add(recipe.id)
             registrations.push({ pluginKey: plugin.pluginKey, recipe })
           }
-          // Verify after reading so the in-memory commands shown/activated are
-          // bound to the exact tree identity the user reviewed.
+          // Reverify after reading so activated commands still match the reviewed tree.
           await verifyInstructionalPluginContent(plugin)
           return { pluginKey: plugin.pluginKey, approved, registrations }
         } catch (error) {

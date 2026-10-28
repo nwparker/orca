@@ -1,46 +1,31 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { buildWslCodexIdentityArgs } from '../codex-accounts/wsl-codex-command'
 
-const { execFileSyncMock, resolveCodexCommandMock } = vi.hoisted(() => ({
-  execFileSyncMock: vi.fn(),
-  resolveCodexCommandMock: vi.fn()
-}))
+const { runProcessMock } = vi.hoisted(() => ({ runProcessMock: vi.fn() }))
 
-vi.mock('node:child_process', () => ({ execFileSync: execFileSyncMock }))
-
-vi.mock('../codex-cli/command', () => ({
-  resolveCodexCommand: resolveCodexCommandMock
-}))
+vi.mock('@orca/process-host', () => ({ runProcess: runProcessMock }))
 
 import { resolveCodexTrustGrantHost } from './codex-trust-grant-host'
 
 beforeEach(() => {
-  execFileSyncMock.mockReset()
-  execFileSyncMock.mockReturnValue('/home/alice/.local/bin/codex\ncodex-cli 1.2.3\n')
-  resolveCodexCommandMock.mockReset()
-  resolveCodexCommandMock.mockReturnValue(process.execPath)
+  runProcessMock.mockReset()
+  // exec replaces the identity shell, leaving the captured payload without an end fence.
+  runProcessMock.mockImplementation((spec: { args: string[] }) => {
+    const nonce = /__ORCA_WSL_CAPTURE_BEGIN_ ([^_]+)__/.exec(String(spec.args.at(-1)))?.[1] ?? ''
+    return Promise.resolve({
+      code: 0,
+      signal: null,
+      timedOut: false,
+      stderr: '',
+      stdout:
+        'To run a command as administrator (user "root"), use "sudo <command>".\n\n' +
+        `__ORCA_WSL_CAPTURE_BEGIN_${nonce}__/home/alice/.local/bin/codex\ncodex-cli 1.2.3\n`
+    })
+  })
 })
 
 describe('resolveCodexTrustGrantHost', () => {
-  it('resolves the native command once for both the binary stamp and request', () => {
-    const host = resolveCodexTrustGrantHost({ kind: 'native' })
-    const input = {
-      runtimeHomePath: '/tmp/codex-home',
-      managedCommand: '/bin/sh codex-hook.sh',
-      expectedTrustKeys: ['managed-key']
-    }
-
-    expect(host.binaryStamp).toMatchObject({ kind: 'native', path: process.execPath })
-    expect(host.buildRequest(input).invocation.command).toBe(process.execPath)
-    expect(host.buildRequest(input).invocation.command).toBe(process.execPath)
-    // Why: PATH/version-manager scans are synchronous launch-path I/O. Reusing
-    // the resolved command keeps one grant at one scan regardless of consumers.
-    expect(resolveCodexCommandMock).toHaveBeenCalledTimes(1)
-    expect(execFileSyncMock).not.toHaveBeenCalled()
-  })
-
-  it('builds WSL requests without scanning the native PATH', () => {
-    const host = resolveCodexTrustGrantHost({
+  it("builds WSL requests, stamped with the guest's codex path and version", async () => {
+    const host = await resolveCodexTrustGrantHost({
       kind: 'wsl',
       distro: 'Ubuntu',
       linuxRuntimeHome: '/home/alice/.codex-runtime'
@@ -58,11 +43,30 @@ describe('resolveCodexTrustGrantHost', () => {
       version: 'codex-cli 1.2.3'
     })
     expect(request.invocation.command).toBe('wsl.exe')
-    expect(execFileSyncMock).toHaveBeenCalledWith(
-      'wsl.exe',
-      buildWslCodexIdentityArgs('Ubuntu'),
-      expect.objectContaining({ encoding: 'utf-8', timeout: 5_000, windowsHide: true })
+    expect(runProcessMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        program: 'wsl.exe',
+        args: expect.arrayContaining(['-d', 'Ubuntu', '--exec', 'sh', '-c']),
+        timeoutMs: 5_000
+      })
     )
-    expect(resolveCodexCommandMock).not.toHaveBeenCalled()
+  })
+
+  it('drops the stamp when the guest probe fails instead of trusting partial stdout', async () => {
+    runProcessMock.mockResolvedValue({
+      code: 127,
+      signal: null,
+      timedOut: false,
+      stdout: '',
+      stderr: 'codex not found'
+    })
+
+    const host = await resolveCodexTrustGrantHost({
+      kind: 'wsl',
+      distro: 'Ubuntu',
+      linuxRuntimeHome: '/home/alice/.codex-runtime'
+    })
+
+    expect(host.binaryStamp).toBeNull()
   })
 })

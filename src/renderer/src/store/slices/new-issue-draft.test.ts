@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import { describe, expect, it } from 'vitest'
 import { createNewIssueDraftSlice } from './new-issue-draft'
 import type { AppState } from '../types'
-import type { GitHubAssignableUser } from '../../../../shared/types'
+import type { GitHubAssignableUser } from '../../../../shared/github/pull-request-types'
 
 function makeStore() {
   return create<Pick<AppState, 'newIssueDraft' | 'setNewIssueDraft' | 'clearNewIssueDraft'>>()(
@@ -62,9 +62,7 @@ describe('createNewIssueDraftSlice', () => {
   })
 
   it('seeds fresh label/assignee arrays per empty draft (no shared-constant aliasing)', () => {
-    // Regression: a module-level empty-draft constant would make partial patches
-    // that omit labels/assignees alias one shared array instance, so an in-place
-    // mutation of one draft would corrupt every subsequently-seeded empty draft.
+    // Partial patches must seed fresh label/assignee arrays; shared defaults let mutations corrupt all future drafts.
     const a = makeStore()
     const b = makeStore()
     a.getState().setNewIssueDraft({ title: 'A' })

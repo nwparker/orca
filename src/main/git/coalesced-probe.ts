@@ -1,23 +1,16 @@
-/**
- * Coalescing for repeated host probes (P1-D).
- *
- * Why: the in-flight maps under the hosted-review funnel only drop a probe when
- * it settles, so one that never does pins every later retry for the life of the
- * process — the outer deadline then unpins the UI without restoring any lookup
- * progress. Joining a probe only while it is young enough to still be making
- * progress is what lets a host recover in-session.
- */
+/** Stop joining stale probes so an unsettled host lookup cannot block all future retries. */
 
-export type CoalescedProbe<T> = { startedAt: number; promise: Promise<T> }
+export type CoalescedProbe<T> = { startedAt: number; token: object; promise: Promise<T> }
 export type CoalescedProbes<T> = Map<string, CoalescedProbe<T>>
 
-/** Every step under a probe is bounded well inside this, so an older one is wedged, not slow. */
+// Retry after this age; elapsed time alone does not prove a probe has stopped progressing.
 export const PROBE_COALESCE_STALE_MS = 60_000
 
+/** ownsKey prevents an abandoned probe from publishing over its successor. */
 export async function runCoalescedProbe<T>(
   probes: CoalescedProbes<T>,
   key: string,
-  createProbe: () => Promise<T>,
+  createProbe: (ownsKey: () => boolean) => Promise<T>,
   staleAfterMs: number = PROBE_COALESCE_STALE_MS
 ): Promise<T> {
   const now = Date.now()
@@ -26,10 +19,15 @@ export async function runCoalescedProbe<T>(
     return existing.promise
   }
   if (existing) {
-    // The abandoned probe keeps running; nothing here will await it again.
+    // Observe failures from the abandoned probe, which may still be running.
     void existing.promise.catch(() => {})
   }
-  const entry: CoalescedProbe<T> = { startedAt: now, promise: createProbe() }
+  const token = {}
+  const entry: CoalescedProbe<T> = {
+    startedAt: now,
+    token,
+    promise: createProbe(() => probes.get(key)?.token === token)
+  }
   probes.set(key, entry)
   try {
     return await entry.promise

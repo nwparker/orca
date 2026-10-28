@@ -1,14 +1,15 @@
 import { View, Text, Pressable, TextInput, StyleSheet, ActivityIndicator } from 'react-native'
-import { Pencil, Plus, Search, Trash2, Check, Play } from 'lucide-react-native'
-import { colors, spacing, typography } from '../theme/mobile-theme'
+import { Check, Plus, Search } from 'lucide-react-native'
+import { colors, spacing } from '../theme/mobile-theme'
+import { themedStyleSheet } from '../theme/themed-styles'
+import { useMobileColorScheme } from '../theme/use-mobile-color-scheme'
+import { TEXT_INPUT_FONT_SIZE } from '../platform/text-input-font-size'
 import { MobileAgentIcon } from '../components/MobileAgentIcon'
 import { MOBILE_AGENT_CATALOG } from '../tasks/mobile-agent-catalog'
-import type { TerminalQuickCommand, TuiAgent } from '../../../src/shared/types'
-import {
-  getQuickCommandDisplayPreview,
-  isAgentQuickCommand,
-  supportsTerminalAgentQuickCommand
-} from '../terminal/quick-commands'
+import type { TerminalQuickCommand } from '../../../src/shared/terminal-quick-command-types'
+import type { TuiAgent } from '../../../src/shared/tui-agent'
+import { supportsTerminalAgentQuickCommand } from '../terminal/quick-commands'
+import { QuickCommandRow } from './QuickCommandRow'
 
 export const QUICK_COMMAND_SUPPORTED_AGENTS = MOBILE_AGENT_CATALOG.filter((entry) =>
   supportsTerminalAgentQuickCommand(entry.id)
@@ -23,7 +24,6 @@ type ListProps = {
   query: string
   loading: boolean
   disabled: boolean
-  canAdd: boolean
   error: string | null
   onQueryChange: (value: string) => void
   onLaunch: (command: TerminalQuickCommand) => void
@@ -39,7 +39,6 @@ export function QuickCommandsList({
   query,
   loading,
   disabled,
-  canAdd,
   error,
   onQueryChange,
   onLaunch,
@@ -47,8 +46,8 @@ export function QuickCommandsList({
   onDelete,
   onAdd
 }: ListProps) {
+  useMobileColorScheme()
   const hasVisible = repoCommands.length + globalCommands.length > 0
-  const addDisabled = disabled || !canAdd
   // Why: keep an active filter clearable if a delete or paired desktop edit
   // leaves only one command while the sheet is open.
   const showSearch = totalCount > 1 || query.length > 0
@@ -111,17 +110,15 @@ export function QuickCommandsList({
       <Pressable
         style={({ pressed }) => [
           styles.addRow,
-          addDisabled && styles.disabled,
-          pressed && !addDisabled && styles.pressed
+          disabled && styles.disabled,
+          pressed && !disabled && styles.pressed
         ]}
-        disabled={addDisabled}
+        disabled={disabled}
         onPress={onAdd}
         accessibilityRole="button"
       >
         <Plus size={18} color={colors.textSecondary} />
-        <Text style={styles.addText}>
-          {canAdd ? 'New quick command' : 'Quick command limit reached'}
-        </Text>
+        <Text style={styles.addText}>New quick command</Text>
       </Pressable>
     </View>
   )
@@ -142,6 +139,7 @@ function QuickCommandGroup({
   onDelete: (command: TerminalQuickCommand) => void
   disabled: boolean
 }) {
+  useMobileColorScheme()
   return (
     <View>
       <Text style={styles.groupLabel}>{label}</Text>
@@ -162,67 +160,6 @@ function QuickCommandGroup({
   )
 }
 
-function QuickCommandRow({
-  command,
-  first,
-  onLaunch,
-  onEdit,
-  onDelete,
-  disabled
-}: {
-  command: TerminalQuickCommand
-  first: boolean
-  onLaunch: (command: TerminalQuickCommand) => void
-  onEdit: (command: TerminalQuickCommand) => void
-  onDelete: (command: TerminalQuickCommand) => void
-  disabled: boolean
-}) {
-  const isAgent = isAgentQuickCommand(command)
-  return (
-    <View style={[styles.row, !first && styles.rowBorder, disabled && styles.disabled]}>
-      <Pressable
-        style={({ pressed }) => [styles.rowMain, pressed && !disabled && styles.pressed]}
-        disabled={disabled}
-        onPress={() => onLaunch(command)}
-        accessibilityRole="button"
-        accessibilityLabel={`Run ${command.label}`}
-      >
-        <View style={styles.rowIcon}>
-          {isAgent ? (
-            <MobileAgentIcon agentId={command.agent} size={16} />
-          ) : (
-            <Play size={14} color={colors.textPrimary} fill={colors.textPrimary} />
-          )}
-        </View>
-        <View style={styles.rowText}>
-          <Text style={styles.rowLabel} numberOfLines={1}>
-            {command.label}
-          </Text>
-          <Text style={[styles.rowPreview, !isAgent && styles.mono]} numberOfLines={1}>
-            {getQuickCommandDisplayPreview(command)}
-          </Text>
-        </View>
-      </Pressable>
-      <Pressable
-        style={({ pressed }) => [styles.rowAction, pressed && !disabled && styles.pressed]}
-        disabled={disabled}
-        onPress={() => onEdit(command)}
-        accessibilityLabel={`Edit ${command.label}`}
-      >
-        <Pencil size={15} color={colors.textSecondary} />
-      </Pressable>
-      <Pressable
-        style={({ pressed }) => [styles.rowAction, pressed && !disabled && styles.pressed]}
-        disabled={disabled}
-        onPress={() => onDelete(command)}
-        accessibilityLabel={`Delete ${command.label}`}
-      >
-        <Trash2 size={15} color={colors.statusRed} />
-      </Pressable>
-    </View>
-  )
-}
-
 export function QuickCommandAgentPicker({
   selected,
   onSelect
@@ -230,6 +167,7 @@ export function QuickCommandAgentPicker({
   selected: TuiAgent | null
   onSelect: (agent: TuiAgent) => void
 }) {
+  useMobileColorScheme()
   return (
     <View style={styles.group}>
       {QUICK_COMMAND_SUPPORTED_AGENTS.map((agent, index) => (
@@ -255,7 +193,7 @@ export function QuickCommandAgentPicker({
   )
 }
 
-const styles = StyleSheet.create({
+const styles = themedStyleSheet(() => ({
   pressed: { backgroundColor: colors.bgRaised },
   disabled: { opacity: 0.45 },
   listBody: { gap: spacing.sm, paddingBottom: spacing.sm },
@@ -270,7 +208,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm
   },
-  searchInput: { flex: 1, color: colors.textPrimary, fontSize: 14, padding: 0 },
+  searchInput: { flex: 1, color: colors.textPrimary, fontSize: TEXT_INPUT_FONT_SIZE, padding: 0 },
   error: { color: colors.statusRed, fontSize: 13, paddingHorizontal: spacing.xs },
   loading: { paddingVertical: spacing.lg },
   empty: {
@@ -292,15 +230,6 @@ const styles = StyleSheet.create({
   group: { backgroundColor: colors.bgPanel, borderRadius: 12, overflow: 'hidden' },
   row: { flexDirection: 'row', alignItems: 'center' },
   rowBorder: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.borderSubtle },
-  rowMain: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
-    paddingVertical: spacing.md,
-    paddingLeft: spacing.md,
-    minWidth: 0
-  },
   rowIcon: {
     width: 26,
     height: 26,
@@ -309,11 +238,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center'
   },
-  rowText: { flex: 1, minWidth: 0 },
-  rowLabel: { fontSize: 14, fontWeight: '600', color: colors.textPrimary },
-  rowPreview: { fontSize: 12, color: colors.textSecondary, marginTop: 1 },
-  mono: { fontFamily: typography.monoFamily },
-  rowAction: { width: 40, height: 44, alignItems: 'center', justifyContent: 'center' },
   agentLabel: { flex: 1, fontSize: 14, color: colors.textPrimary },
   addRow: {
     flexDirection: 'row',
@@ -329,4 +253,4 @@ const styles = StyleSheet.create({
     marginTop: spacing.xs
   },
   addText: { fontSize: 14, fontWeight: '600', color: colors.textPrimary }
-})
+}))

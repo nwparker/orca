@@ -1,6 +1,6 @@
 import { CircleHelp } from 'lucide-react'
 import { useState } from 'react'
-import type { NestedRepoScanResult } from '../../../../shared/types'
+import type { NestedRepoScanResult } from '../../../../shared/project-group-types'
 import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover'
 import { translate } from '@/i18n/i18n'
 
@@ -65,8 +65,7 @@ export function NestedRepoScanLimitNotice({ scan }: { scan: NestedRepoScanResult
           side="top"
           sideOffset={4}
           className="max-w-[260px] px-3 py-2 text-xs leading-5 text-pretty"
-          // Why: this popover opens on hover, so default focus-on-open would
-          // yank focus off the dialog every time the pointer grazes the icon.
+          // Hover-open must not move focus from the dialog when the pointer grazes this icon.
           onOpenAutoFocus={(event) => event.preventDefault()}
         >
           {detailsText}

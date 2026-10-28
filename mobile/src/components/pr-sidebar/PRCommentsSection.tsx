@@ -1,9 +1,11 @@
 import { useMemo, useState } from 'react'
 import { ActivityIndicator, Pressable, Text, View } from 'react-native'
 import { ChevronDown, ChevronRight } from 'lucide-react-native'
-import type { GitHubWorkItemDetails, PRState } from '../../../../src/shared/types'
+import type { PRState } from '../../../../src/shared/github/pull-request-types'
+import type { GitHubWorkItemDetails } from '../../../../src/shared/github/work-item-types'
 import type { GitHubPrRepoSlug } from '../../session/github-pr-rpc'
 import { colors } from '../../theme/mobile-theme'
+import { useMobileColorScheme } from '../../theme/use-mobile-color-scheme'
 import { canAddRootComment } from '../../session/pr-comment-actions'
 import { isPrSidebarDetailsPlaceholder } from '../../session/mobile-pr-sidebar-state'
 import type { MobilePrCommentActions } from '../../session/use-mobile-pr-comment-actions'
@@ -12,12 +14,14 @@ import { CommentMarkdown } from './CommentMarkdown'
 import { PRCommentCard, type PRCommentCardActions } from './PRCommentCard'
 import { PRCommentComposer } from './PRCommentComposer'
 import {
-  PR_COMMENT_AUDIENCE_FILTERS,
   filterPRCommentsByAudience,
   getPRCommentAudienceCounts,
-  getPRCommentAudienceEmptyLabel,
   type PRCommentAudienceFilter
-} from './pr-comment-audience'
+} from '../../../../src/shared/pr-comment-audience'
+import {
+  PR_COMMENT_AUDIENCE_FILTERS,
+  getPRCommentAudienceEmptyLabel
+} from './pr-comment-audience-labels'
 import {
   getPRCommentGroupCount,
   getPRCommentGroupId,
@@ -25,33 +29,27 @@ import {
   groupPRComments,
   isResolvedPRCommentGroup,
   type PRCommentGroup
-} from './pr-comment-groups'
+} from '../../../../src/shared/pr-comment-groups'
 import { prCommentsStyles as styles } from './pr-comments-styles'
 import { mobilePrSidebarStyles as shared } from './mobile-pr-sidebar-styles'
+import { useNow } from '../../hooks/use-now'
 
 type Props = {
   details: GitHubWorkItemDetails | null
   // The PR conversation state — gates the root-comment composer (open PRs only).
   prState: PRState | null
-  // Repo slug for the slug-addressed comment edit/delete RPCs; threaded into the
-  // per-card actions so the edit/delete affordances can gate on its presence.
+  // Thread repo slug into card actions; edit/delete require it.
   prRepo?: GitHubPrRepoSlug | null
-  // Interactive comment actions (reply/resolve/add/edit/delete). Absent (e.g.
-  // non-PR) leaves the timeline read-only.
+  // Omit actions to keep timeline read-only outside interactive PR.
   actions?: MobilePrCommentActions
-  // Author logins manually marked as bots on desktop; keeps the Humans/Bots
-  // tabs classifying the same comments as the desktop panel.
+  // Honor desktop’s manually marked bot logins so audience tabs classify identically.
   botAuthorOverrides?: ReadonlySet<string>
 }
 
-// Render comments in bounded pages — the whole sidebar is one ScrollView (can't
-// virtualize a nested list), so eagerly rendering a large set parses markdown for
-// every comment synchronously and ANRs the JS thread. Start small, reveal in chunks.
+// Page comments in chunks: nested ScrollView cannot virtualize, and eager Markdown parse of whole timeline can ANR JS thread.
 const COMMENT_PAGE = 12
 
-// PR body + full comment timeline, mirroring the desktop PR page: a Description
-// card, then a Comments section with an audience filter (PRs only), threaded
-// review comments, reactions, and collapsible resolved threads.
+// Match desktop description/timeline with audience filter, threaded review replies, reactions and collapsible resolved threads.
 export function PRCommentsSection({
   details,
   prState,
@@ -59,8 +57,8 @@ export function PRCommentsSection({
   actions,
   botAuthorOverrides
 }: Props) {
-  // details is null while phase 2 (the heavy comments/body payload) is still loading.
-  // A synthetic placeholder means phase 2 failed — do not paint that as empty success.
+  useMobileColorScheme()
+  // Null details means phase 2 loading; synthetic placeholder means failure, never empty success.
   const loadingDetails = details === null
   const detailsFailed = details != null && isPrSidebarDetailsPlaceholder(details)
   const body = details?.body ?? ''
@@ -70,8 +68,7 @@ export function PRCommentsSection({
   )
   const isPr = details != null && !detailsFailed && details.item.type === 'pr'
 
-  // Per-card action bundle (stable callbacks from the hook) — built once so the
-  // memo'd cards don't re-render on unrelated timeline changes.
+  // Memoize stable per-card callback bundles so unrelated timeline updates skip cards.
   const cardActions = useMemo<PRCommentCardActions | undefined>(
     () =>
       actions && isPr
@@ -101,15 +98,14 @@ export function PRCommentsSection({
     [botAuthorOverrides, comments, filter]
   )
   const groups = useMemo(() => groupPRComments(visible), [visible])
+  const now = useNow(60_000, comments.length > 0)
 
-  // Bounded render window; reset to the first page when the user selects another filter.
   const [limit, setLimit] = useState(COMMENT_PAGE)
   const selectFilter = (nextFilter: PRCommentAudienceFilter): void => {
     if (nextFilter === filter) {
       return
     }
-    // Why: paging belongs to the filter-tab event, so reset it in the same batch
-    // instead of briefly rendering the new filter with the previous page size.
+    // Reset page limit in filter event’s batch to avoid first rendering new audience with old page size.
     setLimit(COMMENT_PAGE)
     setFilter(nextFilter)
   }
@@ -188,6 +184,7 @@ export function PRCommentsSection({
                         key={getPRCommentGroupId(group)}
                         group={group}
                         actions={cardActions}
+                        now={now}
                       />
                     ))}
                     {remaining > 0 ? (
@@ -226,21 +223,31 @@ export function PRCommentsSection({
 
 function CommentGroupView({
   group,
-  actions
+  actions,
+  now
 }: {
   group: PRCommentGroup
   actions?: PRCommentCardActions
+  now: number
 }) {
+  useMobileColorScheme()
   const [expanded, setExpanded] = useState(false)
   const cards =
     group.kind === 'thread'
       ? [
-          <PRCommentCard key={group.root.id} comment={group.root} actions={actions} />,
+          <PRCommentCard key={group.root.id} comment={group.root} actions={actions} now={now} />,
           ...group.replies.map((reply) => (
-            <PRCommentCard key={reply.id} comment={reply} isReply actions={actions} />
+            <PRCommentCard key={reply.id} comment={reply} isReply actions={actions} now={now} />
           ))
         ]
-      : [<PRCommentCard key={group.comment.id} comment={group.comment} actions={actions} />]
+      : [
+          <PRCommentCard
+            key={group.comment.id}
+            comment={group.comment}
+            actions={actions}
+            now={now}
+          />
+        ]
 
   if (!isResolvedPRCommentGroup(group)) {
     return <View style={styles.group}>{cards}</View>

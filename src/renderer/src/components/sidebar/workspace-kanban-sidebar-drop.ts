@@ -1,19 +1,16 @@
-import type {
-  WorkspaceStatus,
-  WorkspaceStatusDefinition,
-  Worktree,
-  WorktreeMeta
-} from '../../../../shared/types'
+import type { WorkspaceStatus, WorkspaceStatusDefinition } from '../../../../shared/worktree/types'
 import {
   parseWorkspaceLaneFullIds,
   resolveFullLaneDropIndex
 } from './workspace-kanban-filtered-drop-index'
 import { getWorkspaceStatus } from './workspace-status'
+import { collectDropWrites, type DropWriteRows } from './worktree-list/drag/dragged-worktree-copies'
 import {
   buildManualOrderUpdatesForGroupDrop,
   shouldWriteManualOrderForGroupDrop,
   type WorktreeDragGroup
 } from './worktree-manual-order'
+import type { WorktreeMetaBatchUpdate } from '../../store/slices/worktree-helpers'
 import {
   CARD_SELECTOR,
   getCardDropTarget,
@@ -55,17 +52,11 @@ function getLaneCardIds(lane: HTMLElement): HTMLElement[] {
   return Array.from(lane.querySelectorAll<HTMLElement>(CARD_SELECTOR))
 }
 
-/**
- * `viewIds` is the lane in the index space `getCardDropTarget` reports, and
- * `fullLaneIds` is the lane's whole membership. Board search hides non-matching
- * cards, so lanes publish their full membership for exactly this reader.
- *
- * Why the virtual layout first: lanes virtualize, so the mounted cards are a
- * window rather than the lane view, and `getCardDropTarget` indexes the same
- * virtual layout. The DOM scan is only the fallback for a lane the virtualizer
- * never claimed — there the unfiltered card list is the full lane, since a card
- * the browser is not laying out is still a member for manual-order purposes.
- */
+function getCardWorktreeId(card: HTMLElement): string | undefined {
+  return card.dataset.workspaceBoardWorktreeId ?? card.dataset.workspaceBoardCardId
+}
+
+/** Prefer the virtualizer’s complete view over mounted cards; fullLaneIds also retains search-hidden members. */
 function toLaneDropIds(lane: HTMLElement): { fullLaneIds: string[]; viewIds: string[] } {
   const publishedFullLaneIds = parseWorkspaceLaneFullIds(lane.dataset.workspaceLaneFullIds)
   const laneScroll = lane.querySelector<HTMLElement>(LANE_SCROLL_SELECTOR)
@@ -76,11 +67,10 @@ function toLaneDropIds(lane: HTMLElement): { fullLaneIds: string[]; viewIds: str
   }
   const cards = getLaneCardIds(lane)
   return {
-    fullLaneIds:
-      publishedFullLaneIds ?? cards.flatMap((card) => card.dataset.workspaceBoardCardId ?? []),
+    fullLaneIds: publishedFullLaneIds ?? cards.flatMap((card) => getCardWorktreeId(card) ?? []),
     viewIds: cards
       .filter((card) => card.offsetParent !== null)
-      .flatMap((card) => card.dataset.workspaceBoardCardId ?? [])
+      .flatMap((card) => getCardWorktreeId(card) ?? [])
   }
 }
 
@@ -154,13 +144,7 @@ export function getWorkspaceKanbanSidebarDropTarget(
   return getCardDropTarget(board, x, y)
 }
 
-/**
- * Translates a tracked drop index — which counts the lane's *view* items,
- * matching the drop indicator — onto the full lane that
- * `getWorkspaceKanbanSidebarDropGroups` reports. Call this once, at the commit
- * boundary: a tracked target can be committed after the pointer has left the
- * lane, so translating earlier would miss that path.
- */
+/** Translate view to full-lane indexes once at commit, including tracked drops committed after leaving the lane. */
 export function resolveWorkspaceKanbanSidebarFullLaneDropIndex(
   status: WorkspaceStatus,
   viewDropIndex: number
@@ -211,37 +195,25 @@ export function buildWorkspaceKanbanSidebarDropUpdates(args: {
   status: WorkspaceStatus
   dropIndex: number
   groups: readonly WorktreeDragGroup[]
-  worktreeById: ReadonlyMap<string, Worktree>
+  /** The rows each id may write; a twin's id names another host's copy too. */
+  rowsFor: DropWriteRows
+  allWorktreeIds: readonly string[]
+  rankByWorktreeId: ReadonlyMap<string, number>
   workspaceStatuses: readonly WorkspaceStatusDefinition[]
   sortBy: string
   now: number
 }): {
-  updates: Map<string, Partial<WorktreeMeta>>
+  updates: WorktreeMetaBatchUpdate[]
   shouldSwitchToManual: boolean
 } {
-  const sourceGroupKeys = args.worktreeIds.flatMap((worktreeId) => {
-    const worktree = args.worktreeById.get(worktreeId)
-    return worktree ? [getWorkspaceStatus(worktree, args.workspaceStatuses)] : []
-  })
+  const sourceGroupKeys = args.worktreeIds.flatMap((worktreeId) =>
+    args.rowsFor.status(worktreeId).map((row) => getWorkspaceStatus(row, args.workspaceStatuses))
+  )
   const writeManualOrder = shouldWriteManualOrderForGroupDrop({
     sortBy: args.sortBy,
     sourceGroupKeys,
     targetGroupKey: args.status
   })
-  const rankByWorktreeId = writeManualOrder
-    ? (() => {
-        const ranks = new Map<string, number>()
-        for (const group of args.groups) {
-          for (const worktreeId of group.worktreeIds) {
-            const worktree = args.worktreeById.get(worktreeId)
-            if (worktree) {
-              ranks.set(worktreeId, worktree.manualOrder ?? worktree.sortOrder)
-            }
-          }
-        }
-        return ranks
-      })()
-    : undefined
   const order = writeManualOrder
     ? buildManualOrderUpdatesForGroupDrop({
         groups: args.groups,
@@ -249,29 +221,19 @@ export function buildWorkspaceKanbanSidebarDropUpdates(args: {
         draggedIds: args.worktreeIds,
         dropIndex: args.dropIndex,
         now: args.now,
-        rankByWorktreeId
+        rankByWorktreeId: args.rankByWorktreeId,
+        allWorktreeIds: args.allWorktreeIds
       })
     : { changed: false, updates: new Map<string, { manualOrder: number }>() }
 
-  const updates = new Map<string, Partial<WorktreeMeta>>()
-  for (const worktreeId of args.worktreeIds) {
-    const current = args.worktreeById.get(worktreeId)
-    if (!current) {
-      continue
-    }
-    if (getWorkspaceStatus(current, args.workspaceStatuses) !== args.status) {
-      updates.set(worktreeId, { workspaceStatus: args.status })
-    }
-  }
-
-  if (writeManualOrder) {
-    for (const [worktreeId, manualOrder] of order.updates) {
-      updates.set(worktreeId, { ...updates.get(worktreeId), ...manualOrder })
-    }
-  }
-
   return {
-    updates,
+    updates: collectDropWrites({
+      rowsFor: args.rowsFor,
+      statusIds: args.worktreeIds,
+      status: args.status,
+      workspaceStatuses: args.workspaceStatuses,
+      orderUpdates: order.updates
+    }),
     shouldSwitchToManual: writeManualOrder && order.changed
   }
 }

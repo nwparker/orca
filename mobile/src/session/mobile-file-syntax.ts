@@ -46,9 +46,13 @@ const LANGUAGE_ALIASES: Record<string, string> = {
   tsx: 'typescript',
   sh: 'bash',
   shell: 'bash',
+  shellscript: 'bash',
   zsh: 'bash',
   fish: 'bash',
-  yml: 'yaml'
+  yml: 'yaml',
+  'cuda-cpp': 'cpp',
+  'glimmer-js': 'javascript',
+  'glimmer-ts': 'typescript'
 }
 
 export function resolveMobileSyntaxLanguage(filePath: string, preferredLanguage?: string): string {

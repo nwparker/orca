@@ -28,9 +28,7 @@ describe('ReviewIcon', () => {
     expect(markup).not.toContain('lucide-git-merge')
   })
 
-  // Why: an open MR with no explicit check tone falls through to the emerald "open" colour, so a
-  // GitLab pipeline blocked on a manual gate must not resolve to a tone-less status — the card
-  // would read exactly like a passing pipeline while GitLab still refuses the merge.
+  // Manual-blocked GitLab pipelines need a check tone or the open-MR fallback would look passing.
   it('does not paint a manual-blocked GitLab pipeline like a passing one', () => {
     const status = derivePipelineStatus({ status: 'manual' })
     const blocked = renderToStaticMarkup(
@@ -43,5 +41,81 @@ describe('ReviewIcon', () => {
     expect(blocked).toContain('text-amber-500/85')
     expect(blocked).not.toContain('text-emerald-500/80')
     expect(blocked).not.toBe(passing)
+  })
+
+  it('gives a draft its own glyph and never paints it with a check tone', () => {
+    const draft = renderToStaticMarkup(
+      <ReviewIcon
+        review={{
+          provider: 'github',
+          number: 1,
+          title: 'Draft',
+          state: 'draft',
+          status: 'failure'
+        }}
+        className="size-3"
+        variant="generic"
+      />
+    )
+    const closed = renderToStaticMarkup(
+      <ReviewIcon
+        review={{ provider: 'github', number: 1, title: 'Closed', state: 'closed' }}
+        className="size-3"
+        variant="generic"
+      />
+    )
+
+    expect(draft).toContain('lucide-git-pull-request-draft')
+    expect(draft).not.toContain('text-rose-500/85')
+    expect(closed).toContain('lucide-git-pull-request-closed')
+    expect(draft).not.toBe(closed)
+  })
+
+  it('keeps check tones on open reviews so failing checks still stand out', () => {
+    const failing = renderToStaticMarkup(
+      <ReviewIcon
+        review={{ provider: 'github', number: 1, title: 'Open', state: 'open', status: 'failure' }}
+        className="size-3"
+        variant="generic"
+      />
+    )
+
+    expect(failing).toContain('text-rose-500/85')
+  })
+
+  it('renders merged reviews with the merge glyph', () => {
+    const merged = renderToStaticMarkup(
+      <ReviewIcon
+        review={{ provider: 'github', number: 1, title: 'Merged', state: 'merged' }}
+        className="size-3"
+        variant="generic"
+      />
+    )
+
+    expect(merged).toContain('lucide-git-merge')
+  })
+
+  it('overrides the GitLab provider glyph for closed merge requests', () => {
+    const closed = renderToStaticMarkup(
+      <ReviewIcon review={{ ...gitlabReview, state: 'closed' }} className="size-3" />
+    )
+
+    expect(closed).toContain('lucide-git-pull-request-closed')
+    expect(closed).not.toContain('lucide-git-merge')
+  })
+
+  // Loading/failed folder review rows lack a state glyph; show problems without implying confirmed success.
+  it('flags problems on a stateless row without ever claiming success', () => {
+    const stateless = (status: 'failure' | 'pending' | 'success') =>
+      renderToStaticMarkup(
+        <ReviewIcon
+          review={{ provider: 'github', number: 1, title: 'Loading PR...', status }}
+          className="size-3"
+        />
+      )
+
+    expect(stateless('failure')).toContain('text-rose-500/85')
+    expect(stateless('pending')).toContain('text-amber-500/85')
+    expect(stateless('success')).not.toContain('text-emerald-500/80')
   })
 })

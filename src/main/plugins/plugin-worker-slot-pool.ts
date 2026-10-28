@@ -13,8 +13,7 @@ function cancellationError(): Error {
   return new Error('plugin worker activation was cancelled')
 }
 
-/** Atomically leases the bounded worker slots and hands releases to queued
- * activations in FIFO order. */
+/** Hand bounded worker-slot leases to waiting activations in FIFO order. */
 export class PluginWorkerSlotPool {
   private readonly waiters: SlotWaiter[] = []
   private leased = 0
@@ -49,7 +48,7 @@ export class PluginWorkerSlotPool {
           }
           cancelled = true
           const index = this.waiters.indexOf(waiter)
-          if (index >= 0) {
+          if (index !== -1) {
             this.waiters.splice(index, 1)
           }
           signal.removeEventListener('abort', waiter.onAbort)

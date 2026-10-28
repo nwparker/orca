@@ -14,7 +14,6 @@ import {
   removeInstalledPlugin
 } from '../plugins/plugin-install'
 import { applyPluginConsent, applyPluginEnablement } from '../plugins/plugin-enablement'
-import { buildPluginList, type PluginListEntry } from '../plugins/plugin-list-projection'
 import type { PluginService } from '../plugins/plugin-service'
 import { bindPluginPanelOwnerLifecycle } from '../plugins/plugin-panel-owner-lifecycle'
 import { isQualifiedPluginKey } from '../../shared/plugins/plugin-manifest'
@@ -68,13 +67,8 @@ const removeArgsSchema = z.object({
 })
 const logsArgsSchema = z.object({ pluginKey: z.string().min(1) })
 
-export async function listPluginsForClients(
-  pluginService: PluginService
-): Promise<PluginListEntry[]> {
-  await pluginService.whenReady()
-  const lock = await readPluginLockfile(getUserPluginsDir(pluginService.options.userDataPath))
-  return buildPluginList(pluginService, lock)
-}
+// Preserve import compatibility; runtime RPC uses the Electron-free client-list module.
+import { listPluginsForClients } from '../plugins/plugin-client-list'
 
 export function canRemoveInstalledPlugin(
   pluginService: PluginService,
@@ -97,24 +91,21 @@ export function registerPluginHandlers(
   runtime: OrcaRuntimeService | null,
   marketplaceServices?: PluginMarketplaceHandlerServices
 ): void {
-  // The runtime IS the delegate: the structural PluginRuntimeDelegate type
-  // keeps the facade electron-free while main binds the real service.
+  // A structural delegate binds the real runtime without importing Electron into the facade.
   if (runtime) {
     pluginService.setRuntimeDelegate(runtime)
   }
 
   store.onSettingsChanged((updates) => {
     if ('pluginSystemEnabled' in updates || 'devPluginPaths' in updates) {
-      // Main owns plugin lifecycle. Renderer follow-up refreshes are UX only;
-      // a crashed or remote caller must not leave old workers authoritative.
+      // Main owns lifecycle refresh even when a caller crashes before its follow-up refresh.
       void pluginService.refresh().catch((error) => {
         console.warn('[plugins] failed to apply plugin settings change:', error)
       })
     }
   })
 
-  // Why: startup discovery is fire-and-forget; every handler awaits it so an
-  // early renderer fetch can't observe the empty pre-discovery list.
+  // All handlers must await startup discovery to avoid returning a pre-discovery empty list.
   ipcMain.handle('plugins:list', async () => listPluginsForClients(pluginService))
   ipcMain.handle('plugins:listLanguagePacks', async () => {
     await pluginService.whenReady()
@@ -147,8 +138,7 @@ export function registerPluginHandlers(
     return listPluginsForClients(pluginService)
   })
 
-  // Why: the renderer renders panel HTML via a sandboxed iframe srcdoc, so it
-  // needs (CSP-wrapped) file contents — never a file:// path — across IPC.
+  // Sandboxed iframe srcdoc needs CSP-wrapped HTML contents across IPC.
   ipcMain.handle(
     'plugins:readPanelEntry',
     async (event, args: unknown): Promise<PluginPanelEntry | null> => {
@@ -158,17 +148,16 @@ export function registerPluginHandlers(
       )
       await pluginService.whenReady()
       const parsed = readPanelEntryArgsSchema.parse(args)
-      const entry = await pluginService.panels.open(ownerKey, parsed.pluginKey, parsed.panelId)
-      if (!ownerLease.isCurrent()) {
-        pluginService.panels.revokeOwner(ownerKey)
-        return null
-      }
-      return entry
+      return pluginService.panels.open(
+        ownerKey,
+        parsed.pluginKey,
+        parsed.panelId,
+        ownerLease.isCurrent
+      )
     }
   )
 
-  // Panel-originated actions relayed by the renderer's postMessage bridge
-  // host. Capability enforcement happens in main, never in the renderer.
+  // Renderer forwards panel actions; main enforces capabilities.
   ipcMain.handle(
     'plugins:panelAction',
     async (event, args: unknown): Promise<PluginPanelActionOutcome> => {
@@ -219,13 +208,13 @@ export function registerPluginHandlers(
     if (!canRemoveInstalledPlugin(pluginService, parsed.pluginKey, lock)) {
       throw new Error(`cannot remove protected or non-installed plugin ${parsed.pluginKey}`)
     }
-    await pluginService.deactivatePlugin(parsed.pluginKey)
-    await removeInstalledPlugin({
-      pluginsDir,
-      pluginsDataDir: getPluginsDataDir(pluginService.options.userDataPath),
-      pluginKey: parsed.pluginKey
-    })
-    // Drop the stale consent so a later reinstall re-prompts from scratch.
+    await pluginService.removePlugin(parsed.pluginKey, () =>
+      removeInstalledPlugin({
+        pluginsDir,
+        pluginsDataDir: getPluginsDataDir(pluginService.options.userDataPath),
+        pluginKey: parsed.pluginKey
+      })
+    )
     const settings = store.getSettings()
     const consents = { ...settings.pluginConsents }
     delete consents[parsed.pluginKey]
@@ -245,8 +234,6 @@ export function registerPluginHandlers(
     return pluginService.getLogs(parsed.pluginKey)
   })
 
-  // Re-discover after settings edits (feature flag, dev paths) — the
-  // renderer calls this right after updating those settings.
   ipcMain.handle('plugins:refresh', async () => {
     await pluginService.refresh()
     return listPluginsForClients(pluginService)

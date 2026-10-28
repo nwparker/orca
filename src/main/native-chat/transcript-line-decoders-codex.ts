@@ -1,10 +1,9 @@
-// Codex JSONL line → NativeChatMessage decoder.
-
 import {
   NATIVE_CHAT_INTERRUPTED_STATUS_TEXT,
   type NativeChatBlock,
   type NativeChatMessage
 } from '../../shared/native-chat-types'
+import { NATIVE_CHAT_NOTICE_COPY } from '../../shared/native-chat/native-chat-notice'
 import {
   asRecord,
   extractString,
@@ -24,7 +23,8 @@ export function decodeCodexTranscriptLine(
   }
   const payload = asRecord(record.payload)
   if (!payload) {
-    return null
+    const id = extractString(record.id) ?? fallbackId
+    return codexUnwrappedResponseItem(record, id, parseTimestamp(record.timestamp))
   }
   const timestamp = parseTimestamp(record.timestamp)
   const baseId = extractString(payload.id) ?? fallbackId
@@ -38,18 +38,38 @@ export function decodeCodexTranscriptLine(
   return null
 }
 
+function codexUnwrappedResponseItem(
+  record: Record<string, unknown>,
+  id: string,
+  timestamp: number | null
+): NativeChatMessage | null {
+  if (record.type !== 'message') {
+    return codexResponseItem(record, id, timestamp)
+  }
+  const role = record.role === 'assistant' ? 'assistant' : record.role === 'user' ? 'user' : null
+  const decodedBlocks = codexTurnItemBlocks(record.content)
+  const blocks =
+    role === 'user' ? decodedBlocks.filter((block) => !isSkillContext(block)) : decodedBlocks
+  return role && blocks.length > 0 ? { id, role, blocks, timestamp, source: 'transcript' } : null
+}
+
 function codexResponseItem(
   payload: Record<string, unknown>,
   id: string,
   timestamp: number | null
 ): NativeChatMessage | null {
   if (payload.type === 'message') {
-    const blocks = claudeContentBlocks(payload.content)
+    const role =
+      payload.role === 'assistant' ? 'assistant' : payload.role === 'user' ? 'user' : null
+    if (!role) {
+      return null
+    }
+    const decodedBlocks = claudeContentBlocks(payload.content)
+    const blocks =
+      role === 'user' ? decodedBlocks.filter((block) => !isSkillContext(block)) : decodedBlocks
     if (blocks.length === 0) {
       return null
     }
-    const role =
-      payload.role === 'assistant' ? 'assistant' : payload.role === 'user' ? 'user' : 'system'
     return { id, role, blocks, timestamp, source: 'transcript' }
   }
   if (payload.type === 'reasoning') {
@@ -65,26 +85,38 @@ function codexResponseItem(
       source: 'transcript'
     }
   }
-  if (payload.type === 'function_call' || payload.type === 'local_shell_call') {
+  if (
+    payload.type === 'function_call' ||
+    payload.type === 'local_shell_call' ||
+    payload.type === 'custom_tool_call'
+  ) {
     const name = extractString(payload.name) ?? 'tool'
+    const callId = extractString(payload.call_id)
     return {
       id,
       role: 'assistant',
-      blocks: [{ type: 'tool-call', name, input: codexCallInput(payload) }],
+      blocks: [
+        { type: 'tool-call', name, input: codexCallInput(payload), ...(callId ? { callId } : {}) }
+      ],
       timestamp,
       source: 'transcript'
     }
   }
-  if (payload.type === 'function_call_output') {
+  if (payload.type === 'function_call_output' || payload.type === 'custom_tool_call_output') {
     return {
       id,
       role: 'tool',
-      blocks: [codexToolResult(payload.output)],
+      blocks: [codexToolResult(payload.output, extractString(payload.call_id))],
       timestamp,
       source: 'transcript'
     }
   }
   return null
+}
+
+// Explicit skill expansions are model context, not the user's recorded prompt.
+function isSkillContext(block: NativeChatBlock): boolean {
+  return block.type === 'text' && block.text.trimStart().slice(0, 7).toLowerCase() === '<skill>'
 }
 
 function codexEventMessage(
@@ -101,6 +133,13 @@ function codexEventMessage(
       source: 'transcript'
     }
   }
+  // Legacy rollouts persist this event; paginated rollouts persist a ContextCompaction item instead.
+  if (payload.type === 'context_compacted') {
+    return codexCompactionMarker(id, timestamp)
+  }
+  if (payload.type === 'item_completed') {
+    return codexCompletedTurnItem(payload, id, timestamp)
+  }
   if (payload.type === 'user_message') {
     const text = extractString(payload.message)
     return text
@@ -116,6 +155,84 @@ function codexEventMessage(
   return null
 }
 
+function codexCompletedTurnItem(
+  payload: Record<string, unknown>,
+  fallbackId: string,
+  timestamp: number | null
+): NativeChatMessage | null {
+  const item = asRecord(payload.item)
+  if (!item) {
+    return null
+  }
+  const id = extractString(item.id) ?? fallbackId
+  if (item.type === 'ContextCompaction') {
+    return codexCompactionMarker(id, timestamp)
+  }
+  const blocks = codexTurnItemBlocks(item.content)
+  if (blocks.length === 0) {
+    return null
+  }
+  if (item.type === 'UserMessage' || item.type === 'user_message') {
+    return { id, role: 'user', blocks, timestamp, source: 'transcript' }
+  }
+  if (item.type === 'AgentMessage' || item.type === 'agent_message') {
+    return { id, role: 'assistant', blocks, timestamp, source: 'transcript' }
+  }
+  return null
+}
+
+function codexCompactionMarker(id: string, timestamp: number | null): NativeChatMessage {
+  return {
+    id,
+    role: 'system',
+    blocks: [
+      { type: 'text', text: NATIVE_CHAT_NOTICE_COPY.compaction, presentation: 'compaction' }
+    ],
+    timestamp,
+    source: 'transcript'
+  }
+}
+
+function codexTurnItemBlocks(content: unknown): NativeChatBlock[] {
+  if (!Array.isArray(content)) {
+    return []
+  }
+  const blocks: NativeChatBlock[] = []
+  for (const value of content) {
+    const item = asRecord(value)
+    if (!item) {
+      continue
+    }
+    if (
+      item.type === 'text' ||
+      item.type === 'Text' ||
+      item.type === 'input_text' ||
+      item.type === 'output_text'
+    ) {
+      const text = extractString(item.text)
+      if (text) {
+        blocks.push({ type: 'text', text })
+      }
+      continue
+    }
+    if (item.type === 'image' || item.type === 'Image' || item.type === 'input_image') {
+      const url = extractString(item.image_url) ?? extractString(item.url)
+      if (url) {
+        blocks.push({ type: 'image-ref', url })
+      }
+      continue
+    }
+    if (item.type === 'local_image' || item.type === 'LocalImage') {
+      const path = extractString(item.path)
+      if (path) {
+        blocks.push({ type: 'image-ref', path })
+      }
+    }
+  }
+  return blocks
+}
+
+/** Preserve raw argument shape for all consumers; callers needing structure decode it themselves. */
 function codexCallInput(payload: Record<string, unknown>): unknown {
   if (payload.arguments !== undefined) {
     return payload.arguments
@@ -123,12 +240,13 @@ function codexCallInput(payload: Record<string, unknown>): unknown {
   return payload.input ?? payload.action ?? null
 }
 
-function codexToolResult(output: unknown): NativeChatBlock {
+function codexToolResult(output: unknown, callId: string | null): NativeChatBlock {
   const record = asRecord(output)
   const isError = record?.success === false || record?.is_error === true
   return {
     type: 'tool-result',
     output: toolResultOutput(record?.content ?? record?.output ?? output),
+    ...(callId ? { callId } : {}),
     ...(isError ? { isError: true } : {})
   }
 }

@@ -42,7 +42,6 @@ export function deviceLabel(
   return 'Mobile Emulator'
 }
 
-/** Resolve the MJPEG endpoint serve-sim exposes for the live phone preview. */
 export function simulatorPreviewStreamUrl(info?: EmulatorStreamInfo): string | undefined {
   if (!info) {
     return undefined
@@ -70,5 +69,3 @@ export function pickDefaultDevice(devices: SimulatorDeviceRow[]): SimulatorDevic
     null
   )
 }
-
-export const isMacOs = typeof navigator !== 'undefined' && navigator.userAgent.includes('Mac')

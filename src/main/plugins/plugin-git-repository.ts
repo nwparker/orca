@@ -1,31 +1,20 @@
-import { execFile } from 'node:child_process'
-import { promisify } from 'node:util'
 import {
   isAllowedPluginGitUrl,
   PLUGIN_COMMIT_PATTERN
 } from '../../shared/plugins/plugin-install-lockfile'
+import { gitExecFileAsync } from '../git/runner'
 
-const execFileAsync = promisify(execFile)
 const PLUGIN_GIT_TIMEOUT_MS = 120_000
 
-/** Runs system Git with argv-only invocation so credential helpers and SSH
- * remotes work without exposing an executable remote-helper surface. */
+/** Use system Git credentials while retaining argv-only invocation and restricted remote protocols. */
 export async function runPluginGit(args: string[], cwd: string): Promise<string> {
-  const { stdout } = await execFileAsync('git', args, {
+  const { stdout } = await gitExecFileAsync(args, {
     cwd,
-    timeout: PLUGIN_GIT_TIMEOUT_MS,
-    windowsHide: true,
-    env: {
-      ...process.env,
-      // Existing non-interactive helpers and SSH agents still work, but a
-      // background marketplace refresh can never hang on a terminal prompt.
-      GIT_TERMINAL_PROMPT: '0'
-    }
+    timeout: PLUGIN_GIT_TIMEOUT_MS
   })
   return stdout.trim()
 }
 
-/** Checks out one Git ref into an empty destination and returns exact HEAD. */
 export async function checkoutPluginGitSource(input: {
   url: string
   ref: string

@@ -2,9 +2,12 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { Gauge, RefreshCw } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { installWindowVisibilityInterval } from '@/lib/window-visibility-interval'
-import { useAppStore } from '@/store'
-import { callRuntimeRpc, getActiveRuntimeTarget } from '@/runtime/runtime-rpc-client'
-import type { GetRateLimitResult, GitHubRateLimitSnapshot } from '../../../../shared/types'
+import { callRuntimeRpc } from '@/runtime/runtime-rpc-client'
+import type { RuntimeClientTarget } from '../../../../shared/runtime-client-target'
+import type {
+  GetRateLimitResult,
+  GitHubRateLimitSnapshot
+} from '../../../../shared/github/rate-limit-types'
 import { getProviderRateLimitScope } from '@/components/settings/provider-account-scope'
 import { ProviderHostScopeControl } from '@/components/settings/ProviderHostScopeControl'
 import { translate } from '@/i18n/i18n'
@@ -72,7 +75,10 @@ export function toneForGitHubBucket(remaining: number, limit: number): 'ok' | 'w
   return 'ok'
 }
 
-export function useGitHubRateLimitSnapshot(options?: { autoRefresh?: boolean }): {
+export function useGitHubRateLimitSnapshot(
+  target: RuntimeClientTarget,
+  options?: { autoRefresh?: boolean }
+): {
   snapshot: GitHubRateLimitSnapshot | null
   hasError: boolean
   isFetching: boolean
@@ -81,7 +87,6 @@ export function useGitHubRateLimitSnapshot(options?: { autoRefresh?: boolean }):
   const [snapshot, setSnapshot] = useState<GitHubRateLimitSnapshot | null>(null)
   const [hasError, setHasError] = useState(false)
   const [isFetching, setIsFetching] = useState(false)
-  const settings = useAppStore((s) => s.settings)
   const latestToken = useRef(0)
   const autoRefresh = options?.autoRefresh ?? true
 
@@ -90,7 +95,6 @@ export function useGitHubRateLimitSnapshot(options?: { autoRefresh?: boolean }):
       const token = ++latestToken.current
       setIsFetching(true)
       try {
-        const target = getActiveRuntimeTarget(settings)
         const params = force ? { force: true } : undefined
         const res =
           target.kind === 'environment'
@@ -117,7 +121,7 @@ export function useGitHubRateLimitSnapshot(options?: { autoRefresh?: boolean }):
         }
       }
     },
-    [settings]
+    [target]
   )
 
   useEffect(() => {
@@ -169,10 +173,16 @@ function GitHubRateLimitRows({
   )
 }
 
-export function GitHubRateLimitPanel({ className }: { className?: string }): React.JSX.Element {
-  const { snapshot, hasError, isFetching, refresh } = useGitHubRateLimitSnapshot()
-  const settings = useAppStore((s) => s.settings)
-  const budgetScope = getProviderRateLimitScope(settings, 'GitHub')
+export function GitHubRateLimitPanel({
+  className,
+  target
+}: {
+  className?: string
+  /** The host chosen at the top of Settings. */
+  target: RuntimeClientTarget
+}): React.JSX.Element {
+  const { snapshot, hasError, isFetching, refresh } = useGitHubRateLimitSnapshot(target)
+  const budgetScope = getProviderRateLimitScope(target, 'GitHub')
 
   return (
     <div className={cn('space-y-3 rounded-md border border-border/60 p-3', className)}>

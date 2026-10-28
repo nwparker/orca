@@ -1,11 +1,12 @@
 import type { Platform } from './MobileHero'
 import { translate } from '@/i18n/i18n'
 
-// iOS ships two App Store tracks: the public App Store build (slower, ~weekly)
-// and the TestFlight preview build (daily). Android only ships one APK track.
+// iOS offers App Store and TestFlight tracks; Android has a single APK track.
 export type IosChannel = 'stable' | 'preview'
 
 export type InstallCopy = { ctaLabel: string; url: string }
+
+export const ANDROID_INSTALL_GUIDE_URL = 'https://www.onorca.dev/docs/android-apk'
 
 const IOS_CHANNEL_COPY: Record<IosChannel, InstallCopy> = {
   stable: {
@@ -20,7 +21,7 @@ const IOS_CHANNEL_COPY: Record<IosChannel, InstallCopy> = {
 
 const ANDROID_COPY: InstallCopy = {
   ctaLabel: 'Download APK',
-  url: 'https://github.com/stablyai/orca/releases/download/mobile-android-v0.0.32/app-release.apk'
+  url: 'https://www.onorca.dev/download/android'
 }
 
 export function getInstallCopy(platform: Platform, iosChannel: IosChannel): InstallCopy {

@@ -1,7 +1,7 @@
 import { ActionSheetModal, type ActionSheetAction } from '../components/ActionSheetModal'
 import { ConfirmModal } from '../components/ConfirmModal'
 import { PickerModal } from '../components/PickerModal'
-import { openMobilePrUrl } from '../components/MobilePrComposeSheet'
+import { openMobilePrUrl } from '../components/mobile-pr-url'
 import { MobileBranchDiffPreviewDrawer } from './MobileBranchDiffPreviewDrawer'
 import type { MobileSourceControlState } from './use-mobile-source-control-state'
 
@@ -61,7 +61,6 @@ export function MobileSourceControlModals({ state, actionSheetActions }: Props) 
               filePath: discardTarget.path
             })
           }
-          // Modal visibility is derived from discardTarget — clear it so it dismisses.
           setDiscardTarget(null)
         }}
         onCancel={() => setDiscardTarget(null)}

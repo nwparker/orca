@@ -1,3 +1,4 @@
+import './unused-default-rpc-methods.test-fixture'
 import { describe, expect, it, vi } from 'vitest'
 import { RpcDispatcher } from './dispatcher'
 import type { RpcRequest } from './core'
@@ -12,15 +13,14 @@ import {
   encodeTerminalStreamJson
 } from '../../../shared/terminal-stream-protocol'
 
-// Transport-level regression for #7329: the daemon's mid-escape tail
-// (pendingEscapeTailAnsi) must survive the terminal.multiplex wire so the
-// renderer can replay it after the reset. Without threading it through the
-// SnapshotStart JSON frame, the tail is lost and the next live chunk renders
-// literally ("colors/garbage around what I type").
+// Preserve pendingEscapeTailAnsi through SnapshotStart (#7329); after reset, missing partial escapes make subsequent live bytes render literally.
 
 function stubRuntime(overrides: Partial<OrcaRuntimeService> = {}): OrcaRuntimeService {
+  // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: This partial runtime supplies the terminal RPC methods these tests invoke.
   return {
     getRuntimeId: () => 'test-runtime',
+    getPtyExecutionHostMetadata: () => ({ incarnationId: 'test-incarnation' }),
+    getTerminalLaunchResult: () => undefined,
     ...overrides
   } as OrcaRuntimeService
 }
@@ -47,8 +47,11 @@ describe('terminal.multiplex pending-escape-tail threading (#7329)', () => {
           data: 'user@host:~$ ',
           cols: 80,
           rows: 24,
+          seq: 7,
           // The dangling partial the emulator could not serialize.
-          pendingEscapeTailAnsi: '\x1b[3'
+          pendingEscapeTailAnsi: '\x1b[3',
+          alternateScreen: false,
+          terminalOwner: 'shell'
         }),
         getTerminalSize: vi.fn().mockReturnValue({ cols: 80, rows: 24 }),
         getMobileDisplayMode: vi.fn().mockReturnValue('auto'),
@@ -109,8 +112,7 @@ describe('terminal.multiplex pending-escape-tail threading (#7329)', () => {
         )!
       )
 
-      // Drive the subscribe promise chain (readTerminal/serialize awaits + the
-      // output-batcher flush timer) to completion.
+      // Finish read/serialize awaits and the output-batcher flush timer.
       for (let i = 0; i < 5; i += 1) {
         await vi.runOnlyPendingTimersAsync()
       }
@@ -119,7 +121,9 @@ describe('terminal.multiplex pending-escape-tail threading (#7329)', () => {
         .map((frame) => decodeTerminalStreamFrame(frame))
         .find((frame) => frame?.opcode === TerminalStreamOpcode.SnapshotStart)!
       expect(decodeTerminalStreamJson(snapshotStart.payload)).toMatchObject({
-        pendingEscapeTailAnsi: '\x1b[3'
+        pendingEscapeTailAnsi: '\x1b[3',
+        alternateScreen: false,
+        terminalOwner: 'shell'
       })
 
       runtime.cleanupSubscription('terminal-multiplex:conn-1')

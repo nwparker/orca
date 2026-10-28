@@ -6,7 +6,7 @@ import type {
 } from '../../../../shared/feature-wall-workflows'
 import type { ReviewStep, ReviewStepId } from '../../../../shared/review-steps'
 import type { FeatureWallOpenSourceTelemetry } from '../../../../shared/telemetry-events'
-import type { GlobalSettings } from '../../../../shared/types'
+import type { GlobalSettings } from '../../../../shared/global-settings-types'
 import type { WorkbenchStep, WorkbenchStepId } from '../../../../shared/workbench-steps'
 import type { InstalledAgentSkillState } from '@/hooks/useInstalledAgentSkills'
 import { cn } from '@/lib/utils'
@@ -57,8 +57,7 @@ export function FeatureWallTourPanel(props: {
   continueButton: ReactNode
   leadingFooterContent?: ReactNode
 }): JSX.Element {
-  // Why: the tour should not slide horizontally between pages; individual
-  // visuals can adapt inside the stage, but the page anchor must stay fixed.
+  // Keep the page anchor fixed while individual visuals change size.
   const contentStageClassName = 'mx-auto w-full max-w-[940px]'
   const previewTitle = props.activeStepCopy?.title ?? props.selected.title
   const panel = (
