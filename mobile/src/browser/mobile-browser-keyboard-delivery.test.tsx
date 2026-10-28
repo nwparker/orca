@@ -154,6 +154,30 @@ describe('browser keyboard draft delivery', () => {
     keyboard.unmount()
   })
 
+  it('sends newer typing while an earlier send is still in flight', async () => {
+    const keyboard = mountKeyboard()
+    let first: Promise<void>
+    let second: Promise<void>
+    act(() => {
+      first = keyboard.send()
+    })
+    act(() => keyboard.edit('next draft'))
+    act(() => {
+      second = keyboard.send()
+    })
+    expect(keyboard.client.requests.map((request) => request.args[1])).toMatchObject([
+      { text: 'first draft' },
+      { text: 'next draft' }
+    ])
+    await act(async () => {
+      keyboard.client.requests[0]!.resolve(rpcSuccess('send', {}))
+      keyboard.client.requests[1]!.resolve(rpcSuccess('send', {}))
+      await Promise.all([first, second])
+    })
+    expect(keyboard.draft()).toBe('')
+    keyboard.unmount()
+  })
+
   it('restores unconfirmed text after a reconnect replaces the client', async () => {
     const keyboard = mountKeyboard()
     let pending: Promise<void>
