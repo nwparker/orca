@@ -96,8 +96,9 @@ export default function VoiceSettingsScreen({
         rereadWhenSettled.current ||= !latest
         return { ok: true, reply, latest }
       } catch (error) {
-        rereadWhenSettled.current = true
-        return { ok: false, error, latest: epoch === requestEpoch.current }
+        const latest = epoch === requestEpoch.current
+        rereadWhenSettled.current ||= !latest
+        return { ok: false, error, latest }
       } finally {
         pendingChanges.current -= 1
         if (pendingChanges.current === 0 && rereadWhenSettled.current) {
@@ -133,9 +134,11 @@ export default function VoiceSettingsScreen({
         setSetup(result.reply)
       } else {
         setError(result.error instanceof Error ? result.error.message : 'Could not update')
+        // Undo the optimistic flip.
+        void refreshSetup()
       }
     },
-    [operations, sendChange]
+    [operations, refreshSetup, sendChange]
   )
 
   const handleUseModel = useCallback(

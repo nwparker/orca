@@ -193,7 +193,7 @@ describe('shared settings screen state', () => {
     })
     expect(switchProps().value).toBe(true)
   })
-  describe('a model delete that settles after a newer change', () => {
+  describe('a model delete', () => {
     const model: MobileSpeechModel = {
       id: 'base',
       label: 'Base',
@@ -235,7 +235,7 @@ describe('shared settings screen state', () => {
       })
       return pendingDelete
     }
-    it('re-reads when it succeeds', async () => {
+    it('re-reads when it succeeds after a newer change replied', async () => {
       const pendingDelete = await deleteThenChangeMode()
       await act(async () => {
         pendingDelete.resolve(deleted)
@@ -282,11 +282,23 @@ describe('shared settings screen state', () => {
       })
       expect(renderer.root.findByType(VoiceModelList).props.setup.selectedModelId).toBe('')
     })
-    it('still shows its error when it fails', async () => {
-      const pendingDelete = await deleteThenChangeMode()
+    it('keeps its error on screen when it fails alone', async () => {
+      const operations: VoiceSettingsOperations = {
+        load: vi.fn().mockResolvedValue(selected),
+        configure: vi.fn(),
+        download: vi.fn(),
+        delete: vi.fn().mockRejectedValue(new Error('voice_model_in_use'))
+      }
       await act(async () => {
-        pendingDelete.reject(new Error('voice_model_in_use'))
+        renderer = create(
+          createElement(VoiceSettingsScreen, { operations, focused: true, onBack: vi.fn() })
+        )
       })
+      await act(async () => {
+        renderer.root.findByType(VoiceModelList).props.onDelete(model)
+      })
+      // A re-read would clear the error once it replied.
+      expect(operations.load).toHaveBeenCalledTimes(1)
       expect(JSON.stringify(renderer.toJSON())).toContain('voice_model_in_use')
     })
   })
