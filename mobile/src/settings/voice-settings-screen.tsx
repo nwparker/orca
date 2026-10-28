@@ -38,6 +38,8 @@ export default function VoiceSettingsScreen({
   const insets = useSafeAreaInsets()
   const [setup, setSetup] = useState<MobileSpeechSetup | null>(null)
   const [loading, setLoading] = useState(true)
+  // A read clears only its own failure, so a background re-read cannot hide why a change failed.
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busyAction, setBusyAction] = useState<ModelBusyAction | null>(null)
   const requestEpoch = useRef(0)
@@ -61,11 +63,11 @@ export default function VoiceSettingsScreen({
         return undefined
       }
       setSetup(next)
-      setError(null)
+      setLoadError(null)
       return next.models.some(isModelInFlight)
     } catch (err) {
       if (epoch === requestEpoch.current) {
-        setError(err instanceof Error ? err.message : 'Failed to load voice settings')
+        setLoadError(err instanceof Error ? err.message : 'Failed to load voice settings')
       }
       return undefined
     } finally {
@@ -81,7 +83,7 @@ export default function VoiceSettingsScreen({
     intervalMs: POLL_INTERVAL_MS
   })
 
-  // Only the newest change's reply is applied; if any reply was skipped, re-read once all changes settle.
+  // Only the newest change's reply is applied; after a skipped reply or a failure, re-read once all changes settle.
   const sendChange = useCallback(
     async <T,>(
       send: () => Promise<T>
@@ -96,9 +98,8 @@ export default function VoiceSettingsScreen({
         rereadWhenSettled.current ||= !latest
         return { ok: true, reply, latest }
       } catch (error) {
-        const latest = epoch === requestEpoch.current
-        rereadWhenSettled.current ||= !latest
-        return { ok: false, error, latest }
+        rereadWhenSettled.current = true
+        return { ok: false, error, latest: epoch === requestEpoch.current }
       } finally {
         pendingChanges.current -= 1
         if (pendingChanges.current === 0 && rereadWhenSettled.current) {
@@ -134,11 +135,9 @@ export default function VoiceSettingsScreen({
         setSetup(result.reply)
       } else {
         setError(result.error instanceof Error ? result.error.message : 'Could not update')
-        // Undo the optimistic flip.
-        void refreshSetup()
       }
     },
-    [operations, refreshSetup, sendChange]
+    [operations, sendChange]
   )
 
   const handleUseModel = useCallback(
@@ -232,7 +231,7 @@ export default function VoiceSettingsScreen({
         </View>
       ) : setup === null ? (
         <View style={[styles.section, styles.sectionTopGap]}>
-          <Text style={styles.errorText}>{error ?? 'Failed to load voice settings.'}</Text>
+          <Text style={styles.errorText}>{loadError ?? 'Failed to load voice settings.'}</Text>
         </View>
       ) : (
         <ScrollView
@@ -301,7 +300,7 @@ export default function VoiceSettingsScreen({
             </Pressable>
           </View>
 
-          {error ? <Text style={styles.error}>{error}</Text> : null}
+          {(error ?? loadError) ? <Text style={styles.error}>{error ?? loadError}</Text> : null}
         </ScrollView>
       )}
 
