@@ -104,8 +104,8 @@ export default function VoiceSettingsScreen({
       } catch (err) {
         if (epoch === requestEpoch.current) {
           setError(err instanceof Error ? err.message : 'Could not update')
-          void refreshSetup()
         }
+        void refreshSetup()
       }
     },
     [operations, refreshSetup]
