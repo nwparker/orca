@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useRef, type Dispatch, type SetStateAction } from 'react'
+import { useCallback, useEffect, useRef, type Dispatch, type SetStateAction } from 'react'
 import type { RpcClient } from '../transport/rpc-client'
 import { isRpcDeliveryUnknown } from '../transport/rpc-delivery-ambiguity'
 import { isLogicalClientCutoverError } from '../transport/stable-logical-rpc-client'
@@ -75,14 +75,15 @@ export function useMobileBrowserCommands(args: MobileBrowserCommandArgs) {
 
   const pendingWheelCommandRef = useRef<PendingWheelCommand | null>(null)
   const dialogAnswerTokenRef = useRef(0)
-  // A send's reply may only touch the draft of the page and client that sent it.
-  const keyboardSendOwnerRef = useRef({ sending: false })
-  useLayoutEffect(() => {
-    keyboardSendOwnerRef.current = { sending: false }
+  // The pane remounts per page, so the draft outlives a reconnect; only unmount ends a send's claim on it.
+  const keyboardSendRef = useRef({ mounted: true, sending: false })
+  useEffect(() => {
+    const send = keyboardSendRef.current
+    send.mounted = true
     return () => {
-      keyboardSendOwnerRef.current = { sending: false }
+      send.mounted = false
     }
-  }, [client, pageParams])
+  }, [])
 
   const wheelCommandInFlightRef = useRef(false)
 
@@ -224,11 +225,11 @@ export function useMobileBrowserCommands(args: MobileBrowserCommandArgs) {
 
   const sendKeyboardText = useCallback(async () => {
     const text = keyboardValue
-    const owner = keyboardSendOwnerRef.current
-    if (!text || owner.sending) {
+    const send = keyboardSendRef.current
+    if (!text || send.sending) {
       return
     }
-    owner.sending = true
+    send.sending = true
     setKeyboardValue('')
     try {
       const result = await sendBrowserRequest(
@@ -247,7 +248,7 @@ export function useMobileBrowserCommands(args: MobileBrowserCommandArgs) {
         },
         { suppressError: true }
       )
-      if (keyboardSendOwnerRef.current !== owner) {
+      if (!send.mounted) {
         return
       }
       if (result === 'sent') {
@@ -259,7 +260,7 @@ export function useMobileBrowserCommands(args: MobileBrowserCommandArgs) {
         onToast('Delivery unconfirmed — check page before retrying')
       }
     } finally {
-      owner.sending = false
+      send.sending = false
     }
   }, [keyboardValue, onToast, sendBrowserRequest])
 

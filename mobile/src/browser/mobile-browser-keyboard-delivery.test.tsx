@@ -4,13 +4,14 @@ import { describe, expect, it, vi } from 'vitest'
 import { createFakeRpcClient, rpcSuccess } from '../mobile-web-shell/bridge-host-test-fakes'
 import { useMobileBrowserCommands } from './use-mobile-browser-commands'
 import { useMobileBrowserRequest } from './use-mobile-browser-request'
+import { markRpcDeliveryUnknown } from '../transport/rpc-delivery-ambiguity'
 import { createStableLogicalRpcClient } from '../transport/stable-logical-rpc-client'
 
 function mountKeyboard() {
   const client = createFakeRpcClient()
   const logicalClient = createStableLogicalRpcClient(client, 'relay')
   const toast = vi.fn()
-  let pageId = 'page-1'
+  let activeClient = logicalClient
   let renderer: ReactTestRenderer
   let value = ''
   let edit: (text: string) => void = () => {}
@@ -19,14 +20,14 @@ function mountKeyboard() {
     const [draft, setDraft] = useState('first draft')
     const request = useMobileBrowserRequest({
       busyRef: { current: false },
-      client: logicalClient,
-      pageId,
+      client: activeClient,
+      pageId: 'page-1',
       worktreeId: 'tree-1',
       setBusy: () => {},
       setError: () => {}
     })
     const commands = useMobileBrowserCommands({
-      client: logicalClient,
+      client: activeClient,
       frameMetadataRef: { current: null },
       keyboardValue: draft,
       layoutRef: { current: null },
@@ -59,9 +60,9 @@ function mountKeyboard() {
         renderer.update(createElement(Keyboard))
       })
     },
-    switchPage: () =>
+    reconnect: () =>
       act(() => {
-        pageId = 'page-2'
+        activeClient = createStableLogicalRpcClient(createFakeRpcClient(), 'relay')
         renderer.update(createElement(Keyboard))
       }),
     unmount: () => act(() => renderer.unmount())
@@ -153,20 +154,22 @@ describe('browser keyboard draft delivery', () => {
     keyboard.unmount()
   })
 
-  it('does not restore a refused send into a different page draft', async () => {
+  it('restores unconfirmed text after a reconnect replaces the client', async () => {
     const keyboard = mountKeyboard()
     let pending: Promise<void>
     act(() => {
       pending = keyboard.send()
     })
-    keyboard.switchPage()
-    act(() => keyboard.edit('page two'))
+    keyboard.reconnect()
+    act(() => keyboard.edit('after reconnect'))
     await act(async () => {
-      keyboard.client.requests[0]!.reject(new Error('Disconnected'))
+      keyboard.client.requests[0]!.reject(markRpcDeliveryUnknown(new Error('Request timed out')))
       await pending
     })
-    expect(keyboard.draft()).toBe('page two')
-    expect(keyboard.toast).not.toHaveBeenCalled()
+    expect(keyboard.draft()).toBe('first draftafter reconnect')
+    expect(keyboard.toast.mock.calls).toEqual([
+      ['Delivery unconfirmed — check page before retrying']
+    ])
     keyboard.unmount()
   })
 })
