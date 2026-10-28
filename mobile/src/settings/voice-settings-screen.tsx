@@ -128,9 +128,7 @@ export default function VoiceSettingsScreen({
           void refreshSetup()
         }
       } catch (err) {
-        if (epoch === requestEpoch.current) {
-          setError(err instanceof Error ? err.message : 'Could not select model')
-        }
+        setError(err instanceof Error ? err.message : 'Could not select model')
       } finally {
         setBusyAction(null)
       }
@@ -143,16 +141,14 @@ export default function VoiceSettingsScreen({
       if (!operations) {
         return
       }
-      const epoch = ++requestEpoch.current
+      requestEpoch.current += 1
       setBusyAction({ modelId: model.id, type: 'download' })
       setError(null)
       try {
         await operations.download(model.id)
         await refreshSetup()
       } catch (err) {
-        if (epoch === requestEpoch.current) {
-          setError(err instanceof Error ? err.message : 'Download failed')
-        }
+        setError(err instanceof Error ? err.message : 'Download failed')
       } finally {
         setBusyAction(null)
       }
@@ -180,9 +176,7 @@ export default function VoiceSettingsScreen({
           void refreshSetup()
         }
       } catch (err) {
-        if (epoch === requestEpoch.current) {
-          setError(err instanceof Error ? err.message : 'Delete failed')
-        }
+        setError(err instanceof Error ? err.message : 'Delete failed')
       } finally {
         setBusyAction(null)
       }

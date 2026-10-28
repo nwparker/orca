@@ -16,6 +16,11 @@ export default function NativeVoiceSettingsRoute() {
   const { clients, focused } = useFocusedSettingsHostClients(hostIds)
   const connected = clients.find((entry) => entry.state === 'connected')
   const client = connected?.client ?? null
+  // Keep the last desktop through reconnects; a different desktop remounts the screen.
+  const [screenHostId, setScreenHostId] = useState(connected?.hostId)
+  if (connected && connected.hostId !== screenHostId) {
+    setScreenHostId(connected.hostId)
+  }
   const operations = useMemo(
     () => (client ? nativeVoiceSettingsOperations(client) : null),
     [client]
@@ -23,7 +28,7 @@ export default function NativeVoiceSettingsRoute() {
   return (
     // Remount per desktop so a late reply from the previous one cannot land on this screen.
     <VoiceSettingsScreen
-      key={connected?.hostId}
+      key={screenHostId}
       operations={operations}
       focused={focused}
       onBack={() => router.back()}
