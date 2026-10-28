@@ -34,6 +34,13 @@ function settledValue(
   return verdict.accepted ? verdict.value : undefined
 }
 
+type OwnedRuntimeContext = {
+  owner: { client: RpcClient | null; hostId: string | undefined }
+  runtimeSettings: NewWorktreeRuntimeSettings | null
+  trustedOrcaHooks: PersistedTrustedOrcaHooks
+  availableProviders: TaskProvider[]
+}
+
 export function useNewWorkspaceRuntimeContext(
   client: RpcClient | null,
   visible: boolean,
@@ -46,18 +53,18 @@ export function useNewWorkspaceRuntimeContext(
   availableProviders: TaskProvider[]
   jiraConnection: MobileJiraConnection
 } {
-  const [context, setContext] = useState<{
-    client: RpcClient | null
-    hostId: string | undefined
-    runtimeSettings: NewWorktreeRuntimeSettings | null
-    trustedOrcaHooks: PersistedTrustedOrcaHooks
-    availableProviders: TaskProvider[]
-  }>({ client, hostId, runtimeSettings: null, trustedOrcaHooks: {}, availableProviders: [] })
-  const matchesOwner = context.client === client && context.hostId === hostId
+  // A fresh owner per selection keeps A -> B -> A from reviving the first A's callbacks.
+  const [context, setContext] = useState<OwnedRuntimeContext>(() => ({
+    owner: { client, hostId },
+    runtimeSettings: null,
+    trustedOrcaHooks: {},
+    availableProviders: []
+  }))
+  const { owner } = context
+  const matchesOwner = owner.client === client && owner.hostId === hostId
   if (!matchesOwner) {
     setContext({
-      client,
-      hostId,
+      owner: { client, hostId },
       runtimeSettings: null,
       trustedOrcaHooks: {},
       availableProviders: []
@@ -66,25 +73,19 @@ export function useNewWorkspaceRuntimeContext(
   const runtimeSettings = matchesOwner ? context.runtimeSettings : null
   const trustedOrcaHooks = matchesOwner ? context.trustedOrcaHooks : {}
   const availableProviders = matchesOwner ? context.availableProviders : []
-  const setRuntimeSettings = useCallback(
-    (settings: NewWorktreeRuntimeSettings) => {
-      setContext((current) =>
-        current.client === client && current.hostId === hostId
-          ? { ...current, runtimeSettings: settings }
-          : current
-      )
+  const publish = useCallback(
+    (patch: Partial<Omit<OwnedRuntimeContext, 'owner'>>) => {
+      setContext((current) => (current.owner === owner ? { ...current, ...patch } : current))
     },
-    [client, hostId]
+    [owner]
+  )
+  const setRuntimeSettings = useCallback(
+    (settings: NewWorktreeRuntimeSettings) => publish({ runtimeSettings: settings }),
+    [publish]
   )
   const setTrustedOrcaHooks = useCallback(
-    (trust: PersistedTrustedOrcaHooks) => {
-      setContext((current) =>
-        current.client === client && current.hostId === hostId
-          ? { ...current, trustedOrcaHooks: trust }
-          : current
-      )
-    },
-    [client, hostId]
+    (trust: PersistedTrustedOrcaHooks) => publish({ trustedOrcaHooks: trust }),
+    [publish]
   )
   // Tasks can offer Jira setup; the composer requires a connected site.
   const [jiraConnection, setJiraConnection] = useMobileJiraConnectionState(
@@ -146,11 +147,7 @@ export function useNewWorkspaceRuntimeContext(
         gitlabInstalled: glabInstalled,
         linearConnected
       }).filter((provider) => visibleProviders.includes(provider))
-      setContext((current) =>
-        current.client === client && current.hostId === hostId
-          ? { ...current, availableProviders }
-          : current
-      )
+      publish({ availableProviders })
       const [jiraRes] = await jiraProbe
       if (!stale) {
         setJiraConnection(
@@ -161,7 +158,7 @@ export function useNewWorkspaceRuntimeContext(
     return () => {
       stale = true
     }
-  }, [visible, client, hostId, setRuntimeSettings, setTrustedOrcaHooks])
+  }, [visible, client, hostId, publish, setRuntimeSettings, setTrustedOrcaHooks])
 
   return {
     runtimeSettings,

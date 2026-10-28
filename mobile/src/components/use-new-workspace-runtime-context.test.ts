@@ -138,36 +138,41 @@ describe('useNewWorkspaceRuntimeContext', () => {
     )
     expect((await answer({ settings: SETTINGS }, null)).trustedOrcaHooks).toEqual({})
   })
-  it.each(['pending', 'refused', 'rejected'])(
-    'does not reuse runtime settings or approvals from the previous client when the new reads are %s',
-    async (outcome) => {
-      await answer({ settings: SETTINGS }, UI_WITH_TRUST)
-      const next = new FakeSession('connected')
-      next.sendRequest.mockImplementation(async () => {
-        if (outcome === 'pending') {
-          return new Promise<RpcResponse>(() => {})
-        }
-        if (outcome === 'rejected') {
-          throw new Error('host unavailable')
-        }
-        return { id: 'refused', ok: false, error: { code: 'UNAVAILABLE', message: 'Unavailable' } }
-      })
-      await act(async () => renderer?.update(createElement(Harness, { client: next })))
-      expect(currentContext().runtimeSettings).toBeNull()
-      expect(currentContext().trustedOrcaHooks).toEqual({})
-      expect(currentContext().availableProviders).not.toContain('linear')
-    }
-  )
 
-  it('ignores a settings or trust publisher retained by the previous host', async () => {
+  it('does not show the previous host settings or approvals while the new host has not answered', async () => {
     await answer({ settings: SETTINGS }, UI_WITH_TRUST)
-    const previous = currentContext()
+    const next = new FakeSession('connected')
+    next.sendRequest.mockImplementation(() => new Promise<RpcResponse>(() => {}))
+    await act(async () => renderer?.update(createElement(Harness, { client: next })))
+    expect(currentContext().runtimeSettings).toBeNull()
+    expect(currentContext().trustedOrcaHooks).toEqual({})
+    expect(currentContext().availableProviders).toEqual([])
+  })
+
+  // A -> B -> A: the first A's Save callbacks must stay retired when A is picked again.
+  it('ignores publishers from an earlier selection, including of the same host', async () => {
+    let ui: unknown = UI_WITH_TRUST
+    const first = new FakeSession('connected')
+    first.sendRequest.mockImplementation(async (method: string) =>
+      reply(method === 'ui.get' ? ui : method === 'settings.get' ? { settings: SETTINGS } : {})
+    )
+    await act(async () => {
+      renderer = create(createElement(Harness, { client: first }))
+    })
+    const retired = currentContext()
+    expect(retired.trustedOrcaHooks).toEqual(TRUSTED_HOOKS)
+
     await answer({ settings: { defaultTuiAgent: 'claude' } }, { ui: {} })
     act(() => {
-      previous.setRuntimeSettings(SETTINGS)
-      previous.setTrustedOrcaHooks(TRUSTED_HOOKS)
+      retired.setRuntimeSettings(SETTINGS)
+      retired.setTrustedOrcaHooks(TRUSTED_HOOKS)
     })
     expect(currentContext().runtimeSettings).toEqual({ defaultTuiAgent: 'claude' })
+    expect(currentContext().trustedOrcaHooks).toEqual({})
+
+    ui = { ui: {} }
+    await act(async () => renderer?.update(createElement(Harness, { client: first })))
+    act(() => retired.setTrustedOrcaHooks(TRUSTED_HOOKS))
     expect(currentContext().trustedOrcaHooks).toEqual({})
   })
 })
