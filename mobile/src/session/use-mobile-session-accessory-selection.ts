@@ -62,6 +62,10 @@ export function useMobileSessionAccessorySelection(scope: MobileSessionTerminalI
   const appStateRef = useRef(AppState.currentState)
   const focusedRef = useRef(false)
   const repeatOwnerRevisionRef = useRef(0)
+  // Repeats read the latest live-input mode; press-time ownership is fenced by the sender below.
+  const handleAccessoryKeyRef = useRef(handleAccessoryKey)
+  // react-doctor-disable-next-line react-doctor/no-ref-current-in-render
+  handleAccessoryKeyRef.current = handleAccessoryKey
   const stopAccessoryRepeat = useCallback(() => accessoryRepeat.stop(), [accessoryRepeat])
   const cancelAccessoryRepeat = useCallback(() => {
     repeatOwnerRevisionRef.current += 1
@@ -105,11 +109,11 @@ export function useMobileSessionAccessorySelection(scope: MobileSessionTerminalI
           connStateRef.current === 'connected' &&
           activeHandleRef.current === handle &&
           activeSessionTabTypeRef.current === 'terminal',
-        handleAccessoryKey
+        (...args) => handleAccessoryKeyRef.current(...args)
       )
       accessoryRepeat.start(input, sender)
     },
-    [accessoryRepeat, handleAccessoryKey]
+    [accessoryRepeat]
   )
   const setMobileSessionRootRef = useCallback(
     (node: View | null): void => {

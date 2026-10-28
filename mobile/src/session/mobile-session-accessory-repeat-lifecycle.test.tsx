@@ -69,7 +69,12 @@ describe('mounted accessory-repeat delivery lifecycle', () => {
       kind: 'allow-raw'
     }))
     let api: ReturnType<typeof useMobileSessionAccessorySelection> | null = null
-    type Props = { client: RpcClient; handle: string; state: ConnectionState }
+    type Props = {
+      client: RpcClient
+      handle: string
+      state: ConnectionState
+      preflight?: typeof preflight
+    }
     function Harness(props: Props) {
       const clientRef = useRef(props.client)
       const activeHandleRef = useRef<string | null>(props.handle)
@@ -94,7 +99,7 @@ describe('mounted accessory-repeat delivery lifecycle', () => {
         ptyModesRef: { current: new Map() },
         commandInputRef: { current: null },
         liveInputRef: { current: null },
-        handleLiveInputAccessoryBytes: preflight,
+        handleLiveInputAccessoryBytes: props.preflight ?? preflight,
         worktreeId: 'workspace',
         clearTerminalCache: vi.fn(),
         clearToastHideTimer: vi.fn(),
@@ -238,6 +243,21 @@ describe('mounted accessory-repeat delivery lifecycle', () => {
       expect(view.writes()).toHaveLength(0)
     }
   )
+
+  it('repeats through the latest live editor when live input turns on mid-hold', async () => {
+    const view = await mount()
+    act(() => view.current().startAccessoryRepeat(input))
+    await view.advance(445)
+    expect(view.writes().length).toBeGreaterThan(0)
+    const liveEditor = vi.fn<() => Promise<TerminalLiveAccessoryInputCommitResult>>(async () => ({
+      kind: 'handled'
+    }))
+    await view.update({ preflight: liveEditor })
+    view.client.sendRequest.mockClear()
+    await view.advance(200)
+    expect(liveEditor).toHaveBeenCalled()
+    expect(view.writes()).toHaveLength(0)
+  })
 
   it('waits for each host acknowledgment and drops pending preflight after the terminal changes', async () => {
     const view = await mount()

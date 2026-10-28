@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { View, Text, ScrollView, Pressable } from 'react-native'
 import {
   ChevronDown,
@@ -47,6 +48,8 @@ export function MobileSessionAccessoryKeys({
     keyboardLift
   } = controller
   const keepsKeyboard = useKeyboardPersistingTaps('always')
+  // An unmounting Pressable never fires onPressOut, so a held key would outlive its strip.
+  useEffect(() => stopAccessoryRepeat, [stopAccessoryRepeat])
   return (
     <View ref={keepsKeyboard} style={vertical ? styles.accessoryRail : styles.accessoryBar}>
       {/* Why: fixed keyboard escape hatch; outside ScrollView + shortcut path so it can't scroll away or be hidden (#5106). */}
