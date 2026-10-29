@@ -223,7 +223,7 @@ describe('sending review notes to a new agent session', () => {
       [
         'worktree.set',
         { worktree: 'id:workspace-1', diffComments: [], diffCommentsBase: [NOTE] },
-        { failWhenDisconnected: true }
+        {}
       ]
     ])
     await act(async () => screen().send())

@@ -224,7 +224,7 @@ describe('mobile review notes saved against the host', () => {
     expect(ids(shown)).toEqual(ids(host.notes))
   })
 
-  it('drops a save queued behind a failed one, so a host without the merge keeps the note', async () => {
+  it('sends only its own change after a failed save, so a host without the merge keeps the note', async () => {
     const { host, client } = fakeHost([note('a'), note('b')], { merges: false })
     await mountNotes(client)
     host.failNextSet = true
@@ -232,39 +232,26 @@ describe('mobile review notes saved against the host', () => {
     await act(async () => {
       await Promise.all([
         hook().deleteDiffCommentForFile('a'),
-        hook().addDiffCommentForFile('src/a.ts', 2, 'dropped')
+        hook().addDiffCommentForFile('src/a.ts', 2, 'added')
       ])
     })
 
-    expect(ids(host.notes)).toEqual(['a', 'b'])
-    expect(ids(shown).toSorted()).toEqual(['a', 'b'])
+    expect(host.notes.map((comment) => comment.body)).toEqual(['note a', 'note b', 'added'])
+    expect(ids(shown)).toEqual(ids(host.notes))
   })
 
-  it('hides a note desktop deleted while a later phone save was still queued', async () => {
-    const { host, client, heldSets } = fakeHost([note('a')], { merges: true })
+  it('keeps loaded notes on a host without the merge when a note is added before the first load', async () => {
+    const { host, client, heldShows } = fakeHost([note('a')], { merges: false })
+    host.holdShow = true
     await mountNotes(client)
-    host.holdSets = true
 
-    let adding: Promise<boolean> = Promise.resolve(false)
-    let clearing: Promise<void> = Promise.resolve()
     await act(async () => {
-      adding = hook().addDiffCommentForFile('src/a.ts', 2, 'kept')
-      clearing = hook().clearDeliveredDiffComments(shown.filter((comment) => comment.id === 'a'))
-    })
-    host.notes = [...host.notes, note('desktop')]
-    await act(async () => {
-      heldSets.shift()?.()
+      const adding = hook().addDiffCommentForFile('src/a.ts', 2, 'early')
+      heldShows.forEach((answer) => answer())
       await adding
-      await new Promise((resolve) => setTimeout(resolve, 0))
-    })
-    host.notes = host.notes.filter((comment) => comment.id !== 'desktop')
-    await act(async () => {
-      heldSets.shift()?.()
-      await clearing
     })
 
-    expect(host.notes.map((comment) => comment.body)).toEqual(['kept'])
-    expect(ids(shown)).toEqual(ids(host.notes))
+    expect(host.notes.map((comment) => comment.body)).toEqual(['note a', 'early'])
   })
 
   it('still sends the full list, so a host without the merge replaces it as before', async () => {

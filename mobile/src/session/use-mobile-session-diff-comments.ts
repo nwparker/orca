@@ -26,6 +26,8 @@ import type { MobileSessionDocumentReadersModel } from './use-mobile-session-doc
 
 // Why: a queued request must not wait untimed for a reconnect and stall the notes behind it.
 const NOTES_REQUEST_OPTIONS: SendRequestOptions = { failWhenDisconnected: true }
+// Why: delivered notes must still clear after a reconnect, or they could be sent again.
+const DELIVERED_CLEANUP_REQUEST_OPTIONS: SendRequestOptions = {}
 
 export function useMobileSessionDiffComments(scope: MobileSessionDocumentReadersModel) {
   const {
@@ -85,29 +87,27 @@ export function useMobileSessionDiffComments(scope: MobileSessionDocumentReaders
 
   // Shows `next` at once, then the host's merged list; on failure drops only this change.
   const saveDiffComments = useCallback(
-    async (next: DiffComment[]): Promise<void> => {
+    async (next: DiffComment[], options: SendRequestOptions = NOTES_REQUEST_OPTIONS) => {
       const sync = notesSync
       const save = { base: diffCommentsRef.current, next }
-      const failedSaves = sync.failedSaves
       sync.pending = [...sync.pending, save]
       showDiffComments(sync)
       try {
         await enqueueReviewNotesRequest(sync, async () => {
-          // Why: this list was built on a change that failed; an older host would store it whole.
-          if (failedSaves !== sync.failedSaves) {
-            throw new Error('Failed to save review notes')
-          }
           if (!client || connState !== 'connected') {
             throw new Error('Waiting for desktop...')
           }
+          // Why: send the host's list plus only this change; an older host stores the list whole.
+          const base = sync.host
+          const rebased = mergeDiffCommentMutation(save.base, base, save.next)
           const response = await sessionWorktreeNotesWrite.request(
             client,
             {
               worktree: `id:${worktreeId}`,
-              diffComments: [...save.next],
-              diffCommentsBase: [...save.base]
+              diffComments: [...rebased],
+              diffCommentsBase: [...base]
             },
-            NOTES_REQUEST_OPTIONS
+            options
           )
           const saved = interpretOrThrowRefusalMessage(
             () => sessionWorktreeNotesWrite.interpret(response),
@@ -117,11 +117,10 @@ export function useMobileSessionDiffComments(scope: MobileSessionDocumentReaders
           sync.host =
             saved?.diffComments !== undefined
               ? normalizeMobileDiffComments(saved.diffComments, worktreeId)
-              : mergeDiffCommentMutation(save.base, sync.host, save.next)
+              : rebased
           showDiffComments(sync)
         })
       } catch (err) {
-        sync.failedSaves += 1
         sync.pending = sync.pending.filter((pending) => pending !== save)
         showDiffComments(sync)
         throw err
@@ -262,7 +261,7 @@ export function useMobileSessionDiffComments(scope: MobileSessionDocumentReaders
       }
       setDiffCommentBusy(true)
       try {
-        await saveDiffComments(next)
+        await saveDiffComments(next, DELIVERED_CLEANUP_REQUEST_OPTIONS)
       } catch {
         // saveDiffComments already restored the delivered notes.
       } finally {

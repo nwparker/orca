@@ -9,11 +9,10 @@ export type ReviewNotesSync = {
   host: DiffComment[]
   pending: PendingSave[]
   queue: Promise<unknown>
-  failedSaves: number
 }
 
 export function createReviewNotesSync(): ReviewNotesSync {
-  return { active: true, host: [], pending: [], queue: Promise.resolve(), failedSaves: 0 }
+  return { active: true, host: [], pending: [], queue: Promise.resolve() }
 }
 
 // What the phone shows: the host's list with every unanswered phone save replayed on top.
