@@ -121,9 +121,7 @@ export function useMobileSessionDiffComments(scope: MobileSessionDocumentReaders
           showDiffComments(sync)
         })
       } catch (err) {
-        if (failedSaves === sync.failedSaves) {
-          sync.failedSaves += 1
-        }
+        sync.failedSaves += 1
         sync.pending = sync.pending.filter((pending) => pending !== save)
         showDiffComments(sync)
         throw err
