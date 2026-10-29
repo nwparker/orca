@@ -2,6 +2,7 @@ import { useEffect, useCallback, useMemo, useRef, useState } from 'react'
 import { formatDiffComments } from '../../../src/shared/diff-comments-format'
 import { useClipboardWriter } from '../platform/clipboard'
 import { interpretOrThrowRefusalMessage } from '../transport/rpc-refusal-message'
+import type { SendRequestOptions } from '../transport/unvalidated-rpc-request-port'
 import { sessionWorktreeRecordRead } from './mobile-session-read-operations'
 import { sessionWorktreeNotesWrite } from './mobile-session-write-operations'
 import { triggerSelection, triggerSuccess, triggerError } from '../platform/haptics'
@@ -22,6 +23,9 @@ import {
 import type { DiffComment } from '../../../src/shared/diff-comment-types'
 import type { DiffNotesDelivery } from './mobile-session-route-types'
 import type { MobileSessionDocumentReadersModel } from './use-mobile-session-document-readers'
+
+// Why: a queued request must not wait untimed for a reconnect and stall the notes behind it.
+const NOTES_REQUEST_OPTIONS: SendRequestOptions = { failWhenDisconnected: true }
 
 export function useMobileSessionDiffComments(scope: MobileSessionDocumentReadersModel) {
   const {
@@ -66,7 +70,11 @@ export function useMobileSessionDiffComments(scope: MobileSessionDocumentReaders
         return
       }
       const response = sessionWorktreeRecordRead.interpret(
-        await sessionWorktreeRecordRead.request(client, { worktree: `id:${worktreeId}` })
+        await sessionWorktreeRecordRead.request(
+          client,
+          { worktree: `id:${worktreeId}` },
+          NOTES_REQUEST_OPTIONS
+        )
       )
       if (response.accepted) {
         sync.host = normalizeMobileDiffComments(response.value?.diffComments, worktreeId)
@@ -92,11 +100,15 @@ export function useMobileSessionDiffComments(scope: MobileSessionDocumentReaders
           if (!client || connState !== 'connected') {
             throw new Error('Waiting for desktop...')
           }
-          const response = await sessionWorktreeNotesWrite.request(client, {
-            worktree: `id:${worktreeId}`,
-            diffComments: [...save.next],
-            diffCommentsBase: [...save.base]
-          })
+          const response = await sessionWorktreeNotesWrite.request(
+            client,
+            {
+              worktree: `id:${worktreeId}`,
+              diffComments: [...save.next],
+              diffCommentsBase: [...save.base]
+            },
+            NOTES_REQUEST_OPTIONS
+          )
           const saved = interpretOrThrowRefusalMessage(
             () => sessionWorktreeNotesWrite.interpret(response),
             'Failed to save review notes'
